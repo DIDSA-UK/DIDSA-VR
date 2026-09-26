@@ -1,0 +1,12 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Never commit the real backend URL/API key — copy secrets.cfg.example to
+# secrets.cfg and fill in real values locally, on each dev machine.
+secrets.cfg
+
+# Editor/OS cruft
+.DS_Store
+Thumbs.db
+export_presets.cfg

@@ -1,0 +1,50 @@
+[gd_scene format=3 uid="uid://56ytbiyp3xbg"]
+
+[ext_resource type="Script" uid="uid://b46vr76mysads" path="res://scripts/main.gd" id="1"]
+[ext_resource type="Script" uid="uid://bvyvt4ik1u7le" path="res://scripts/controller.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/locomotion.gd" id="3"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_1"]
+size = Vector2(6, 6)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_1"]
+size = Vector3(6, 0.1, 6)
+
+[node name="Main" type="Node3D" unique_id=1165984304]
+script = ExtResource("1")
+
+[node name="HTTPRequest" type="HTTPRequest" parent="." unique_id=1162396915]
+
+[node name="AssemblyRoot" type="Node3D" parent="." unique_id=401897004]
+
+[node name="StatusLabel3D" type="Label3D" parent="." unique_id=1643761573]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.9, -1)
+billboard = 1
+text = "Starting..."
+outline_size = 8
+
+[node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=2041845535]
+script = ExtResource("3")
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=396637508]
+
+[node name="LeftController" type="XRController3D" parent="XROrigin3D" unique_id=771157336]
+tracker = &"left_hand"
+script = ExtResource("2")
+
+[node name="RightController" type="XRController3D" parent="XROrigin3D" unique_id=602840141]
+tracker = &"right_hand"
+script = ExtResource("2")
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=545872202]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground" unique_id=491332628]
+mesh = SubResource("PlaneMesh_1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground" unique_id=446363985]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
+shape = SubResource("BoxShape3D_1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1168713881]
+transform = Transform3D(0.8, -0.4, 0.45, 0, 0.75, 0.66, -0.6, -0.53, 0.6, 0, 3, 0)
+shadow_enabled = true

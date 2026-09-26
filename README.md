@@ -1,0 +1,168 @@
+# DIDSA VR spike (Godot)
+
+Milestone 0's engine spike (glTF endpoint + engine choice) is done: Godot
+won, proven on a real assembly over PCVR. This project is now milestone 1's
+working ground — "Import and viewport" — building out the real interaction
+model and multi-format loading. Still plain Godot 4 core (no
+`godot-xr-tools`, no addons).
+
+## What it does
+
+1. On start, tries to activate OpenXR. On a headset (or a PCVR runtime on
+   desktop) you're in VR; otherwise it runs as a flat 3D preview so you can
+   sanity-check the download/parse step without a headset attached.
+2. Reads `assembly.didsa` (or whatever `native_file_path` points at) from
+   this project folder and `POST`s it to `{backend_url}/document/import/native`
+   — this is the same "load a project" step the Flutter app does, just done
+   once at startup here so the backend actually has your assembly in memory.
+   The part id to load is read straight out of that file's own
+   `document.root_part_id` field — nothing to look up or type in by hand.
+3. Downloads `GET {backend_url}/document/parts/{part_id}/assembly-mesh.glb`
+   with your `X-API-Key`, parses it with Godot's built-in `GLTFDocument`, and
+   drops the result about a metre in front of you.
+4. Each mesh can be manipulated two ways ("Individual part manipulation" in
+   the vision brief), and the two are independent of each other: **grip**
+   always grabs and moves whichever part is physically closest to your hand
+   (1:1, drop on release), regardless of what's selected. Separately, point
+   at a part from a distance and pull the **trigger** to select it (trigger
+   again, or aim at nothing, to deselect) — while selected, the
+   **thumbstick** rotates it relative to how you're currently looking
+   (left/right spins it, up/down tips it away/towards you, not around the
+   part's own possibly-tilted axes), and **A/X**/**B/Y** pull it nearer or
+   push it farther. A thin cyan laser shows where you're aiming; selected
+   parts get a yellow highlight.
+5. Walk with the **left thumbstick** (relative to where you're looking); the
+   **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
+   teleport (push forward — a cyan disc marks the landing spot — release to
+   jump there). Either stick backs off automatically while that hand has a
+   part selected, so rotating a part never also turns or teleports you.
+6. A floating status label shows what's happening (importing, downloading,
+   parse errors, part count) since you won't have a terminal visible once
+   you're in the headset.
+
+## 1. Drop in a real assembly
+
+Export or copy a saved assembly file — a `.DIDSAprt`/`.didsa` file whose
+**root Part has occurrences on it** (an assembly, not a bare single part;
+that's what makes the grab test meaningful) — into this project folder,
+next to `project.godot`, named `assembly.didsa`. It's plain JSON regardless
+of the extension on the original file, so a straight copy/rename works.
+
+If you'd rather not rename your file, or want to keep several around, change
+`native_file_path` on the Main node instead (see below).
+
+## 2. Set up the backend connection
+
+Copy `secrets.cfg.example` to `secrets.cfg` (same folder as `project.godot`)
+and fill in the two real values — this file is gitignored, so it never gets
+committed, unlike the old approach of typing them into the Inspector (which
+saves them straight into the tracked `.tscn` scene file):
+
+```ini
+[backend]
+url="http://your-backend-host"
+api_key="your-CAD_API_KEY"
+```
+
+- `url` — your server's address. **Use your Cloudflare Tunnel HTTPS URL if
+  you have one** (e.g. `https://cad-api.snail-shell.uk`) rather than a bare
+  LAN IP — Android blocks plain HTTP to anything but `localhost` by default,
+  and switching that off needs a custom Gradle build, which is more setup
+  than this project needs. If you only want to test on the desktop preview
+  (not on-headset), a LAN `http://` URL works fine since that restriction is
+  Android-only.
+- `api_key` — matches your backend's `CAD_API_KEY`.
+
+If `secrets.cfg` is missing, the app shows that on the status label instead
+of silently trying (and failing) to hit an empty URL.
+
+A few more knobs live on the **Main** node's Inspector, under **Backend**,
+if you need to change them from their defaults:
+
+- `native_file_path` — defaults to `res://assembly.didsa`; only change this
+  if you named your file something else.
+- `part_id_override` — leave blank. It's only there for the rare case you
+  want to skip the import step entirely and point straight at a part id
+  that's already loaded in the backend's session some other way.
+- `quality` / `tier` / `include_hidden` — same meaning as the JSON endpoint;
+  the defaults (`0.5`, full tier, hidden omitted) are fine to start.
+
+Note: the import call and the mesh-fetch call both go out with no
+`X-Document-Session` header, so both land in the backend's `"default"`
+session — consistent with each other, but a *different* session than
+whatever the Flutter app is using if it's open on your tablet at the same
+time (it sets its own session id per launch). Close the Flutter app's
+connection to this backend or don't rely on it having the same in-memory
+state while you're testing the spike, if that matters for what you're
+checking.
+
+## 3. Desktop preview (no headset needed first)
+
+Press **F6** (run current scene) in the editor. You should see the console
+log the import, then the download and part count, and the status label
+update in the 3D view. This alone tells you whether the endpoint, API key
+and glTF parse are all working, before you touch export/sideload at all.
+
+## 4. Export to Quest
+
+1. In the editor: **Editor → Manage Export Templates** → download templates
+   matching your Godot version, if you haven't already.
+2. **Project → Export → Add… → Android.** Point it at your Android SDK if
+   this is the first Android export on this machine (Godot prompts for the
+   SDK path).
+3. On the Android preset, under **Xr Features**, set:
+   - `Xr Mode` → `OpenXR`
+   - `Hand Tracking` → off (spike uses controllers only)
+4. Export a debug APK.
+
+## 5. Sideload and run
+
+```
+adb install -r path/to/exported.apk
+```
+
+Put the headset on, launch **DIDSA VR Spike** from Unknown Sources /
+App Library → Quest Link's sideload list (however you normally launch
+sideloaded apps). Reach a hand toward the loaded part and squeeze the grip
+button.
+
+## What "done" looks like for milestone 1
+
+- The model loads and is recognisably your assembly, at real-world scale —
+  `spawn_scale` defaults to `0.001` because the backend's native units are
+  millimetres, but a raw glTF coordinate is read as one metre by Godot (and
+  by the glTF spec generally). If a part still looks wrong-sized, that's
+  the ratio to check first, not the model itself.
+- You can see roughly where your hands are (a small glowing marker on each
+  controller — bare `XRController3D` draws nothing on its own).
+- Two of the vision brief's four manipulation modes are built: individual
+  part manipulation (grip to grab close, trigger-laser to select and then
+  grip/thumbstick/A-B at a distance) and user movement (thumbstick walk,
+  snap-turn, teleport). Still open: whole-model two-hand rotate/scale, and
+  scale views (jump to real-life / preset scales, with a lock).
+- Only native `.didsa`/`.DIDSAprt` import is wired up so far. STEP, glTF and
+  OBJ/STL loading (the rest of milestone 1's "done when") aren't built yet —
+  the backend already has the pieces (`POST /parts/{id}/import-features` for
+  STEP/OBJ/STL, straight-to-Godot `GLTFDocument` for a bare `.glb`), they
+  just aren't hooked up in this client yet.
+- You have a felt sense of load time and frame rate on real Quest hardware,
+  which is the actual point — the vision brief's payload estimates (~90–100
+  KB for a 186-instance test assembly) were never measured on-headset.
+
+## Known gaps this project doesn't solve yet
+
+- **Cleartext HTTP on Quest** — see the `backend_url` note above. Worth
+  solving for real once milestone 1 is further along, not now.
+- **Drag latency** — grabbing (grip or the laser-select's nudge/rotate)
+  moves things locally and instantly; it doesn't round-trip to the backend's
+  mate solver at all. That's deliberately out of scope here (see the vision
+  brief's "Drag latency" open decision).
+- **No multi-file assemblies** — the import step sends exactly one file's
+  own JSON (its own features/occurrences/mates). If your assembly's
+  Occurrences point at *other* files via `external_ref`, those referenced
+  parts won't resolve — that's the server-side composition work the vision
+  brief already flags as a separate, unbuilt roadmap item, not something
+  this project attempts.
+- **No godot-xr-tools** — deliberate, so far, to keep measuring the bare
+  engine. Worth revisiting once milestone 1's interaction model is proven
+  out, rather than continuing to hand-roll everything.
