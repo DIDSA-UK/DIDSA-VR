@@ -24,7 +24,10 @@ extends XRController3D
 @export var select_max_distance: float = 8.0 ## metres; laser-select range
 @export var select_max_angle_degrees: float = 12.0 ## cone half-angle around where you're aiming
 @export var rotate_speed_degrees: float = 90.0 ## per second, at full thumbstick deflection
-@export var nudge_speed: float = 0.6 ## metres/second, A/X and B/Y nearer/farther
+@export var nudge_rate: float = 0.6 ## A/X and B/Y move a part this fraction of its distance from your hand every second:
+## 0.6 m/s at 1 m, 3 m/s at 5 m, 0.18 m/s at 30 cm. Far parts travel fast, near ones can be placed finely.
+@export var nudge_min_speed: float = 0.03 ## metres/second floor, so a part right by your hand can still be pushed out
+@export var nudge_max_speed: float = 8.0 ## metres/second ceiling
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; fixed visual length, doesn't retarget to hit point
 
@@ -85,10 +88,21 @@ func _physics_process(delta: float) -> void:
 		selected_node.global_rotate(pitch_axis, deg_to_rad(rotate_speed_degrees) * -stick.y * delta)
 
 	var forward := -global_transform.basis.z.normalized()
+	var speed := nudge_speed_for(selected_node)
 	if is_button_pressed("ax_button"):
-		selected_node.global_position -= forward * nudge_speed * delta
+		selected_node.global_position -= forward * speed * delta
 	if is_button_pressed("by_button"):
-		selected_node.global_position += forward * nudge_speed * delta
+		selected_node.global_position += forward * speed * delta
+
+
+func nudge_speed_for(part: Node3D) -> float:
+	## A/B speed for this part: proportional to how far it is from your hand
+	## (measured to the middle of its bounds, since a part's origin can sit far
+	## from its geometry), clamped to a sensible range.
+	var centre := part.global_position
+	if part is MeshInstance3D:
+		centre = part.global_transform * (part as MeshInstance3D).get_aabb().get_center()
+	return clampf(nudge_rate * global_position.distance_to(centre), nudge_min_speed, nudge_max_speed)
 
 
 func is_manipulating() -> bool:

@@ -40,7 +40,9 @@ live-synced.
    **thumbstick** rotates it relative to how you're currently looking
    (left/right spins it, up/down tips it away/towards you, not around the
    part's own possibly-tilted axes), and **A/X**/**B/Y** pull it nearer or
-   push it farther. A thin cyan laser shows where you're aiming; selected
+   push it farther — at a speed proportional to how far the part is from your
+   hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far parts
+   travel quickly and near ones can be placed finely. A thin cyan laser shows where you're aiming; selected
    parts get a yellow highlight.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
    **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
@@ -49,7 +51,10 @@ live-synced.
    part selected, so rotating a part never also turns or teleports you.
 6. Grip on **empty space** (not near a part) to grab the whole model. With
    **one hand** it follows that hand (moves only, so a wrist twitch never
-   spins it). With **both hands** it moves with them, turns as you swing the
+   spins it). The one-hand drag scales with the model: 1:1 for anything up
+   to about 1.2 m across, then proportionally faster (a model 12 m across
+   moves 10 cm for every 1 cm of hand, capped at 15x), so big models don't
+   need endless re-grabbing. With **both hands** it moves with them, turns as you swing the
    line between your hands, and scales (3x as sensitive as the raw hand spread, `scale_gain`) as you spread or close them, pivoting
    on the midpoint between your hands. Every turn builds on the model's
    current orientation, so you can rotate about one axis and then another

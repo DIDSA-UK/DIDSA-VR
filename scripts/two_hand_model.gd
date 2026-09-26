@@ -5,7 +5,9 @@ extends Node
 ## Grips on EMPTY space (a hand that grabbed a part sits out):
 ##  - ONE hand: the model follows that hand, translation only, like dragging a
 ##    drawing across a table. Turning stays two-handed so a small wrist twitch
-##    never spins your model.
+##    never spins your model. The drag is amplified for big models (see
+##    one_hand_gain_*): a model 10 m across would otherwise need you to
+##    shuffle it a metre at a time with your arm.
 ##  - TWO hands: it follows your hands like a rope between two fists. Moving
 ##    them together drags it, swinging the line between them turns it
 ##    (shortest-arc, so it never rolls about that line), spreading/closing them
@@ -38,6 +40,8 @@ const STEADINESS_BETA := 10.0 ## Hz per m/s: how quickly the filter opens up whe
 @export var grab_action: String = "grip_click"
 @export var presets: Array[float] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0] ## multiples of real life; 1.0 = 1:1
 @export var scale_gain: float = 3.0 ## how strongly spreading/closing your hands scales: hands 10% farther apart = 1.1^gain (~33%) bigger
+@export var one_hand_gain_ref_radius: float = 0.6 ## metres: a model this size (or smaller, half its bounding diagonal) drags 1:1
+@export var one_hand_gain_max: float = 15.0 ## a bigger model drags proportionally faster, up to this multiple
 @export var fit_radius: float = 0.5 ## metres: half the model's bounding diagonal after Fit
 @export var fit_distance: float = 1.2 ## metres in front of your head after Fit
 
@@ -59,6 +63,7 @@ var _one_hand: XRController3D
 var _start_root: Transform3D
 var _left_filter := OneEuro.new()
 var _right_filter := OneEuro.new()
+var _one_hand_gain := 1.0
 var _start_hand := Vector3.ZERO
 var _prev_mid := Vector3.ZERO
 var _prev_vec := Vector3.ZERO
@@ -80,6 +85,14 @@ func set_steadiness(level: int) -> void:
 	for f in [_left_filter, _right_filter]:
 		f.min_cutoff = maxf(STEADINESS_CUTOFF_HZ[steadiness], 0.01)
 		f.beta = STEADINESS_BETA
+
+
+func one_hand_drag_gain() -> float:
+	## How far the model moves per unit your hand moves: 1 for anything you can
+	## reach around, growing in proportion to the model's size beyond that.
+	## Measured once when the grab starts, so it can't feed back on itself.
+	var radius := _model_bounds().size.length() * 0.5
+	return clampf(radius / one_hand_gain_ref_radius, 1.0, one_hand_gain_max)
 
 
 func set_real_life_scale(scale_value: float) -> void:
@@ -181,9 +194,10 @@ func _update_one_hand(hand: XRController3D, hand_pos: Vector3) -> void:
 		_one_hand = hand
 		_start_root = _root.global_transform
 		_start_hand = hand_pos
+		_one_hand_gain = one_hand_drag_gain()
 		return
 	var t := _start_root
-	t.origin += hand_pos - _start_hand
+	t.origin += (hand_pos - _start_hand) * _one_hand_gain
 	_root.global_transform = t
 
 

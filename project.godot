@@ -24,6 +24,7 @@ config/icon="res://icon.svg"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+window/vsync/vsync_mode=0
 
 [layer_names]
 
@@ -33,6 +34,7 @@ window/stretch/mode="canvas_items"
 
 [physics]
 
+common/physics_ticks_per_second=90
 3d/physics_engine="GodotPhysics3D"
 
 [rendering]

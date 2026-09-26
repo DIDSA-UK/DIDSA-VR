@@ -44,6 +44,7 @@ var _resolved_part_id: String = ""
 # on-headset. Timestamps are Time.get_ticks_msec() values.
 var _two_hand: Node
 var _tablet: Node
+var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
 var _download_started_ms := 0
@@ -107,6 +108,7 @@ func set_msaa(level: int) -> void:
 
 
 func _process(delta: float) -> void:
+	_worst_frame_ms = maxf(_worst_frame_ms, delta * 1000.0)
 	# Only while the tablet is open (nobody can see the numbers otherwise), and a few
 	# times a second: rewriting the label every frame would make the readout itself a
 	# cost and be unreadable anyway.
@@ -117,7 +119,8 @@ func _process(delta: float) -> void:
 		return
 	_perf_refresh_left = 0.5
 	var lines := PackedStringArray()
-	lines.append("%d fps  %.1f ms/frame" % [Engine.get_frames_per_second(), delta * 1000.0])
+	lines.append("%d fps  %.1f ms/frame  (worst %.1f ms)" % [Engine.get_frames_per_second(), delta * 1000.0, _worst_frame_ms])
+	_worst_frame_ms = 0.0
 	var viewport_rid := get_viewport().get_viewport_rid()
 	lines.append("render: cpu %.1f ms, gpu %.1f ms  |  scripts %.1f ms, physics %.1f ms" % [
 		RenderingServer.viewport_get_measured_render_time_cpu(viewport_rid),
@@ -147,6 +150,11 @@ func _start_xr() -> void:
 	xr_interface = XRServer.find_interface("OpenXR")
 	if xr_interface and xr_interface.is_initialized():
 		get_viewport().use_xr = true
+		# The headset runtime sets the pace. Vsync on the desktop mirror window would make
+		# every frame also wait for the monitor's refresh, which can cap a 90 Hz headset
+		# at about half rate (the classic Godot XR "stuck at 45-50 fps" trap).
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		Engine.max_fps = 0
 		print("DIDSA VR spike: OpenXR initialised, headset active.")
 	else:
 		push_warning("DIDSA VR spike: OpenXR not initialised — running as a flat desktop preview. On Quest this should initialise automatically; on desktop it's expected unless a PCVR runtime (e.g. Virtual Desktop) is actively streaming to a headset right now.")
