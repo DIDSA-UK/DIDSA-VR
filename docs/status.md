@@ -160,10 +160,14 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 
 - Godot: `C:\Users\johnn\Downloads\Godot_v4.7.2-stable_win64.exe\
   Godot_v4.7.2-stable_win64_console.exe` (not on PATH).
+- **`tests/` holds the headless tests and `tests/run_all.sh` runs them all**
+  (parse-checks every script, then the steadiness filter, sensitivity, two-hand
+  rotation, grab/scale and full-scene tablet tests). `tests/README.md` lists
+  the expected values. Needs no GPU, headset or backend.
 - Parse check: `"$G" --headless --path . --check-only --script
   res://scripts/x.gd` (reports `SCRIPT ERROR: Parse Error`; the OpenXR "no
   HMD" notice is harmless).
-- Smoke tests: an `extends SceneTree` script that builds nodes in
+- Writing new tests: an `extends SceneTree` script that builds nodes in
   `_initialize()`, `await process_frame`s, prints `SMOKE …`, and `quit()`s;
   run with `--headless --script`. The tablet was tested by aiming the right
   controller at button positions and emitting `button_pressed`/`released`.

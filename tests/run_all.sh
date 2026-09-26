@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs the headless tests and stops at the first script/parse error.
+# Usage (from the project root):  GODOT=/path/to/godot tests/run_all.sh
+# Needs no GPU, headset or backend. gpu_timing.gd is separate (needs a GPU + window).
+set -u
+GODOT="${GODOT:-godot}"
+fail=0
+
+echo "== parse check"
+for f in scripts/*.gd; do
+  out=$("$GODOT" --headless --path . --check-only --script "res://$f" 2>&1 | grep -E "SCRIPT ERROR|Parse Error")
+  if [ -n "$out" ]; then echo "FAIL $f"; echo "$out"; fail=1; fi
+done
+
+for t in steadiness_filter sensitivity two_hand_rotation grab_and_scale tablet_scene; do
+  echo "== $t"
+  out=$(timeout 300 "$GODOT" --headless --path . --script "res://tests/$t.gd" 2>&1)
+  echo "$out" | grep -E "SMOKE" | cut -c1-200
+  if echo "$out" | grep -qE "SCRIPT ERROR|Parse Error"; then
+    echo "FAIL $t"; echo "$out" | grep -E -A2 "SCRIPT ERROR|Parse Error"; fail=1
+  fi
+done
+
+[ "$fail" = 0 ] && echo "ALL RAN WITHOUT SCRIPT ERRORS (now eyeball the SMOKE values against tests/README.md)" || echo "SOME FAILED"
+exit "$fail"
