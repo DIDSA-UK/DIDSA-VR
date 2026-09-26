@@ -48,18 +48,22 @@ Unity comparison was run since nothing surfaced that Godot couldn't do.
   pieces (see `docs/backend-api-notes.md`'s import-features section), this
   client only ever imports the native format so far.
 
-## Known bug: teleport-preview marker not visible
+## Teleport-preview marker — fixed
 
-`locomotion.gd`'s teleport marker (a flat cyan disc meant to show the
-landing spot while aiming) doesn't render in-headset, even though the
-teleport itself works (the blink happens on stick release). First
-hypothesis was z-fighting with the Ground plane's visual mesh (both sit at
-y=0) — raised the marker 2cm off the floor to test that. Didn't fix it, so
-that wasn't the (whole) cause. Not chased further yet because this was all
-being debugged blind, patching files over a remote device bridge with no
-access to Godot's own console/output panel or breakpoints — a local session
-with a real Godot editor open should be able to add a `print()` or two and
-find this quickly.
+`locomotion.gd`'s teleport marker didn't render in-headset. Raising it 2cm
+off the floor (to rule out z-fighting with the Ground plane, both sit at
+y=0) didn't fix it, and that debugging was happening blind anyway — patching
+files over a remote device bridge with no access to Godot's own
+console/output panel or breakpoints. Fixed in commit `dd0db4e`, from a
+session with a real local Godot editor open: the actual cause was
+`_build_teleport_marker()` calling `get_parent().add_child()` from
+`_ready()` while `Main` was still setting up its own children, so Godot
+rejected the add — the marker was never in the scene at all, no z-fighting
+involved. That commit also reworked the landing spot to be where the right
+hand's laser meets the floor (not a stick-scaled guess), and changed the
+marker to a torus ring. This is the concrete example, if one's needed, of
+why a local session with real editor/console access finds some bugs faster
+than the conversational/remote-bridge loop.
 
 ## Untested paths
 
@@ -69,6 +73,21 @@ find this quickly.
   workaround note is still theoretical, not verified.
 - **STEP/OBJ/STL import** (see above) — backend support exists and is
   documented, but nothing in this client calls it yet.
+
+## In-progress, uncommitted, on the dev machine right now
+
+As of this doc's last edit, a separate session (Claude Code CLI, running
+locally rather than through the remote-bridge/conversational route) has
+uncommitted work sitting in the working tree for two of the "still open"
+items above: `scripts/two_hand_model.gd` (whole-model two-hand rotate/scale)
+and `scripts/wrist_tablet.gd` (a wrist-mounted tablet with Modes/Scale/
+Files/Info tabs — the Scale tab covers most of the "scale views" item, and
+Files adds local `.glb`/`.gltf` loading with no backend at all). Also
+touched but uncommitted: `main.gd`, `controller.gd`, `.gitignore` (a
+`models/` folder for local files), and further `README.md` updates
+describing all of this. Don't be surprised if the "still open" list above
+is stale by the time you read this — check `git log` and `git status` for
+what's actually landed since.
 
 ## Repo and secrets
 
