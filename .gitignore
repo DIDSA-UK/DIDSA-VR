@@ -10,3 +10,8 @@ secrets.cfg
 .DS_Store
 Thumbs.db
 export_presets.cfg
+
+# Local .glb/.gltf models for the tablet's Files tab: often proprietary, so
+# they stay on the machine. The folder itself is kept via .gitkeep.
+models/*
+!models/.gitkeep

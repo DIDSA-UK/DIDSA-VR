@@ -6,6 +6,14 @@ working ground — "Import and viewport" — building out the real interaction
 model and multi-format loading. Still plain Godot 4 core (no
 `godot-xr-tools`, no addons).
 
+**Picking this up fresh (including a new Claude Code session)?** Read
+[`docs/status.md`](docs/status.md) first — what's built, what's open, the
+known teleport bug, untested paths. [`docs/backend-api-notes.md`](docs/backend-api-notes.md)
+covers the DIDSA-CAD endpoints this client depends on.
+[`docs/vision-brief.md`](docs/vision-brief.md) is the fuller product vision
+(milestones, interaction model, open decisions) — a point-in-time export, not
+live-synced.
+
 ## What it does
 
 1. On start, tries to activate OpenXR. On a headset (or a PCVR runtime on
@@ -22,8 +30,11 @@ model and multi-format loading. Still plain Godot 4 core (no
    drops the result about a metre in front of you.
 4. Each mesh can be manipulated two ways ("Individual part manipulation" in
    the vision brief), and the two are independent of each other: **grip**
-   always grabs and moves whichever part is physically closest to your hand
-   (1:1, drop on release), regardless of what's selected. Separately, point
+   grabs the part your hand is touching — anywhere on it, not just near its
+   middle (inside its bounding box or within 5 cm of it; a light cyan
+   highlight shows what a grip would take). The part stays attached exactly
+   where you took hold, so turning your hand turns it about that spot; it
+   moves 1:1 and drops on release, regardless of what's selected. Separately, point
    at a part from a distance and pull the **trigger** to select it (trigger
    again, or aim at nothing, to deselect) — while selected, the
    **thumbstick** rotates it relative to how you're currently looking
@@ -36,7 +47,47 @@ model and multi-format loading. Still plain Godot 4 core (no
    teleport (push forward and point the right hand's laser at the floor — a
    cyan ring marks where it lands, within 5 m — release to jump there). Either stick backs off automatically while that hand has a
    part selected, so rotating a part never also turns or teleports you.
-6. A floating status label shows what's happening (importing, downloading,
+6. Grip on **empty space** (not near a part) to grab the whole model. With
+   **one hand** it follows that hand (moves only, so a wrist twitch never
+   spins it). With **both hands** it moves with them, turns as you swing the
+   line between your hands, and scales (3x as sensitive as the raw hand spread, `scale_gain`) as you spread or close them, pivoting
+   on the midpoint between your hands. Every turn builds on the model's
+   current orientation, so you can rotate about one axis and then another
+   naturally. Switching between one and two hands never makes the model
+   jump.
+7. **Wrist tablet.** A small cyan bullseye floats above your left wrist.
+   Point the right hand's laser at it (it turns yellow) and pull the trigger
+   to open the tablet; press the **X** on the tablet to close it. It never
+   opens by itself, so looking at your wrist can't trigger it. While the
+   laser is over the bullseye or the tablet, the trigger presses those
+   instead of selecting a part. Tabs:
+   - **Modes** — switch model movement, user movement and part manipulation
+     on or off independently, and set **Steadiness** (Off / Light / Medium /
+     Strong): an adaptive filter on your hands while you hold the model, so a
+     held hand doesn't shake it but deliberate moves stay direct (measured:
+     Medium removes ~80% of a simulated 2 mm hand tremor and adds about 1 mm
+     of lag on a slow 2 cm/s move).
+   - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
+     about the model's centre; lock the scale (also stops the two-hand
+     spread/close and Fit from resizing); **Fit to view** brings the whole
+     model in front of you at a comfortable size; **Home** returns it to
+     where it first loaded (not while the scale is locked).
+   - **Files** — load a `.glb`/`.gltf` from the `models/` folder next to
+     `project.godot` (or `user://models`, which also works in an exported
+     build) with no backend at all. Local files are read as metres, so 1:1
+     is the file's own size; change `local_glb_scale` on Main if yours are
+     in millimetres. The `models/` contents are git-ignored.
+   - **Perf** — fps, CPU/GPU render time, script and physics time, part
+     count, draw calls, load times; plus the levers for speed: **Shadows**,
+     **Resolution** (100/80/65% of the headset runtime's size) and **MSAA**.
+     Read GPU vs CPU ms first: over about 11 ms GPU (at 90 Hz) means lower
+     Resolution or MSAA; high CPU means scripts. The tablet only renders and
+     measures while open.
+
+   The right thumbstick click is reserved for the popup keyboard (not built
+   yet). With no `secrets.cfg` the app now starts anyway, ready for a local
+   file.
+8. A floating status label shows what's happening (importing, downloading,
    parse errors, part count) since you won't have a terminal visible once
    you're in the headset.
 

@@ -26,6 +26,8 @@ extends Node3D
 
 @export_group("Placement")
 @export var spawn_position: Vector3 = Vector3(0, 1.0, -1.0)
+@export var local_glb_scale: float = 1.0 ## Scale for a .glb loaded from disk with the tablet's Files tab.
+## A bare glb is normally in metres per the glTF spec (unlike the backend's, which is mm), so 1.0.
 @export var spawn_scale: float = 0.001 ## Backend native units are millimetres (see backend/app/document/models.py's
 ## Mate docstring), but glTF/Godot both treat raw coordinate values as metres.
 ## 0.001 converts mm -> m. If a part looks tiny/huge, check what units it was
@@ -38,6 +40,17 @@ extends Node3D
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
 
+# Perf readout (see _process): the numbers milestone 1 exists to measure
+# on-headset. Timestamps are Time.get_ticks_msec() values.
+var _two_hand: Node
+var _tablet: Node
+var _perf_refresh_left := 0.0
+var _import_started_ms := 0
+var _download_started_ms := 0
+var _parse_started_ms := 0
+var _load_summary := ""
+var _part_count := 0
+
 # All endpoints below live under the backend's "/document" router prefix —
 # see backend/app/document/router.py's `router = APIRouter(prefix="/document", ...)`.
 const API_PREFIX := "/document"
@@ -45,13 +58,78 @@ const API_PREFIX := "/document"
 
 func _ready() -> void:
 	assembly_root.add_to_group("assembly_root")
+	_add_two_hand_model()
+	_add_wrist_tablet()
 	_load_secrets()
-	if backend_url.is_empty() or api_key.is_empty():
-		_set_status("backend_url/api_key not set — create %s (see secrets.cfg.example)." % secrets_file_path)
-		return
 	_start_xr()
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
+		return
 	http_request.request_completed.connect(_on_import_completed)
 	_begin_import()
+
+
+func _add_two_hand_model() -> void:
+	var two_hand := preload("res://scripts/two_hand_model.gd").new()
+	two_hand.name = "TwoHandModel"
+	add_child(two_hand)
+	two_hand.setup(assembly_root, $XROrigin3D/LeftController, $XROrigin3D/RightController, spawn_scale)
+	_two_hand = two_hand
+
+
+func _add_wrist_tablet() -> void:
+	var tablet := preload("res://scripts/wrist_tablet.gd").new()
+	tablet.name = "WristTablet"
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self)
+	_tablet = tablet
+
+
+func set_measuring(on: bool) -> void:
+	## GPU/CPU render timing costs a little itself, so it only runs while the tablet is open.
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), on)
+
+
+func set_shadows(on: bool) -> void:
+	$DirectionalLight3D.shadow_enabled = on
+
+
+func set_render_scale(multiplier: float) -> void:
+	## Fraction of the headset runtime's recommended resolution (per axis). The biggest
+	## lever on a GPU-bound frame: 80% is ~64% of the pixels.
+	if xr_interface and xr_interface.is_initialized():
+		xr_interface.set("render_target_size_multiplier", multiplier)
+	else:
+		get_viewport().scaling_3d_scale = multiplier
+
+
+func set_msaa(level: int) -> void:
+	get_viewport().msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X][level]
+
+
+func _process(delta: float) -> void:
+	# Only while the tablet is open (nobody can see the numbers otherwise), and a few
+	# times a second: rewriting the label every frame would make the readout itself a
+	# cost and be unreadable anyway.
+	if not _tablet.is_open():
+		return
+	_perf_refresh_left -= delta
+	if _perf_refresh_left > 0.0:
+		return
+	_perf_refresh_left = 0.5
+	var lines := PackedStringArray()
+	lines.append("%d fps  %.1f ms/frame" % [Engine.get_frames_per_second(), delta * 1000.0])
+	var viewport_rid := get_viewport().get_viewport_rid()
+	lines.append("render: cpu %.1f ms, gpu %.1f ms  |  scripts %.1f ms, physics %.1f ms" % [
+		RenderingServer.viewport_get_measured_render_time_cpu(viewport_rid),
+		RenderingServer.viewport_get_measured_render_time_gpu(viewport_rid),
+		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+	])
+	if _part_count > 0:
+		lines.append("%d parts  %d draw calls" % [_part_count, int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))])
+	if _load_summary != "":
+		lines.append(_load_summary)
+	_tablet.set_info("\n".join(lines))
 
 
 func _load_secrets() -> void:
@@ -97,6 +175,7 @@ func _begin_import() -> void:
 		# backend's "default" session by some other means, and go straight
 		# to the mesh fetch (the old, manual-part-id behaviour).
 		_resolved_part_id = part_id_override
+		_download_started_ms = Time.get_ticks_msec()
 		_fetch_mesh()
 		return
 
@@ -119,6 +198,7 @@ func _begin_import() -> void:
 	_resolved_part_id = root_part_id
 
 	_set_status("Importing %s (part %s) into the backend..." % [native_file_path.get_file(), _resolved_part_id])
+	_import_started_ms = Time.get_ticks_msec()
 
 	var url := "%s%s/import/native" % [backend_url, API_PREFIX]
 	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
@@ -139,6 +219,7 @@ func _on_import_completed(result: int, response_code: int, _headers: PackedStrin
 		return
 
 	_set_status("Imported. Fetching assembly mesh...")
+	_download_started_ms = Time.get_ticks_msec()
 	http_request.request_completed.connect(_on_mesh_completed)
 	_fetch_mesh()
 
@@ -161,32 +242,83 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 		push_error("DIDSA VR spike: assembly-mesh.glb fetch failed: result=%d code=%d" % [result, response_code])
 		return
 
+	_parse_started_ms = Time.get_ticks_msec()
+	var download_ms := _parse_started_ms - _download_started_ms
 	_set_status("Downloaded %d KB, parsing glTF..." % int(body.size() / 1024.0))
+	if not _show_model(body, "", spawn_scale):
+		return
 
+	var import_ms := (_download_started_ms - _import_started_ms) if _import_started_ms > 0 else 0
+	_load_summary = "load: import %d ms, download %d ms (%d KB), parse %d ms" % [
+		import_ms, download_ms, int(body.size() / 1024.0), Time.get_ticks_msec() - _parse_started_ms
+	]
+	print("DIDSA VR spike: ", _load_summary)
+	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % _part_count)
+
+
+func list_model_files() -> PackedStringArray:
+	## .glb/.gltf files the tablet's Files tab offers: res://models (next to
+	## the project, for running from the editor) and user://models (which also
+	## works in an exported build).
+	var found := PackedStringArray()
+	for dir_path in ["res://models", "user://models"]:
+		var dir := DirAccess.open(dir_path)
+		if dir == null:
+			continue
+		for file_name in dir.get_files():
+			if file_name.get_extension().to_lower() in ["glb", "gltf"]:
+				found.append(dir_path.path_join(file_name))
+	return found
+
+
+func load_glb_file(path: String) -> void:
+	## Load a bare .glb/.gltf straight from disk — no backend round trip.
+	if not FileAccess.file_exists(path):
+		_set_status("No such file: %s" % path)
+		return
+	var started_ms := Time.get_ticks_msec()
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if not _show_model(bytes, path.get_base_dir(), local_glb_scale):
+		return
+	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
+	print("DIDSA VR spike: ", _load_summary)
+	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float) -> bool:
+	## Parse glTF bytes and make them THE model, replacing whatever is loaded.
+	## Returns false (with a status message) if it couldn't.
 	var gltf_document := GLTFDocument.new()
 	var gltf_state := GLTFState.new()
-	var parse_error := gltf_document.append_from_buffer(body, "", gltf_state)
+	var parse_error := gltf_document.append_from_buffer(glb_bytes, base_path, gltf_state)
 	if parse_error != OK:
 		_set_status("glTF parse failed (error %d)" % parse_error)
 		push_error("DIDSA VR spike: glTF parse failed: %d" % parse_error)
-		return
+		return false
 
 	var scene := gltf_document.generate_scene(gltf_state)
 	if scene == null:
 		_set_status("glTF parsed but produced no scene.")
-		return
+		return false
+
+	# Nothing may still hold, or have selected, a part that's about to go.
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.reset_interaction()
+	for old in assembly_root.get_children():
+		assembly_root.remove_child(old)
+		old.queue_free()
 
 	assembly_root.add_child(scene)
-	assembly_root.position = spawn_position
-	assembly_root.scale = Vector3.ONE * spawn_scale
+	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * scale_value), spawn_position)
+	_two_hand.set_real_life_scale(scale_value)
+	_two_hand.remember_home()
 
-	var mesh_count := 0
+	_part_count = 0
 	for node in _all_descendants(scene):
 		if node is MeshInstance3D:
 			node.add_to_group("grabbable_parts")
-			mesh_count += 1
-
-	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % mesh_count)
+			_part_count += 1
+	return true
 
 
 func _all_descendants(root: Node) -> Array[Node]:

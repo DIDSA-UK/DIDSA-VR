@@ -5,6 +5,7 @@ extends XROrigin3D
 ## while that hand is busy rotating a selected part (controller.gd's
 ## is_manipulating()), so manipulating a part never also spins or teleports you.
 
+@export var enabled := true ## mode switch on the wrist tablet ("User movement")
 @export var move_speed: float = 1.5 ## metres/second
 @export var snap_turn_degrees: float = 30.0
 @export var snap_turn_deadzone: float = 0.6 ## how far right stick must return before another snap can fire
@@ -31,6 +32,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not enabled:
+		_hide_teleport_preview()
+		return
 	_handle_move(delta)
 	_handle_snap_turn()
 	_handle_teleport()

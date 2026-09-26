@@ -1,0 +1,265 @@
+extends Node
+## Whole-model manipulation (vision brief mode 1, "Model movement"), plus the
+## scale views (mode 4).
+##
+## Grips on EMPTY space (a hand that grabbed a part sits out):
+##  - ONE hand: the model follows that hand, translation only, like dragging a
+##    drawing across a table. Turning stays two-handed so a small wrist twitch
+##    never spins your model.
+##  - TWO hands: it follows your hands like a rope between two fists. Moving
+##    them together drags it, swinging the line between them turns it
+##    (shortest-arc, so it never rolls about that line), spreading/closing them
+##    scales it. Everything pivots on the midpoint between your hands.
+##    Each frame applies only how your hands moved SINCE THE LAST FRAME, on top
+##    of the model's current pose. (Measuring against the pose at the start of
+##    the grab instead made a second rotation about a different axis feel
+##    anchored to the model's orientation before the first one.)
+## Going between one and two hands re-baselines, so the model never jumps.
+##
+## Steadiness: your hand positions go through an adaptive filter (one_euro.gd)
+## before they move the model, so a hand held "still" doesn't make it shake,
+## while deliberate moves stay direct. Levels below; the tablet sets it.
+##
+## Scale views: set_preset() jumps to a multiple of real life (1.0 = 1:1),
+## about the model's centre. scale_locked stops presets, Fit and the two-hand
+## spread/close from changing scale; dragging and turning still work.
+## fit_to_view() brings the whole model in front of you at a comfortable size
+## (CAD's "zoom to extents"); go_home() returns it to where it first loaded.
+## The wrist tablet drives these; no thumbstick clicks are used (the right one
+## is reserved for the popup keyboard).
+
+const OneEuro := preload("res://scripts/one_euro.gd")
+const STEADINESS_NAMES: Array[String] = ["Off", "Light", "Medium", "Strong"]
+const STEADINESS_CUTOFF_HZ: Array[float] = [0.0, 3.0, 1.5, 0.8] ## lower = steadier when still (and slower to settle)
+const STEADINESS_BETA := 10.0 ## Hz per m/s: how quickly the filter opens up when the hand moves
+
+@export var min_multiple: float = 0.1 ## smallest scale, as a multiple of real life
+@export var max_multiple: float = 50.0 ## largest
+@export var grab_action: String = "grip_click"
+@export var presets: Array[float] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0] ## multiples of real life; 1.0 = 1:1
+@export var scale_gain: float = 3.0 ## how strongly spreading/closing your hands scales: hands 10% farther apart = 1.1^gain (~33%) bigger
+@export var fit_radius: float = 0.5 ## metres: half the model's bounding diagonal after Fit
+@export var fit_distance: float = 1.2 ## metres in front of your head after Fit
+
+var enabled := true ## mode switch on the wrist tablet
+var scale_locked := false
+var steadiness := 2 ## index into STEADINESS_NAMES
+
+enum Mode { NONE, ONE_HAND, TWO_HAND }
+
+var _root: Node3D
+var _left: XRController3D
+var _right: XRController3D
+var _real_life_scale := 0.001
+var _home: Transform3D
+var _has_home := false
+
+var _mode := Mode.NONE
+var _one_hand: XRController3D
+var _start_root: Transform3D
+var _left_filter := OneEuro.new()
+var _right_filter := OneEuro.new()
+var _start_hand := Vector3.ZERO
+var _prev_mid := Vector3.ZERO
+var _prev_vec := Vector3.ZERO
+
+
+func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float) -> void:
+	_root = root
+	_left = left
+	_right = right
+	_real_life_scale = real_life_scale
+
+
+func _init() -> void:
+	set_steadiness(steadiness)
+
+
+func set_steadiness(level: int) -> void:
+	steadiness = clampi(level, 0, STEADINESS_NAMES.size() - 1)
+	for f in [_left_filter, _right_filter]:
+		f.min_cutoff = maxf(STEADINESS_CUTOFF_HZ[steadiness], 0.01)
+		f.beta = STEADINESS_BETA
+
+
+func set_real_life_scale(scale_value: float) -> void:
+	## What assembly_root's scale is at 1:1. The backend's glb is in mm (0.001);
+	## a local .glb is normally in metres (1.0).
+	_real_life_scale = scale_value
+
+
+func remember_home() -> void:
+	_home = _root.global_transform
+	_has_home = true
+
+
+func is_active() -> bool:
+	return _mode != Mode.NONE
+
+
+func scale_text() -> String:
+	## e.g. "scale 1:1", "scale 2:1 (locked)" — for the on-screen readout.
+	if _root == null:
+		return ""
+	var ratio := _current_multiple()
+	var text: String
+	if ratio >= 1.0:
+		text = "%s:1" % _trim(ratio)
+	else:
+		text = "1:%s" % _trim(1.0 / ratio)
+	return "scale %s%s" % [text, " (locked)" if scale_locked else ""]
+
+
+func set_preset(multiple: float) -> void:
+	## Jump to `multiple` times real life (1.0 = 1:1), about the model's centre.
+	if scale_locked or _mode == Mode.TWO_HAND or _root == null:
+		return
+	var factor := _clamped_multiple(multiple) / _current_multiple()
+	_scale_about(_model_bounds().get_center(), factor)
+
+
+func fit_to_view(camera: Node3D) -> void:
+	## Bring the whole model in front of you, centred, at a size that fits.
+	## Locked scale: it's moved but not resized.
+	if _root == null or _model_bounds().size == Vector3.ZERO:
+		return
+	var box := _model_bounds()
+	var factor := 1.0
+	if not scale_locked:
+		var radius := box.size.length() * 0.5
+		var target_multiple := _clamped_multiple(_current_multiple() * fit_radius / radius)
+		factor = target_multiple / _current_multiple()
+
+	var forward := -camera.global_transform.basis.z
+	forward.y = 0.0
+	forward = Vector3.FORWARD if forward.length() < 0.001 else forward.normalized()
+	var target_centre := camera.global_position + forward * fit_distance
+	target_centre.y = camera.global_position.y - 0.2
+
+	var t := _root.global_transform
+	_root.global_transform = Transform3D(t.basis * factor, target_centre + (t.origin - box.get_center()) * factor)
+
+
+func go_home() -> void:
+	## Back to where the model first appeared. Not while the scale is locked
+	## (that would silently change it).
+	if _has_home and not scale_locked and _mode == Mode.NONE:
+		_root.global_transform = _home
+
+
+func _process(delta: float) -> void:
+	if _root == null or _left == null or _right == null:
+		return
+
+	var left_free := enabled and _hand_free(_left)
+	var right_free := enabled and _hand_free(_right)
+	var left_pos := _steady(_left_filter, _left.global_position, left_free, delta)
+	var right_pos := _steady(_right_filter, _right.global_position, right_free, delta)
+
+	if left_free and right_free and (right_pos - left_pos).length() >= 0.05:
+		_update_two_hand(left_pos, right_pos)
+	elif left_free != right_free:
+		_update_one_hand(_left if left_free else _right, left_pos if left_free else right_pos)
+	else:
+		_mode = Mode.NONE
+
+
+func _steady(filter: RefCounted, raw: Vector3, gripping: bool, delta: float) -> Vector3:
+	## The filter only matters while a hand is on the model; otherwise keep it
+	## parked on the raw position so it starts fresh the moment you grab.
+	if steadiness == 0:
+		return raw
+	if not gripping:
+		filter.reset(raw)
+		return raw
+	return filter.filter(raw, delta)
+
+
+func _update_one_hand(hand: XRController3D, hand_pos: Vector3) -> void:
+	if _mode != Mode.ONE_HAND or _one_hand != hand:
+		_mode = Mode.ONE_HAND
+		_one_hand = hand
+		_start_root = _root.global_transform
+		_start_hand = hand_pos
+		return
+	var t := _start_root
+	t.origin += hand_pos - _start_hand
+	_root.global_transform = t
+
+
+func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
+	var vec := right_pos - left_pos
+	var mid := (left_pos + right_pos) * 0.5
+	if _mode != Mode.TWO_HAND:
+		_mode = Mode.TWO_HAND
+		_prev_mid = mid
+		_prev_vec = vec
+		return
+
+	# The change since last frame: how far the line between the hands swung
+	# (shortest-arc), and how much it lengthened or shortened.
+	var rot := Basis(_shortest_arc(_prev_vec.normalized(), vec.normalized()))
+	var scale_factor := 1.0
+	if not scale_locked:
+		var current := _current_multiple()
+		# Raised to scale_gain, so a small spread goes a long way. Because each frame's ratio
+		# telescopes, the total is still (hand distance now / at grab)^gain, whatever the path.
+		scale_factor = _clamped_multiple(current * pow(vec.length() / _prev_vec.length(), scale_gain)) / current
+
+	# Turn/scale the model about where the midpoint WAS, then hang it off where it is now.
+	var t := _root.global_transform
+	_root.global_transform = Transform3D(
+		(rot * t.basis) * scale_factor,
+		mid + (rot * (t.origin - _prev_mid)) * scale_factor
+	)
+	_prev_mid = mid
+	_prev_vec = vec
+
+
+func _hand_free(hand: XRController3D) -> bool:
+	if not hand.is_button_pressed(grab_action):
+		return false
+	# controller.gd exposes held_node; a hand carrying a part isn't free.
+	return hand.get("held_node") == null
+
+
+func _current_multiple() -> float:
+	return _root.global_transform.basis.get_scale().x / _real_life_scale
+
+
+func _clamped_multiple(multiple: float) -> float:
+	return clampf(multiple, min_multiple, max_multiple)
+
+
+func _scale_about(pivot: Vector3, factor: float) -> void:
+	var t := _root.global_transform
+	_root.global_transform = Transform3D(t.basis * factor, pivot + (t.origin - pivot) * factor)
+
+
+func _model_bounds() -> AABB:
+	## World-space bounds of all the part meshes; zero-size if there are none.
+	## (A held part has left the model, so it doesn't count.)
+	var box := AABB()
+	var first := true
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if not (node is MeshInstance3D) or (node.has_meta("held") and node.get_meta("held")):
+			continue
+		var b: AABB = node.global_transform * node.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	return box
+
+
+func _trim(x: float) -> String:
+	return ("%.2f" % x).rstrip("0").rstrip(".")
+
+
+func _shortest_arc(from: Vector3, to: Vector3) -> Quaternion:
+	var d := from.dot(to)
+	if d < -0.9999:
+		# Hands flipped exactly through each other: any perpendicular axis will do.
+		var axis := from.cross(Vector3.UP)
+		if axis.length() < 0.001:
+			axis = from.cross(Vector3.RIGHT)
+		return Quaternion(axis.normalized(), PI)
+	return Quaternion(from, to)
