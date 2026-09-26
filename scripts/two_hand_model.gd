@@ -67,13 +67,17 @@ var _one_hand_gain := 1.0
 var _start_hand := Vector3.ZERO
 var _prev_mid := Vector3.ZERO
 var _prev_vec := Vector3.ZERO
+var _gesture_active := false
+var _gesture_start_transform: Transform3D
+var command_stack = null ## set via setup(); a shared command_stack.gd instance for undo/redo
 
 
-func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float) -> void:
+func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float, stack = null) -> void:
 	_root = root
 	_left = left
 	_right = right
 	_real_life_scale = real_life_scale
+	command_stack = stack
 
 
 func _init() -> void:
@@ -110,6 +114,10 @@ func is_active() -> bool:
 	return _mode != Mode.NONE
 
 
+func current_multiple() -> float:
+	return _current_multiple()
+
+
 func scale_text() -> String:
 	## e.g. "scale 1:1", "scale 2:1 (locked)" — for the on-screen readout.
 	if _root == null:
@@ -127,8 +135,10 @@ func set_preset(multiple: float) -> void:
 	## Jump to `multiple` times real life (1.0 = 1:1), about the model's centre.
 	if scale_locked or _mode == Mode.TWO_HAND or _root == null:
 		return
+	var before := _root.global_transform
 	var factor := _clamped_multiple(multiple) / _current_multiple()
 	_scale_about(_model_bounds().get_center(), factor)
+	_push_move_command("scale to %s" % _ratio_hint(multiple), before)
 
 
 func fit_to_view(camera: Node3D) -> void:
@@ -136,6 +146,7 @@ func fit_to_view(camera: Node3D) -> void:
 	## Locked scale: it's moved but not resized.
 	if _root == null or _model_bounds().size == Vector3.ZERO:
 		return
+	var before := _root.global_transform
 	var box := _model_bounds()
 	var factor := 1.0
 	if not scale_locked:
@@ -151,13 +162,32 @@ func fit_to_view(camera: Node3D) -> void:
 
 	var t := _root.global_transform
 	_root.global_transform = Transform3D(t.basis * factor, target_centre + (t.origin - box.get_center()) * factor)
+	_push_move_command("fit to view", before)
 
 
 func go_home() -> void:
 	## Back to where the model first appeared. Not while the scale is locked
 	## (that would silently change it).
 	if _has_home and not scale_locked and _mode == Mode.NONE:
+		var before := _root.global_transform
 		_root.global_transform = _home
+		_push_move_command("go home", before)
+
+
+func _push_move_command(label: String, before: Transform3D) -> void:
+	if command_stack == null or _root == null:
+		return
+	var after := _root.global_transform
+	if before.is_equal_approx(after):
+		return # no net change: nothing worth undoing
+	var target := _root
+	command_stack.push(label,
+		func() -> void: target.global_transform = before,
+		func() -> void: target.global_transform = after)
+
+
+func _ratio_hint(multiple: float) -> String:
+	return "%s:1" % _trim(multiple) if multiple >= 1.0 else "1:%s" % _trim(1.0 / multiple)
 
 
 func _process(delta: float) -> void:
@@ -174,7 +204,23 @@ func _process(delta: float) -> void:
 	elif left_free != right_free:
 		_update_one_hand(_left if left_free else _right, left_pos if left_free else right_pos)
 	else:
+		_end_gesture()
 		_mode = Mode.NONE
+
+
+func _begin_gesture() -> void:
+	## One undo step per drag, however it moved between one and two hands —
+	## only remember the transform from the FIRST frame of a fresh gesture.
+	if not _gesture_active:
+		_gesture_active = true
+		_gesture_start_transform = _root.global_transform
+
+
+func _end_gesture() -> void:
+	if not _gesture_active:
+		return
+	_gesture_active = false
+	_push_move_command("move model", _gesture_start_transform)
 
 
 func _steady(filter: RefCounted, raw: Vector3, gripping: bool, delta: float) -> Vector3:
@@ -195,6 +241,7 @@ func _update_one_hand(hand: XRController3D, hand_pos: Vector3) -> void:
 		_start_root = _root.global_transform
 		_start_hand = hand_pos
 		_one_hand_gain = one_hand_drag_gain()
+		_begin_gesture()
 		return
 	var t := _start_root
 	t.origin += (hand_pos - _start_hand) * _one_hand_gain
@@ -208,6 +255,7 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 		_mode = Mode.TWO_HAND
 		_prev_mid = mid
 		_prev_vec = vec
+		_begin_gesture()
 		return
 
 	# The change since last frame: how far the line between the hands swung

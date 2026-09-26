@@ -39,11 +39,13 @@ extends Node3D
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
+var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
 var _two_hand: Node
 var _tablet: Node
+var _keyboard: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -61,6 +63,10 @@ func _ready() -> void:
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_wrist_tablet()
+	_add_popup_keyboard()
+	$XROrigin3D/LeftController.command_stack = command_stack
+	$XROrigin3D/RightController.command_stack = command_stack
+	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
@@ -74,15 +80,122 @@ func _add_two_hand_model() -> void:
 	var two_hand := preload("res://scripts/two_hand_model.gd").new()
 	two_hand.name = "TwoHandModel"
 	add_child(two_hand)
-	two_hand.setup(assembly_root, $XROrigin3D/LeftController, $XROrigin3D/RightController, spawn_scale)
+	two_hand.setup(assembly_root, $XROrigin3D/LeftController, $XROrigin3D/RightController, spawn_scale, command_stack)
 	_two_hand = two_hand
 
 
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack)
 	_tablet = tablet
+
+
+func _add_popup_keyboard() -> void:
+	## The vision brief's popup keyboard, reserved on the right thumbstick
+	## click since the wrist tablet was built. First real use: typing an
+	## exact scale multiple (see _on_right_stick_click below).
+	var keyboard := preload("res://scripts/popup_keyboard.gd").new()
+	keyboard.name = "PopupKeyboard"
+	add_child(keyboard)
+	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	_keyboard = keyboard
+
+
+func _on_right_stick_click(action_name: String) -> void:
+	if action_name != "primary_click":
+		return
+	if _keyboard.is_open():
+		_keyboard.close()
+		return
+	_keyboard.open_for(_trim_number(_two_hand.current_multiple()), _on_scale_typed)
+
+
+func _on_scale_typed(text: String) -> void:
+	var value := text.to_float()
+	if value > 0.0:
+		_two_hand.set_preset(value)
+
+
+# --- Tools tab (wrist_tablet.gd): hide/show all, reverse visibility, isolate.
+# Shoot-to-hide itself is per-hand (controller.gd's hide_tool_active/_try_shoot_hide);
+# these are the whole-assembly operations, so they live here alongside
+# list_model_files()/load_glb_file() — the other model-wide API the tablet calls into.
+
+func hide_all_parts() -> void:
+	_set_all_visibility(false, "hide all")
+
+
+func show_all_parts() -> void:
+	_set_all_visibility(true, "show all")
+
+
+func reverse_visibility() -> void:
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	if parts.is_empty():
+		return
+	var before := {}
+	for p in parts:
+		before[p] = p.visible
+	for p in parts:
+		p.visible = not p.visible
+	_push_visibility_command("reverse visibility", before)
+
+
+func isolate_selected() -> void:
+	var target := _current_selected_part()
+	if target == null:
+		return
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	var before := {}
+	for p in parts:
+		before[p] = p.visible
+	for p in parts:
+		p.visible = (p == target)
+	_push_visibility_command("isolate %s" % target.name, before)
+
+
+func _current_selected_part() -> Node3D:
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		if hand.selected_node != null:
+			return hand.selected_node
+	return null
+
+
+func _set_all_visibility(vis: bool, label: String) -> void:
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	if parts.is_empty():
+		return
+	var before := {}
+	var changed := false
+	for p in parts:
+		before[p] = p.visible
+		if p.visible != vis:
+			changed = true
+	if not changed:
+		return # nothing to undo if it was already all hidden/shown
+	for p in parts:
+		p.visible = vis
+	_push_visibility_command(label, before)
+
+
+func _push_visibility_command(label: String, before: Dictionary) -> void:
+	var after := {}
+	for p in before:
+		after[p] = p.visible
+	var undo_fn := func() -> void:
+		for p in before:
+			if is_instance_valid(p):
+				p.visible = before[p]
+	var redo_fn := func() -> void:
+		for p in after:
+			if is_instance_valid(p):
+				p.visible = after[p]
+	command_stack.push(label, undo_fn, redo_fn)
+
+
+func _trim_number(x: float) -> String:
+	return ("%.3f" % x).rstrip("0").rstrip(".")
 
 
 func set_measuring(on: bool) -> void:
@@ -309,7 +422,9 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 		_set_status("glTF parsed but produced no scene.")
 		return false
 
-	# Nothing may still hold, or have selected, a part that's about to go.
+	# Nothing may still hold, or have selected, a part that's about to go —
+	# and the undo/redo history can't point at nodes that are about to be freed.
+	command_stack.clear()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 	for old in assembly_root.get_children():
@@ -325,6 +440,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	for node in _all_descendants(scene):
 		if node is MeshInstance3D:
 			node.add_to_group("grabbable_parts")
+			node.create_trimesh_collision() # so controller.gd's laser-select can ray-test real geometry
 			_part_count += 1
 	return true
 

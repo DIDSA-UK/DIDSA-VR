@@ -35,15 +35,20 @@ live-synced.
    highlight shows what a grip would take). The part stays attached exactly
    where you took hold, so turning your hand turns it about that spot; it
    moves 1:1 and drops on release, regardless of what's selected. Separately, point
-   at a part from a distance and pull the **trigger** to select it (trigger
-   again, or aim at nothing, to deselect) — while selected, the
-   **thumbstick** rotates it relative to how you're currently looking
-   (left/right spins it, up/down tips it away/towards you, not around the
-   part's own possibly-tilted axes), and **A/X**/**B/Y** pull it nearer or
-   push it farther — at a speed proportional to how far the part is from your
-   hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far parts
-   travel quickly and near ones can be placed finely. A thin cyan laser shows where you're aiming; selected
-   parts get a yellow highlight.
+   at a part from a distance — a real ray test against its actual geometry
+   (not just a cone around its origin point, so big and overlapping parts
+   pick correctly; nearest hit wins) highlights it pale yellow and shows its
+   name — and pull the **trigger** to select it (trigger again, or aim at
+   nothing, to deselect) — while selected, the **thumbstick** rotates it
+   about the point the ray hit (or its centre), relative to how you're
+   currently looking (left/right spins it, up/down tips it away/towards you,
+   not around the part's own possibly-tilted axes), and **A/X**/**B/Y** pull
+   it nearer or push it farther — at a speed proportional to how far the part
+   is from your hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far
+   parts travel quickly and near ones can be placed finely. A thin cyan laser
+   shows where you're aiming; selected parts get a yellow highlight. Every
+   part move (grip-drag or laser rotate/nudge) is undoable — see the wrist
+   tablet's Undo/Redo below.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
    **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
    teleport (push forward and point the right hand's laser at the floor — a
@@ -65,7 +70,8 @@ live-synced.
    to open the tablet; press the **X** on the tablet to close it. It never
    opens by itself, so looking at your wrist can't trigger it. While the
    laser is over the bullseye or the tablet, the trigger presses those
-   instead of selecting a part. Tabs:
+   instead of selecting a part. **Undo**/**Redo** buttons sit above the tabs,
+   visible whatever tab is open — see item 9 below. Tabs:
    - **Modes** — switch model movement, user movement and part manipulation
      on or off independently, and set **Steadiness** (Off / Light / Medium /
      Strong): an adaptive filter on your hands while you hold the model, so a
@@ -76,7 +82,9 @@ live-synced.
      about the model's centre; lock the scale (also stops the two-hand
      spread/close and Fit from resizing); **Fit to view** brings the whole
      model in front of you at a comfortable size; **Home** returns it to
-     where it first loaded (not while the scale is locked).
+     where it first loaded (not while the scale is locked). For an exact
+     value, click the **right thumbstick** — see item 8.
+   - **Tools** — see item 10.
    - **Files** — load a `.glb`/`.gltf` from the `models/` folder next to
      `project.godot` (or `user://models`, which also works in an exported
      build) with no backend at all. Local files are read as metres, so 1:1
@@ -89,12 +97,35 @@ live-synced.
      Resolution or MSAA; high CPU means scripts. The tablet only renders and
      measures while open.
 
-   The right thumbstick click is reserved for the popup keyboard (not built
-   yet). With no `secrets.cfg` the app now starts anyway, ready for a local
-   file.
-8. A floating status label shows what's happening (importing, downloading,
-   parse errors, part count) since you won't have a terminal visible once
-   you're in the headset.
+   With no `secrets.cfg` the app now starts anyway, ready for a local file.
+8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
+   numeric keypad floating in front of you, pre-filled with the model's
+   current scale multiple — its first real use, per the vision brief's "for
+   any text entry" (reserved since the wrist tablet was built). Type a new
+   number (the first keystroke replaces the pre-filled value rather than
+   appending to it) and press **OK** to apply it — this goes through the
+   same scale-preset code as the Scale tab's buttons, so it's undoable the
+   same way; **Cancel**, or clicking the right thumbstick again, backs out
+   without applying anything. Aim and click its keys with the right hand's
+   laser and trigger, same as the wrist tablet.
+9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
+   whole-model move (one/two-hand drag, and the Scale tab's presets/Fit/
+   Home), and Tools-tab hide/show action goes onto one shared history —
+   **Undo**/**Redo** on the wrist tablet step back/forward through it. A
+   drag that ends up back where it started doesn't push anything. The
+   history is cleared whenever the model is replaced (loading a different
+   file), since it can't point at parts that no longer exist.
+10. **Tools tab.** **Shoot to hide** — toggle it on, then point the right
+    hand's laser at a part (same hover+name as normal selection) and pull
+    the trigger to hide it. **Hide all** / **Show all** toggle every part at
+    once. **Reverse visibility** flips every part's hidden/shown state.
+    **Isolate selected** hides everything except whichever part is currently
+    laser-selected (select it first, then press Isolate). All four are
+    undoable. A hidden part is click-through for both the laser and grip —
+    it's out of the way, not just invisible.
+11. A floating status label shows what's happening (importing, downloading,
+    parse errors, part count) since you won't have a terminal visible once
+    you're in the headset.
 
 ## 1. Drop in a real assembly
 

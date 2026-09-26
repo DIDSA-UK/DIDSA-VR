@@ -43,6 +43,9 @@ var _camera: XRCamera3D
 var _two_hand: Node
 var _locomotion: Node
 var _main: Node
+var _command_stack = null
+var _undo_button: Button
+var _redo_button: Button
 
 var _viewport: SubViewport
 var _quad: MeshInstance3D
@@ -66,13 +69,14 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
 	_two_hand = two_hand
 	_locomotion = locomotion
 	_main = main
+	_command_stack = command_stack
 
 	_build_viewport()
 	_build_quad()
@@ -121,6 +125,9 @@ func _process(delta: float) -> void:
 		_scale_label.text = _two_hand.scale_text()
 		_lock_button.set_pressed_no_signal(_two_hand.scale_locked)
 		_lock_button.text = "Scale lock: %s" % ("ON" if _two_hand.scale_locked else "off")
+		if _command_stack:
+			_undo_button.disabled = not _command_stack.can_undo()
+			_redo_button.disabled = not _command_stack.can_redo()
 
 
 func _update_pointer(normal: Vector3) -> void:
@@ -262,6 +269,25 @@ func _build_ui() -> Control:
 	column.add_theme_constant_override("separation", 12)
 	panel.add_child(column)
 
+	# Undo/redo: always visible, regardless of which tab is open, since it
+	# applies across all of them (part moves, model moves, and whatever
+	# later tools push to the same command_stack.gd history).
+	var history_row := HBoxContainer.new()
+	history_row.add_theme_constant_override("separation", 8)
+	column.add_child(history_row)
+	_undo_button = Button.new()
+	_undo_button.text = "Undo"
+	_undo_button.disabled = true
+	_undo_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_undo_button.pressed.connect(_on_undo_pressed)
+	history_row.add_child(_undo_button)
+	_redo_button = Button.new()
+	_redo_button.text = "Redo"
+	_redo_button.disabled = true
+	_redo_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_redo_button.pressed.connect(_on_redo_pressed)
+	history_row.add_child(_redo_button)
+
 	# Tab bar: radio-style buttons, exactly one page showing.
 	var tab_row := HBoxContainer.new()
 	tab_row.add_theme_constant_override("separation", 8)
@@ -274,6 +300,7 @@ func _build_ui() -> Control:
 	var builders := {
 		"Modes": _build_modes_page,
 		"Scale": _build_scale_page,
+		"Tools": _build_tools_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -306,6 +333,16 @@ func _build_ui() -> Control:
 	root.add_child(_cursor)
 
 	return root
+
+
+func _on_undo_pressed() -> void:
+	if _command_stack:
+		_command_stack.undo()
+
+
+func _on_redo_pressed() -> void:
+	if _command_stack:
+		_command_stack.redo()
 
 
 func _on_tab_toggled(on: bool, tab_name: String) -> void:
@@ -341,11 +378,11 @@ func _build_modes_page() -> Control:
 	return page
 
 
-func _mode_toggle(label: String, apply: Callable) -> Button:
+func _mode_toggle(label: String, apply: Callable, default_on: bool = true) -> Button:
 	var button := Button.new()
 	button.toggle_mode = true
-	button.button_pressed = true
-	button.text = "%s: ON" % label
+	button.button_pressed = default_on
+	button.text = "%s: %s" % [label, "ON" if default_on else "off"]
 	button.toggled.connect(func(on: bool) -> void:
 		button.text = "%s: %s" % [label, "ON" if on else "off"]
 		apply.call(on)
@@ -390,6 +427,44 @@ func _build_scale_page() -> Control:
 	home.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	home.pressed.connect(func() -> void: _two_hand.go_home())
 	view_row.add_child(home)
+	return page
+
+
+# --- Tools: assembly tools from the vision brief's "Assembly tools" list ---
+
+func _build_tools_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 10)
+
+	page.add_child(_mode_toggle("Shoot to hide", func(on: bool) -> void:
+		_left.hide_tool_active = on
+		_right.hide_tool_active = on
+	, false))
+
+	var visibility_row := HBoxContainer.new()
+	visibility_row.add_theme_constant_override("separation", 8)
+	page.add_child(visibility_row)
+	var hide_all := Button.new()
+	hide_all.text = "Hide all"
+	hide_all.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hide_all.pressed.connect(_main.hide_all_parts)
+	visibility_row.add_child(hide_all)
+	var show_all := Button.new()
+	show_all.text = "Show all"
+	show_all.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	show_all.pressed.connect(_main.show_all_parts)
+	visibility_row.add_child(show_all)
+
+	var reverse := Button.new()
+	reverse.text = "Reverse visibility"
+	reverse.pressed.connect(_main.reverse_visibility)
+	page.add_child(reverse)
+
+	var isolate := Button.new()
+	isolate.text = "Isolate selected"
+	isolate.pressed.connect(_main.isolate_selected)
+	page.add_child(isolate)
+
 	return page
 
 
