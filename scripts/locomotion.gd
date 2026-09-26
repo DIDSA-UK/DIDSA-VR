@@ -11,9 +11,10 @@ extends XROrigin3D
 @export var stick_deadzone: float = 0.15
 @export var axis_lockout: float = 0.4 ## how much of the OTHER right-stick axis cancels snap-turn/teleport, so a diagonal push doesn't fire both
 @export var teleport_deadzone: float = 0.3
-@export var teleport_max_distance: float = 5.0 ## metres, at full forward stick deflection
-@export var teleport_marker_clearance: float = 0.02 ## metres above the floor; the marker and the
-## Ground plane's visual mesh both sit at y=0, so with no offset they z-fight and the floor wins.
+@export var teleport_max_distance: float = 5.0 ## metres from the right hand to where its laser meets the floor
+@export var teleport_ring_radius: float = 0.25 ## metres, outer edge of the landing ring
+@export var teleport_ring_thickness: float = 0.03 ## metres, outer minus inner radius
+@export var teleport_marker_clearance: float = 0.005 ## metres between the ring's underside and the floor, so they don't z-fight
 
 @onready var camera: XRCamera3D = $XRCamera3D
 @onready var left_controller: XRController3D = $LeftController
@@ -86,21 +87,28 @@ func _handle_teleport() -> void:
 	var wanting_teleport := input.y > teleport_deadzone and absf(input.x) < axis_lockout
 
 	if wanting_teleport:
-		var forward := -camera.global_transform.basis.z
-		forward.y = 0.0
-		forward = forward.normalized()
-		var distance := clampf(input.y, 0.0, 1.0) * teleport_max_distance
-		_teleport_target = camera.global_position + forward * distance
-		_teleport_target.y = global_position.y # keep current floor height
-		if _teleport_marker:
-			_teleport_marker.global_position = _teleport_target + Vector3(0, teleport_marker_clearance, 0)
-			_teleport_marker.visible = true
-		_teleporting = true
+		# Target is wherever the right hand's laser meets the floor (the
+		# origin's own height). Aiming level/upwards, or farther than
+		# teleport_max_distance, gives no target: the ring hides and
+		# releasing the stick won't jump.
+		var aim_origin := right_controller.global_position
+		var aim_dir := -right_controller.global_transform.basis.z.normalized()
+		var floor_plane := Plane(Vector3.UP, global_position.y)
+		var hit = floor_plane.intersects_ray(aim_origin, aim_dir)
+		_teleporting = hit != null and aim_origin.distance_to(hit) <= teleport_max_distance
+		if _teleporting:
+			_teleport_target = hit
+		if _teleport_marker and _teleport_marker.is_inside_tree():
+			_teleport_marker.visible = _teleporting
+			if _teleporting:
+				_teleport_marker.global_position = _teleport_target + Vector3(0, _marker_lift(), 0)
 	else:
 		if _teleporting:
-			# Stick eased back off the deadzone: blink to the last previewed spot.
-			global_position.x = _teleport_target.x
-			global_position.z = _teleport_target.z
+			# Stick eased back off the deadzone: blink so your head (not the
+			# origin, which room-scale drift puts elsewhere) lands on the ring.
+			var offset := _teleport_target - camera.global_position
+			global_position.x += offset.x
+			global_position.z += offset.z
 		_hide_teleport_preview()
 
 
@@ -110,12 +118,16 @@ func _hide_teleport_preview() -> void:
 		_teleport_marker.visible = false
 
 
+func _marker_lift() -> float:
+	# A torus is centred on its tube, so raise it by the tube's radius to sit on the floor.
+	return teleport_ring_thickness / 2.0 + teleport_marker_clearance
+
+
 func _build_teleport_marker() -> void:
 	_teleport_marker = MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.25
-	mesh.bottom_radius = 0.25
-	mesh.height = 0.02
+	var mesh := TorusMesh.new() # lies flat in the XZ plane, so it reads as a ring on the floor
+	mesh.inner_radius = teleport_ring_radius - teleport_ring_thickness
+	mesh.outer_radius = teleport_ring_radius
 	_teleport_marker.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -123,4 +135,6 @@ func _build_teleport_marker() -> void:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mesh.material = mat
 	_teleport_marker.visible = false
-	get_parent().add_child(_teleport_marker)
+	# Deferred: this runs from _ready(), while Main is still setting up its
+	# children, so a direct add_child() on it fails and the marker never enters the tree.
+	get_parent().add_child.call_deferred(_teleport_marker)

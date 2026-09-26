@@ -33,8 +33,8 @@ model and multi-format loading. Still plain Godot 4 core (no
    parts get a yellow highlight.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
    **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
-   teleport (push forward — a cyan disc marks the landing spot — release to
-   jump there). Either stick backs off automatically while that hand has a
+   teleport (push forward and point the right hand's laser at the floor — a
+   cyan ring marks where it lands, within 5 m — release to jump there). Either stick backs off automatically while that hand has a
    part selected, so rotating a part never also turns or teleports you.
 6. A floating status label shows what's happening (importing, downloading,
    parse errors, part count) since you won't have a terminal visible once
