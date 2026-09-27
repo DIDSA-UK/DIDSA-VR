@@ -377,19 +377,40 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % _part_count)
 
 
+## source_format string for each extension the backend's ImportSourceFormat
+## enum accepts (backend/app/document/models.py) — "step"/"stl"/"obj" go
+## through the backend's importer; glb/gltf load straight into Godot with no
+## backend round trip at all (see load_glb_file()).
+const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
+
 func list_model_files() -> PackedStringArray:
-	## .glb/.gltf files the tablet's Files tab offers: res://models (next to
-	## the project, for running from the editor) and user://models (which also
-	## works in an exported build).
+	## Model files the tablet's Files tab offers: res://models (next to the
+	## project, for running from the editor) and user://models (which also
+	## works in an exported build). .glb/.gltf load locally; .step/.stp/.stl/
+	## .obj need a configured backend (see load_model_file()).
 	var found := PackedStringArray()
+	var extensions := ["glb", "gltf"] + _BACKEND_IMPORT_FORMATS.keys()
 	for dir_path in ["res://models", "user://models"]:
 		var dir := DirAccess.open(dir_path)
 		if dir == null:
 			continue
 		for file_name in dir.get_files():
-			if file_name.get_extension().to_lower() in ["glb", "gltf"]:
+			if file_name.get_extension().to_lower() in extensions:
 				found.append(dir_path.path_join(file_name))
 	return found
+
+
+func load_model_file(path: String) -> void:
+	## Dispatches on extension: a bare .glb/.gltf loads straight from disk;
+	## .step/.stp/.stl/.obj need the backend's /import-features (it's the
+	## only thing that can decode them into geometry Godot can render).
+	var ext := path.get_extension().to_lower()
+	if ext in ["glb", "gltf"]:
+		load_glb_file(path)
+	elif ext in _BACKEND_IMPORT_FORMATS:
+		_import_external_file(path, _BACKEND_IMPORT_FORMATS[ext])
+	else:
+		_set_status("Don't know how to load %s (extension .%s)" % [path.get_file(), ext])
 
 
 func load_glb_file(path: String) -> void:
@@ -404,6 +425,92 @@ func load_glb_file(path: String) -> void:
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR spike: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func _import_external_file(path: String, source_format: String) -> void:
+	## STEP/STL/OBJ, milestone 1's last "done when" item: the backend has no
+	## bare "view this file" endpoint for these, so this creates a fresh Part
+	## (POST /parts), imports the file into it as a fixed Body
+	## (POST /parts/{id}/import-features), then fetches and renders it the
+	## same way as any other backend part (GET .../assembly-mesh.glb) —
+	## mirrors _begin_import()/_fetch_mesh()'s two-step flow, just starting
+	## from a local file instead of a native document, and with a "create
+	## part" step first since there's no existing part to import into.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("%s needs a backend (see secrets.cfg.example) — STEP/STL/OBJ can't be read without one." % path.get_file())
+		return
+	if not FileAccess.file_exists(path):
+		_set_status("No such file: %s" % path)
+		return
+
+	var started_ms := Time.get_ticks_msec()
+	_set_status("Reading %s..." % path.get_file())
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var data_b64 := Marshalls.raw_to_base64(bytes)
+
+	var req := HTTPRequest.new() # a separate node from http_request, which is spoken for by the startup import chain
+	add_child(req)
+	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+
+	_set_status("Creating a part for %s..." % path.get_file())
+	req.request(backend_url + API_PREFIX + "/parts", headers, HTTPClient.METHOD_POST, JSON.stringify({"name": path.get_file().get_basename()}))
+	var create_result: Array = await req.request_completed
+	var part_json = _parse_import_response(create_result, "create a part for %s" % path.get_file(), req)
+	if part_json == null:
+		return
+	var new_part_id: String = part_json.get("id", "")
+	if new_part_id.is_empty():
+		_set_status("Create-part response for %s had no id." % path.get_file())
+		req.queue_free()
+		return
+
+	_set_status("Importing %s (part %s)..." % [path.get_file(), new_part_id])
+	req.request(
+		backend_url + API_PREFIX + "/parts/%s/import-features" % new_part_id, headers, HTTPClient.METHOD_POST,
+		JSON.stringify({"source_format": source_format, "data_base64": data_b64})
+	)
+	var import_result: Array = await req.request_completed
+	if _parse_import_response(import_result, "import %s into part %s" % [path.get_file(), new_part_id], req) == null:
+		return
+
+	_set_status("Imported. Fetching mesh...")
+	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=false" % [backend_url, API_PREFIX, new_part_id, str(quality)]
+	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	var mesh_result: Array = await req.request_completed
+	req.queue_free()
+	var mesh_result_code: int = mesh_result[0]
+	var mesh_response_code: int = mesh_result[1]
+	var mesh_body: PackedByteArray = mesh_result[3]
+	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
+		_set_status("Mesh fetch for %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		return
+
+	_set_status("Downloaded %d KB, parsing glTF..." % int(mesh_body.size() / 1024.0))
+	if not _show_model(mesh_body, "", spawn_scale): # backend units are mm regardless of the source format — spawn_scale, not local_glb_scale
+		return
+	_load_summary = "load: %s (%s, via backend), %d KB, %d ms" % [path.get_file(), source_format, int(mesh_body.size() / 1024.0), Time.get_ticks_msec() - started_ms]
+	print("DIDSA VR spike: ", _load_summary)
+	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func _parse_import_response(result: Array, step_description: String, req: HTTPRequest):
+	## Common HTTP-result/JSON-parse checking for _import_external_file()'s
+	## three sequential calls. Returns the parsed JSON Dictionary on success,
+	## or null (having already set the status and freed req) on any failure.
+	var result_code: int = result[0]
+	var response_code: int = result[1]
+	var body: PackedByteArray = result[3]
+	if result_code != HTTPRequest.RESULT_SUCCESS or (response_code != 200 and response_code != 201):
+		_set_status("Couldn't %s: HTTP %d (result %d)" % [step_description, response_code, result_code])
+		push_error("DIDSA VR spike: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
+		req.queue_free()
+		return null
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if parsed == null or not (parsed is Dictionary):
+		_set_status("Couldn't parse the response for: %s" % step_description)
+		req.queue_free()
+		return null
+	return parsed
 
 
 func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float) -> bool:

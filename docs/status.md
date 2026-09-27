@@ -12,7 +12,8 @@ brief drift" below).
 Last updated for the "CAD foundations" phase (precise picking, undo/redo,
 popup keyboard, Tools tab), built on top of commit `62e55ab`, plus three
 follow-up fixes: held-part steadiness, two-hand drag gain, and closing out
-the up-axis question (see below and `docs/backend-api-notes.md`).
+the up-axis question (see below and `docs/backend-api-notes.md`) — and now
+milestone 1's last open build item, STEP/OBJ/STL import.
 
 **"Untested paths" (below) is the running list of what's built but not yet
 confirmed in the headset — keep it current: add to it whenever headless work
@@ -27,16 +28,37 @@ real headset (PCVR via Virtual Desktop, not a sideloaded APK — see
 correct real-world scale → grab a part → walk around. Godot won; no formal
 Unity comparison was run since nothing surfaced that Godot couldn't do.
 
-## Milestone 1 — Import and viewport: in progress
+## Milestone 1 — Import and viewport: build done; on-Quest measurement outstanding
 
 Two of the vision brief's four manipulation modes were already built; the
 other two, plus the wrist tablet that switches between them, are now built
-too. All of it is committed and pushed.
+too. All of it is committed and pushed. Every "done when" item the vision
+brief's milestone table lists for milestone 1 is now built — the one thing
+left is measuring it on real Quest hardware (see "Untested paths" below),
+which needs a physical headset, not more code.
 
 ### Built
 
 - **Native import and render.** `.didsa`/`.DIDSAprt` file → backend import →
   `assembly-mesh.glb` fetch → render at correct mm→m scale (`main.gd`).
+- **STEP/STL/OBJ import.** `main.gd`'s `load_model_file()` dispatches on
+  extension: `.glb`/`.gltf` load locally (below); `.step`/`.stp`/`.stl`/
+  `.obj` go through `_import_external_file()` — a new endpoint sequence not
+  used anywhere else in this client: `POST /parts` (there's no existing part
+  to import into, unlike the native-assembly flow) → `POST
+  /parts/{id}/import-features` with the file's own bytes (base64) → the same
+  `assembly-mesh.glb` fetch every other backend part uses. Uses its own
+  `HTTPRequest` node (not the one the startup native-import flow occupies)
+  and Godot 4's `await some_signal` to await each step in turn, rather than
+  the connect/disconnect dance `_on_import_completed`/`_on_mesh_completed`
+  use — a cleaner pattern worth using if those get touched again. Backend
+  units are mm regardless of source format, so this uses `spawn_scale`, not
+  `local_glb_scale`. Confirmed end to end for `.obj` and `.stl` against a
+  real backend (`tests/e2e_step_import.gd`, generated fixtures, no
+  proprietary geometry) — **STEP itself wasn't exercised** (no simple
+  hand-written STEP fixture); same client code, different `source_format`
+  string, so the risk is in the backend's own STEP parser, not this client.
+  Files tab lists these alongside `.glb`/`.gltf` now.
 - **Local `.glb`/`.gltf` loading, no backend.** From `models/` next to
   `project.godot` (git-ignored contents) or `user://models`, chosen on the
   tablet's Files tab. Local files are read as metres (`local_glb_scale`). The
@@ -122,12 +144,11 @@ tab if it regresses. If it does: a steady ~22 ms worst-frame is a rate cap
 
 ### Still open for milestone 1
 
-- **STEP/OBJ/STL import in the client.** The backend already has the pieces
-  (`POST /parts/{id}/import-features`, see `docs/backend-api-notes.md`); the
-  client only imports native files and bare glb so far.
-- **Measured on-headset numbers on Quest**, not just PCVR (see below).
-- The popup keyboard and the tablet's Tools tab are now built — see the
-  "CAD foundations" section below.
+- **Measured on-headset numbers on Quest**, not just PCVR (see "Untested
+  paths" below) — the one item left; needs a physical headset.
+- STEP/OBJ/STL import, the popup keyboard and the tablet's Tools tab are all
+  now built — STEP/OBJ/STL above, the other two in the "CAD foundations"
+  section below.
 
 ## "CAD foundations" phase: done (headless-verified; not yet in the headset)
 
@@ -198,8 +219,11 @@ APK / cleartext HTTP, multiplayer, mates, sections, measurements.
   deliberately iterates on PCVR — faster). No APK has been exported or
   sideloaded; the README's cleartext-HTTP note is still theoretical. PCVR
   performance numbers say little about Quest's budget.
-- **STEP/OBJ/STL import** — backend support exists, nothing in the client
-  calls it.
+- **STEP/OBJ/STL import** — now built and confirmed end to end against a
+  real backend for `.obj`/`.stl` (`tests/e2e_step_import.gd`); `.step` itself
+  wasn't exercised (no simple hand-written STEP fixture — see the "Built"
+  section above). None of the three tried in the headset, or with a real
+  (non-generated) file.
 - **Everything since `dd0db4e` has been verified headless, not yet in the
   headset, except where John reported results.** Reported in the headset:
   the teleport ring at the laser point was "better", and frame rate is
@@ -306,8 +330,17 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 
 `docs/vision-brief.md` is an export and its milestone table still says, for
 milestone 1, that whole-model two-hand rotate/scale and scale views are open.
-Both are built. The live Claude Docs artifact should be updated to something
-like: "Native import, individual part manipulation, user movement, whole-model
-one/two-hand movement, scale views, the wrist tablet (modes, scale, local
-glb files, perf) and local glb import are built. Still open: STEP/OBJ/STL
-import and on-Quest measurements."
+Both are built, and so is STEP/OBJ/STL import since. The live Claude Docs
+artifact should be updated to something like: "Native import, STEP/OBJ/STL
+import, individual part manipulation, user movement, whole-model one/two-hand
+movement, scale views, the wrist tablet (modes, scale, tools, files, perf,
+undo/redo), the popup keyboard, and local glb import are built. Milestone 1
+is otherwise done — the only thing left is measuring it on real Quest
+hardware, not more building."
+
+**Also not yet in the live doc:** the "Mates workflow" section in this export
+now has a note (added 27 Sep 2026, this repo's copy only) that VR mates must
+be readable/editable in DIDSA-CAD's flat app and vice versa, so a user can
+move between VR and flat with the same assembly file — John's own
+requirement, added ahead of the mates work itself so it's not missed when
+that phase starts. Carry that note into the live doc too.

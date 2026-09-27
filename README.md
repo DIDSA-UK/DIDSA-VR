@@ -94,11 +94,16 @@ live-synced.
      where it first loaded (not while the scale is locked). For an exact
      value, click the **right thumbstick** — see item 8.
    - **Tools** — see item 10.
-   - **Files** — load a `.glb`/`.gltf` from the `models/` folder next to
+   - **Files** — load a model from the `models/` folder next to
      `project.godot` (or `user://models`, which also works in an exported
-     build) with no backend at all. Local files are read as metres, so 1:1
-     is the file's own size; change `local_glb_scale` on Main if yours are
-     in millimetres. The `models/` contents are git-ignored.
+     build). A `.glb`/`.gltf` loads straight from disk, no backend at all,
+     read as metres (change `local_glb_scale` on Main if yours are in
+     millimetres). A `.step`/`.stp`/`.stl`/`.obj` needs a configured backend
+     (see `secrets.cfg.example`) — the client can't decode these itself, so
+     it creates a new Part on the backend, uploads the file to
+     `POST /parts/{id}/import-features`, then fetches and renders it the
+     same way as any other backend part. The `models/` contents are
+     git-ignored.
    - **Perf** — fps, CPU/GPU render time, script and physics time, part
      count, draw calls, load times; plus the levers for speed: **Shadows**,
      **Resolution** (100/80/65% of the headset runtime's size) and **MSAA**.
@@ -231,19 +236,20 @@ button.
   the ratio to check first, not the model itself.
 - You can see roughly where your hands are (a small glowing marker on each
   controller — bare `XRController3D` draws nothing on its own).
-- Two of the vision brief's four manipulation modes are built: individual
+- All four of the vision brief's manipulation modes are built: individual
   part manipulation (grip to grab close, trigger-laser to select and then
-  grip/thumbstick/A-B at a distance) and user movement (thumbstick walk,
-  snap-turn, teleport). Still open: whole-model two-hand rotate/scale, and
-  scale views (jump to real-life / preset scales, with a lock).
-- Only native `.didsa`/`.DIDSAprt` import is wired up so far. STEP, glTF and
-  OBJ/STL loading (the rest of milestone 1's "done when") aren't built yet —
-  the backend already has the pieces (`POST /parts/{id}/import-features` for
-  STEP/OBJ/STL, straight-to-Godot `GLTFDocument` for a bare `.glb`), they
-  just aren't hooked up in this client yet.
-- You have a felt sense of load time and frame rate on real Quest hardware,
-  which is the actual point — the vision brief's payload estimates (~90–100
-  KB for a 186-instance test assembly) were never measured on-headset.
+  grip/thumbstick/A-B at a distance), user movement (thumbstick walk,
+  snap-turn, teleport), whole-model movement (one/two-hand drag, turn and
+  scale), and scale views (jump to real-life/preset scales, with a lock).
+- Native `.didsa`/`.DIDSAprt` import, bare `.glb`/`.gltf` (no backend round
+  trip), and STEP/STL/OBJ (via the backend's `import-features`) are all
+  wired up — milestone 1's full "done when" list of formats. (Bare glTF
+  import was never actually blocked on anything; it's Godot's own
+  `GLTFDocument`, already used for local files.)
+- You have a felt sense of load time and frame rate — but only over PCVR so
+  far, never on real Quest hardware, which was the actual point of that
+  bullet. The vision brief's payload estimates (~90–100 KB for a
+  186-instance test assembly) still haven't been measured on-headset.
 
 ## Known gaps this project doesn't solve yet
 

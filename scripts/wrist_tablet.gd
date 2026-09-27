@@ -491,7 +491,7 @@ func _rebuild_files() -> void:
 	var files: PackedStringArray = _main.list_model_files()
 	if files.is_empty():
 		var none := Label.new()
-		none.text = "No .glb files found.\nPut them in the project's models folder."
+		none.text = "No model files found.\nPut a .glb/.gltf/.step/.stl/.obj in the project's models folder."
 		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_files_box.add_child(none)
 	for i in mini(files.size(), max_files_listed):
@@ -499,7 +499,7 @@ func _rebuild_files() -> void:
 		var button := Button.new()
 		button.text = path.get_file()
 		button.clip_text = true
-		button.pressed.connect(_main.load_glb_file.bind(path))
+		button.pressed.connect(_main.load_model_file.bind(path))
 		_files_box.add_child(button)
 	if files.size() > max_files_listed:
 		var more := Label.new()
