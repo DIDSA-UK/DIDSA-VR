@@ -212,7 +212,7 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
-## Milestone 4 — assembly environment (mates, colours, sections, measurements): foundation laid, tools not built yet
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): mates and colours built; sections and measurements not started
 
 Started by reading the vision brief's Assembly tools/Mates workflow sections
 and the 27 Sep cross-compatibility note (mates must be built as a client to
@@ -382,9 +382,8 @@ a VR-only representation, per the 27 Sep compatibility note.
   for it is available, rather than just trusting the shared-endpoint
   argument).
 - **Not yet built**: editing an existing mate's value/flip (only
-  create/list/delete for this pass), edge picking, and colours/sections/
-  measurements — the other three of milestone 4's four tools. Colours mostly
-  falls out of the already-wired `Occurrence.color` field; sections is
+  create/list/delete for this pass), and edge picking. Colours is now built
+  too (see below); sections and measurements are still open — sections is
   planned client-side (a shader clip-plane uniform, since the backend's own
   `section.py` is a stateless, re-tessellate-on-every-request preview
   endpoint, too slow for a dragged plane at 90 Hz); measurements reuses this
@@ -535,16 +534,19 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 - **`tests/` holds the headless tests and `tests/run_all.sh` runs them all**
   (parse-checks every script, then the steadiness filter, sensitivity,
   two-hand rotation, grab/scale, precise-picking, undo/redo, popup-keyboard,
-  Tools-tab and full-scene tablet tests). `tests/README.md` lists the
-  expected values. Needs no GPU, headset or backend.
-- **`tests/e2e_backend.gd` is the one exception**: it deliberately points
-  `main.secrets_file_path` at the real `secrets.cfg` and drives the actual
-  import/native → assembly-mesh.glb → scene-load flow against a running
-  backend, using the tracked `assembly.didsa`. Run it manually once your
-  backend is up. Confirmed once from the cloud sandbox: 3 parts, import
+  Tools-tab, full-scene tablet, mesh-identity, mates-tool and colour-tool
+  tests). `tests/README.md` lists the expected values. Needs no GPU, headset
+  or backend.
+- **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
+  `e2e_mates.gd`, `e2e_colour.gd`): each deliberately points
+  `main.secrets_file_path` at the real `secrets.cfg` and drives real network
+  calls against a running backend, using the tracked `assembly.didsa`. Run
+  them manually once your backend is up; none are part of `run_all.sh`.
+  `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
-  instantiating the scene to "Loaded". This is the first time this path has
-  been exercised outside John's own machine.
+  instantiating the scene to "Loaded" — the first time this path was
+  exercised outside John's own machine. `e2e_mates.gd`/`e2e_colour.gd` are
+  milestone 4's own real-backend confirmations (see that section above).
 - Parse check: `"$G" --headless --path . --check-only --script
   res://scripts/x.gd` (reports `SCRIPT ERROR: Parse Error`; the OpenXR "no
   HMD" notice is harmless).
@@ -578,3 +580,11 @@ be readable/editable in DIDSA-CAD's flat app and vice versa, so a user can
 move between VR and flat with the same assembly file — John's own
 requirement, added ahead of the mates work itself so it's not missed when
 that phase starts. Carry that note into the live doc too.
+
+**Milestone 4 progress, also not yet in the live doc**: the milestones
+table's row 4 ("Assembly environment... Parts move individually; mates,
+colours, sections and measurements work") is now partly done — mates and
+colours are built (face-only mates, headless- and real-backend-confirmed,
+not headset-verified; see the "Milestone 4" section above) — sections and
+measurements haven't been started. Update the live doc once this reaches a
+headset-verified state, not before.
