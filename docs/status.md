@@ -212,6 +212,130 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): foundation laid, tools not built yet
+
+Started by reading the vision brief's Assembly tools/Mates workflow sections
+and the 27 Sep cross-compatibility note (mates must be built as a client to
+DIDSA-CAD's existing Mate endpoints, not a VR-only representation — see
+below). Before any of the four tools themselves: a real architectural gap
+had to be closed first, and a wrong assumption about Godot physics caught
+before it could quietly break picking.
+
+**The gap: `assembly-mesh.glb` carried no occurrence or face/edge identity at
+all.** Read `backend/app/document/mesh_export.py`/`models.py` directly (in
+the `DIDSA-CAD` repo) and confirmed the Mate/Measure APIs need a real
+`occurrence_id` plus a `SubShapeRef{body_id, shape_type, index}` — but the
+glb encoder emitted anonymous transforms over shared meshes, no node name,
+no extras. Fixed in `DIDSA-CAD` (backend, not this repo):
+
+- `mesh_export.py`'s `AssemblyGlbInstance`/`encode_assembly_glb` now carry
+  `owner_part_id`/`occurrence_id` (glTF node `extras`, not `name` — Godot
+  silently uniquifies duplicate node *names*, which would corrupt an id
+  reused by two occurrences of the same part) and `face_ids`/`body_ids`
+  (primitive `extras`, parallel to the triangle list) — plain JSON, not a
+  vertex attribute, so this client needs no custom `GLTFDocumentExtension`.
+- `router.py`'s `_walk_assembly_glb_instances` threads the real owning
+  Part/Occurrence through the recursion (empty `occurrence_id` means "this
+  is `owner_part_id`'s own top-level content", matching
+  `MeasureEntityRefSchema`'s own existing convention; a pattern-derived
+  instance also gets an empty `occurrence_id` — it has no `Occurrence` entry
+  of its own to reference).
+- Found and fixed a second, real bug while verifying against genuine
+  `pythonocc-core`: `_merged_body_mesh_data` (used by `assembly-mesh.glb` to
+  merge a multi-Body Part into one glTF mesh) dropped `face_ids` entirely
+  and would have silently mis-numbered them across bodies if naively offset
+  the way triangle vertex indices are — added `MeshData.body_ids` so
+  `(body_ids[i], face_ids[i])` reconstructs a real `SubShapeRef` even for a
+  Part with more than one Body.
+- New backend tests (real OCCT, `DIDSA-CAD` repo):
+  `test_merged_body_mesh_data.py`, plus additions to `test_mesh_export.py`
+  and `test_assembly_mesh_glb.py`. Full `DIDSA-CAD` backend suite (2491+
+  tests) re-run clean against genuine `pythonocc-core` (micromamba,
+  `backend/environment.yml` — see "How this has been worked on" below).
+
+**A wrong assumption caught before it shipped: Godot's own `PrimitiveMesh`
+winding is NOT what a real glTF import produces.** `create_trimesh_collision()`
+ray hits only register correctly (from outside, on the expected face) when
+the ray direction matches the mesh's *actual* front-facing winding — and
+`BoxMesh` (used by several existing synthetic tests, including
+`precise_picking.gd`) turns out to use the opposite winding convention from
+standard glTF/OpenGL CCW-front. Confirmed directly against real OCCT
+(`tessellate_shape`'s own vertex order dotted against its own stored normal:
++1.000 on every face of a test box) that OCCT tessellation uses the
+standard convention, and separately confirmed (headless, a hand-built glb in
+the real backend's own byte shape, loaded through the exact
+`GLTFDocument.append_from_buffer` → `generate_scene()` →
+`create_trimesh_collision()` path `main.gd` uses) that a *real* glTF import
+hits correctly from outside on every one of a box's 6 faces, with
+`face_index` landing exactly on the expected triangle every time. Net
+effect: real backend-tessellated parts pick correctly (this doesn't change
+anything about the already-shipped precise-picking feature, which only ever
+ran against real parts or `BoxMesh` stand-ins that happened not to expose
+this), but a *new* synthetic test built from a raw hand-rolled `ArrayMesh`
+or `BoxMesh` is not a reliable stand-in for real glTF-imported geometry
+where per-triangle face identity matters — `tests/mesh_identity.gd` builds
+its own test glb in the real backend's byte shape for exactly this reason.
+
+**Also found while wiring this up: `GLTFState.get_scene_node(idx)` looked
+like the obvious way to map a glTF json node index to its generated Node,
+but empirically only returns a live object *during* `generate_scene()`
+itself** — called afterwards, from ordinary script code, it returns an
+already-freed instance every time (undocumented anywhere obvious; found by
+just trying it headless). Worked around instead by relying on
+`assembly-mesh.glb`'s own nodes always being flat (one per placed instance,
+no parent/child nesting — `encode_assembly_glb` never emits a "children"
+key) — confirmed `generate_scene()` preserves that flat order 1:1 in
+`scene.get_children()`, so plain index correlation works with no
+`GLTFDocumentExtension` anywhere. Documented as a hard constraint in
+`mesh_identity.gd`'s own docstring: this does NOT generalize to a glTF file
+with real hierarchy/skinning.
+
+**Built so far:**
+
+- `scripts/mesh_identity.gd`: `tag_scene()` (called from `main.gd`'s
+  `_show_model()` right after `generate_scene()`) tags every loaded part's
+  `MeshInstance3D` with `occurrence_id`/`owner_part_id` (node meta) and
+  `face_ids`/`body_ids` (also node meta, re-cast to real ints once at tag
+  time — glTF JSON round-trips every number as float, and a request built
+  straight off the raw round-tripped value would send `"index": 3.0`
+  instead of `3`). `subshape_ref_for_hit(part, face_index)` turns a
+  `controller.gd`-style raycast hit's own `face_index` into a real
+  `SubShapeRef`; `occurrence_ref_for(part)` gives `{owner_part_id,
+  occurrence_id}` for a `POST .../mates` or `.../measure` call. Test:
+  `tests/mesh_identity.gd` — no backend needed, hand-builds a glb in the
+  real encoder's exact byte shape.
+- **Confirmed for real, end to end, not just headless-against-synthetic-data**:
+  stood up a real throwaway backend (micromamba `didsacad` env, throwaway
+  `CAD_API_KEY`, never John's real one), imported this repo's own tracked
+  `assembly.didsa` (3 parts, 2 occurrences), fetched its real
+  `assembly-mesh.glb`, and loaded that real response through the exact
+  client code path (`GLTFDocument` → `generate_scene()` →
+  `MeshIdentity.tag_scene()` → `create_trimesh_collision()`). All 3 parts
+  came through with correct identity (root content: `occurrence_id=""`;
+  each placed occurrence: its own real UUID) and correct per-part
+  `face_ids` (204/444/12 entries matching each part's own triangle count);
+  a real ray hit on the real geometry resolved via `subshape_ref_for_hit()`
+  to a genuine `SubShapeRef` with a real OCCT body UUID. This is the first
+  time this specific path (real backend → real glb → real identity tags →
+  real ray hit → real SubShapeRef) has been exercised at all, closing the
+  one gap this section would otherwise still be flagging.
+
+**Not yet built: any of the four tools themselves** (mates, colours,
+sections, measurements) — this was groundwork only. Next: the mates tool
+itself (wrist tablet UI, `POST/GET/PATCH/DELETE .../mates`, "relax/enforce
+all" via `solve_for_occurrence` since there's no bulk-solve endpoint), then
+a cross-compatibility check against a real Mate created directly through the
+backend (no flat-created assembly-with-mates fixture exists anywhere in
+either repo yet, and `assembly.didsa` still has zero mates — one will need
+to be authored via the backend directly, mirroring `DIDSA-CAD`'s own
+`mate_panel.dart` request shapes, to prove the 27 Sep compatibility
+requirement rather than just assuming it). Colours mostly falls out of the
+now-wired `Occurrence.color` field; sections is planned client-side (a
+shader clip-plane uniform, since the backend's own `section.py` is a
+stateless, re-tessellate-on-every-request preview endpoint, too slow for a
+dragged plane at 90 Hz); measurements reuses this same picking foundation
+against `POST /parts/{id}/measure`.
+
 ## Untested paths
 
 - **Standalone Quest APK.** Every test so far has been Godot editor +

@@ -40,6 +40,7 @@ extends Node3D
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
+const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
@@ -528,6 +529,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	if scene == null:
 		_set_status("glTF parsed but produced no scene.")
 		return false
+	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
