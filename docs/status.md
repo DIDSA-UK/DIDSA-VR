@@ -393,6 +393,45 @@ a VR-only representation, per the 27 Sep compatibility note.
   4 so far, has only run headless and against a real backend from a cloud
   sandbox, never with a real hand pulling a real trigger.
 
+### Colours tool: built (headless-verified, real backend confirmed)
+
+The wrist tablet's new **Colours** tab, per the vision brief's Assembly
+tools list. Simpler than Mates: no picking tool of its own — it acts on
+whichever part is already laser-selected (`main.gd`'s now-public
+`current_selected_part()`, the same lookup the Tools tab's "Isolate
+selected" already used). A fixed swatch palette plus a **Custom hex…**
+button (popup keyboard) and **Clear colour**.
+
+- Built as a plain client to DIDSA-CAD's existing, already-shipped
+  `PATCH /parts/{owner_part_id}/occurrences/{occurrence_id}` endpoint
+  (`OccurrenceTransformUpdate.color` — the same field the flat app's own
+  colour-disc row sets), so no backend changes were needed at all for this
+  one, unlike mates. `scripts/colour_tool.gd` sends the hex string straight
+  through (`""` clears the override, matching that field's own
+  None-omitted/`""`-clears convention) and, once the backend confirms it,
+  applies the colour locally via `material_override` so it's visible
+  immediately without a full assembly reload.
+- **A deliberate limitation, not an oversight**: "Clear colour" shows a
+  plain neutral grey rather than reconstructing whatever the part's true
+  pre-colour material was — that material identity isn't threaded through
+  `assembly-mesh.glb` at all (only per-triangle face/body ids are, for
+  mates/measurements), so a full reload is the only way to see the backend's
+  own real post-clear rendering. Not undoable via `command_stack`, same
+  precedent as Mates' create/delete: a backend-committed action, not a
+  purely local instant transform.
+- Tests: `tests/colour_tool.gd` (pure logic, no network — hex conversion
+  matches the backend's own straight scaling exactly, root content is
+  rejected before ever touching the network, `_apply_local_color` sets a
+  real material) and `tests/e2e_colour.gd` (real backend, same "run
+  manually" exception as the other `e2e_*.gd` tests).
+- **Confirmed for real, end to end**: stood up a throwaway backend, let
+  `main.tscn` load `assembly.didsa` for real, PATCHed a real occurrence's
+  colour, confirmed it actually persisted server-side via a fresh
+  `GET .../occurrences` fetch (not just trusting the optimistic local
+  apply), confirmed the Godot node's own material changed to match, then
+  cleared it again. Passed on the first real run.
+- **Not yet headset-verified**, same caveat as Mates above.
+
 ## Untested paths
 
 - **The Mates tab is headless- and real-backend-confirmed, never handset-
@@ -404,6 +443,11 @@ a VR-only representation, per the 27 Sep compatibility note.
   backend). Whether picking two faces in quick succession feels right, and
   whether the tab's layout fits legibly on the existing panel size alongside
   everything else, are both open.
+- **The Colours tab has the same gap** — `colour_tool.gd`'s logic is
+  headless- and real-backend-confirmed, but the swatch grid itself (colour
+  legibility against the panel background, whether the text-colour contrast
+  pick actually reads well, tapping a swatch with a real laser) has never
+  been rendered or clicked for real.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
   deliberately iterates on PCVR — faster). No APK has been exported or

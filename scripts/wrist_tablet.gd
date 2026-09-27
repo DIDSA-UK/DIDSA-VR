@@ -45,6 +45,7 @@ var _locomotion: Node
 var _main: Node
 var _command_stack = null
 var _mates_tool: Node
+var _colour_tool: Node
 var _undo_button: Button
 var _redo_button: Button
 
@@ -57,6 +58,18 @@ var _mates_create_button: Button
 var _mates_relax_button: Button
 var _mates_list_box: VBoxContainer
 var _mates_last_owner_part_id := ""
+
+# Milestone 4: a fixed swatch palette (common colours, plus Custom via the
+# popup keyboard) — "#RRGGBB" strings straight into colour_tool.gd, which
+# sends them to the backend verbatim (an opaque, client-owned string, never
+# parsed server-side — see OccurrenceTransformUpdate.color's own docstring).
+const COLOUR_SWATCHES: Array[Dictionary] = [
+	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
+	{"name": "Yellow", "hex": "#f1c40f"}, {"name": "Green", "hex": "#2ecc71"},
+	{"name": "Blue", "hex": "#3498db"}, {"name": "Purple", "hex": "#9b59b6"},
+	{"name": "White", "hex": "#f5f5f5"}, {"name": "Black", "hex": "#222222"},
+]
+var _colour_status_label: Label
 
 var _viewport: SubViewport
 var _quad: MeshInstance3D
@@ -80,7 +93,7 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -89,6 +102,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_main = main
 	_command_stack = command_stack
 	_mates_tool = mates_tool
+	_colour_tool = colour_tool
 
 	_build_viewport()
 	_build_quad()
@@ -143,6 +157,9 @@ func _process(delta: float) -> void:
 		if _command_stack:
 			_undo_button.disabled = not _command_stack.can_undo()
 			_redo_button.disabled = not _command_stack.can_redo()
+		if _colour_status_label:
+			var selected: Node3D = _main.current_selected_part()
+			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
 
 
 func _update_pointer(normal: Vector3) -> void:
@@ -317,6 +334,7 @@ func _build_ui() -> Control:
 		"Scale": _build_scale_page,
 		"Tools": _build_tools_page,
 		"Mates": _build_mates_page,
+		"Colours": _build_colours_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -677,6 +695,85 @@ func _on_delete_mate_pressed(owner_part_id: String, mate_id: String) -> void:
 
 func _trim_mate_value(x) -> String:
 	return ("%.3f" % float(x)).rstrip("0").rstrip(".")
+
+
+# --- Colours: the vision brief's Assembly tools "Colours" - acts on
+# whichever part is already laser-selected (no picking tool of its own, see
+# colour_tool.gd's own docstring for why), a fixed swatch palette plus a
+# Custom hex entry via the popup keyboard, and Clear.
+
+func _build_colours_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	_colour_status_label = Label.new()
+	_colour_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_colour_status_label)
+
+	var swatch_grid := HFlowContainer.new()
+	swatch_grid.add_theme_constant_override("h_separation", 8)
+	swatch_grid.add_theme_constant_override("v_separation", 8)
+	page.add_child(swatch_grid)
+	for swatch in COLOUR_SWATCHES:
+		var button := Button.new()
+		button.text = swatch["name"]
+		button.add_theme_color_override("font_color", _readable_text_color(swatch["hex"]))
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(swatch["hex"])
+		style.set_content_margin_all(10)
+		button.add_theme_stylebox_override("normal", style)
+		button.pressed.connect(_on_colour_swatch_pressed.bind(swatch["hex"]))
+		swatch_grid.add_child(button)
+
+	var custom_row := HBoxContainer.new()
+	custom_row.add_theme_constant_override("separation", 8)
+	page.add_child(custom_row)
+	var custom := Button.new()
+	custom.text = "Custom hex…"
+	custom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	custom.pressed.connect(_on_custom_colour_pressed)
+	custom_row.add_child(custom)
+	var clear := Button.new()
+	clear.text = "Clear colour"
+	clear.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clear.pressed.connect(func() -> void: _apply_colour(""))
+	custom_row.add_child(clear)
+
+	return page
+
+
+func _on_colour_swatch_pressed(hex: String) -> void:
+	_apply_colour(hex)
+
+
+func _on_custom_colour_pressed() -> void:
+	_main.open_keyboard_for("", func(text: String) -> void:
+		var hex := text if text.begins_with("#") else "#" + text
+		if hex.length() == 7:
+			_apply_colour(hex)
+		else:
+			_colour_status_label.text = "Not a valid hex colour (want #RRGGBB): %s" % text
+	)
+
+
+func _apply_colour(hex: String) -> void:
+	if not _colour_tool:
+		return
+	var part: Node3D = _main.current_selected_part()
+	if part == null:
+		_colour_status_label.text = "Selected: nothing — laser-select a part first"
+		return
+	var result: Dictionary = await _colour_tool.set_color(part, hex)
+	if not result["ok"]:
+		_colour_status_label.text = "Couldn't set colour: %s" % result["error"]
+
+
+func _readable_text_color(hex: String) -> Color:
+	## Plain luminance check so a swatch's own label stays legible against
+	## both light (White/Yellow) and dark (Black) backgrounds.
+	var c := Color(hex)
+	var luminance := 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+	return Color.BLACK if luminance > 0.6 else Color.WHITE
 
 
 # --- Files: load a local .glb ---

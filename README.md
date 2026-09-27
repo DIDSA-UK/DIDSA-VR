@@ -155,7 +155,17 @@ live-synced.
     all**. Existing mates are listed below with a **Delete** button each,
     refreshed whenever the tab opens or a mate changes. Face-only for now —
     edge picking isn't wired up yet (see `docs/status.md`).
-11. A floating status label shows what's happening (importing, downloading,
+12. **Colours tab** (milestone 4). Laser-select a part as usual (no separate
+    picking tool — it acts on whatever's already selected), then tap a
+    swatch to colour it, or **Custom hex…** to type an exact `#RRGGBB` on
+    the popup keyboard. **Clear colour** removes the override. Each tap
+    `PATCH`es the real backend (`PATCH /parts/{id}/occurrences/{id}` — the
+    same field the flat app's own colour-disc row sets) and applies the
+    change locally right away; **Clear** shows a plain neutral grey rather
+    than reconstructing the part's exact prior look, which needs a full
+    reload to see for real. Not undoable — pick a different colour (or
+    Clear) rather than Undo.
+13. A floating status label shows what's happening (importing, downloading,
     parse errors, part count) since you won't have a terminal visible once
     you're in the headset.
 
