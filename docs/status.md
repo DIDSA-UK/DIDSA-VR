@@ -212,8 +212,242 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): foundation laid, tools not built yet
+
+Started by reading the vision brief's Assembly tools/Mates workflow sections
+and the 27 Sep cross-compatibility note (mates must be built as a client to
+DIDSA-CAD's existing Mate endpoints, not a VR-only representation — see
+below). Before any of the four tools themselves: a real architectural gap
+had to be closed first, and a wrong assumption about Godot physics caught
+before it could quietly break picking.
+
+**The gap: `assembly-mesh.glb` carried no occurrence or face/edge identity at
+all.** Read `backend/app/document/mesh_export.py`/`models.py` directly (in
+the `DIDSA-CAD` repo) and confirmed the Mate/Measure APIs need a real
+`occurrence_id` plus a `SubShapeRef{body_id, shape_type, index}` — but the
+glb encoder emitted anonymous transforms over shared meshes, no node name,
+no extras. Fixed in `DIDSA-CAD` (backend, not this repo):
+
+- `mesh_export.py`'s `AssemblyGlbInstance`/`encode_assembly_glb` now carry
+  `owner_part_id`/`occurrence_id` (glTF node `extras`, not `name` — Godot
+  silently uniquifies duplicate node *names*, which would corrupt an id
+  reused by two occurrences of the same part) and `face_ids`/`body_ids`
+  (primitive `extras`, parallel to the triangle list) — plain JSON, not a
+  vertex attribute, so this client needs no custom `GLTFDocumentExtension`.
+- `router.py`'s `_walk_assembly_glb_instances` threads the real owning
+  Part/Occurrence through the recursion (empty `occurrence_id` means "this
+  is `owner_part_id`'s own top-level content", matching
+  `MeasureEntityRefSchema`'s own existing convention; a pattern-derived
+  instance also gets an empty `occurrence_id` — it has no `Occurrence` entry
+  of its own to reference).
+- Found and fixed a second, real bug while verifying against genuine
+  `pythonocc-core`: `_merged_body_mesh_data` (used by `assembly-mesh.glb` to
+  merge a multi-Body Part into one glTF mesh) dropped `face_ids` entirely
+  and would have silently mis-numbered them across bodies if naively offset
+  the way triangle vertex indices are — added `MeshData.body_ids` so
+  `(body_ids[i], face_ids[i])` reconstructs a real `SubShapeRef` even for a
+  Part with more than one Body.
+- New backend tests (real OCCT, `DIDSA-CAD` repo):
+  `test_merged_body_mesh_data.py`, plus additions to `test_mesh_export.py`
+  and `test_assembly_mesh_glb.py`. Full `DIDSA-CAD` backend suite (2491+
+  tests) re-run clean against genuine `pythonocc-core` (micromamba,
+  `backend/environment.yml` — see "How this has been worked on" below).
+
+**A wrong assumption caught before it shipped: Godot's own `PrimitiveMesh`
+winding is NOT what a real glTF import produces.** `create_trimesh_collision()`
+ray hits only register correctly (from outside, on the expected face) when
+the ray direction matches the mesh's *actual* front-facing winding — and
+`BoxMesh` (used by several existing synthetic tests, including
+`precise_picking.gd`) turns out to use the opposite winding convention from
+standard glTF/OpenGL CCW-front. Confirmed directly against real OCCT
+(`tessellate_shape`'s own vertex order dotted against its own stored normal:
++1.000 on every face of a test box) that OCCT tessellation uses the
+standard convention, and separately confirmed (headless, a hand-built glb in
+the real backend's own byte shape, loaded through the exact
+`GLTFDocument.append_from_buffer` → `generate_scene()` →
+`create_trimesh_collision()` path `main.gd` uses) that a *real* glTF import
+hits correctly from outside on every one of a box's 6 faces, with
+`face_index` landing exactly on the expected triangle every time. Net
+effect: real backend-tessellated parts pick correctly (this doesn't change
+anything about the already-shipped precise-picking feature, which only ever
+ran against real parts or `BoxMesh` stand-ins that happened not to expose
+this), but a *new* synthetic test built from a raw hand-rolled `ArrayMesh`
+or `BoxMesh` is not a reliable stand-in for real glTF-imported geometry
+where per-triangle face identity matters — `tests/mesh_identity.gd` builds
+its own test glb in the real backend's byte shape for exactly this reason.
+
+**Also found while wiring this up: `GLTFState.get_scene_node(idx)` looked
+like the obvious way to map a glTF json node index to its generated Node,
+but empirically only returns a live object *during* `generate_scene()`
+itself** — called afterwards, from ordinary script code, it returns an
+already-freed instance every time (undocumented anywhere obvious; found by
+just trying it headless). Worked around instead by relying on
+`assembly-mesh.glb`'s own nodes always being flat (one per placed instance,
+no parent/child nesting — `encode_assembly_glb` never emits a "children"
+key) — confirmed `generate_scene()` preserves that flat order 1:1 in
+`scene.get_children()`, so plain index correlation works with no
+`GLTFDocumentExtension` anywhere. Documented as a hard constraint in
+`mesh_identity.gd`'s own docstring: this does NOT generalize to a glTF file
+with real hierarchy/skinning.
+
+**Built so far:**
+
+- `scripts/mesh_identity.gd`: `tag_scene()` (called from `main.gd`'s
+  `_show_model()` right after `generate_scene()`) tags every loaded part's
+  `MeshInstance3D` with `occurrence_id`/`owner_part_id` (node meta) and
+  `face_ids`/`body_ids` (also node meta, re-cast to real ints once at tag
+  time — glTF JSON round-trips every number as float, and a request built
+  straight off the raw round-tripped value would send `"index": 3.0`
+  instead of `3`). `subshape_ref_for_hit(part, face_index)` turns a
+  `controller.gd`-style raycast hit's own `face_index` into a real
+  `SubShapeRef`; `occurrence_ref_for(part)` gives `{owner_part_id,
+  occurrence_id}` for a `POST .../mates` or `.../measure` call. Test:
+  `tests/mesh_identity.gd` — no backend needed, hand-builds a glb in the
+  real encoder's exact byte shape.
+- **Confirmed for real, end to end, not just headless-against-synthetic-data**:
+  stood up a real throwaway backend (micromamba `didsacad` env, throwaway
+  `CAD_API_KEY`, never John's real one), imported this repo's own tracked
+  `assembly.didsa` (3 parts, 2 occurrences), fetched its real
+  `assembly-mesh.glb`, and loaded that real response through the exact
+  client code path (`GLTFDocument` → `generate_scene()` →
+  `MeshIdentity.tag_scene()` → `create_trimesh_collision()`). All 3 parts
+  came through with correct identity (root content: `occurrence_id=""`;
+  each placed occurrence: its own real UUID) and correct per-part
+  `face_ids` (204/444/12 entries matching each part's own triangle count);
+  a real ray hit on the real geometry resolved via `subshape_ref_for_hit()`
+  to a genuine `SubShapeRef` with a real OCCT body UUID. This is the first
+  time this specific path (real backend → real glb → real identity tags →
+  real ray hit → real SubShapeRef) has been exercised at all, closing the
+  one gap this section would otherwise still be flagging.
+
+### Mates tool: built (face-only, headless-verified, real backend confirmed)
+
+The wrist tablet's new **Mates** tab, per the vision brief's "Mates
+workflow": toggle the tool, laser-target a face on two different parts, pick
+a mate type, type a value on the popup keyboard, Create. Plus the "Assembly
+tools" list's **Relax all mates**/**Enforce all mates**. Built as a plain
+client to DIDSA-CAD's real Mate endpoints (`scripts/mates_tool.gd`) — never
+a VR-only representation, per the 27 Sep compatibility note.
+
+- **Scope for this pass: FACE-only.** A raycast against a filled triangle
+  mesh naturally resolves to a face; picking an *edge* needs either separate
+  wireframe-pickable geometry or a nearest-boundary-edge heuristic on top of
+  the face hit — not built yet. This still covers real, common mate types
+  (coincident/parallel/distance/angle between planar faces, concentric
+  between cylindrical faces), just not an edge-to-edge concentric mate yet.
+- **Also scoped to top-level Occurrences of the loaded root Part.** The
+  backend only lets a Mate reference a top-level Occurrence of its own owning
+  Part anyway (`MateEntityRef`'s own docstring in DIDSA-CAD) — `mates_tool.gd`
+  rejects a pick on the root's own unplaced content, and rejects two picks
+  from different assemblies, with its own status message either way. This
+  also happens to be exactly the case where a solved Mate's local-to-parent
+  transform IS the flattened, world-relative-to-root transform already baked
+  into that instance's Godot node (`assembly-mesh.glb` has no intermediate
+  parenting at all) — `_apply_solved_transform()` relies on this directly;
+  it would need real work to generalize past top-level occurrences.
+- **"Relax all"/"Enforce all"**: there's no bulk-solve endpoint server-side,
+  and this client never auto-solves during a drag (out of scope per the
+  vision brief's own "Drag latency" decision). So `relaxed` just suspends the
+  one auto-solve this tool would otherwise do right after `create_mate` —
+  mirroring the flat app's own create-then-solve pairing (see
+  `solve_for_occurrence`'s own docstring: "a freshly-authored Mate visibly
+  snaps its target into place immediately, matching real CAD mate-authoring
+  UX") — letting a user place several mates before solving them all at once.
+  "Enforce all" loops `solve_for_occurrence` over every occurrence any of
+  this Part's own Mates reference.
+- Tests: `tests/mates_tool.gd` (pure pick-validation/payload-building logic,
+  no network — a manually-tagged `Node3D` stand-in, same convention
+  `mesh_identity.gd`'s own test uses) and `tests/e2e_mates.gd` (real backend,
+  same "run manually" exception as `e2e_backend.gd`). Two real bugs caught
+  while getting the pure test to pass, both now fixed: `Node.name` is a
+  `StringName`, not a `String` — comparing a pick's stored label against a
+  plain string literal silently failed until cast with `str()`; and the pick
+  validator conflated "no backend identity at all" (an untagged part, e.g. a
+  bare local `.glb`) with "this part's real, tagged root content" into the
+  same wrong error message — now two distinct messages.
+- **Confirmed for real, end to end, against a real backend**: stood up a
+  throwaway backend, let `main.tscn` run its own real import/load of
+  `assembly.didsa`, then drove `mates_tool.gd`'s real network calls against
+  its own two real occurrences — picked a face on each, `create_mate()` (a
+  genuine `POST /parts/{id}/mates`), confirmed it round-tripped through
+  `GET .../mates`, confirmed the driven part's Godot transform genuinely
+  changed (`solve_for_occurrence` ran server-side and the result was
+  correctly applied client-side), then `delete_mate()` to clean up. This is
+  the concrete proof of the cross-compatibility mechanism — the Mate this
+  created is indistinguishable from one the flat app would create with the
+  same call — though not yet checked against a Mate authored *by* the flat
+  app itself (no flat-created assembly-with-mates fixture exists anywhere in
+  either repo, and the flat app's own Dart/Flutter client isn't available in
+  this sandbox to author one directly — worth doing once a device/toolchain
+  for it is available, rather than just trusting the shared-endpoint
+  argument).
+- **Not yet built**: editing an existing mate's value/flip (only
+  create/list/delete for this pass), edge picking, and colours/sections/
+  measurements — the other three of milestone 4's four tools. Colours mostly
+  falls out of the already-wired `Occurrence.color` field; sections is
+  planned client-side (a shader clip-plane uniform, since the backend's own
+  `section.py` is a stateless, re-tessellate-on-every-request preview
+  endpoint, too slow for a dragged plane at 90 Hz); measurements reuses this
+  same picking foundation against `POST /parts/{id}/measure`.
+- **Not yet headset-verified** — this whole tool, like the rest of milestone
+  4 so far, has only run headless and against a real backend from a cloud
+  sandbox, never with a real hand pulling a real trigger.
+
+### Colours tool: built (headless-verified, real backend confirmed)
+
+The wrist tablet's new **Colours** tab, per the vision brief's Assembly
+tools list. Simpler than Mates: no picking tool of its own — it acts on
+whichever part is already laser-selected (`main.gd`'s now-public
+`current_selected_part()`, the same lookup the Tools tab's "Isolate
+selected" already used). A fixed swatch palette plus a **Custom hex…**
+button (popup keyboard) and **Clear colour**.
+
+- Built as a plain client to DIDSA-CAD's existing, already-shipped
+  `PATCH /parts/{owner_part_id}/occurrences/{occurrence_id}` endpoint
+  (`OccurrenceTransformUpdate.color` — the same field the flat app's own
+  colour-disc row sets), so no backend changes were needed at all for this
+  one, unlike mates. `scripts/colour_tool.gd` sends the hex string straight
+  through (`""` clears the override, matching that field's own
+  None-omitted/`""`-clears convention) and, once the backend confirms it,
+  applies the colour locally via `material_override` so it's visible
+  immediately without a full assembly reload.
+- **A deliberate limitation, not an oversight**: "Clear colour" shows a
+  plain neutral grey rather than reconstructing whatever the part's true
+  pre-colour material was — that material identity isn't threaded through
+  `assembly-mesh.glb` at all (only per-triangle face/body ids are, for
+  mates/measurements), so a full reload is the only way to see the backend's
+  own real post-clear rendering. Not undoable via `command_stack`, same
+  precedent as Mates' create/delete: a backend-committed action, not a
+  purely local instant transform.
+- Tests: `tests/colour_tool.gd` (pure logic, no network — hex conversion
+  matches the backend's own straight scaling exactly, root content is
+  rejected before ever touching the network, `_apply_local_color` sets a
+  real material) and `tests/e2e_colour.gd` (real backend, same "run
+  manually" exception as the other `e2e_*.gd` tests).
+- **Confirmed for real, end to end**: stood up a throwaway backend, let
+  `main.tscn` load `assembly.didsa` for real, PATCHed a real occurrence's
+  colour, confirmed it actually persisted server-side via a fresh
+  `GET .../occurrences` fetch (not just trusting the optimistic local
+  apply), confirmed the Godot node's own material changed to match, then
+  cleared it again. Passed on the first real run.
+- **Not yet headset-verified**, same caveat as Mates above.
+
 ## Untested paths
 
+- **The Mates tab is headless- and real-backend-confirmed, never handset-
+  tested.** The wrist tablet UI itself (tab layout, the type/flip/allow-
+  rotation choice rows, the popup keyboard reused for a value, the mates
+  list's Delete buttons) has never been rendered or clicked by a real laser —
+  only the underlying `mates_tool.gd` logic has been driven directly
+  (headless pure-logic tests plus one real end-to-end run against a real
+  backend). Whether picking two faces in quick succession feels right, and
+  whether the tab's layout fits legibly on the existing panel size alongside
+  everything else, are both open.
+- **The Colours tab has the same gap** — `colour_tool.gd`'s logic is
+  headless- and real-backend-confirmed, but the swatch grid itself (colour
+  legibility against the panel background, whether the text-colour contrast
+  pick actually reads well, tapping a swatch with a real laser) has never
+  been rendered or clicked for real.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
   deliberately iterates on PCVR — faster). No APK has been exported or

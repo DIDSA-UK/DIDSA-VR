@@ -40,12 +40,15 @@ extends Node3D
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
+const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
 var _two_hand: Node
 var _tablet: Node
 var _keyboard: Node
+var _mates_tool: Node
+var _colour_tool: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -62,12 +65,18 @@ const API_PREFIX := "/document"
 func _ready() -> void:
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
+	_add_mates_tool()
+	_add_colour_tool()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
+	$XROrigin3D/LeftController.mates_tool = _mates_tool
+	$XROrigin3D/RightController.mates_tool = _mates_tool
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
+	_mates_tool.configure_backend(backend_url, api_key)
+	_colour_tool.configure_backend(backend_url, api_key)
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
@@ -84,10 +93,25 @@ func _add_two_hand_model() -> void:
 	_two_hand = two_hand
 
 
+func _add_mates_tool() -> void:
+	var mates := preload("res://scripts/mates_tool.gd").new()
+	mates.name = "MatesTool"
+	add_child(mates)
+	mates.setup(command_stack)
+	_mates_tool = mates
+
+
+func _add_colour_tool() -> void:
+	var colours := preload("res://scripts/colour_tool.gd").new()
+	colours.name = "ColourTool"
+	add_child(colours)
+	_colour_tool = colours
+
+
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool)
 	_tablet = tablet
 
 
@@ -117,6 +141,23 @@ func _on_scale_typed(text: String) -> void:
 		_two_hand.set_preset(value)
 
 
+func open_keyboard_for(initial_text: String, on_confirm: Callable) -> void:
+	## Lets the wrist tablet's Mates tab reuse the same popup keyboard the
+	## Scale tab's exact-value entry does (_on_right_stick_click above) —
+	## only one thing needs it open at a time anyway.
+	if _keyboard.is_open():
+		_keyboard.close()
+	_keyboard.open_for(initial_text, on_confirm)
+
+
+func current_root_part_id() -> String:
+	## The loaded assembly's own root Part id — every top-level Occurrence's
+	## own owner_part_id (see mesh_identity.gd) matches this, so it's what
+	## the Mates tab's "Enforce all"/mate-list refresh operate on. Empty if
+	## nothing backend-backed is loaded yet (a bare local .glb, say).
+	return _resolved_part_id
+
+
 # --- Tools tab (wrist_tablet.gd): hide/show all, reverse visibility, isolate.
 # Shoot-to-hide itself is per-hand (controller.gd's hide_tool_active/_try_shoot_hide);
 # these are the whole-assembly operations, so they live here alongside
@@ -143,7 +184,7 @@ func reverse_visibility() -> void:
 
 
 func isolate_selected() -> void:
-	var target := _current_selected_part()
+	var target := current_selected_part()
 	if target == null:
 		return
 	var parts := get_tree().get_nodes_in_group("grabbable_parts")
@@ -155,7 +196,7 @@ func isolate_selected() -> void:
 	_push_visibility_command("isolate %s" % target.name, before)
 
 
-func _current_selected_part() -> Node3D:
+func current_selected_part() -> Node3D:
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		if hand.selected_node != null:
 			return hand.selected_node
@@ -528,10 +569,12 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	if scene == null:
 		_set_status("glTF parsed but produced no scene.")
 		return false
+	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
 	command_stack.clear()
+	_mates_tool.clear_picks()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 	for old in assembly_root.get_children():

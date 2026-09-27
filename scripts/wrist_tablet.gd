@@ -44,8 +44,32 @@ var _two_hand: Node
 var _locomotion: Node
 var _main: Node
 var _command_stack = null
+var _mates_tool: Node
+var _colour_tool: Node
 var _undo_button: Button
 var _redo_button: Button
+
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
+
+var _mates_status_label: Label
+var _mates_picks_label: Label
+var _mates_value_label: Label
+var _mates_create_button: Button
+var _mates_relax_button: Button
+var _mates_list_box: VBoxContainer
+var _mates_last_owner_part_id := ""
+
+# Milestone 4: a fixed swatch palette (common colours, plus Custom via the
+# popup keyboard) — "#RRGGBB" strings straight into colour_tool.gd, which
+# sends them to the backend verbatim (an opaque, client-owned string, never
+# parsed server-side — see OccurrenceTransformUpdate.color's own docstring).
+const COLOUR_SWATCHES: Array[Dictionary] = [
+	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
+	{"name": "Yellow", "hex": "#f1c40f"}, {"name": "Green", "hex": "#2ecc71"},
+	{"name": "Blue", "hex": "#3498db"}, {"name": "Purple", "hex": "#9b59b6"},
+	{"name": "White", "hex": "#f5f5f5"}, {"name": "Black", "hex": "#222222"},
+]
+var _colour_status_label: Label
 
 var _viewport: SubViewport
 var _quad: MeshInstance3D
@@ -69,7 +93,7 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -77,6 +101,8 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_locomotion = locomotion
 	_main = main
 	_command_stack = command_stack
+	_mates_tool = mates_tool
+	_colour_tool = colour_tool
 
 	_build_viewport()
 	_build_quad()
@@ -86,6 +112,9 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_build_target()
 	_right.button_pressed.connect(_on_right_pressed)
 	_right.button_released.connect(_on_right_released)
+	if _mates_tool:
+		_mates_tool.picks_changed.connect(_refresh_mates_picks_display)
+		_mates_tool.mates_changed.connect(_rebuild_mates_list)
 	visible = false
 
 
@@ -128,6 +157,9 @@ func _process(delta: float) -> void:
 		if _command_stack:
 			_undo_button.disabled = not _command_stack.can_undo()
 			_redo_button.disabled = not _command_stack.can_redo()
+		if _colour_status_label:
+			var selected: Node3D = _main.current_selected_part()
+			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
 
 
 func _update_pointer(normal: Vector3) -> void:
@@ -301,6 +333,8 @@ func _build_ui() -> Control:
 		"Modes": _build_modes_page,
 		"Scale": _build_scale_page,
 		"Tools": _build_tools_page,
+		"Mates": _build_mates_page,
+		"Colours": _build_colours_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -355,6 +389,12 @@ func _show_page(tab_name: String) -> void:
 		_pages[page_name].visible = (page_name == tab_name)
 	if tab_name == "Files":
 		_rebuild_files()
+	elif tab_name == "Mates":
+		_refresh_mates_picks_display()
+		var owner_part_id: String = _main.current_root_part_id()
+		if _mates_tool and owner_part_id != "":
+			_mates_last_owner_part_id = owner_part_id
+			_mates_tool.refresh_mates(owner_part_id)
 
 
 # --- Modes: the brief's four manipulation modes, switchable on their own ---
@@ -470,6 +510,270 @@ func _build_tools_page() -> Control:
 	page.add_child(isolate)
 
 	return page
+
+
+# --- Mates: the vision brief's "Mates workflow" - start the tool, laser-
+# target faces, pick a type, type a value on the popup keyboard, Create.
+# Built as a client to DIDSA-CAD's real Mate endpoints (mates_tool.gd) so a
+# mate authored here round-trips with the flat app - see that script's own
+# docstring and docs/status.md.
+
+func _build_mates_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	page.add_child(_mode_toggle("Mates tool", func(on: bool) -> void:
+		_left.mates_tool_active = on
+		_right.mates_tool_active = on
+		if _mates_tool:
+			_mates_tool.set_active(on)
+	, false))
+
+	_mates_status_label = Label.new()
+	_mates_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_mates_status_label)
+
+	_mates_picks_label = Label.new()
+	_mates_picks_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mates_picks_label.add_theme_font_size_override("font_size", 18)
+	_mates_picks_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(_mates_picks_label)
+
+	var clear := Button.new()
+	clear.text = "Clear picks"
+	clear.pressed.connect(func() -> void:
+		if _mates_tool:
+			_mates_tool.clear_picks()
+	)
+	page.add_child(clear)
+
+	page.add_child(_choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
+		if _mates_tool:
+			_mates_tool.mate_type = _mates_tool.MATE_TYPES[i]
+	))
+
+	var toggles_row := HBoxContainer.new()
+	toggles_row.add_theme_constant_override("separation", 8)
+	page.add_child(toggles_row)
+	var flip := Button.new()
+	flip.text = "Flip"
+	flip.toggle_mode = true
+	flip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flip.toggled.connect(func(on: bool) -> void:
+		if _mates_tool:
+			_mates_tool.mate_flipped = on
+	)
+	toggles_row.add_child(flip)
+	var allow_rot := Button.new()
+	allow_rot.text = "Allow rotation"
+	allow_rot.toggle_mode = true
+	allow_rot.button_pressed = true
+	allow_rot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	allow_rot.toggled.connect(func(on: bool) -> void:
+		if _mates_tool:
+			_mates_tool.mate_allow_rotation = on
+	)
+	toggles_row.add_child(allow_rot)
+
+	var value_row := HBoxContainer.new()
+	value_row.add_theme_constant_override("separation", 8)
+	page.add_child(value_row)
+	_mates_value_label = Label.new()
+	_mates_value_label.text = "Value: 0 (distance mm / angle deg)"
+	_mates_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mates_value_label.clip_text = true
+	value_row.add_child(_mates_value_label)
+	var set_value := Button.new()
+	set_value.text = "Set value"
+	set_value.pressed.connect(_on_set_mate_value_pressed)
+	value_row.add_child(set_value)
+
+	_mates_create_button = Button.new()
+	_mates_create_button.text = "Create mate"
+	_mates_create_button.disabled = true
+	_mates_create_button.pressed.connect(_on_create_mate_pressed)
+	page.add_child(_mates_create_button)
+
+	var bulk_row := HBoxContainer.new()
+	bulk_row.add_theme_constant_override("separation", 8)
+	page.add_child(bulk_row)
+	_mates_relax_button = Button.new()
+	_mates_relax_button.text = "Relax all: off"
+	_mates_relax_button.toggle_mode = true
+	_mates_relax_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mates_relax_button.toggled.connect(func(on: bool) -> void:
+		_mates_relax_button.text = "Relax all: %s" % ("ON" if on else "off")
+		if _mates_tool:
+			_mates_tool.set_relaxed(on)
+	)
+	bulk_row.add_child(_mates_relax_button)
+	var enforce := Button.new()
+	enforce.text = "Enforce all"
+	enforce.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	enforce.pressed.connect(func() -> void:
+		var owner_part_id: String = _main.current_root_part_id()
+		if _mates_tool and owner_part_id != "":
+			_mates_last_owner_part_id = owner_part_id
+			_mates_tool.enforce_all(owner_part_id)
+	)
+	bulk_row.add_child(enforce)
+
+	var list_label := Label.new()
+	list_label.text = "Existing mates:"
+	list_label.add_theme_font_size_override("font_size", 18)
+	list_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(list_label)
+	_mates_list_box = VBoxContainer.new()
+	_mates_list_box.add_theme_constant_override("separation", 4)
+	page.add_child(_mates_list_box)
+
+	_refresh_mates_picks_display()
+	return page
+
+
+func _on_set_mate_value_pressed() -> void:
+	if not _mates_tool:
+		return
+	_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value), func(text: String) -> void:
+		_mates_tool.mate_value = text.to_float()
+		_mates_value_label.text = "Value: %s (distance mm / angle deg)" % _trim_mate_value(_mates_tool.mate_value)
+	)
+
+
+func _on_create_mate_pressed() -> void:
+	if not _mates_tool or not _mates_tool.can_create():
+		return
+	_mates_create_button.disabled = true
+	var result: Dictionary = await _mates_tool.create_mate()
+	_mates_create_button.disabled = not _mates_tool.can_create()
+	if not result["ok"]:
+		_mates_status_label.text = "Couldn't create mate: %s" % result["error"]
+
+
+func _refresh_mates_picks_display() -> void:
+	if not _mates_tool or _mates_status_label == null:
+		return
+	_mates_status_label.text = _mates_tool.status_text()
+	var labels: Array = _mates_tool.picked_labels()
+	_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
+	if _mates_create_button:
+		_mates_create_button.disabled = not _mates_tool.can_create()
+
+
+func _rebuild_mates_list() -> void:
+	if _mates_list_box == null:
+		return
+	for child in _mates_list_box.get_children():
+		_mates_list_box.remove_child(child)
+		child.queue_free()
+	var owner_part_id: String = _mates_last_owner_part_id
+	for mate in _mates_tool.mates:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var label := Label.new()
+		var type_label: String = str(mate.get("type", "?")).capitalize()
+		var has_value: bool = mate.get("value") != null
+		label.text = "%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else ""]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.clip_text = true
+		row.add_child(label)
+		var delete_button := Button.new()
+		delete_button.text = "Delete"
+		delete_button.pressed.connect(_on_delete_mate_pressed.bind(owner_part_id, str(mate.get("id", ""))))
+		row.add_child(delete_button)
+		_mates_list_box.add_child(row)
+	if _mates_tool.mates.is_empty():
+		var none := Label.new()
+		none.text = "No mates yet."
+		_mates_list_box.add_child(none)
+
+
+func _on_delete_mate_pressed(owner_part_id: String, mate_id: String) -> void:
+	if _mates_tool and owner_part_id != "" and mate_id != "":
+		await _mates_tool.delete_mate(owner_part_id, mate_id)
+
+
+func _trim_mate_value(x) -> String:
+	return ("%.3f" % float(x)).rstrip("0").rstrip(".")
+
+
+# --- Colours: the vision brief's Assembly tools "Colours" - acts on
+# whichever part is already laser-selected (no picking tool of its own, see
+# colour_tool.gd's own docstring for why), a fixed swatch palette plus a
+# Custom hex entry via the popup keyboard, and Clear.
+
+func _build_colours_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	_colour_status_label = Label.new()
+	_colour_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_colour_status_label)
+
+	var swatch_grid := HFlowContainer.new()
+	swatch_grid.add_theme_constant_override("h_separation", 8)
+	swatch_grid.add_theme_constant_override("v_separation", 8)
+	page.add_child(swatch_grid)
+	for swatch in COLOUR_SWATCHES:
+		var button := Button.new()
+		button.text = swatch["name"]
+		button.add_theme_color_override("font_color", _readable_text_color(swatch["hex"]))
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(swatch["hex"])
+		style.set_content_margin_all(10)
+		button.add_theme_stylebox_override("normal", style)
+		button.pressed.connect(_on_colour_swatch_pressed.bind(swatch["hex"]))
+		swatch_grid.add_child(button)
+
+	var custom_row := HBoxContainer.new()
+	custom_row.add_theme_constant_override("separation", 8)
+	page.add_child(custom_row)
+	var custom := Button.new()
+	custom.text = "Custom hex…"
+	custom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	custom.pressed.connect(_on_custom_colour_pressed)
+	custom_row.add_child(custom)
+	var clear := Button.new()
+	clear.text = "Clear colour"
+	clear.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clear.pressed.connect(func() -> void: _apply_colour(""))
+	custom_row.add_child(clear)
+
+	return page
+
+
+func _on_colour_swatch_pressed(hex: String) -> void:
+	_apply_colour(hex)
+
+
+func _on_custom_colour_pressed() -> void:
+	_main.open_keyboard_for("", func(text: String) -> void:
+		var hex := text if text.begins_with("#") else "#" + text
+		if hex.length() == 7:
+			_apply_colour(hex)
+		else:
+			_colour_status_label.text = "Not a valid hex colour (want #RRGGBB): %s" % text
+	)
+
+
+func _apply_colour(hex: String) -> void:
+	if not _colour_tool:
+		return
+	var part: Node3D = _main.current_selected_part()
+	if part == null:
+		_colour_status_label.text = "Selected: nothing — laser-select a part first"
+		return
+	var result: Dictionary = await _colour_tool.set_color(part, hex)
+	if not result["ok"]:
+		_colour_status_label.text = "Couldn't set colour: %s" % result["error"]
+
+
+func _readable_text_color(hex: String) -> Color:
+	## Plain luminance check so a swatch's own label stays legible against
+	## both light (White/Yellow) and dark (Black) backgrounds.
+	var c := Color(hex)
+	var luminance := 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+	return Color.BLACK if luminance > 0.6 else Color.WHITE
 
 
 # --- Files: load a local .glb ---
