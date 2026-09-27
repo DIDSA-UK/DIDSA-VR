@@ -105,7 +105,9 @@ func set_active(on: bool, camera: Node3D = null) -> void:
 		_spawn_gizmo(camera)
 		_update_global_plane()
 	else:
-		_held_by = null
+		if _held_by != null:
+			_held_by.set_meta("section_gizmo_held", false) # deactivated mid-grab: release() never ran, so this meta would otherwise stay stuck permanently on that hand
+			_held_by = null
 		_unwrap_all()
 		RenderingServer.global_shader_parameter_set("section_enabled", false)
 		_despawn_gizmo()
@@ -153,6 +155,14 @@ func try_grab(hand: Node3D, extra_reach: float = 0.0) -> bool:
 	if reach > plane_radius + grab_extra_reach + extra_reach:
 		return false
 	_held_by = hand
+	# Real-headset feedback: grabbing the gizmo also dragged the whole
+	# model, because two_hand_model.gd's own _hand_free() only ever checks
+	# controller.gd's held_node (which this deliberately never sets — see
+	# the class docstring) to decide whether a hand is "free" to drag the
+	# whole model. Same meta convention this tool already uses to talk to
+	# controller.gd (ui_hover/ui_hit_distance) — two_hand_model.gd checks
+	# this before falling through to its own held_node check.
+	hand.set_meta("section_gizmo_held", true)
 	_grab_offset = hand.global_transform.affine_inverse() * _gizmo.global_transform
 	_grab_filter.reset(hand.global_position)
 	_gesture_start_transform = _gizmo.global_transform
@@ -163,6 +173,7 @@ func release(hand: Node3D) -> bool:
 	if _held_by != hand:
 		return false
 	_held_by = null
+	hand.set_meta("section_gizmo_held", false)
 	_push_move_command()
 	return true
 
@@ -207,6 +218,7 @@ func _spawn_gizmo(camera: Node3D) -> void:
 	add_child(_gizmo)
 	_gizmo.add_child(_build_disc())
 	_gizmo.add_child(_build_arrow())
+	_gizmo.add_child(_build_tail())
 	_place_in_front_of(camera)
 
 
@@ -234,15 +246,29 @@ func _place_in_front_of(camera: Node3D) -> void:
 	_gizmo.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), origin)
 
 
+const ARROW_HEIGHT := 0.08 ## the arrowhead pyramid's own height along the gizmo's local Z
+const ARROW_BASE_RADIUS := 0.03
+const TAIL_RADIUS := 0.006
+
+func _arrow_mid_offset() -> float:
+	## Distance from the gizmo's own origin (the plane surface) to the
+	## arrowhead's own local origin (its midpoint, since CylinderMesh/a
+	## pyramid built from one is centred on its own origin) — shared by
+	## _build_tail()'s own length and _update_global_plane()'s repositioning,
+	## so the two never drift out of sync with each other.
+	return plane_radius * 0.5 + 0.05
+
+
 func _build_disc() -> MeshInstance3D:
+	## A rectangle (real-headset feedback: a circular disc read ambiguously
+	## as "the cut" vs "a grab handle" — a flat rectangular panel reads more
+	## like a real cutting plane). BoxMesh's own size axes already sit along
+	## local X/Y/Z with no rotation needed, unlike the CylinderMesh this
+	## replaced (whose flat caps needed a 90° turn to face local Z).
 	var instance := MeshInstance3D.new()
-	var mesh := CylinderMesh.new() # a very flat cylinder reads as a disc and (unlike PlaneMesh/QuadMesh) has a visible edge from any angle
-	mesh.top_radius = plane_radius
-	mesh.bottom_radius = plane_radius
-	mesh.height = 0.006
-	mesh.radial_segments = 32
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(plane_radius * 2.0, plane_radius * 2.0, 0.006)
 	instance.mesh = mesh
-	instance.rotation_degrees.x = 90.0 # cylinder's flat faces are normally +/-Y; this turns them to face +/-Z, matching the gizmo's own "normal = local -Z kept" convention below
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(0.3, 0.9, 1.0, 0.25)
@@ -253,20 +279,48 @@ func _build_disc() -> MeshInstance3D:
 
 
 func _build_arrow() -> MeshInstance3D:
-	## A small cone on the KEPT side, so which half the plane keeps is
-	## visible at a glance without opening the tablet — flips to the other
-	## face when Flip is toggled (_update_global_plane() below moves it).
+	## A square-based pyramid on the KEPT side (real-headset feedback: a
+	## round cone here too), so which half the plane keeps is visible at a
+	## glance without opening the tablet — flips to the other face when Flip
+	## is toggled (_update_global_plane() below moves it). A CylinderMesh
+	## with top_radius=0 and radial_segments=4 IS a square pyramid — same
+	## mesh type the disc used to use, just a 4-gon cross-section instead of
+	## a circle.
 	var instance := MeshInstance3D.new()
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.0
-	mesh.bottom_radius = 0.03
-	mesh.height = 0.08
+	mesh.bottom_radius = ARROW_BASE_RADIUS
+	mesh.height = ARROW_HEIGHT
+	mesh.radial_segments = 4
 	instance.mesh = mesh
-	instance.rotation_degrees.x = -90.0 # cone points local -Z by default after this, matching the disc's own front convention
+	instance.rotation_degrees.x = -90.0 # apex points local -Z by default after this, matching the disc's own front convention
 	instance.name = "KeptSideArrow"
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1.0, 0.85, 0.1, 0.9)
+	mesh.material = mat
+	return instance
+
+
+func _build_tail() -> MeshInstance3D:
+	## A thin rod from the plane's own surface out to the arrowhead's base,
+	## so the indicator reads as one continuous pin (plane → tail →
+	## arrowhead) rather than a shape floating near the plane — real-headset
+	## feedback. Length/position are set for real in _update_global_plane()
+	## (which runs at spawn and on every drag/Flip); this just builds the
+	## mesh with a placeholder length so the node exists to update.
+	var instance := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = TAIL_RADIUS
+	mesh.bottom_radius = TAIL_RADIUS
+	mesh.height = 0.01
+	mesh.radial_segments = 8
+	instance.mesh = mesh
+	instance.rotation_degrees.x = -90.0 # same "long axis along local Z" convention as the arrow
+	instance.name = "PlaneTail"
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.85, 0.1, 0.7)
 	mesh.material = mat
 	return instance
 
@@ -292,13 +346,23 @@ func _update_global_plane() -> void:
 	RenderingServer.global_shader_parameter_set("section_plane_origin", _gizmo.global_position)
 	RenderingServer.global_shader_parameter_set("section_plane_normal", normal)
 	RenderingServer.global_shader_parameter_set("section_enabled", true)
+	# effective_normal() is always +/- the gizmo's own local -Z (Flip just
+	# picks the sign) — so both the arrow's and the tail's own LOCAL offsets
+	# are constants, no inverse-transform needed: local -Z when kept, local
+	# +Z when flipped.
+	var local_z := 1.0 if flipped else -1.0
+	var arrow_mid_offset := _arrow_mid_offset()
 	var arrow: Node3D = _gizmo.get_node_or_null("KeptSideArrow")
 	if arrow:
-		# effective_normal() is always +/- the gizmo's own local -Z (Flip just
-		# picks the sign) — so the arrow's LOCAL offset is a constant, no
-		# inverse-transform needed: local -Z when kept, local +Z when flipped.
-		var local_z := 1.0 if flipped else -1.0
-		arrow.position = Vector3(0, 0, local_z * (plane_radius * 0.5 + 0.05))
+		arrow.position = Vector3(0, 0, local_z * arrow_mid_offset)
+	var tail: MeshInstance3D = _gizmo.get_node_or_null("PlaneTail")
+	if tail:
+		# Spans from the plane's own surface (gizmo origin) out to the
+		# arrowhead's base (its midpoint minus half its own height — the
+		# apex points further out, away from the plane).
+		var tail_length: float = maxf(arrow_mid_offset - ARROW_HEIGHT * 0.5, 0.001)
+		(tail.mesh as CylinderMesh).height = tail_length
+		tail.position = Vector3(0, 0, local_z * tail_length * 0.5)
 
 
 func reconcile(parts: Array) -> void:

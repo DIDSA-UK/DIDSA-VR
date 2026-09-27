@@ -121,6 +121,18 @@ func _initialize() -> void:
 	print("SMOKE  after part-manipulation click: parts=", l.parts_enabled, "/", r.parts_enabled)
 	print("SMOKE modes: locomotion=", origin.enabled, " model=", th.enabled, " parts=", l.parts_enabled, "/", r.parts_enabled)
 
+	# --- real-headset regression: a pressed toggle used to look identical to
+	# an unpressed one at arm's length — _build_ui()'s theme never defined a
+	# "pressed"/"hover_pressed" stylebox, so every toggle relied on Godot's
+	# own default theme fallback. Confirm the shared theme now gives a
+	# pressed button a real, visually distinct stylebox (any one of Modes'
+	# now-ON toggles works; "User movement" was just clicked above).
+	var user_movement_btn := find_button(func(b): return b.text.begins_with("User movement"))
+	var pressed_style: StyleBox = user_movement_btn.get_theme_stylebox("pressed")
+	var normal_style: StyleBox = user_movement_btn.get_theme_stylebox("normal")
+	var styles_differ := pressed_style != null and pressed_style is StyleBoxFlat and normal_style is StyleBoxFlat and not (pressed_style as StyleBoxFlat).bg_color.is_equal_approx((normal_style as StyleBoxFlat).bg_color)
+	print("SMOKE a pressed toggle now has a real, visually distinct stylebox: ", styles_differ)
+
 	# steadiness row (Modes tab is showing): pick "Strong"
 	print("SMOKE steadiness default: ", th.STEADINESS_NAMES[th.steadiness])
 	await aim_and_click(find_button(func(b): return b.text == "Strong"))
@@ -139,6 +151,28 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b): return b.text == "Off"))
 	print("SMOKE MSAA Off -> ", main.get_viewport().msaa_3d, " (0 = disabled)")
 	print("SMOKE tablet panel rendering while open: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
+
+	# --- real-headset regression: the Colours tab's error/status text used to
+	# get clobbered by the periodic refresh (_process()'s own 0.25s tick)
+	# before it could be read — a held error is only worth anything if it
+	# actually survives at least one of those ticks. Nothing is laser-selected
+	# here, so "Clear" hits _apply_colour()'s own no-selection branch.
+	await aim_and_click(find_button(func(b): return b.text == "Colours"))
+	await aim_and_click(find_button(func(b): return b.text == "Clear colour"))
+	var message_text: String = tab._colour_status_label.text
+	print("SMOKE clearing with nothing selected shows the no-selection message: ", message_text.find("laser-select a part first") != -1)
+	await create_timer(0.3).timeout # outlasts one 0.25s refresh tick
+	print("SMOKE the message survives a periodic refresh tick: ", tab._colour_status_label.text == message_text)
+	# the "nothing selected" error and the plain live-selection refresh text
+	# happen to read identically when nothing really is selected, so prove
+	# the hold itself actually expires with a message that reads differently
+	# from whatever the refresh would show
+	tab._show_colour_message("TEST: transient message")
+	print("SMOKE _show_colour_message sets the text immediately: ", tab._colour_status_label.text == "TEST: transient message")
+	await create_timer(3.3).timeout # outlasts _show_colour_message()'s own default 3s hold
+	await process_frame
+	print("SMOKE the message reverts to the live selection state once its hold expires: ", tab._colour_status_label.text != "TEST: transient message")
+
 	await aim_and_click(find_button(func(b): return b.text == "X"))
 	print("SMOKE tablet panel rendering after close: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
 	await process_frame

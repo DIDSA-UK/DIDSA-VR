@@ -48,7 +48,41 @@ func _initialize() -> void:
 	var cleared_mat: StandardMaterial3D = placed.material_override
 	print("SMOKE clearing applies the neutral default colour: ", cleared_mat.albedo_color.is_equal_approx(ColourTool.DEFAULT_MATERIAL_COLOR))
 
+	# --- root-content rejection message is the new, clearer wording (names
+	# the actual data-model limit, not a generic "can't do that")
+	print("SMOKE root content error explains the data-model limit: ", result["error"].find("colour lives only on a placed Occurrence") != -1)
+
+	# --- set_group_color() also rejects root content before ever touching
+	# the network (same fast-fail as set_color(), plus its own group-specific
+	# detail appended)
+	var group_result: Dictionary = await tool.set_group_color(root_content, "#ff0000")
+	print("SMOKE group-colour root content rejected: ", not group_result["ok"] and group_result["count"] == 0)
+	print("SMOKE group-colour rejection explains no owning Occurrence either: ", group_result["error"].find("no owning Occurrence to group by") != -1)
+
+	# --- _apply_local_color_to_group() (pure, no network): applies only to
+	# nodes sharing the given owner_part_id and whose occurrence_id is in the
+	# given succeeded set, leaving siblings under a different owner untouched
+	var sibling_a := _tagged_mesh_part("part-a", "occ-1", "SiblingA")
+	var sibling_b := _tagged_mesh_part("part-a", "occ-2", "SiblingB")
+	var other_owner := _tagged_mesh_part("part-b", "occ-3", "OtherOwner")
+	get_root().add_child(sibling_a)
+	get_root().add_child(sibling_b)
+	get_root().add_child(other_owner)
+	sibling_a.add_to_group("grabbable_parts")
+	sibling_b.add_to_group("grabbable_parts")
+	other_owner.add_to_group("grabbable_parts")
+	await process_frame # group membership isn't queryable via get_tree() until a frame has run - see tests/undo_redo.gd's own "await process_frame" precedent
+	tool._apply_local_color_to_group("part-a", {"occ-1": true, "occ-2": true}, "#3498db")
+	var sibling_a_mat: StandardMaterial3D = sibling_a.material_override
+	var sibling_b_mat: StandardMaterial3D = sibling_b.material_override
+	print("SMOKE group apply colours the first sibling: ", sibling_a_mat != null and sibling_a_mat.albedo_color.is_equal_approx(ColourTool._hex_to_color("#3498db")))
+	print("SMOKE group apply colours the second sibling: ", sibling_b_mat != null and sibling_b_mat.albedo_color.is_equal_approx(ColourTool._hex_to_color("#3498db")))
+	print("SMOKE group apply leaves a different owner's part untouched: ", other_owner.material_override == null)
+
 	root_content.free()
 	placed.free()
+	sibling_a.free()
+	sibling_b.free()
+	other_owner.free()
 	tool.free()
 	quit()
