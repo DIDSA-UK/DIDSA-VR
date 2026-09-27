@@ -94,6 +94,7 @@ live-synced.
      where it first loaded (not while the scale is locked). For an exact
      value, click the **right thumbstick** — see item 8.
    - **Tools** — see item 10.
+   - **Mates** — see item 11.
    - **Files** — load a model from the `models/` folder next to
      `project.godot` (or `user://models`, which also works in an exported
      build). A `.glb`/`.gltf` loads straight from disk, no backend at all,
@@ -137,6 +138,23 @@ live-synced.
     laser-selected (select it first, then press Isolate). All four are
     undoable. A hidden part is click-through for both the laser and grip —
     it's out of the way, not just invisible.
+11. **Mates tab** (milestone 4). Toggle **Mates tool** on, then point the
+    right hand's laser at a face and pull the trigger to pick it (same
+    hover+name as normal selection) — pick a face on a second, different
+    part to complete a pair; a status line explains why a pick didn't count
+    (picking the assembly's own unplaced content, the same part twice, or a
+    part from a different assembly all reject with their own message).
+    Choose a **mate type** (Coincident/Concentric/Parallel/Distance/Angle),
+    **Flip** and **Allow rotation** as needed, and for Distance/Angle tap
+    **Set value** to type an exact number on the popup keyboard (mm for
+    distance, degrees for angle). **Create mate** posts a real Mate to the
+    backend (`POST /parts/{id}/mates` — the same endpoint DIDSA-CAD's flat
+    app uses, so a mate created here is readable and editable there too) and
+    solves it into place immediately, unless **Relax all** is on, letting
+    you place several mates before solving them all at once with **Enforce
+    all**. Existing mates are listed below with a **Delete** button each,
+    refreshed whenever the tab opens or a mate changes. Face-only for now —
+    edge picking isn't wired up yet (see `docs/status.md`).
 11. A floating status label shows what's happening (importing, downloading,
     parse errors, part count) since you won't have a terminal visible once
     you're in the headset.

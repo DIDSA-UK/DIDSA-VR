@@ -54,6 +54,8 @@ var selected_node: Node3D = null
 var parts_enabled := true ## mode switch on the wrist tablet ("Individual part manipulation")
 var command_stack = null ## set by main.gd; a shared command_stack.gd instance for undo/redo
 var hide_tool_active := false ## Tools tab's "Shoot to hide": trigger hides whatever the laser hits instead of selecting it
+var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate entity instead of selecting/hiding
+var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 
 var _laser: MeshInstance3D
 var _select_material: StandardMaterial3D
@@ -180,7 +182,9 @@ func _on_button_pressed(action_name: String) -> void:
 	elif action_name == select_action:
 		if has_meta("ui_hover") and get_meta("ui_hover"):
 			return # laser is over the wrist tablet or popup keyboard: the click is for them, not a part.
-		if hide_tool_active:
+		if mates_tool_active:
+			_try_pick_mate_entity()
+		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
 		elif parts_enabled:
@@ -309,6 +313,18 @@ func _try_shoot_hide() -> void:
 	part.visible = false
 
 
+func _try_pick_mate_entity() -> void:
+	## Mates tab active: the same ray test as laser-select, handed to
+	## mates_tool.gd instead of selecting/hiding — see that script's own
+	## try_pick() for validation (same-part, cross-assembly, no face
+	## identity, etc.).
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var part: Node3D = hit.get("part")
+	if part == null or mates_tool == null:
+		return
+	mates_tool.try_pick(part, hit.get("face_index", -1))
+
+
 func _try_select() -> void:
 	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	var target: Node3D = hit.get("part")
@@ -351,7 +367,7 @@ func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> 
 		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
 			excluded.append((collider as StaticBody3D).get_rid())
 			continue
-		return {"part": part, "point": result.get("position")}
+		return {"part": part, "point": result.get("position"), "face_index": result.get("face_index", -1)}
 	return {}
 
 
@@ -360,7 +376,7 @@ func _update_aim_hover() -> void:
 	## select right now, so you know what a trigger pull will pick before
 	## you commit to it.
 	var hit := {}
-	if (parts_enabled or hide_tool_active) and held_node == null:
+	if (parts_enabled or hide_tool_active or mates_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
 

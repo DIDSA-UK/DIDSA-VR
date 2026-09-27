@@ -320,24 +320,90 @@ with real hierarchy/skinning.
   real ray hit → real SubShapeRef) has been exercised at all, closing the
   one gap this section would otherwise still be flagging.
 
-**Not yet built: any of the four tools themselves** (mates, colours,
-sections, measurements) — this was groundwork only. Next: the mates tool
-itself (wrist tablet UI, `POST/GET/PATCH/DELETE .../mates`, "relax/enforce
-all" via `solve_for_occurrence` since there's no bulk-solve endpoint), then
-a cross-compatibility check against a real Mate created directly through the
-backend (no flat-created assembly-with-mates fixture exists anywhere in
-either repo yet, and `assembly.didsa` still has zero mates — one will need
-to be authored via the backend directly, mirroring `DIDSA-CAD`'s own
-`mate_panel.dart` request shapes, to prove the 27 Sep compatibility
-requirement rather than just assuming it). Colours mostly falls out of the
-now-wired `Occurrence.color` field; sections is planned client-side (a
-shader clip-plane uniform, since the backend's own `section.py` is a
-stateless, re-tessellate-on-every-request preview endpoint, too slow for a
-dragged plane at 90 Hz); measurements reuses this same picking foundation
-against `POST /parts/{id}/measure`.
+### Mates tool: built (face-only, headless-verified, real backend confirmed)
+
+The wrist tablet's new **Mates** tab, per the vision brief's "Mates
+workflow": toggle the tool, laser-target a face on two different parts, pick
+a mate type, type a value on the popup keyboard, Create. Plus the "Assembly
+tools" list's **Relax all mates**/**Enforce all mates**. Built as a plain
+client to DIDSA-CAD's real Mate endpoints (`scripts/mates_tool.gd`) — never
+a VR-only representation, per the 27 Sep compatibility note.
+
+- **Scope for this pass: FACE-only.** A raycast against a filled triangle
+  mesh naturally resolves to a face; picking an *edge* needs either separate
+  wireframe-pickable geometry or a nearest-boundary-edge heuristic on top of
+  the face hit — not built yet. This still covers real, common mate types
+  (coincident/parallel/distance/angle between planar faces, concentric
+  between cylindrical faces), just not an edge-to-edge concentric mate yet.
+- **Also scoped to top-level Occurrences of the loaded root Part.** The
+  backend only lets a Mate reference a top-level Occurrence of its own owning
+  Part anyway (`MateEntityRef`'s own docstring in DIDSA-CAD) — `mates_tool.gd`
+  rejects a pick on the root's own unplaced content, and rejects two picks
+  from different assemblies, with its own status message either way. This
+  also happens to be exactly the case where a solved Mate's local-to-parent
+  transform IS the flattened, world-relative-to-root transform already baked
+  into that instance's Godot node (`assembly-mesh.glb` has no intermediate
+  parenting at all) — `_apply_solved_transform()` relies on this directly;
+  it would need real work to generalize past top-level occurrences.
+- **"Relax all"/"Enforce all"**: there's no bulk-solve endpoint server-side,
+  and this client never auto-solves during a drag (out of scope per the
+  vision brief's own "Drag latency" decision). So `relaxed` just suspends the
+  one auto-solve this tool would otherwise do right after `create_mate` —
+  mirroring the flat app's own create-then-solve pairing (see
+  `solve_for_occurrence`'s own docstring: "a freshly-authored Mate visibly
+  snaps its target into place immediately, matching real CAD mate-authoring
+  UX") — letting a user place several mates before solving them all at once.
+  "Enforce all" loops `solve_for_occurrence` over every occurrence any of
+  this Part's own Mates reference.
+- Tests: `tests/mates_tool.gd` (pure pick-validation/payload-building logic,
+  no network — a manually-tagged `Node3D` stand-in, same convention
+  `mesh_identity.gd`'s own test uses) and `tests/e2e_mates.gd` (real backend,
+  same "run manually" exception as `e2e_backend.gd`). Two real bugs caught
+  while getting the pure test to pass, both now fixed: `Node.name` is a
+  `StringName`, not a `String` — comparing a pick's stored label against a
+  plain string literal silently failed until cast with `str()`; and the pick
+  validator conflated "no backend identity at all" (an untagged part, e.g. a
+  bare local `.glb`) with "this part's real, tagged root content" into the
+  same wrong error message — now two distinct messages.
+- **Confirmed for real, end to end, against a real backend**: stood up a
+  throwaway backend, let `main.tscn` run its own real import/load of
+  `assembly.didsa`, then drove `mates_tool.gd`'s real network calls against
+  its own two real occurrences — picked a face on each, `create_mate()` (a
+  genuine `POST /parts/{id}/mates`), confirmed it round-tripped through
+  `GET .../mates`, confirmed the driven part's Godot transform genuinely
+  changed (`solve_for_occurrence` ran server-side and the result was
+  correctly applied client-side), then `delete_mate()` to clean up. This is
+  the concrete proof of the cross-compatibility mechanism — the Mate this
+  created is indistinguishable from one the flat app would create with the
+  same call — though not yet checked against a Mate authored *by* the flat
+  app itself (no flat-created assembly-with-mates fixture exists anywhere in
+  either repo, and the flat app's own Dart/Flutter client isn't available in
+  this sandbox to author one directly — worth doing once a device/toolchain
+  for it is available, rather than just trusting the shared-endpoint
+  argument).
+- **Not yet built**: editing an existing mate's value/flip (only
+  create/list/delete for this pass), edge picking, and colours/sections/
+  measurements — the other three of milestone 4's four tools. Colours mostly
+  falls out of the already-wired `Occurrence.color` field; sections is
+  planned client-side (a shader clip-plane uniform, since the backend's own
+  `section.py` is a stateless, re-tessellate-on-every-request preview
+  endpoint, too slow for a dragged plane at 90 Hz); measurements reuses this
+  same picking foundation against `POST /parts/{id}/measure`.
+- **Not yet headset-verified** — this whole tool, like the rest of milestone
+  4 so far, has only run headless and against a real backend from a cloud
+  sandbox, never with a real hand pulling a real trigger.
 
 ## Untested paths
 
+- **The Mates tab is headless- and real-backend-confirmed, never handset-
+  tested.** The wrist tablet UI itself (tab layout, the type/flip/allow-
+  rotation choice rows, the popup keyboard reused for a value, the mates
+  list's Delete buttons) has never been rendered or clicked by a real laser —
+  only the underlying `mates_tool.gd` logic has been driven directly
+  (headless pure-logic tests plus one real end-to-end run against a real
+  backend). Whether picking two faces in quick succession feels right, and
+  whether the tab's layout fits legibly on the existing panel size alongside
+  everything else, are both open.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
   deliberately iterates on PCVR — faster). No APK has been exported or
