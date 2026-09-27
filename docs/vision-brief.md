@@ -95,11 +95,11 @@ A wrist-mounted tablet controls the environment: UI and UX settings, tool select
 3. Pick the mate type from the wrist menu.
 4. Type any values on the popup keyboard.
 
-**Cross-app compatibility with DIDSA-CAD (flat), added 27 Sep 2026 — not yet
-in the live doc, see `docs/status.md`'s "Vision brief drift" note.** Mates
-created in VR must be readable and editable in DIDSA-CAD's flat app, and
-vice versa, so a user can move between VR and flat and take the same
-assembly file with them. Mates are already backend/session state, not
+**Cross-app compatibility with DIDSA-CAD (flat), added 27 Sep 2026 — now
+synced into the live doc too.** Mates created in VR must be readable and
+editable in DIDSA-CAD's flat app, and vice versa, so a user can move
+between VR and flat and take the same assembly file with them. Mates are
+already backend/session state, not
 client state (see "Reuse from DIDSA-CAD" above: "Mate picking: Ids yes, code
 no — face and edge ids are engine-agnostic; picking is a raycast in the VR
 client" and "Solvers (py-slvs): Yes — Mate solve is backend logic"), so this

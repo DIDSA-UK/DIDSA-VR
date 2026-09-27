@@ -770,30 +770,46 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 
 ## Vision brief drift
 
-`docs/vision-brief.md` is an export and its milestone table still says, for
-milestone 1, that whole-model two-hand rotate/scale and scale views are open.
-Both are built, and so is STEP/OBJ/STL import since. The live Claude Docs
-artifact should be updated to something like: "Native import, STEP/OBJ/STL
-import, individual part manipulation, user movement, whole-model one/two-hand
-movement, scale views, the wrist tablet (modes, scale, tools, files, perf,
-undo/redo), the popup keyboard, and local glb import are built. Milestone 1
-is otherwise done — the only thing left is measuring it on real Quest
-hardware, not more building."
+**Resolved this session, but only in the live Claude Docs artifact — this
+repo's own `docs/vision-brief.md` export was only re-synced for the Mates
+cross-compatibility note below, not the two Milestones-table rewordings.**
+The export is a point-in-time snapshot by design ("re-export after any
+significant change" per its own header), so its Milestones table still
+reads exactly as it did before this session for milestone 1 and milestone
+4's own "Done when" cells — re-export it (or hand-edit those two rows to
+match) next time it's touched, so a future reader of the export alone
+doesn't see stale milestone status. Kept here as the record of what
+drifted and when, since it can drift again the same way.
 
-**Also not yet in the live doc:** the "Mates workflow" section in this export
-now has a note (added 27 Sep 2026, this repo's copy only) that VR mates must
-be readable/editable in DIDSA-CAD's flat app and vice versa, so a user can
-move between VR and flat with the same assembly file — John's own
-requirement, added ahead of the mates work itself so it's not missed when
-that phase starts. Carry that note into the live doc too.
-
-**Milestone 4 progress, also not yet in the live doc**: the milestones
-table's row 4 ("Assembly environment... Parts move individually; mates,
-colours, sections and measurements work") is now partly done — mates,
-colours and sections are built (face-only mates; sections client-side-only,
-a single grabbable clip-plane gizmo — the vision brief itself left this
-tool's interaction unspecified, so that design call was made this session,
-not implemented from a spec; all headless- and real-backend-confirmed, not
-headset-verified; see the "Milestone 4" section above) — measurements
-hasn't been started. Update the live doc once this reaches a
-headset-verified state, not before.
+- **Milestone 1.** The live doc's milestone table used to say whole-model
+  two-hand rotate/scale and scale views were open. Both were built, and so
+  was STEP/OBJ/STL import since. Live doc now says: "Done except for
+  measuring it on real Quest hardware. Native import, STEP/OBJ/STL import,
+  individual part manipulation (proximity grab, and trigger-laser select
+  with thumbstick rotate / A-B nudge), user movement (walk, snap-turn,
+  teleport), whole-model one/two-hand movement (drag, turn, scale), scale
+  views (presets, lock, Fit, Home), the wrist tablet (Modes, Scale, Tools,
+  Files, Perf, Undo/Redo), the popup keyboard, and local glb import (no
+  backend round-trip) are all built and running — the only thing left is
+  measuring performance on a real Quest headset (everything so far has been
+  PCVR via Virtual Desktop), not more building."
+- **Mates cross-compatibility note.** The "Mates workflow" section's note
+  (added 27 Sep 2026) that VR mates must be readable/editable in DIDSA-CAD's
+  flat app and vice versa — John's own requirement, added ahead of the mates
+  work itself so it wouldn't be missed when that phase started — had only
+  ever made it into this repo's own export, not the live doc. Now in both.
+- **Milestone 4 progress.** The milestones table's row 4 ("Assembly
+  environment... Parts move individually; mates, colours, sections and
+  measurements work") now says: "In progress. Parts move individually
+  (built since milestone 1). Mates (face-only picking, a real client to
+  DIDSA-CAD's own Mate create/solve endpoints — a mate authored in VR is
+  readable and editable in the flat app and vice versa), Colours (a real
+  client to the existing occurrence-colour PATCH endpoint) and Sections
+  (client-side only: a grabbable clip-plane gizmo; the backend's own
+  section-preview endpoint re-tessellates a fresh OCCT boolean on every
+  call, too slow for a plane dragged at 90 Hz) are built — confirmed
+  headless and against a real backend, not yet on a real headset.
+  Measurements hasn't been started." Sections' interaction was this
+  session's own design call — the vision brief itself never specified one,
+  unlike Mates' own spelled-out workflow (see the "Milestone 4" section
+  above for the full reasoning).
