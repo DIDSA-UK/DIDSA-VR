@@ -438,14 +438,16 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 ## through the backend's importer; glb/gltf load straight into Godot with no
 ## backend round trip at all (see load_glb_file()).
 const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
+const _NATIVE_FORMATS := ["didsa", "didsaprt"] ## a plain JSON native save/export, either extension (see README) — same file, no format difference.
 
 func list_model_files() -> PackedStringArray:
 	## Model files the tablet's Files tab offers: res://models (next to the
 	## project, for running from the editor) and user://models (which also
 	## works in an exported build). .glb/.gltf load locally; .step/.stp/.stl/
-	## .obj need a configured backend (see load_model_file()).
+	## .obj need a configured backend (see load_model_file()); .didsa/
+	## .DIDSAprt also need one (open_native_file()/add_component_file()).
 	var found := PackedStringArray()
-	var extensions := ["glb", "gltf"] + _BACKEND_IMPORT_FORMATS.keys()
+	var extensions := ["glb", "gltf"] + _NATIVE_FORMATS + _BACKEND_IMPORT_FORMATS.keys()
 	for dir_path in ["res://models", "user://models"]:
 		var dir := DirAccess.open(dir_path)
 		if dir == null:
@@ -458,15 +460,144 @@ func list_model_files() -> PackedStringArray:
 
 func load_model_file(path: String) -> void:
 	## Dispatches on extension: a bare .glb/.gltf loads straight from disk;
-	## .step/.stp/.stl/.obj need the backend's /import-features (it's the
-	## only thing that can decode them into geometry Godot can render).
+	## .didsa/.DIDSAprt is a full-replace open of a different native file at
+	## runtime (open_native_file()); .step/.stp/.stl/.obj need the backend's
+	## /import-features (it's the only thing that can decode them into
+	## geometry Godot can render).
 	var ext := path.get_extension().to_lower()
 	if ext in ["glb", "gltf"]:
 		load_glb_file(path)
+	elif ext in _NATIVE_FORMATS:
+		open_native_file(path)
 	elif ext in _BACKEND_IMPORT_FORMATS:
 		_import_external_file(path, _BACKEND_IMPORT_FORMATS[ext])
 	else:
 		_set_status("Don't know how to load %s (extension .%s)" % [path.get_file(), ext])
+
+
+func _read_native_json(path: String) -> Variant:
+	## Shared by open_native_file()/add_component_file(): reads and JSON-
+	## parses a local native file, or null (having already set the status)
+	## if it can't. Same parse this scene already does for native_file_path
+	## at startup (_begin_import()), factored out so both new runtime paths
+	## share it instead of duplicating the read-and-parse boilerplate.
+	if not FileAccess.file_exists(path):
+		_set_status("No such file: %s" % path)
+		return null
+	var file := FileAccess.open(path, FileAccess.READ)
+	var raw_text := file.get_as_text()
+	file.close()
+	var parsed = JSON.parse_string(raw_text)
+	if parsed == null or not (parsed is Dictionary):
+		_set_status("Couldn't parse %s as JSON — is it a real exported .didsa/.DIDSAprt file?" % path.get_file())
+		return null
+	return parsed
+
+
+func open_native_file(path: String) -> void:
+	## Files tab "Open": a full-replace load of a different native .didsa/
+	## .DIDSAprt file at runtime — mirrors _begin_import()'s startup flow
+	## (import, then fetch+render), just callable at any time and from an
+	## arbitrary path/root_part_id instead of the fixed native_file_path
+	## this scene started with. Closes the first half of the "no in-VR way
+	## to open a different native file" gap — see docs/status.md's "Real-
+	## headset testing round 2" (mates blocker). The other half is
+	## add_component_file() below, for adding rather than replacing.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("Open needs a backend (see secrets.cfg.example).")
+		return
+	var parsed = _read_native_json(path)
+	if parsed == null:
+		return
+	var document_dict: Dictionary = parsed.get("document", {})
+	var root_part_id: String = str(document_dict.get("root_part_id", ""))
+	if root_part_id.is_empty():
+		_set_status("%s has no document.root_part_id — can't tell which Part to load." % path.get_file())
+		return
+
+	var req := HTTPRequest.new() # a separate node from http_request, which is spoken for by the startup import chain
+	add_child(req)
+	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	_set_status("Importing %s (part %s)..." % [path.get_file(), root_part_id])
+	req.request("%s%s/import/native" % [backend_url, API_PREFIX], headers, HTTPClient.METHOD_POST, JSON.stringify(parsed))
+	var import_result: Array = await req.request_completed
+	if _parse_import_response(import_result, "import %s" % path.get_file(), req) == null:
+		return
+
+	_resolved_part_id = root_part_id
+	_set_status("Imported. Fetching assembly mesh...")
+	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
+		backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()
+	]
+	if tier != "":
+		mesh_url += "&tier=%s" % tier
+	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	var mesh_result: Array = await req.request_completed
+	req.queue_free()
+	var mesh_result_code: int = mesh_result[0]
+	var mesh_response_code: int = mesh_result[1]
+	var mesh_body: PackedByteArray = mesh_result[3]
+	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
+		_set_status("Mesh load for %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		return
+	if not _show_model(mesh_body, "", spawn_scale):
+		return
+	_set_status("Opened %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func add_component_file(path: String) -> void:
+	## Files tab "Add": merges a second native file's own Part into the
+	## *currently loaded* assembly's root Part as a new Occurrence, via the
+	## backend's POST /parts/{root_id}/add-component
+	## (backend/app/document/add_component.py, ported from the Flutter
+	## client's own add_component.dart) — unlike open_native_file() above,
+	## this does NOT replace the loaded scene; it adds to the live session
+	## and re-fetches the assembly mesh to show the result. Needs a
+	## currently backend-loaded assembly (current_root_part_id() non-empty)
+	## — there's nothing to add an Occurrence onto otherwise. This is what
+	## finally gives the Mates tool real Occurrences to test against on a
+	## single-Part test file — see docs/status.md's "Real-headset testing
+	## round 2" for the blocker this closes.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("Add needs a backend (see secrets.cfg.example).")
+		return
+	if _resolved_part_id.is_empty():
+		_set_status("Load a backend-hosted assembly first — nothing to add %s onto." % path.get_file())
+		return
+	var parsed = _read_native_json(path)
+	if parsed == null:
+		return
+
+	var req := HTTPRequest.new()
+	add_child(req)
+	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	_set_status("Adding %s to the assembly..." % path.get_file())
+	req.request(
+		"%s%s/parts/%s/add-component" % [backend_url, API_PREFIX, _resolved_part_id], headers,
+		HTTPClient.METHOD_POST, JSON.stringify({"component": parsed})
+	)
+	var add_result: Array = await req.request_completed
+	if _parse_import_response(add_result, "add %s to the assembly" % path.get_file(), req) == null:
+		return
+
+	_set_status("Added. Refreshing assembly mesh...")
+	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
+		backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()
+	]
+	if tier != "":
+		mesh_url += "&tier=%s" % tier
+	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	var mesh_result: Array = await req.request_completed
+	req.queue_free()
+	var mesh_result_code: int = mesh_result[0]
+	var mesh_response_code: int = mesh_result[1]
+	var mesh_body: PackedByteArray = mesh_result[3]
+	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
+		_set_status("Mesh refresh after adding %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		return
+	if not _show_model(mesh_body, "", spawn_scale):
+		return
+	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
 
 
 func load_glb_file(path: String) -> void:
@@ -519,6 +650,7 @@ func _import_external_file(path: String, source_format: String) -> void:
 		_set_status("Create-part response for %s had no id." % path.get_file())
 		req.queue_free()
 		return
+	_resolved_part_id = new_part_id # so a later Files-tab "Add" has something to add onto, same as a native open
 
 	_set_status("Importing %s (part %s)..." % [path.get_file(), new_part_id])
 	req.request(

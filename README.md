@@ -304,12 +304,19 @@ button.
   moves things locally and instantly; it doesn't round-trip to the backend's
   mate solver at all. That's deliberately out of scope here (see the vision
   brief's "Drag latency" open decision).
-- **No multi-file assemblies** — the import step sends exactly one file's
-  own JSON (its own features/occurrences/mates). If your assembly's
-  Occurrences point at *other* files via `external_ref`, those referenced
-  parts won't resolve — that's the server-side composition work the vision
-  brief already flags as a separate, unbuilt roadmap item, not something
-  this project attempts.
+- **No automatic multi-file assemblies** — the import step still sends
+  exactly one file's own JSON (its own features/occurrences/mates); if your
+  assembly's Occurrences point at *other* files via `external_ref` with no
+  `resolved_part_id` already stamped in, those referenced parts still won't
+  auto-resolve on open — that's the server-side composition work the vision
+  brief flags as a separate, unbuilt roadmap item (a mounted network share,
+  path resolution), not something this project attempts. **What *is* built
+  now**: the wrist tablet's Files tab can open any native file at runtime
+  (`open_native_file()`, not just the one this scene started with) and add
+  a second file's Part onto the loaded assembly as a real Occurrence
+  (`add_component_file()`, backend's new `POST /parts/{id}/add-component`)
+  — manual, one file at a time, but enough to build (and therefore test
+  Mates against) a real multi-Occurrence assembly entirely from inside VR.
 - **No godot-xr-tools** — deliberate, so far, to keep measuring the bare
   engine. Worth revisiting once milestone 1's interaction model is proven
   out, rather than continuing to hand-roll everything.

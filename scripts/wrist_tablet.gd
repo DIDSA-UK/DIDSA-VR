@@ -968,16 +968,32 @@ func _rebuild_files() -> void:
 	var files: PackedStringArray = _main.list_model_files()
 	if files.is_empty():
 		var none := Label.new()
-		none.text = "No model files found.\nPut a .glb/.gltf/.step/.stl/.obj in the project's models folder."
+		none.text = "No model files found.\nPut a .glb/.gltf/.didsa/.step/.stl/.obj in the project's models folder."
 		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_files_box.add_child(none)
+	var assembly_loaded: bool = not _main.current_root_part_id().is_empty()
 	for i in mini(files.size(), max_files_listed):
 		var path := files[i]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
 		var button := Button.new()
 		button.text = path.get_file()
 		button.clip_text = true
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_main.load_model_file.bind(path))
-		_files_box.add_child(button)
+		row.add_child(button)
+		# Native files get a second "Add" action alongside the row's normal
+		# tap-to-open one — merges this file's own Part as a new component
+		# of whichever assembly is currently loaded (main.gd's
+		# add_component_file()), rather than replacing it. Only meaningful
+		# once something backend-hosted is already loaded to add onto.
+		if path.get_extension().to_lower() in ["didsa", "didsaprt"] and assembly_loaded:
+			var add_button := Button.new()
+			add_button.text = "Add"
+			add_button.tooltip_text = "Add this file's Part to the loaded assembly"
+			add_button.pressed.connect(_main.add_component_file.bind(path))
+			row.add_child(add_button)
+		_files_box.add_child(row)
 	if files.size() > max_files_listed:
 		var more := Label.new()
 		more.text = "+ %d more (not listed yet)" % (files.size() - max_files_listed)
