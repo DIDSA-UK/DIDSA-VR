@@ -10,7 +10,13 @@ link if it's gone stale (it isn't kept in sync automatically — see "Vision
 brief drift" below).
 
 Last updated for the "CAD foundations" phase (precise picking, undo/redo,
-popup keyboard, Tools tab), built on top of commit `62e55ab`.
+popup keyboard, Tools tab), built on top of commit `62e55ab`, plus three
+follow-up fixes: held-part steadiness, two-hand drag gain, and closing out
+the up-axis question (see below and `docs/backend-api-notes.md`).
+
+**"Untested paths" (below) is the running list of what's built but not yet
+confirmed in the headset — keep it current: add to it whenever headless work
+lands, and move an item out once John reports it checked over PCVR.**
 
 ## Milestone 0 — glTF endpoint and engine choice: done
 
@@ -65,16 +71,27 @@ too. All of it is committed and pushed.
 - **Whole-model movement** (`two_hand_model.gd`): grip on empty space.
   One hand drags the model (translation only), amplified in proportion to
   model size (1:1 up to 0.6 m radius, capped at 15×). Two hands move, turn
-  and scale it about the midpoint between them. Each frame applies only the
-  change since the last frame, so a second rotation builds on the current
-  orientation (measuring against the pose at grab start made the second
-  rotation feel anchored to the first — fixed). Spread/close scaling has a
-  3× gain (`scale_gain`).
+  and scale it about the midpoint between them — **drag is now gain-
+  amplified for two hands too** (same formula/cap as one-hand, measured once
+  per gesture; turn and scale are deliberately left ungained, so a given
+  wrist swing always turns the model the same angle regardless of size —
+  previously only one-hand drag had this, so a big model needed constant
+  re-grabbing with two hands). Each frame applies only the change since the
+  last frame, so a second rotation builds on the current orientation
+  (measuring against the pose at grab start made the second rotation feel
+  anchored to the first — fixed). Spread/close scaling has a 3× gain
+  (`scale_gain`).
 - **Hand steadiness** (`one_euro.gd`): hand positions feed the model through
   an adaptive One Euro filter (Off/Light/Medium/Strong, default Medium).
   Simulated results: Medium removes ~80% of a 2 mm hand tremor for ~1 mm of
-  lag on a slow 2 cm/s move and ~9 ms on a fast move. Applies to whole-model
-  moves; a single held *part* is still raw.
+  lag on a slow 2 cm/s move and ~9 ms on a fast move. **Now also applies to a
+  single held part** (`controller.gd`'s grip-grab) — its position (not
+  rotation) goes through the same filter, with the same numbers, previously
+  only whole-model moves did. Implementation note: the held part is no
+  longer rigidly reparented onto the hand; `controller.gd` drives its
+  transform explicitly every physics frame from a filtered hand position
+  plus the grab-time offset, so it can filter position while still following
+  the hand's rotation directly.
 - **Scale views**: presets 1:10 … 10:1 about the model's centre (limits are
   multiples of real life, 0.1×–50×, so they work for mm backend models and
   metre local files), scale lock, Fit to view, Home.
@@ -200,6 +217,26 @@ APK / cleartext HTTP, multiplayer, mates, sections, measurements.
   orientation math was reasoned through, never rendered — see phase 3
   above); and whether shoot-to-hide/hide-all/isolate feel right as an
   interaction, not just as a visibility toggle that happens to work.
+- **Three follow-up fixes, also headless-only so far:**
+  - **Held-part steadiness.** A grip-grabbed part's position now goes
+    through the same One Euro filter as whole-model moves (previously only
+    whole-model moves did). Confirmed headless that it matches the
+    whole-model numbers exactly (`tests/steadiness_filter.gd`'s new "held-part
+    shake" block: ~2.0 mm Off, ~0.4 mm Medium). Not yet felt in a real hand —
+    rotation still isn't filtered (only translation), so a part held by an
+    off-centre grab point may still show some residual shake from hand
+    rotation tremor; worth a specific check.
+  - **Two-hand drag gain.** Two-hand model drag is now amplified for big
+    models by the same formula as one-hand drag (previously only one-hand
+    was). Turn and scale are deliberately left ungained. Confirmed headless
+    (`tests/sensitivity.gd`'s new blocks) that the gain matches one-hand's
+    exactly and that turn/scale stay independent of model size. Not yet felt
+    on a real big model two-handed.
+  - **Up-axis question, closed (not a headless/headset gap — just
+    resolved).** No fix was needed: the backend's native coordinate system
+    already matches glTF/Godot's Y-up convention (see
+    `docs/backend-api-notes.md`). Any future "standard views" work can use
+    Godot's own axes directly.
 
 ## Repo and secrets
 

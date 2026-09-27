@@ -22,8 +22,8 @@ feel. Say what you couldn't verify.
 
 | Test | Expect |
 |---|---|
-| `steadiness_filter.gd` | held-still shake ~2.0 mm (Off) falling to ~0.64 / 0.40 / 0.28 mm (Light/Medium/Strong); lag on a slow 2 cm/s move stays ~1 mm |
-| `sensitivity.gd` | one-hand drag gain x1.00 to 0.6 m radius, x2.5 at 1.5 m, x5 at 3 m, capped x15; nudge 0.03 m/s at 5 cm, 0.60 at 1 m, 3.0 at 5 m, 8.0 at 30 m |
+| `steadiness_filter.gd` | held-still shake ~2.0 mm (Off) falling to ~0.64 / 0.40 / 0.28 mm (Light/Medium/Strong); lag on a slow 2 cm/s move stays ~1 mm; held-part (grip) shake through the real controller.gd path matches the same numbers — Off ~2.0 mm, Medium ~0.4 mm |
+| `sensitivity.gd` | one-hand drag gain x1.00 to 0.6 m radius, x2.5 at 1.5 m, x5 at 3 m, capped x15; two-hand drag gain matches the same formula (moved cm = expected cm on every line); a 30° hand swing turns the model 30° regardless of size (rotation/scale stay ungained); nudge 0.03 m/s at 5 cm, 0.60 at 1 m, 3.0 at 5 m, 8.0 at 30 m |
 | `two_hand_rotation.gd` | model Y axis after yaw then tilt is ~(0, 0.7071, 0.7071) and matches the "expected" line (an old bug gave (-0.71, 0.5, 0.5)) |
 | `grab_and_scale.gd` | every boolean line `true`; grab-point distance `0.0`; both scale lines `x1.331` |
 | `precise_picking.gd` | off-axis part's angle to its origin ~5.7° (inside the old 12° cone) but the real ray test finds nothing there: `true`; nearest of two overlapping parts wins: `true`; hover highlight/name lines `true`; pivot sits away from the part's own origin: `true`; hit point stays put through a 90° rotation (distance moved) `0.0`; part origin swings away from the hit point instead: `true` |

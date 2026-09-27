@@ -57,4 +57,32 @@ func _initialize() -> void:
 		for v in fast_lags: fast_lag += v
 		fast_lag = fast_lag / fast_lags.size() * 1000.0
 		print("SMOKE %-8s | %25.2f | %28.1f | %27.1f" % [NAMES[level], shake, slow_lag, fast_lag])
+
+	# A held single part (grip) goes through the same filter now (previously
+	# only whole-model moves did — see controller.gd's _update_held_part()).
+	# Same tremor, fed through the real grab path this time, not the raw filter.
+	print("SMOKE --- held-part shake (grip), same 9 Hz tremor, through controller.gd for real")
+	var world := Node3D.new(); root.add_child(world)
+	var origin := XROrigin3D.new(); world.add_child(origin)
+	var l := XRController3D.new(); l.set_script(load("res://scripts/controller.gd")); origin.add_child(l)
+	var assembly := Node3D.new(); assembly.add_to_group("assembly_root"); world.add_child(assembly)
+	var part := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(0.1, 0.1, 0.1)
+	part.mesh = bm; assembly.add_child(part); part.position = Vector3(0, 1, -1); part.add_to_group("grabbable_parts")
+	await process_frame
+
+	for level in [0, 2]: # Off vs Medium
+		var rng := RandomNumberGenerator.new(); rng.seed = 7
+		l.position = Vector3(0, 1, -1)
+		part.position = Vector3(0, 1, -1) # reset: the previous level's run leaves it at its last (unfiltered, for Off) tremor sample
+		l.set_steadiness(level)
+		l._try_grab()
+		var t := 0.0
+		var errs: Array = []
+		for i in 270:
+			t += dt
+			l.position = Vector3(0, 1, -1) + tremor(t, rng)
+			l._update_held_part(dt)
+			if i > 90: errs.append(part.global_position.distance_to(Vector3(0, 1, -1)))
+		l._try_release()
+		print("SMOKE %-8s held-part shake (mm rms): %.2f" % [NAMES[level], rms(errs) * 1000.0])
 	quit()

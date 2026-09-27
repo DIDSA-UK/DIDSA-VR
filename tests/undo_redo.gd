@@ -35,6 +35,7 @@ func _initialize() -> void:
 	await physics_frame; await physics_frame
 	l._try_grab()
 	l.position += Vector3(0.5, 0.2, 0)
+	await physics_frame # held_node's transform is driven from _physics_process, not instant reparenting
 	var moved_to := part.global_position
 	l._try_release()
 	print("SMOKE part moved by the grip-drag: ", part.global_position.is_equal_approx(moved_to))

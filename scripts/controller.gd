@@ -24,6 +24,16 @@ extends XRController3D
 ## Attach this to both the left and right XRController3D nodes. Parts need a
 ## collision shape to be ray-testable — main.gd calls create_trimesh_collision()
 ## on every loaded MeshInstance3D for this reason.
+##
+## A held part's POSITION goes through the same adaptive One Euro filter as
+## whole-model moves (steadiness — see two_hand_model.gd), so a held hand
+## doesn't shake the part; its ROTATION follows your hand directly, same as
+## before (matching one-hand model-drag's own translation-only precedent —
+## there's no quaternion version of the filter yet). The wrist tablet's
+## Steadiness choice sets it on both hands as well as the model.
+
+const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, so the level numbers and cutoffs stay in one place
+const OneEuro := preload("res://scripts/one_euro.gd")
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -55,6 +65,9 @@ var _aim_label: Label3D ## floats near the hit point, showing the hovered part's
 var _pivot_local: Vector3 = Vector3.ZERO ## selected_node's local-space point the thumbstick rotates about
 var _held_start_transform: Transform3D ## held_node's world transform when this grip grabbed it
 var _selected_start_transform: Transform3D ## selected_node's world transform when the laser selected it
+var steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES; set by the wrist tablet
+var _grab_offset: Transform3D ## held_node's pose in this hand's local frame, captured at grab time
+var _grab_filter := OneEuro.new() ## smooths this hand's own position while it's holding a part
 
 # Rotation is expressed relative to how the headset is currently looking
 # (world-up for spin, the camera's flattened right vector for tip), not the
@@ -67,6 +80,7 @@ var _camera: XRCamera3D
 func _ready() -> void:
 	button_pressed.connect(_on_button_pressed)
 	button_released.connect(_on_button_released)
+	set_steadiness(steadiness)
 	_add_visible_marker()
 	_add_laser()
 	_select_material = StandardMaterial3D.new()
@@ -88,9 +102,17 @@ func _ready() -> void:
 		_camera = parent.get_node_or_null("XRCamera3D") as XRCamera3D
 
 
+func set_steadiness(level: int) -> void:
+	steadiness = clampi(level, 0, TwoHandModel.STEADINESS_NAMES.size() - 1)
+	_grab_filter.min_cutoff = maxf(TwoHandModel.STEADINESS_CUTOFF_HZ[steadiness], 0.01)
+	_grab_filter.beta = TwoHandModel.STEADINESS_BETA
+
+
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
 	_update_aim_hover()
+	if held_node != null:
+		_update_held_part(delta)
 	if selected_node == null:
 		return
 
@@ -180,9 +202,13 @@ func _try_grab() -> void:
 		_set_grab_hover(null)
 		target.set_meta("held", true)
 		_held_start_transform = target.global_transform
-		# Keeps its world pose, so it's now rigidly attached to your hand exactly where
-		# you took hold of it: turning your hand turns the part about that spot.
-		target.reparent(self, true)
+		# Its pose relative to this hand right now, kept exactly where you took
+		# hold of it: turning your hand turns the part about that spot. Stays
+		# under assembly_root rather than reparenting to the hand, since
+		# _update_held_part() drives its transform explicitly every frame (so
+		# steadiness — see below — can filter the hand's position first).
+		_grab_offset = global_transform.affine_inverse() * target.global_transform
+		_grab_filter.reset(global_position)
 		held_node = target
 
 
@@ -244,11 +270,16 @@ func _try_release() -> void:
 
 	var part := held_node
 	part.set_meta("held", false)
-	var assembly_root := get_tree().get_first_node_in_group("assembly_root")
-	if assembly_root:
-		part.reparent(assembly_root, true)
 	held_node = null
 	_push_move_command(part, _held_start_transform)
+
+
+func _update_held_part(delta: float) -> void:
+	## Filters this hand's position (not its rotation — see the class-level
+	## comment) before applying the grab offset, so a held hand's few-mm
+	## tremor doesn't reach the part while a deliberate move still does.
+	var filtered_pos := global_position if steadiness == 0 else _grab_filter.filter(global_position, delta)
+	held_node.global_transform = Transform3D(global_transform.basis, filtered_pos) * _grab_offset
 
 
 func _push_move_command(part: Node3D, before: Transform3D) -> void:

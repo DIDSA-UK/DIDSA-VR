@@ -369,7 +369,11 @@ func _build_modes_page() -> Control:
 		_right.set_parts_enabled(on)
 	))
 	page.add_child(_choice_row("Steadiness (hold-still shake)", _two_hand.STEADINESS_NAMES, _two_hand.steadiness,
-		func(i: int) -> void: _two_hand.set_steadiness(i)))
+		func(i: int) -> void:
+			_two_hand.set_steadiness(i) # whole-model moves
+			_left.set_steadiness(i) # a single held part (grip), each hand
+			_right.set_steadiness(i)
+	))
 	var hint := Label.new()
 	hint.text = "Scale views: see the Scale tab."
 	hint.add_theme_font_size_override("font_size", 20)

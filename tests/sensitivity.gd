@@ -29,6 +29,45 @@ func _initialize() -> void:
 		for c in model.get_children(): c.remove_from_group("grabbable_parts")
 		model.queue_free()
 
+	print("SMOKE --- two-hand drag gain by model size (same formula as one-hand; rotation/scale stay ungained)")
+	for diag_half in [0.3, 6.0, 20.0]:
+		var model := Node3D.new(); world.add_child(model)
+		var side: float = diag_half * 2.0 / sqrt(3.0)
+		box(model, Vector3(side, side, side), Vector3(0, 1, -2))
+		th.setup(model, l, r, 1.0)
+		th._mode = 0
+		var mid := Vector3(0, 1, 0)
+		l.position = mid + Vector3(-0.3, 0, 0); r.position = mid + Vector3(0.3, 0, 0)
+		th._update_two_hand(l.position, r.position) # first frame: baselines, measures gain
+		var g: float = th.one_hand_drag_gain()
+		var before: Vector3 = model.global_position
+		l.position += Vector3(0, 0, -0.10); r.position += Vector3(0, 0, -0.10) # both hands drag 10 cm the same way: pure translation
+		th._update_two_hand(l.position, r.position)
+		var moved := (model.global_position - before).length()
+		print("SMOKE model radius %5.1f m -> gain x%5.2f ; both hands moved 10 cm -> model moved %5.1f cm (expect %5.1f)" % [diag_half, g, moved * 100.0, 10.0 * g])
+		for c in model.get_children(): c.remove_from_group("grabbable_parts")
+		model.queue_free()
+
+	# a pure rotation (hands swing, spread unchanged) must turn the model by the raw angle regardless of size — never gain-amplified
+	for diag_half in [0.3, 20.0]:
+		var model := Node3D.new(); world.add_child(model)
+		var side: float = diag_half * 2.0 / sqrt(3.0)
+		box(model, Vector3(side, side, side), Vector3(0, 1, -2))
+		th.setup(model, l, r, 1.0)
+		th._mode = 0
+		var mid := Vector3(0, 1, 0)
+		l.position = mid + Vector3(-0.3, 0, 0); r.position = mid + Vector3(0.3, 0, 0)
+		th._update_two_hand(l.position, r.position)
+		var half := 0.3
+		var angle := deg_to_rad(30.0)
+		l.position = mid + Vector3(-half * cos(angle), 0, -half * sin(angle))
+		r.position = mid + Vector3(half * cos(angle), 0, half * sin(angle))
+		th._update_two_hand(l.position, r.position)
+		var turned := rad_to_deg(model.global_transform.basis.get_rotation_quaternion().get_axis().y * model.global_transform.basis.get_rotation_quaternion().get_angle())
+		print("SMOKE model radius %5.1f m -> 30 deg hand swing turns it %5.1f deg (ungained, same for any size)" % [diag_half, turned])
+		for c in model.get_children(): c.remove_from_group("grabbable_parts")
+		model.queue_free()
+
 	print("SMOKE --- A/B nudge speed by distance from the hand (old fixed speed: 0.60 m/s)")
 	l.position = Vector3.ZERO
 	var part := box(world, Vector3(0.1, 0.1, 0.1), Vector3.ZERO)

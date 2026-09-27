@@ -33,8 +33,10 @@ live-synced.
    grabs the part your hand is touching — anywhere on it, not just near its
    middle (inside its bounding box or within 5 cm of it; a light cyan
    highlight shows what a grip would take). The part stays attached exactly
-   where you took hold, so turning your hand turns it about that spot; it
-   moves 1:1 and drops on release, regardless of what's selected. Separately, point
+   where you took hold, so turning your hand turns it about that spot; its
+   position (not its rotation) goes through the same Steadiness filter as
+   whole-model moves, so a held hand's tremor doesn't reach it — it drops on
+   release, regardless of what's selected. Separately, point
    at a part from a distance — a real ray test against its actual geometry
    (not just a cone around its origin point, so big and overlapping parts
    pick correctly; nearest hit wins) highlights it pale yellow and shows its
@@ -59,12 +61,18 @@ live-synced.
    spins it). The one-hand drag scales with the model: 1:1 for anything up
    to about 1.2 m across, then proportionally faster (a model 12 m across
    moves 10 cm for every 1 cm of hand, capped at 15x), so big models don't
-   need endless re-grabbing. With **both hands** it moves with them, turns as you swing the
-   line between your hands, and scales (3x as sensitive as the raw hand spread, `scale_gain`) as you spread or close them, pivoting
-   on the midpoint between your hands. Every turn builds on the model's
-   current orientation, so you can rotate about one axis and then another
-   naturally. Switching between one and two hands never makes the model
-   jump.
+   need endless re-grabbing. With **both hands** it moves with them (dragging
+   is amplified by that same size-based gain, so a big model doesn't need
+   endless re-grabbing two-handed either), turns as you swing the line
+   between your hands, and scales (3x as sensitive as the raw hand spread,
+   `scale_gain`) as you spread or close them — turning and scaling are
+   deliberately left at their own raw sensitivity, not gain-amplified, so a
+   given wrist swing always turns the model by the same angle regardless of
+   its size. Pivots on the midpoint between your hands (or, once the drag
+   gain has carried the model away from your hands on a big model, a virtual
+   point that tracks it). Every turn builds on the model's current
+   orientation, so you can rotate about one axis and then another naturally.
+   Switching between one and two hands never makes the model jump.
 7. **Wrist tablet.** A small cyan bullseye floats above your left wrist.
    Point the right hand's laser at it (it turns yellow) and pull the trigger
    to open the tablet; press the **X** on the tablet to close it. It never
@@ -74,10 +82,11 @@ live-synced.
    visible whatever tab is open — see item 9 below. Tabs:
    - **Modes** — switch model movement, user movement and part manipulation
      on or off independently, and set **Steadiness** (Off / Light / Medium /
-     Strong): an adaptive filter on your hands while you hold the model, so a
-     held hand doesn't shake it but deliberate moves stay direct (measured:
-     Medium removes ~80% of a simulated 2 mm hand tremor and adds about 1 mm
-     of lag on a slow 2 cm/s move).
+     Strong): an adaptive filter on your hands while you hold the model *or*
+     grip a single part, so a held hand doesn't shake it but deliberate moves
+     stay direct (measured: Medium removes ~80% of a simulated 2 mm hand
+     tremor and adds about 1 mm of lag on a slow 2 cm/s move — same numbers
+     either way, whole-model or a single held part).
    - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
      about the model's centre; lock the scale (also stops the two-hand
      spread/close and Fit from resizing); **Fit to view** brings the whole
