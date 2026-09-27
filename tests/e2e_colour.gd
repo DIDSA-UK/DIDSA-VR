@@ -34,14 +34,14 @@ func _initialize() -> void:
 	var timeout_ms := 60000
 	while not done and Time.get_ticks_msec() - started_ms < timeout_ms:
 		await process_frame
-		var status: String = main.status_label.text
+		var status: String = main.status_text
 		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't parse"):
 			done = true
-	if not done or not main.status_label.text.begins_with("Loaded "):
-		print("SMOKE FAILED: model didn't load — status: ", main.status_label.text)
+	if not done or not main.status_text.begins_with("Loaded "):
+		print("SMOKE FAILED: model didn't load — status: ", main.status_text)
 		quit(1)
 		return
-	print("SMOKE model loaded: ", main.status_label.text)
+	print("SMOKE model loaded: ", main.status_text)
 
 	colour_tool = main._colour_tool
 

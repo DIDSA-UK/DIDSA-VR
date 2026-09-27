@@ -51,17 +51,17 @@ func _initialize() -> void:
 	var timeout_ms := 60000
 	while Time.get_ticks_msec() - started_ms < timeout_ms:
 		await process_frame
-		var status: String = main.status_label.text
+		var status: String = main.status_text
 		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't") or status.contains("needs a backend"):
 			break
 
 	var elapsed_ms := Time.get_ticks_msec() - started_ms
-	print("SMOKE final status: ", main.status_label.text)
+	print("SMOKE final status: ", main.status_text)
 	print("SMOKE part count: ", main._part_count)
 	print("SMOKE total wall time: %d ms" % elapsed_ms)
 	print("SMOKE load summary: ", main._load_summary)
 
-	if main._part_count > 0 and main.status_label.text.begins_with("Loaded "):
+	if main._part_count > 0 and main.status_text.begins_with("Loaded "):
 		print("SMOKE PASSED: .obj -> create part -> import-features -> assembly-mesh.glb -> scene load succeeded")
 	else:
 		print("SMOKE FAILED: .obj import did not load successfully")
@@ -82,11 +82,11 @@ func _initialize() -> void:
 	main.load_model_file("user://models/e2e_test_tri.stl")
 	while Time.get_ticks_msec() - stl_started_ms < timeout_ms:
 		await process_frame
-		var status: String = main.status_label.text
+		var status: String = main.status_text
 		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't") or status.contains("needs a backend"):
 			break
-	print("SMOKE .stl final status: ", main.status_label.text)
-	if main._part_count > 0 and main.status_label.text.begins_with("Loaded "):
+	print("SMOKE .stl final status: ", main.status_text)
+	if main._part_count > 0 and main.status_text.begins_with("Loaded "):
 		print("SMOKE PASSED: .stl -> create part -> import-features -> assembly-mesh.glb -> scene load succeeded")
 	else:
 		print("SMOKE FAILED: .stl import did not load successfully")

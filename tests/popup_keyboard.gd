@@ -100,5 +100,34 @@ func _initialize() -> void:
 	await type_number("42")
 	await aim_and_click(find_button(kb._viewport, func(b: Button) -> bool: return b.text == "<-"))
 	print("SMOKE backspace removes the last digit: ", kb._text)
+
+	# --- real-headset regression, same class of bug as tests/tablet_scene.gd's
+	# own drift check: a real trigger squeeze isn't instantaneous, and Godot's
+	# BaseButton cancels a press on ANY intervening motion event landing
+	# outside its rect — see wrist_tablet.gd's _send_click() for the full
+	# reasoning (popup_keyboard.gd shares the identical fix).
+	if kb.is_open(): # backspace above left it open — primary_click toggles, so close first or the next click would close it instead of opening it
+		kb.close()
+	r.button_pressed.emit("primary_click")
+	await process_frame
+	var five := find_button(kb._viewport, func(b: Button) -> bool: return b.text == "5")
+	var c: Vector2 = five.global_position + five.size * 0.5
+	var local_x: float = (c.x / kb.viewport_size.x - 0.5) * kb.panel_size.x
+	var local_y: float = (0.5 - c.y / kb.viewport_size.y) * kb.panel_size.y
+	var world: Vector3 = kb.global_transform * Vector3(local_x, local_y, 0)
+	var standoff: Vector3 = kb.global_transform.basis.z.normalized() * 0.3
+	r.global_position = world + standoff
+	r.look_at(world, Vector3.UP)
+	for i in 3:
+		await process_frame
+	r.button_pressed.emit("trigger_click") # DOWN squarely on "5"
+	await process_frame
+	r.global_position += kb.global_transform.basis.x * 0.03 # drift sideways along the panel mid-press, direction unchanged (no new look_at)
+	for i in 3:
+		await process_frame
+	r.button_released.emit("trigger_click")
+	await process_frame
+	print("SMOKE a key press still registers despite drifting mid-press: ", kb._text.ends_with("5"))
+
 	kb.close()
 	quit()

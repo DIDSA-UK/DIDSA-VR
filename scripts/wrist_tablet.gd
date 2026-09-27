@@ -46,6 +46,7 @@ var _main: Node
 var _command_stack = null
 var _mates_tool: Node
 var _colour_tool: Node
+var _section_tool: Node
 var _undo_button: Button
 var _redo_button: Button
 
@@ -71,6 +72,13 @@ const COLOUR_SWATCHES: Array[Dictionary] = [
 ]
 var _colour_status_label: Label
 
+# Milestone 4: Sections — a single grabbable clip-plane gizmo, client-side
+# only (see section_tool.gd's own docstring for why: the backend's real
+# section-preview endpoint re-tessellates a fresh OCCT boolean on every
+# call, much too slow for a plane you're dragging at 90 Hz).
+var _sections_status_label: Label
+var _sections_flip_button: Button
+
 var _viewport: SubViewport
 var _quad: MeshInstance3D
 var _cursor: Control
@@ -89,11 +97,12 @@ var _target_hover := false
 var _hovering := false
 var _pressed := false
 var _pointer_px := Vector2.ZERO
+var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger went down — see _send_click()'s own docstring for why this isn't just _pointer_px
 var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -103,6 +112,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_command_stack = command_stack
 	_mates_tool = mates_tool
 	_colour_tool = colour_tool
+	_section_tool = section_tool
 
 	_build_viewport()
 	_build_quad()
@@ -115,6 +125,8 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	if _mates_tool:
 		_mates_tool.picks_changed.connect(_refresh_mates_picks_display)
 		_mates_tool.mates_changed.connect(_rebuild_mates_list)
+	if _section_tool:
+		_section_tool.changed.connect(_refresh_sections_display)
 	visible = false
 
 
@@ -167,6 +179,7 @@ func _update_pointer(normal: Vector3) -> void:
 	_hovering = false
 	var origin := _right.global_position
 	var dir := -_right.global_transform.basis.z.normalized()
+	var hit_distance := -1.0 ## -1 = not hovering anything of ours this frame; controller.gd's laser reads "ui_hit_distance" below to know how far to draw itself, falling back to its own part-raycast otherwise
 
 	# The wrist bullseye: a sphere-shaped hit area around it.
 	_target_hover = false
@@ -175,6 +188,8 @@ func _update_pointer(normal: Vector3) -> void:
 			origin, origin + dir * max_point_distance, _target.global_position, target_radius
 		)
 		_target_hover = not hits.is_empty()
+		if _target_hover:
+			hit_distance = origin.distance_to(hits[0])
 	if _target_hover != _last_target_hover:
 		_last_target_hover = _target_hover
 		for mat in _target_materials:
@@ -186,16 +201,30 @@ func _update_pointer(normal: Vector3) -> void:
 			var local: Vector3 = global_transform.affine_inverse() * hit
 			if absf(local.x) <= panel_size.x * 0.5 and absf(local.y) <= panel_size.y * 0.5:
 				_hovering = true
-				_pointer_px = Vector2(
-					(local.x / panel_size.x + 0.5) * viewport_size.x,
-					(0.5 - local.y / panel_size.y) * viewport_size.y
-				)
+				hit_distance = origin.distance_to(hit)
+				# While a click is being held, freeze the pointer at the press
+				# position instead of following the live aim — see
+				# _send_click()'s own docstring for the full reasoning: Godot's
+				# BaseButton cancels a press the instant ANY MouseMotion event
+				# lands outside its rect (tracked as "pressing_inside", checked
+				# again only at release), regardless of what position the
+				# eventual mouse-up event itself carries. A real hand's few mm
+				# of drift during a ~100-300ms trigger squeeze is enough to
+				# send at least one such motion event if this keeps tracking
+				# the live aim, silently cancelling the click before release
+				# even sees it.
+				if not _pressed:
+					_pointer_px = Vector2(
+						(local.x / panel_size.x + 0.5) * viewport_size.x,
+						(0.5 - local.y / panel_size.y) * viewport_size.y
+					)
 
 	_right.set_meta("ui_hover", _hovering or _target_hover)
+	_right.set_meta("ui_hit_distance", hit_distance)
 	_cursor.visible = _hovering
 	if _hovering:
 		_cursor.position = _pointer_px - _cursor.size * 0.5
-		if _pointer_px != _last_sent_px:
+		if not _pressed and _pointer_px != _last_sent_px:
 			var motion := InputEventMouseMotion.new()
 			motion.position = _pointer_px
 			motion.global_position = _pointer_px
@@ -214,6 +243,7 @@ func _on_right_pressed(action_name: String) -> void:
 	if action_name == click_action and _hovering:
 		if (Time.get_ticks_msec() - _opened_at_ms) < open_settle_seconds * 1000.0:
 			return
+		_press_px = _pointer_px
 		_send_click(true)
 		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
 
@@ -224,12 +254,28 @@ func _on_right_released(action_name: String) -> void:
 
 
 func _send_click(down: bool) -> void:
+	## Uses _press_px (frozen at the moment the trigger went down), not the
+	## live _pointer_px, for BOTH the down and up events — real-headset
+	## feedback: hover worked but buttons never actually activated. Root
+	## cause: a real hand's trigger squeeze takes real time (the physical
+	## press to release isn't instantaneous like a synthetic button_pressed/
+	## button_released emit in a test), and _pointer_px keeps tracking the
+	## laser every frame in between — so the "up" event used to land at
+	## wherever the aim had drifted to by release, not where it was at press.
+	## Godot's own Button only counts a click when down and up land on the
+	## SAME control (BaseButton::_gui_input checks the event's own carried
+	## position, not a separately-tracked live mouse position), so even a
+	## few pixels of real hand tremor during the hold was enough to silently
+	## drop every click while still showing a perfectly normal hover state
+	## throughout — exactly why this was invisible to every headless test
+	## (button_pressed.emit()/button_released.emit() there always fire with
+	## the simulated controller in the same, unmoving position).
 	_pressed = down
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down
-	click.position = _pointer_px
-	click.global_position = _pointer_px
+	click.position = _press_px
+	click.global_position = _press_px
 	click.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
 	_viewport.push_input(click)
 
@@ -320,9 +366,23 @@ func _build_ui() -> Control:
 	_redo_button.pressed.connect(_on_redo_pressed)
 	history_row.add_child(_redo_button)
 
-	# Tab bar: radio-style buttons, exactly one page showing.
-	var tab_row := HBoxContainer.new()
-	tab_row.add_theme_constant_override("separation", 8)
+	# Tab bar: radio-style buttons, exactly one page showing. HFlowContainer
+	# (same choice _build_scale_page()'s presets row and _build_colours_page()'s
+	# swatch grid already make), not HBoxContainer: with 8 tabs now (Sections
+	# added this session) the row's own minimum width — driven by each
+	# button's own text, which SIZE_EXPAND_FILL can't shrink below — exceeds
+	# viewport_size.x (640px) and HBoxContainer doesn't wrap, so every tab
+	# past that point silently rendered outside the tablet's own clipped
+	# area: still "visible" by Godot's own is_visible_in_tree() (nothing
+	# hides it), but never reachable by a real laser aimed at the physical
+	# panel. Found because it also shifted EVERY control below the tab row
+	# far enough to break tests/tablet_scene.gd's existing click-position
+	# math for a button that hadn't moved (the Modes tab's own Steadiness
+	# row) — not a coincidence: the whole column below an overflowing row
+	# shifts with it. HFlowContainer wraps to a second row instead.
+	var tab_row := HFlowContainer.new()
+	tab_row.add_theme_constant_override("h_separation", 8)
+	tab_row.add_theme_constant_override("v_separation", 8)
 	column.add_child(tab_row)
 	var tab_group := ButtonGroup.new()
 	var pages_holder := VBoxContainer.new()
@@ -335,6 +395,7 @@ func _build_ui() -> Control:
 		"Tools": _build_tools_page,
 		"Mates": _build_mates_page,
 		"Colours": _build_colours_page,
+		"Sections": _build_sections_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -346,7 +407,6 @@ func _build_ui() -> Control:
 		tab.text = tab_name
 		tab.toggle_mode = true
 		tab.button_group = tab_group
-		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tab.toggled.connect(_on_tab_toggled.bind(tab_name))
 		tab_row.add_child(tab)
 		if tab_name == "Modes":
@@ -358,12 +418,22 @@ func _build_ui() -> Control:
 	close.pressed.connect(close_tablet)
 	tab_row.add_child(close)
 
-	# Little dot showing where the laser is on the panel.
+	# A soft glow showing where the laser terminates on the panel — real-
+	# headset feedback wanted the laser to visibly stop and glow here rather
+	# than (per the old flat 8px dot, and the laser itself previously never
+	# shortening at all — see controller.gd's _update_laser_visual()) look
+	# like it passed straight through. Concentric fading rings read as a
+	# glow at arm's length better than one flat-alpha circle does.
 	_cursor = Control.new()
-	_cursor.size = Vector2(16, 16)
+	_cursor.size = Vector2(28, 28)
 	_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cursor.visible = false
-	_cursor.draw.connect(func() -> void: _cursor.draw_circle(Vector2(8, 8), 8.0, Color(1.0, 0.85, 0.1)))
+	_cursor.draw.connect(func() -> void:
+		var centre: Vector2 = _cursor.size * 0.5
+		for i in range(6, 0, -1):
+			_cursor.draw_circle(centre, float(i) * 2.0, Color(1.0, 0.85, 0.1, 0.06))
+		_cursor.draw_circle(centre, 5.0, Color(1.0, 0.95, 0.7, 0.9))
+	)
 	root.add_child(_cursor)
 
 	return root
@@ -413,6 +483,8 @@ func _build_modes_page() -> Control:
 			_two_hand.set_steadiness(i) # whole-model moves
 			_left.set_steadiness(i) # a single held part (grip), each hand
 			_right.set_steadiness(i)
+			if _section_tool:
+				_section_tool.set_steadiness(i) # the section-plane gizmo, grabbed the same way
 	))
 	var hint := Label.new()
 	hint.text = "Scale views: see the Scale tab."
@@ -774,6 +846,56 @@ func _readable_text_color(hex: String) -> Color:
 	var c := Color(hex)
 	var luminance := 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
 	return Color.BLACK if luminance > 0.6 else Color.WHITE
+
+
+# --- Sections: the vision brief's Assembly tools "sections" - a single
+# grabbable clip-plane gizmo, client-side only (see section_tool.gd's own
+# docstring for why: the backend's real section-preview endpoint
+# re-tessellates a fresh OCCT boolean on every call, much too slow for a
+# plane dragged at 90 Hz). GRIP grabs the gizmo directly in-world, same feel
+# as grabbing a part - this tab just toggles it on/off and flips which side
+# is kept.
+
+func _build_sections_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	page.add_child(_mode_toggle("Section tool", func(on: bool) -> void:
+		if _section_tool:
+			_section_tool.set_active(on, _camera)
+	, false))
+
+	_sections_status_label = Label.new()
+	_sections_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_sections_status_label)
+
+	_sections_flip_button = Button.new()
+	_sections_flip_button.text = "Flip"
+	_sections_flip_button.toggle_mode = true
+	_sections_flip_button.toggled.connect(func(on: bool) -> void:
+		if _section_tool:
+			_section_tool.set_flipped(on)
+	)
+	page.add_child(_sections_flip_button)
+
+	var hint := Label.new()
+	hint.text = "Grip the plane to move/tilt it, like grabbing a part."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 18)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(hint)
+
+	_refresh_sections_display()
+	return page
+
+
+func _refresh_sections_display() -> void:
+	if not _section_tool or _sections_status_label == null:
+		return
+	if not _section_tool.active:
+		_sections_status_label.text = "Off — turn on Section tool to place the plane"
+	else:
+		_sections_status_label.text = "Sectioning%s — grip the plane to move it" % (" (flipped)" if _section_tool.flipped else "")
 
 
 # --- Files: load a local .glb ---

@@ -35,7 +35,7 @@ extends Node3D
 
 @onready var http_request: HTTPRequest = $HTTPRequest
 @onready var assembly_root: Node3D = $AssemblyRoot
-@onready var status_label: Label3D = $StatusLabel3D
+var status_text: String = "" ## what _set_status() last said — console-only now (see that function): no floating 3D text in the scene, per John's own real-headset feedback that it was distracting. Kept as a plain string (not just a print) so tests/e2e_*.gd can still poll it to know when a load finished.
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
@@ -49,6 +49,7 @@ var _tablet: Node
 var _keyboard: Node
 var _mates_tool: Node
 var _colour_tool: Node
+var _section_tool: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -67,12 +68,16 @@ func _ready() -> void:
 	_add_two_hand_model()
 	_add_mates_tool()
 	_add_colour_tool()
+	_add_section_tool()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
 	$XROrigin3D/RightController.mates_tool = _mates_tool
+	$XROrigin3D/LeftController.section_tool = _section_tool
+	$XROrigin3D/RightController.section_tool = _section_tool
+	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
 	_mates_tool.configure_backend(backend_url, api_key)
@@ -108,10 +113,18 @@ func _add_colour_tool() -> void:
 	_colour_tool = colours
 
 
+func _add_section_tool() -> void:
+	var sections := preload("res://scripts/section_tool.gd").new()
+	sections.name = "SectionTool"
+	add_child(sections)
+	sections.setup(command_stack)
+	_section_tool = sections
+
+
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool)
 	_tablet = tablet
 
 
@@ -263,6 +276,8 @@ func set_msaa(level: int) -> void:
 
 func _process(delta: float) -> void:
 	_worst_frame_ms = maxf(_worst_frame_ms, delta * 1000.0)
+	if _section_tool.active: # no-ops internally when inactive, but skip the group lookup entirely when there's nothing to do
+		_section_tool.reconcile(get_tree().get_nodes_in_group("grabbable_parts"))
 	# Only while the tablet is open (nobody can see the numbers otherwise), and a few
 	# times a second: rewriting the label every frame would make the readout itself a
 	# cost and be unreadable anyway.
@@ -575,6 +590,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# and the undo/redo history can't point at nodes that are about to be freed.
 	command_stack.clear()
 	_mates_tool.clear_picks()
+	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 	for old in assembly_root.get_children():
@@ -605,5 +621,4 @@ func _all_descendants(root: Node) -> Array[Node]:
 
 func _set_status(text: String) -> void:
 	print("DIDSA VR spike: ", text)
-	if status_label:
-		status_label.text = text
+	status_text = text
