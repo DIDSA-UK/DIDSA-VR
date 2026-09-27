@@ -587,32 +587,96 @@ being implemented.
   clearly on first toggle; and whether the clip itself, correct in a flat
   render, looks right in stereo/at real depth.
 
+## Real-headset testing round: three bugs found and fixed
+
+The first real hand pulling a real trigger at any of this project's UI
+(the wrist tablet, popup keyboard) or at a part with the left hand,
+on a build predating this session. Three issues came back; all three are
+fixed and covered by a new headless test each (none needed a real headset
+to verify the fix, since each has a specific, reproducible mechanism —
+see each test's own docstring for exactly what it simulates and why).
+
+- **Tablet/keyboard buttons: hover worked, activating never did.** Root
+  cause, found by reproducing the exact mechanism headless rather than
+  guessing: `wrist_tablet.gd`/`popup_keyboard.gd`'s own `_update_pointer()`
+  kept tracking the live laser aim every frame, including *while a trigger
+  press was being held* — a real trigger squeeze takes real time (order of
+  100–300 ms), during which even a "steady" real hand drifts enough to push
+  at least one `MouseMotion` event outside the pressed button's own rect.
+  Godot's own `BaseButton` cancels a press the instant that happens
+  (`pressing_inside`, tracked continuously, checked again only at release)
+  — regardless of what position the eventual mouse-up event itself carries,
+  which is why an earlier, incomplete fix (freezing only the up-event's own
+  position) still failed. The real fix: freeze the pointer entirely (no new
+  motion events at all) for the whole duration of a held press, only
+  resuming live tracking once released. Invisible to every existing
+  headless test because a synthetic `button_pressed.emit()`/
+  `button_released.emit()` pair fires both ends in the same, unmoving
+  simulated position — `tests/tablet_scene.gd`/`tests/popup_keyboard.gd` each
+  gained a new drift-mid-press check that moves the simulated controller
+  between press and release specifically to reproduce this.
+- **The laser now shortens to whatever it's actually hitting.** Previously
+  fixed-length regardless of what was in the way (`controller.gd`'s
+  `laser_length`, "doesn't retarget to hit point" — the very first version
+  of that comment turned out to describe exactly the bug John hit: aiming at
+  the wrist tablet, the laser visibly passed straight through it instead of
+  stopping there). Fixed with a `CylinderMesh` whose height/position now
+  update every physics frame (`_update_laser_visual()`): a UI panel (wrist
+  tablet/popup keyboard, reported via a new `ui_hit_distance` meta —
+  same convention `ui_hover` already used) takes priority over a plain part
+  hit, which takes priority over the default full length. Also gave the
+  tablet/keyboard's own cursor dot a soft multi-ring glow (was a flat 8px
+  circle) so the termination point actually reads as one at arm's length.
+  `tests/laser_and_left_hand.gd` confirms full length with nothing hit,
+  shortening to a real part and to the tablet, and returning to full length
+  once clear of either.
+- **Left-hand laser-select blocked left-hand walking.** `locomotion.gd`
+  backs off a hand's own thumbstick while that controller reports
+  `is_manipulating()` (i.e. has a `selected_node`) — so laser-selecting a
+  part with the left hand silently disabled the left thumbstick's own
+  walk/strafe for as long as it stayed selected, with no visual indication
+  why. Per John's own call: left grip-grab is untouched (it "feels right"
+  two-handed) and stays available on both hands; only left-hand laser-select
+  (and the A/B/X/Y nudge + thumbstick rotate that ride on `selected_node`,
+  which now simply never gets set there) is gone, via a new
+  `laser_select_enabled` flag on `controller.gd` (hand-agnostic script,
+  default `true`, set `false` for the left controller only in `main.gd`) —
+  freeing the left trigger for a later tool (context menu, multi-select —
+  not decided yet). The right hand is completely unaffected.
+  `tests/laser_and_left_hand.gd` also confirms: left trigger no longer
+  selects; left grip still grabs exactly as before; `is_manipulating()`
+  stays false on the left hand; the right hand still selects normally.
+
+Also removed per the same real-headset feedback: the floating `Label3D`
+status text that used to hover in front of the user ("Loaded 3 part
+mesh(es)...") — distracting, not requested by the vision brief. `main.gd`'s
+own status reporting is now console-print-only (`status_text`, a plain
+`String` property `tests/e2e_*.gd` still poll to know when a load finished,
+no 3D node needed for that).
+
 ## Untested paths
 
-- **The Mates tab is headless- and real-backend-confirmed, never handset-
-  tested.** The wrist tablet UI itself (tab layout, the type/flip/allow-
-  rotation choice rows, the popup keyboard reused for a value, the mates
-  list's Delete buttons) has never been rendered or clicked by a real laser —
-  only the underlying `mates_tool.gd` logic has been driven directly
-  (headless pure-logic tests plus one real end-to-end run against a real
-  backend). Whether picking two faces in quick succession feels right, and
-  whether the tab's layout fits legibly on the existing panel size alongside
-  everything else, are both open.
-- **The Colours tab has the same gap** — `colour_tool.gd`'s logic is
-  headless- and real-backend-confirmed, but the swatch grid itself (colour
-  legibility against the panel background, whether the text-colour contrast
-  pick actually reads well, tapping a swatch with a real laser) has never
-  been rendered or clicked for real.
-- **The Sections tab has the same gap, plus one more layer.** Beyond the
-  usual "never clicked by a real laser" gap every tab in this milestone
-  shares: the clip plane's own real-render behaviour is confirmed correct in
-  a flat, software-rendered image (`tests/section_render.gd`, Xvfb + Mesa
-  llvmpipe), but never in stereo, at real depth, or lit by anything beyond
-  one plain directional light — whether a real cutaway reads correctly with
-  both eyes, and whether grabbing a thin translucent disc feels natural with
-  a real hand (a part has real volume to reach into; this gizmo doesn't),
-  are both open. The default gizmo size (`plane_radius`, a fixed 0.4 m) and
-  spawn distance (0.6 m in front of the camera) were picked as reasonable
+- **The Mates tab is headless- and real-backend-confirmed; the wrist tablet
+  UI itself has now had one real round of laser/trigger testing too** (see
+  "Real-headset testing round" above — the click-activation bug it found
+  affected every tab, not just this one, and is now fixed). Still open:
+  whether picking two faces in quick succession feels right, and whether the
+  tab's layout fits legibly on the existing panel size alongside everything
+  else — feel, not mechanics, is what's left here.
+- **The Colours tab has the same residual gap** — `colour_tool.gd`'s logic is
+  headless- and real-backend-confirmed, clicking now works for real (see
+  above), but colour legibility against the panel background and whether the
+  text-colour contrast pick actually reads well are still open.
+- **The Sections tab has the same gap, plus one more layer.** Clicking its
+  tab/toggle/Flip buttons now works for real (see above). Beyond that: the
+  clip plane's own real-render behaviour is confirmed correct in a flat,
+  software-rendered image (`tests/section_render.gd`, Xvfb + Mesa llvmpipe),
+  but never in stereo, at real depth, or lit by anything beyond one plain
+  directional light — whether a real cutaway reads correctly with both eyes,
+  and whether grabbing a thin translucent disc feels natural with a real
+  hand (a part has real volume to reach into; this gizmo doesn't), are both
+  open. The default gizmo size (`plane_radius`, a fixed 0.4 m) and spawn
+  distance (0.6 m in front of the camera) were picked as reasonable
   human-scale guesses, never checked against a real arm's reach.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
@@ -732,8 +796,8 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   (parse-checks every script, then the steadiness filter, sensitivity,
   two-hand rotation, grab/scale, precise-picking, undo/redo, popup-keyboard,
   Tools-tab, full-scene tablet, mesh-identity, mates-tool, colour-tool,
-  section-tool and section-tab tests). `tests/README.md` lists the expected
-  values. Needs no GPU, headset or backend.
+  section-tool, section-tab and laser/left-hand tests). `tests/README.md`
+  lists the expected values. Needs no GPU, headset or backend.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
   `e2e_mates.gd`, `e2e_colour.gd`, `e2e_section.gd`): each deliberately points
   `main.secrets_file_path` at the real `secrets.cfg` and drives real network

@@ -35,6 +35,7 @@ var _pristine := false ## true until the first keystroke: that keystroke clears 
 var _on_confirm: Callable = Callable()
 var _hovering := false
 var _pointer_px := Vector2.ZERO
+var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger went down — see _send_click()'s own docstring
 var _last_sent_px := Vector2(-1, -1)
 var _pressed := false
 
@@ -73,6 +74,7 @@ func close() -> void:
 	visible = false
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_right.set_meta("ui_hover", false)
+	_right.set_meta("ui_hit_distance", -1.0) # _update_pointer() only runs while open, so this has to be reset explicitly here too — otherwise the laser could stay shortened to a stale distance after closing
 
 
 func _place_in_front_of_camera() -> void:
@@ -105,21 +107,25 @@ func _update_pointer() -> void:
 	var normal := global_transform.basis.z.normalized()
 	var origin := _right.global_position
 	var dir := -_right.global_transform.basis.z.normalized()
+	var hit_distance := -1.0 ## see wrist_tablet.gd's own _update_pointer() for what controller.gd does with this
 	var hit = Plane(normal, global_position).intersects_ray(origin, dir)
 	if hit != null and origin.distance_to(hit) <= max_point_distance:
 		var local: Vector3 = global_transform.affine_inverse() * hit
 		if absf(local.x) <= panel_size.x * 0.5 and absf(local.y) <= panel_size.y * 0.5:
 			_hovering = true
-			_pointer_px = Vector2(
-				(local.x / panel_size.x + 0.5) * viewport_size.x,
-				(0.5 - local.y / panel_size.y) * viewport_size.y
-			)
+			hit_distance = origin.distance_to(hit)
+			if not _pressed: # frozen while a click is held — see _send_click()'s own docstring (Godot's BaseButton cancels a press on any motion event outside its rect, regardless of the eventual release event's own position)
+				_pointer_px = Vector2(
+					(local.x / panel_size.x + 0.5) * viewport_size.x,
+					(0.5 - local.y / panel_size.y) * viewport_size.y
+				)
 
 	_right.set_meta("ui_hover", _hovering)
+	_right.set_meta("ui_hit_distance", hit_distance)
 	_cursor.visible = _hovering
 	if _hovering:
 		_cursor.position = _pointer_px - _cursor.size * 0.5
-		if _pointer_px != _last_sent_px:
+		if not _pressed and _pointer_px != _last_sent_px:
 			var motion := InputEventMouseMotion.new()
 			motion.position = _pointer_px
 			motion.global_position = _pointer_px
@@ -132,6 +138,7 @@ func _update_pointer() -> void:
 
 func _on_right_pressed(action_name: String) -> void:
 	if action_name == click_action and _hovering:
+		_press_px = _pointer_px
 		_send_click(true)
 		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
 
@@ -142,12 +149,18 @@ func _on_right_released(action_name: String) -> void:
 
 
 func _send_click(down: bool) -> void:
+	## Uses _press_px (frozen at press time), not the live _pointer_px, for
+	## both down and up — see wrist_tablet.gd's own _send_click() for the
+	## full real-headset bug this fixes (hover worked, activating never did:
+	## a real trigger squeeze takes real time, during which _pointer_px kept
+	## tracking the laser, so the "up" event landed wherever the aim had
+	## drifted to by release rather than where it was at press).
 	_pressed = down
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down
-	click.position = _pointer_px
-	click.global_position = _pointer_px
+	click.position = _press_px
+	click.global_position = _press_px
 	click.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
 	_viewport.push_input(click)
 
@@ -251,11 +264,18 @@ func _build_ui() -> Control:
 			button.pressed.connect(_key_pressed.bind(key))
 			row.add_child(button)
 
+	# A soft glow where the laser terminates, same as wrist_tablet.gd's own
+	# cursor and for the same real-headset reason — see that one's docstring.
 	_cursor = Control.new()
-	_cursor.size = Vector2(16, 16)
+	_cursor.size = Vector2(28, 28)
 	_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cursor.visible = false
-	_cursor.draw.connect(func() -> void: _cursor.draw_circle(Vector2(8, 8), 8.0, Color(1.0, 0.85, 0.1)))
+	_cursor.draw.connect(func() -> void:
+		var centre: Vector2 = _cursor.size * 0.5
+		for i in range(6, 0, -1):
+			_cursor.draw_circle(centre, float(i) * 2.0, Color(1.0, 0.85, 0.1, 0.06))
+		_cursor.draw_circle(centre, 5.0, Color(1.0, 0.95, 0.7, 0.9))
+	)
 	root.add_child(_cursor)
 
 	return root

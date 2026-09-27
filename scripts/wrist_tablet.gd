@@ -97,6 +97,7 @@ var _target_hover := false
 var _hovering := false
 var _pressed := false
 var _pointer_px := Vector2.ZERO
+var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger went down — see _send_click()'s own docstring for why this isn't just _pointer_px
 var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
@@ -178,6 +179,7 @@ func _update_pointer(normal: Vector3) -> void:
 	_hovering = false
 	var origin := _right.global_position
 	var dir := -_right.global_transform.basis.z.normalized()
+	var hit_distance := -1.0 ## -1 = not hovering anything of ours this frame; controller.gd's laser reads "ui_hit_distance" below to know how far to draw itself, falling back to its own part-raycast otherwise
 
 	# The wrist bullseye: a sphere-shaped hit area around it.
 	_target_hover = false
@@ -186,6 +188,8 @@ func _update_pointer(normal: Vector3) -> void:
 			origin, origin + dir * max_point_distance, _target.global_position, target_radius
 		)
 		_target_hover = not hits.is_empty()
+		if _target_hover:
+			hit_distance = origin.distance_to(hits[0])
 	if _target_hover != _last_target_hover:
 		_last_target_hover = _target_hover
 		for mat in _target_materials:
@@ -197,16 +201,30 @@ func _update_pointer(normal: Vector3) -> void:
 			var local: Vector3 = global_transform.affine_inverse() * hit
 			if absf(local.x) <= panel_size.x * 0.5 and absf(local.y) <= panel_size.y * 0.5:
 				_hovering = true
-				_pointer_px = Vector2(
-					(local.x / panel_size.x + 0.5) * viewport_size.x,
-					(0.5 - local.y / panel_size.y) * viewport_size.y
-				)
+				hit_distance = origin.distance_to(hit)
+				# While a click is being held, freeze the pointer at the press
+				# position instead of following the live aim — see
+				# _send_click()'s own docstring for the full reasoning: Godot's
+				# BaseButton cancels a press the instant ANY MouseMotion event
+				# lands outside its rect (tracked as "pressing_inside", checked
+				# again only at release), regardless of what position the
+				# eventual mouse-up event itself carries. A real hand's few mm
+				# of drift during a ~100-300ms trigger squeeze is enough to
+				# send at least one such motion event if this keeps tracking
+				# the live aim, silently cancelling the click before release
+				# even sees it.
+				if not _pressed:
+					_pointer_px = Vector2(
+						(local.x / panel_size.x + 0.5) * viewport_size.x,
+						(0.5 - local.y / panel_size.y) * viewport_size.y
+					)
 
 	_right.set_meta("ui_hover", _hovering or _target_hover)
+	_right.set_meta("ui_hit_distance", hit_distance)
 	_cursor.visible = _hovering
 	if _hovering:
 		_cursor.position = _pointer_px - _cursor.size * 0.5
-		if _pointer_px != _last_sent_px:
+		if not _pressed and _pointer_px != _last_sent_px:
 			var motion := InputEventMouseMotion.new()
 			motion.position = _pointer_px
 			motion.global_position = _pointer_px
@@ -225,6 +243,7 @@ func _on_right_pressed(action_name: String) -> void:
 	if action_name == click_action and _hovering:
 		if (Time.get_ticks_msec() - _opened_at_ms) < open_settle_seconds * 1000.0:
 			return
+		_press_px = _pointer_px
 		_send_click(true)
 		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
 
@@ -235,12 +254,28 @@ func _on_right_released(action_name: String) -> void:
 
 
 func _send_click(down: bool) -> void:
+	## Uses _press_px (frozen at the moment the trigger went down), not the
+	## live _pointer_px, for BOTH the down and up events — real-headset
+	## feedback: hover worked but buttons never actually activated. Root
+	## cause: a real hand's trigger squeeze takes real time (the physical
+	## press to release isn't instantaneous like a synthetic button_pressed/
+	## button_released emit in a test), and _pointer_px keeps tracking the
+	## laser every frame in between — so the "up" event used to land at
+	## wherever the aim had drifted to by release, not where it was at press.
+	## Godot's own Button only counts a click when down and up land on the
+	## SAME control (BaseButton::_gui_input checks the event's own carried
+	## position, not a separately-tracked live mouse position), so even a
+	## few pixels of real hand tremor during the hold was enough to silently
+	## drop every click while still showing a perfectly normal hover state
+	## throughout — exactly why this was invisible to every headless test
+	## (button_pressed.emit()/button_released.emit() there always fire with
+	## the simulated controller in the same, unmoving position).
 	_pressed = down
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down
-	click.position = _pointer_px
-	click.global_position = _pointer_px
+	click.position = _press_px
+	click.global_position = _press_px
 	click.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
 	_viewport.push_input(click)
 
@@ -383,12 +418,22 @@ func _build_ui() -> Control:
 	close.pressed.connect(close_tablet)
 	tab_row.add_child(close)
 
-	# Little dot showing where the laser is on the panel.
+	# A soft glow showing where the laser terminates on the panel — real-
+	# headset feedback wanted the laser to visibly stop and glow here rather
+	# than (per the old flat 8px dot, and the laser itself previously never
+	# shortening at all — see controller.gd's _update_laser_visual()) look
+	# like it passed straight through. Concentric fading rings read as a
+	# glow at arm's length better than one flat-alpha circle does.
 	_cursor = Control.new()
-	_cursor.size = Vector2(16, 16)
+	_cursor.size = Vector2(28, 28)
 	_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cursor.visible = false
-	_cursor.draw.connect(func() -> void: _cursor.draw_circle(Vector2(8, 8), 8.0, Color(1.0, 0.85, 0.1)))
+	_cursor.draw.connect(func() -> void:
+		var centre: Vector2 = _cursor.size * 0.5
+		for i in range(6, 0, -1):
+			_cursor.draw_circle(centre, float(i) * 2.0, Color(1.0, 0.85, 0.1, 0.06))
+		_cursor.draw_circle(centre, 5.0, Color(1.0, 0.95, 0.7, 0.9))
+	)
 	root.add_child(_cursor)
 
 	return root

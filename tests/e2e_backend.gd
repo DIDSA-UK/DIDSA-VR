@@ -37,22 +37,22 @@ func _initialize() -> void:
 	_timeout_ms = 60000
 	while not _done and Time.get_ticks_msec() - started_ms < _timeout_ms:
 		await process_frame
-		var status: String = main.status_label.text
+		var status: String = main.status_text
 		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't parse") or status.contains("no document.root_part_id"):
 			_done = true
 
 	var elapsed_ms := Time.get_ticks_msec() - started_ms
 	if not _done:
-		print("SMOKE FAILED: timed out after %d ms waiting for load. Last status: %s" % [_timeout_ms, main.status_label.text])
+		print("SMOKE FAILED: timed out after %d ms waiting for load. Last status: %s" % [_timeout_ms, main.status_text])
 		quit(1)
 		return
 
-	print("SMOKE final status: ", main.status_label.text)
+	print("SMOKE final status: ", main.status_text)
 	print("SMOKE part count: ", main._part_count)
 	print("SMOKE total wall time (instantiate to loaded): %d ms" % elapsed_ms)
 	print("SMOKE load summary: ", main._load_summary)
 
-	if main._part_count <= 0 or not main.status_label.text.begins_with("Loaded "):
+	if main._part_count <= 0 or not main.status_text.begins_with("Loaded "):
 		print("SMOKE FAILED: model did not load successfully")
 		quit(1)
 		return

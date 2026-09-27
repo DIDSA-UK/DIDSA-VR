@@ -39,14 +39,14 @@ func _initialize() -> void:
 	var timeout_ms := 60000
 	while not _done and Time.get_ticks_msec() - started_ms < timeout_ms:
 		await process_frame
-		var status: String = main.status_label.text
+		var status: String = main.status_text
 		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't parse"):
 			_done = true
-	if not _done or not main.status_label.text.begins_with("Loaded "):
-		print("SMOKE FAILED: model didn't load — status: ", main.status_label.text)
+	if not _done or not main.status_text.begins_with("Loaded "):
+		print("SMOKE FAILED: model didn't load — status: ", main.status_text)
 		quit(1)
 		return
-	print("SMOKE model loaded: ", main.status_label.text)
+	print("SMOKE model loaded: ", main.status_text)
 
 	mates_tool = main._mates_tool
 	mates_tool.set_active(true)

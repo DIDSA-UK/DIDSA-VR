@@ -45,7 +45,7 @@ func _initialize() -> void:
 	var th = main._two_hand
 	for i in 4:
 		await process_frame
-	print("SMOKE status: ", main.status_label.text)
+	print("SMOKE status: ", main.status_text)
 
 	# --- false positives: staring at the wrist (camera looking straight down at it, laser elsewhere) must NOT open it
 	r.position = Vector3(1.0, 1.5, 1.0)
@@ -86,7 +86,7 @@ func _initialize() -> void:
 	var fb := find_button(func(b): return b.text == "smoke_test.glb")
 	print("SMOKE files tab shows the file: ", fb != null)
 	await aim_and_click(fb)
-	print("SMOKE parts=", main._part_count, " ", th.scale_text(), " status=", main.status_label.text)
+	print("SMOKE parts=", main._part_count, " ", th.scale_text(), " status=", main.status_text)
 
 	# reload same file again (replaces the model, no dangling refs)
 	await aim_and_click(find_button(func(b): return b.text == "smoke_test.glb"))
@@ -143,5 +143,36 @@ func _initialize() -> void:
 	print("SMOKE tablet panel rendering after close: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
 	await process_frame
 	print("SMOKE after pressing X -> open=", tab._open, " visible=", tab.visible, " bullseye visible=", tab._target.visible)
+
+	# --- real-headset regression: a real trigger squeeze takes real time,
+	# during which a real hand drifts a little even when "aiming steadily" —
+	# _send_click() used to read the LIVE pointer position for both the down
+	# and up events, so the "up" landed wherever the drifted aim ended up,
+	# not where the button was at press-time. Godot's own Button only counts
+	# a click when down and up land on the SAME control, so this silently
+	# dropped every real click while hover still looked completely normal
+	# throughout — exactly why aim_and_click()'s own press+release-in-place
+	# pattern above never caught it. Reproduce the drift deliberately here.
+	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	for i in 3:
+		await process_frame
+	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
+	await create_timer(0.5).timeout # open_settle_seconds
+	var scale_tab := find_button(func(b): return b.text == "Scale")
+	var c: Vector2 = scale_tab.global_position + scale_tab.size * 0.5
+	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
+	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
+	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
+	for i in 3:
+		await process_frame
+	r.button_pressed.emit("trigger_click") # DOWN while aimed squarely at "Scale"
+	await process_frame
+	r.position.x += 0.05 # drift sideways mid-press — a real hand rarely holds a laser aim perfectly still for the ~100-300ms a trigger squeeze takes
+	for i in 3:
+		await process_frame # _update_pointer() keeps tracking the drifted aim every frame, same as it would on a real headset
+	r.button_released.emit("trigger_click") # UP now aimed somewhere else entirely
+	await process_frame
+	print("SMOKE a click still registers despite the hand drifting mid-press: ", tab._pages["Scale"].visible)
+
 	DirAccess.remove_absolute("user://models/smoke_test.glb")
 	quit()

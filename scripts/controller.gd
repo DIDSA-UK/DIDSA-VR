@@ -47,11 +47,12 @@ const OneEuro := preload("res://scripts/one_euro.gd")
 @export var nudge_min_speed: float = 0.03 ## metres/second floor, so a part right by your hand can still be pushed out
 @export var nudge_max_speed: float = 8.0 ## metres/second ceiling
 @export var stick_deadzone: float = 0.15
-@export var laser_length: float = 3.0 ## metres; fixed visual length, doesn't retarget to hit point
+@export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
 var held_node: Node3D = null
 var selected_node: Node3D = null
-var parts_enabled := true ## mode switch on the wrist tablet ("Individual part manipulation")
+var parts_enabled := true ## mode switch on the wrist tablet ("Individual part manipulation") — gates both grip-grab and laser-select
+var laser_select_enabled := true ## set false on the LEFT hand only (main.gd) per real-headset feedback: selecting with the left trigger blocked left-hand locomotion (is_manipulating()), so left grip-grab stays on but left laser-select (and the A/B/X/Y nudge + thumbstick rotate that ride on selected_node) is off, freeing the left laser for something else later. Independent of parts_enabled, which still gates grip on both hands.
 var command_stack = null ## set by main.gd; a shared command_stack.gd instance for undo/redo
 var hide_tool_active := false ## Tools tab's "Shoot to hide": trigger hides whatever the laser hits instead of selecting it
 var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate entity instead of selecting/hiding
@@ -59,6 +60,8 @@ var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
 
 var _laser: MeshInstance3D
+var _laser_mesh: CylinderMesh
+var _part_hit_distance := -1.0 ## metres to whatever _update_aim_hover()'s own raycast last hit, or -1 for nothing — set alongside _aim_hover_node
 var _select_material: StandardMaterial3D
 var _hover_material: StandardMaterial3D
 var _hover_node: Node3D = null ## the part a grip would grab right now, lightly highlighted
@@ -114,6 +117,7 @@ func set_steadiness(level: int) -> void:
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
 	_update_aim_hover()
+	_update_laser_visual()
 	if section_tool:
 		section_tool.update_held(self, delta, steadiness > 0)
 	if held_node != null:
@@ -194,7 +198,7 @@ func _on_button_pressed(action_name: String) -> void:
 		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
-		elif parts_enabled:
+		elif parts_enabled and laser_select_enabled:
 			_try_select()
 
 
@@ -387,9 +391,10 @@ func _update_aim_hover() -> void:
 	## select right now, so you know what a trigger pull will pick before
 	## you commit to it.
 	var hit := {}
-	if (parts_enabled or hide_tool_active or mates_tool_active) and held_node == null:
+	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
+	_part_hit_distance = global_position.distance_to(hit["point"]) if hit.has("point") else -1.0
 
 
 func _set_aim_hover(target: Node3D, point: Vector3) -> void:
@@ -454,22 +459,46 @@ func _add_visible_marker() -> void:
 
 func _add_laser() -> void:
 	_laser = MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.003
-	mesh.bottom_radius = 0.003
-	mesh.height = laser_length
-	_laser.mesh = mesh
+	_laser_mesh = CylinderMesh.new()
+	_laser_mesh.top_radius = 0.003
+	_laser_mesh.bottom_radius = 0.003
+	_laser_mesh.height = laser_length
+	_laser.mesh = _laser_mesh
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(0.3, 0.9, 1.0, 0.5)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mesh.material = mat
+	_laser_mesh.material = mat
 	add_child(_laser)
 	# Cylinder's long axis is local Y by default; rotate -90 about X so it
-	# points down local -Z (the controller's forward/aim direction), then
-	# shift it out by half its length so the near end sits at the hand.
+	# points down local -Z (the controller's forward/aim direction); see
+	# _set_laser_length() for how it's kept anchored at the hand as its own
+	# length changes every frame.
 	_laser.rotation_degrees.x = -90.0
-	_laser.position.z = -laser_length / 2.0
+	_set_laser_length(laser_length)
+
+
+func _set_laser_length(length: float) -> void:
+	_laser_mesh.height = length
+	_laser.position.z = -length / 2.0 # shift out by half its length so the near end always stays at the hand regardless of how long it currently is
+
+
+func _update_laser_visual() -> void:
+	## Shortens the laser to wherever it's actually terminating, instead of
+	## the fixed laser_length it always used to draw at regardless of what
+	## was in the way — real-headset feedback: aiming at the wrist tablet,
+	## the laser visibly passed straight through it rather than stopping
+	## there. A UI panel (wrist_tablet.gd/popup_keyboard.gd, reported via
+	## the "ui_hit_distance" meta those scripts set on us every frame — same
+	## convention "ui_hover" already uses) takes priority over a plain part
+	## hit, which takes priority over the default full length.
+	var distance := laser_length
+	var ui_distance: float = get_meta("ui_hit_distance", -1.0)
+	if ui_distance >= 0.0:
+		distance = ui_distance
+	elif _part_hit_distance >= 0.0:
+		distance = _part_hit_distance
+	_set_laser_length(clampf(distance, 0.02, laser_length))
 
 
 func _add_aim_label() -> void:

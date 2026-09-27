@@ -30,25 +30,32 @@ live-synced.
    drops the result about a metre in front of you.
 4. Each mesh can be manipulated two ways ("Individual part manipulation" in
    the vision brief), and the two are independent of each other: **grip**
-   grabs the part your hand is touching — anywhere on it, not just near its
-   middle (inside its bounding box or within 5 cm of it; a light cyan
-   highlight shows what a grip would take). The part stays attached exactly
-   where you took hold, so turning your hand turns it about that spot; its
-   position (not its rotation) goes through the same Steadiness filter as
-   whole-model moves, so a held hand's tremor doesn't reach it — it drops on
-   release, regardless of what's selected. Separately, point
-   at a part from a distance — a real ray test against its actual geometry
-   (not just a cone around its origin point, so big and overlapping parts
-   pick correctly; nearest hit wins) highlights it pale yellow and shows its
-   name — and pull the **trigger** to select it (trigger again, or aim at
-   nothing, to deselect) — while selected, the **thumbstick** rotates it
-   about the point the ray hit (or its centre), relative to how you're
-   currently looking (left/right spins it, up/down tips it away/towards you,
-   not around the part's own possibly-tilted axes), and **A/X**/**B/Y** pull
-   it nearer or push it farther — at a speed proportional to how far the part
-   is from your hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far
-   parts travel quickly and near ones can be placed finely. A thin cyan laser
-   shows where you're aiming; selected parts get a yellow highlight. Every
+   (either hand) grabs the part your hand is touching — anywhere on it, not
+   just near its middle (inside its bounding box or within 5 cm of it; a
+   light cyan highlight shows what a grip would take). The part stays
+   attached exactly where you took hold, so turning your hand turns it about
+   that spot; its position (not its rotation) goes through the same
+   Steadiness filter as whole-model moves, so a held hand's tremor doesn't
+   reach it — it drops on release, regardless of what's selected. Separately,
+   point at a part from a distance with the **right hand** — a real ray test
+   against its actual geometry (not just a cone around its origin point, so
+   big and overlapping parts pick correctly; nearest hit wins) highlights it
+   pale yellow and shows its name — and pull the **right trigger** to select
+   it (trigger again, or aim at nothing, to deselect) — while selected, the
+   **right thumbstick** rotates it about the point the ray hit (or its
+   centre), relative to how you're currently looking (left/right spins it,
+   up/down tips it away/towards you, not around the part's own possibly-
+   tilted axes), and **A/X**/**B/Y** pull it nearer or push it farther — at a
+   speed proportional to how far the part is from your hand (0.18 m/s at
+   30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far parts travel quickly and near
+   ones can be placed finely. The **left** trigger/thumbstick don't do this —
+   left-hand select used to block left-hand walking (see item 5) whenever a
+   part was selected there, so laser-select is right-hand only for now,
+   freeing the left trigger up for a later tool (not decided yet); left grip
+   is unaffected and still grabs normally. A thin cyan laser shows where
+   you're aiming, shortening to stop exactly on whatever it's actually
+   hitting (a part, or the wrist tablet/popup keyboard) rather than always
+   drawing at a fixed length; selected parts get a yellow highlight. Every
    part move (grip-drag or laser rotate/nudge) is undoable — see the wrist
    tablet's Undo/Redo below.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
@@ -78,8 +85,10 @@ live-synced.
    to open the tablet; press the **X** on the tablet to close it. It never
    opens by itself, so looking at your wrist can't trigger it. While the
    laser is over the bullseye or the tablet, the trigger presses those
-   instead of selecting a part. **Undo**/**Redo** buttons sit above the tabs,
-   visible whatever tab is open — see item 9 below. Tabs:
+   instead of selecting a part — the laser itself shortens to stop exactly
+   there, with a soft glow where it lands, rather than passing through.
+   **Undo**/**Redo** buttons sit above the tabs, visible whatever tab is
+   open — see item 9 below. Tabs:
    - **Modes** — switch model movement, user movement and part manipulation
      on or off independently, and set **Steadiness** (Off / Light / Medium /
      Strong): an adaptive filter on your hands while you hold the model *or*
@@ -175,9 +184,6 @@ live-synced.
     dragging in real time. One plane for now. Turning the tool off drops
     the gizmo and restores every part's real appearance. Undoable (one
     command per grab/drag), toggling the tool and Flip are not.
-14. A floating status label shows what's happening (importing, downloading,
-    parse errors, part count) since you won't have a terminal visible once
-    you're in the headset.
 
 ## 1. Drop in a real assembly
 
@@ -212,8 +218,9 @@ api_key="your-CAD_API_KEY"
   Android-only.
 - `api_key` — matches your backend's `CAD_API_KEY`.
 
-If `secrets.cfg` is missing, the app shows that on the status label instead
-of silently trying (and failing) to hit an empty URL.
+If `secrets.cfg` is missing, the app prints that to the console (and to
+`main.status_text`) instead of silently trying (and failing) to hit an empty
+URL.
 
 A few more knobs live on the **Main** node's Inspector, under **Backend**,
 if you need to change them from their defaults:
@@ -238,9 +245,9 @@ checking.
 ## 3. Desktop preview (no headset needed first)
 
 Press **F6** (run current scene) in the editor. You should see the console
-log the import, then the download and part count, and the status label
-update in the 3D view. This alone tells you whether the endpoint, API key
-and glTF parse are all working, before you touch export/sideload at all.
+log the import, then the download and part count. This alone tells you
+whether the endpoint, API key and glTF parse are all working, before you
+touch export/sideload at all.
 
 ## 4. Export to Quest
 

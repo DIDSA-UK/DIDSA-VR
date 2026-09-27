@@ -35,7 +35,7 @@ extends Node3D
 
 @onready var http_request: HTTPRequest = $HTTPRequest
 @onready var assembly_root: Node3D = $AssemblyRoot
-@onready var status_label: Label3D = $StatusLabel3D
+var status_text: String = "" ## what _set_status() last said — console-only now (see that function): no floating 3D text in the scene, per John's own real-headset feedback that it was distracting. Kept as a plain string (not just a print) so tests/e2e_*.gd can still poll it to know when a load finished.
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
@@ -77,6 +77,7 @@ func _ready() -> void:
 	$XROrigin3D/RightController.mates_tool = _mates_tool
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
+	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
 	_mates_tool.configure_backend(backend_url, api_key)
@@ -620,5 +621,4 @@ func _all_descendants(root: Node) -> Array[Node]:
 
 func _set_status(text: String) -> void:
 	print("DIDSA VR spike: ", text)
-	if status_label:
-		status_label.text = text
+	status_text = text
