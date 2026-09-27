@@ -8,13 +8,32 @@ extends XRController3D
 ##    B even while part A is still selected.
 ## 2. Laser-select (trigger, long range): point at a part and pull the
 ##    trigger to select it (trigger again, or aim at nothing, to deselect).
-##    While selected: the thumbstick rotates it in place, relative to how
-##    you're currently looking (left/right spins it, up/down tips it
-##    away/towards you) rather than the part's own, possibly already-tilted,
-##    axes. A/X pulls it nearer, B/Y pushes it farther. This is the vision
-##    brief's "Individual part manipulation" mode.
+##    Picking is a real physics ray test against each part's actual mesh
+##    (nearest hit wins), not the old angle-to-origin cone, which mis-picked
+##    big or overlapping parts whenever the ray missed a part's geometry but
+##    still passed near its origin. A hover highlight plus the part's name
+##    show what a pull of the trigger would select. While selected: the
+##    thumbstick rotates it in place, pivoting on the point the ray hit (or
+##    the part's centre, e.g. for a selection with no hit point) rather than
+##    the part's own origin — relative to how you're currently looking
+##    (left/right spins it, up/down tips it away/towards you) rather than the
+##    part's own, possibly already-tilted, axes. A/X pulls it nearer, B/Y
+##    pushes it farther. This is the vision brief's "Individual part
+##    manipulation" mode.
 ##
-## Attach this to both the left and right XRController3D nodes.
+## Attach this to both the left and right XRController3D nodes. Parts need a
+## collision shape to be ray-testable — main.gd calls create_trimesh_collision()
+## on every loaded MeshInstance3D for this reason.
+##
+## A held part's POSITION goes through the same adaptive One Euro filter as
+## whole-model moves (steadiness — see two_hand_model.gd), so a held hand
+## doesn't shake the part; its ROTATION follows your hand directly, same as
+## before (matching one-hand model-drag's own translation-only precedent —
+## there's no quaternion version of the filter yet). The wrist tablet's
+## Steadiness choice sets it on both hands as well as the model.
+
+const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, so the level numbers and cutoffs stay in one place
+const OneEuro := preload("res://scripts/one_euro.gd")
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -22,7 +41,6 @@ extends XRController3D
 ## rest of the part and grabbed things you weren't touching.)
 @export var select_action: String = "trigger_click"
 @export var select_max_distance: float = 8.0 ## metres; laser-select range
-@export var select_max_angle_degrees: float = 12.0 ## cone half-angle around where you're aiming
 @export var rotate_speed_degrees: float = 90.0 ## per second, at full thumbstick deflection
 @export var nudge_rate: float = 0.6 ## A/X and B/Y move a part this fraction of its distance from your hand every second:
 ## 0.6 m/s at 1 m, 3 m/s at 5 m, 0.18 m/s at 30 cm. Far parts travel fast, near ones can be placed finely.
@@ -34,11 +52,22 @@ extends XRController3D
 var held_node: Node3D = null
 var selected_node: Node3D = null
 var parts_enabled := true ## mode switch on the wrist tablet ("Individual part manipulation")
+var command_stack = null ## set by main.gd; a shared command_stack.gd instance for undo/redo
+var hide_tool_active := false ## Tools tab's "Shoot to hide": trigger hides whatever the laser hits instead of selecting it
 
 var _laser: MeshInstance3D
 var _select_material: StandardMaterial3D
 var _hover_material: StandardMaterial3D
 var _hover_node: Node3D = null ## the part a grip would grab right now, lightly highlighted
+var _aim_hover_material: StandardMaterial3D
+var _aim_hover_node: Node3D = null ## the part the laser would select right now, lightly highlighted
+var _aim_label: Label3D ## floats near the hit point, showing the hovered part's name
+var _pivot_local: Vector3 = Vector3.ZERO ## selected_node's local-space point the thumbstick rotates about
+var _held_start_transform: Transform3D ## held_node's world transform when this grip grabbed it
+var _selected_start_transform: Transform3D ## selected_node's world transform when the laser selected it
+var steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES; set by the wrist tablet
+var _grab_offset: Transform3D ## held_node's pose in this hand's local frame, captured at grab time
+var _grab_filter := OneEuro.new() ## smooths this hand's own position while it's holding a part
 
 # Rotation is expressed relative to how the headset is currently looking
 # (world-up for spin, the camera's flattened right vector for tip), not the
@@ -51,6 +80,7 @@ var _camera: XRCamera3D
 func _ready() -> void:
 	button_pressed.connect(_on_button_pressed)
 	button_released.connect(_on_button_released)
+	set_steadiness(steadiness)
 	_add_visible_marker()
 	_add_laser()
 	_select_material = StandardMaterial3D.new()
@@ -61,14 +91,28 @@ func _ready() -> void:
 	_hover_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hover_material.albedo_color = Color(0.3, 0.9, 1.0, 0.25)
 	_hover_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_aim_hover_material = StandardMaterial3D.new()
+	_aim_hover_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_aim_hover_material.albedo_color = Color(1.0, 1.0, 0.6, 0.3)
+	_aim_hover_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_add_aim_label()
 
 	var parent := get_parent()
 	if parent:
 		_camera = parent.get_node_or_null("XRCamera3D") as XRCamera3D
 
 
+func set_steadiness(level: int) -> void:
+	steadiness = clampi(level, 0, TwoHandModel.STEADINESS_NAMES.size() - 1)
+	_grab_filter.min_cutoff = maxf(TwoHandModel.STEADINESS_CUTOFF_HZ[steadiness], 0.01)
+	_grab_filter.beta = TwoHandModel.STEADINESS_BETA
+
+
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
+	_update_aim_hover()
+	if held_node != null:
+		_update_held_part(delta)
 	if selected_node == null:
 		return
 
@@ -82,10 +126,12 @@ func _physics_process(delta: float) -> void:
 				pitch_axis = camera_right.normalized()
 		# Left/right spins around world-up, as seen from in front of the part;
 		# up/down tips it away from or towards you around the camera's own
-		# flattened right axis. Both are global-space rotations pivoting on
-		# the part's own origin, so they never drift onto the part's local axes.
-		selected_node.global_rotate(Vector3.UP, deg_to_rad(rotate_speed_degrees) * stick.x * delta)
-		selected_node.global_rotate(pitch_axis, deg_to_rad(rotate_speed_degrees) * -stick.y * delta)
+		# flattened right axis. Both pivot on where the ray hit when it was
+		# selected (or the part's centre), not the part's own origin, so a
+		# part grabbed by an edge swings from that edge rather than spinning
+		# in place about a point that might be nowhere near your aim.
+		_rotate_about_pivot(selected_node, Vector3.UP, deg_to_rad(rotate_speed_degrees) * stick.x * delta)
+		_rotate_about_pivot(selected_node, pitch_axis, deg_to_rad(rotate_speed_degrees) * -stick.y * delta)
 
 	var forward := -global_transform.basis.z.normalized()
 	var speed := nudge_speed_for(selected_node)
@@ -124,17 +170,21 @@ func reset_interaction() -> void:
 	_try_release()
 	_clear_selection()
 	_set_grab_hover(null)
+	_set_aim_hover(null, Vector3.ZERO)
 
 
 func _on_button_pressed(action_name: String) -> void:
-	if not parts_enabled:
-		return
 	if action_name == grab_action:
-		_try_grab()
+		if parts_enabled:
+			_try_grab()
 	elif action_name == select_action:
 		if has_meta("ui_hover") and get_meta("ui_hover"):
-			return # laser is over the wrist tablet (wrist_tablet.gd): the click is for it, not a part.
-		_try_select()
+			return # laser is over the wrist tablet or popup keyboard: the click is for them, not a part.
+		if hide_tool_active:
+			# Its own tool, independent of "Individual part manipulation" mode.
+			_try_shoot_hide()
+		elif parts_enabled:
+			_try_select()
 
 
 func _on_button_released(action_name: String) -> void:
@@ -151,9 +201,14 @@ func _try_grab() -> void:
 	if target:
 		_set_grab_hover(null)
 		target.set_meta("held", true)
-		# Keeps its world pose, so it's now rigidly attached to your hand exactly where
-		# you took hold of it: turning your hand turns the part about that spot.
-		target.reparent(self, true)
+		_held_start_transform = target.global_transform
+		# Its pose relative to this hand right now, kept exactly where you took
+		# hold of it: turning your hand turns the part about that spot. Stays
+		# under assembly_root rather than reparenting to the hand, since
+		# _update_held_part() drives its transform explicitly every frame (so
+		# steadiness — see below — can filter the hand's position first).
+		_grab_offset = global_transform.affine_inverse() * target.global_transform
+		_grab_filter.reset(global_position)
 		held_node = target
 
 
@@ -169,6 +224,8 @@ func _find_grab_target() -> Node3D:
 		if not (node is MeshInstance3D):
 			continue
 		if node.has_meta("held") and node.get_meta("held"):
+			continue
+		if not node.visible: # a shot-hidden part isn't there to touch either
 			continue
 		var reach := _reach_distance(node)
 		if reach > grab_reach:
@@ -211,15 +268,50 @@ func _try_release() -> void:
 	if held_node == null:
 		return
 
-	held_node.set_meta("held", false)
-	var assembly_root := get_tree().get_first_node_in_group("assembly_root")
-	if assembly_root:
-		held_node.reparent(assembly_root, true)
+	var part := held_node
+	part.set_meta("held", false)
 	held_node = null
+	_push_move_command(part, _held_start_transform)
+
+
+func _update_held_part(delta: float) -> void:
+	## Filters this hand's position (not its rotation — see the class-level
+	## comment) before applying the grab offset, so a held hand's few-mm
+	## tremor doesn't reach the part while a deliberate move still does.
+	var filtered_pos := global_position if steadiness == 0 else _grab_filter.filter(global_position, delta)
+	held_node.global_transform = Transform3D(global_transform.basis, filtered_pos) * _grab_offset
+
+
+func _push_move_command(part: Node3D, before: Transform3D) -> void:
+	if command_stack == null or not is_instance_valid(part):
+		return
+	var after := part.global_transform
+	if before.is_equal_approx(after):
+		return # no net move: nothing worth undoing
+	command_stack.push("move %s" % part.name,
+		func() -> void: part.global_transform = before,
+		func() -> void: part.global_transform = after)
+
+
+func _try_shoot_hide() -> void:
+	## Tools tab's "Shoot to hide": the same real ray test as laser-select,
+	## but the trigger hides the hit part instead of selecting it.
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var part: Node3D = hit.get("part")
+	if part == null:
+		return
+	if part == selected_node:
+		_clear_selection() # can't stay "selected" once it's hidden
+	if command_stack:
+		command_stack.push("hide %s" % part.name,
+			func() -> void: part.visible = true,
+			func() -> void: part.visible = false)
+	part.visible = false
 
 
 func _try_select() -> void:
-	var target := _find_aim_target()
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var target: Node3D = hit.get("part")
 
 	if selected_node != null:
 		var previous := selected_node
@@ -228,45 +320,92 @@ func _try_select() -> void:
 			return # pressed trigger again on the same part: deselect and stop.
 
 	if target != null:
-		_set_selection(target)
+		var pivot_point: Vector3 = hit.get("point", target.global_position)
+		_set_selection(target, pivot_point)
 
 
-func _find_aim_target() -> Node3D:
-	var forward := -global_transform.basis.z.normalized()
-	var origin := global_transform.origin
-	var best: Node3D = null
-	var best_angle := deg_to_rad(select_max_angle_degrees)
-
-	for node in get_tree().get_nodes_in_group("grabbable_parts"):
-		if not (node is Node3D):
+func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> Dictionary:
+	## A real ray test against the parts' actual collision geometry (see
+	## main.gd's create_trimesh_collision() call) — nearest hit wins,
+	## replacing the old cone around each part's origin point, which
+	## mis-picked whenever a part's origin sat within the cone but the ray
+	## never actually touched its geometry (or missed a nearer overlapping
+	## part entirely). Held or hidden parts are click-through: a shot-hidden
+	## part in front of something else shouldn't keep blocking the ray.
+	## Returns {} if nothing was hit, else {"part": Node3D, "point": Vector3}
+	## (world-space hit point).
+	if not is_inside_tree():
+		return {}
+	var space_state := get_world_3d().direct_space_state
+	var excluded: Array[RID] = []
+	for _attempt in 8: # generous cap so a stack of hidden/held parts can't loop forever
+		var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * max_distance)
+		query.exclude = excluded
+		var result := space_state.intersect_ray(query)
+		if result.is_empty():
+			return {}
+		var collider: Object = result.get("collider")
+		var part: Node3D = collider.get_parent() if collider is StaticBody3D else null
+		if part == null or not part.is_in_group("grabbable_parts"):
+			return {}
+		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
+			excluded.append((collider as StaticBody3D).get_rid())
 			continue
-		if node.has_meta("held") and node.get_meta("held"):
-			continue
-		if node.has_meta("selected") and node.get_meta("selected") and node != selected_node:
-			continue
-		var to_target: Vector3 = node.global_transform.origin - origin
-		var dist := to_target.length()
-		if dist > select_max_distance or dist < 0.001:
-			continue
-		var angle := forward.angle_to(to_target.normalized())
-		if angle < best_angle:
-			best_angle = angle
-			best = node
-
-	return best
+		return {"part": part, "point": result.get("position")}
+	return {}
 
 
-func _set_selection(node: Node3D) -> void:
+func _update_aim_hover() -> void:
+	## Light highlight plus the part's name on whatever the laser would
+	## select right now, so you know what a trigger pull will pick before
+	## you commit to it.
+	var hit := {}
+	if (parts_enabled or hide_tool_active) and held_node == null:
+		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
+
+
+func _set_aim_hover(target: Node3D, point: Vector3) -> void:
+	if target == _aim_hover_node and is_instance_valid(target):
+		_aim_label.global_position = point + Vector3(0, 0.05, 0)
+		return
+	if is_instance_valid(_aim_hover_node) and _aim_hover_node != selected_node and _aim_hover_node.material_overlay == _aim_hover_material:
+		_aim_hover_node.material_overlay = null
+	_aim_hover_node = target
+	if is_instance_valid(_aim_hover_node):
+		if _aim_hover_node != selected_node:
+			_aim_hover_node.material_overlay = _aim_hover_material
+		_aim_label.text = _aim_hover_node.name
+		_aim_label.global_position = point + Vector3(0, 0.05, 0)
+		_aim_label.visible = true
+	else:
+		_aim_label.visible = false
+
+
+func _rotate_about_pivot(node: Node3D, axis: Vector3, angle: float) -> void:
+	var pivot := node.global_transform * _pivot_local
+	var rot := Basis(axis, angle)
+	var t := node.global_transform
+	t.origin = pivot + rot * (t.origin - pivot)
+	t.basis = rot * t.basis
+	node.global_transform = t
+
+
+func _set_selection(node: Node3D, pivot_point: Vector3) -> void:
 	selected_node = node
 	node.set_meta("selected", true)
 	node.material_overlay = _select_material
+	_pivot_local = node.global_transform.affine_inverse() * pivot_point
+	_selected_start_transform = node.global_transform
 
 
 func _clear_selection() -> void:
 	if selected_node:
-		selected_node.set_meta("selected", false)
-		selected_node.material_overlay = null
-	selected_node = null
+		var part := selected_node
+		part.set_meta("selected", false)
+		part.material_overlay = null
+		selected_node = null
+		_push_move_command(part, _selected_start_transform)
 
 
 func _add_visible_marker() -> void:
@@ -304,3 +443,13 @@ func _add_laser() -> void:
 	# shift it out by half its length so the near end sits at the hand.
 	_laser.rotation_degrees.x = -90.0
 	_laser.position.z = -laser_length / 2.0
+
+
+func _add_aim_label() -> void:
+	_aim_label = Label3D.new()
+	_aim_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_aim_label.no_depth_test = true
+	_aim_label.font_size = 32
+	_aim_label.outline_size = 10
+	_aim_label.visible = false
+	add_child(_aim_label)

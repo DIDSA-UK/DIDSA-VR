@@ -33,17 +33,24 @@ live-synced.
    grabs the part your hand is touching — anywhere on it, not just near its
    middle (inside its bounding box or within 5 cm of it; a light cyan
    highlight shows what a grip would take). The part stays attached exactly
-   where you took hold, so turning your hand turns it about that spot; it
-   moves 1:1 and drops on release, regardless of what's selected. Separately, point
-   at a part from a distance and pull the **trigger** to select it (trigger
-   again, or aim at nothing, to deselect) — while selected, the
-   **thumbstick** rotates it relative to how you're currently looking
-   (left/right spins it, up/down tips it away/towards you, not around the
-   part's own possibly-tilted axes), and **A/X**/**B/Y** pull it nearer or
-   push it farther — at a speed proportional to how far the part is from your
-   hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far parts
-   travel quickly and near ones can be placed finely. A thin cyan laser shows where you're aiming; selected
-   parts get a yellow highlight.
+   where you took hold, so turning your hand turns it about that spot; its
+   position (not its rotation) goes through the same Steadiness filter as
+   whole-model moves, so a held hand's tremor doesn't reach it — it drops on
+   release, regardless of what's selected. Separately, point
+   at a part from a distance — a real ray test against its actual geometry
+   (not just a cone around its origin point, so big and overlapping parts
+   pick correctly; nearest hit wins) highlights it pale yellow and shows its
+   name — and pull the **trigger** to select it (trigger again, or aim at
+   nothing, to deselect) — while selected, the **thumbstick** rotates it
+   about the point the ray hit (or its centre), relative to how you're
+   currently looking (left/right spins it, up/down tips it away/towards you,
+   not around the part's own possibly-tilted axes), and **A/X**/**B/Y** pull
+   it nearer or push it farther — at a speed proportional to how far the part
+   is from your hand (0.18 m/s at 30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far
+   parts travel quickly and near ones can be placed finely. A thin cyan laser
+   shows where you're aiming; selected parts get a yellow highlight. Every
+   part move (grip-drag or laser rotate/nudge) is undoable — see the wrist
+   tablet's Undo/Redo below.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
    **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
    teleport (push forward and point the right hand's laser at the floor — a
@@ -54,34 +61,49 @@ live-synced.
    spins it). The one-hand drag scales with the model: 1:1 for anything up
    to about 1.2 m across, then proportionally faster (a model 12 m across
    moves 10 cm for every 1 cm of hand, capped at 15x), so big models don't
-   need endless re-grabbing. With **both hands** it moves with them, turns as you swing the
-   line between your hands, and scales (3x as sensitive as the raw hand spread, `scale_gain`) as you spread or close them, pivoting
-   on the midpoint between your hands. Every turn builds on the model's
-   current orientation, so you can rotate about one axis and then another
-   naturally. Switching between one and two hands never makes the model
-   jump.
+   need endless re-grabbing. With **both hands** it moves with them (dragging
+   is amplified by that same size-based gain, so a big model doesn't need
+   endless re-grabbing two-handed either), turns as you swing the line
+   between your hands, and scales (3x as sensitive as the raw hand spread,
+   `scale_gain`) as you spread or close them — turning and scaling are
+   deliberately left at their own raw sensitivity, not gain-amplified, so a
+   given wrist swing always turns the model by the same angle regardless of
+   its size. Pivots on the midpoint between your hands (or, once the drag
+   gain has carried the model away from your hands on a big model, a virtual
+   point that tracks it). Every turn builds on the model's current
+   orientation, so you can rotate about one axis and then another naturally.
+   Switching between one and two hands never makes the model jump.
 7. **Wrist tablet.** A small cyan bullseye floats above your left wrist.
    Point the right hand's laser at it (it turns yellow) and pull the trigger
    to open the tablet; press the **X** on the tablet to close it. It never
    opens by itself, so looking at your wrist can't trigger it. While the
    laser is over the bullseye or the tablet, the trigger presses those
-   instead of selecting a part. Tabs:
+   instead of selecting a part. **Undo**/**Redo** buttons sit above the tabs,
+   visible whatever tab is open — see item 9 below. Tabs:
    - **Modes** — switch model movement, user movement and part manipulation
      on or off independently, and set **Steadiness** (Off / Light / Medium /
-     Strong): an adaptive filter on your hands while you hold the model, so a
-     held hand doesn't shake it but deliberate moves stay direct (measured:
-     Medium removes ~80% of a simulated 2 mm hand tremor and adds about 1 mm
-     of lag on a slow 2 cm/s move).
+     Strong): an adaptive filter on your hands while you hold the model *or*
+     grip a single part, so a held hand doesn't shake it but deliberate moves
+     stay direct (measured: Medium removes ~80% of a simulated 2 mm hand
+     tremor and adds about 1 mm of lag on a slow 2 cm/s move — same numbers
+     either way, whole-model or a single held part).
    - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
      about the model's centre; lock the scale (also stops the two-hand
      spread/close and Fit from resizing); **Fit to view** brings the whole
      model in front of you at a comfortable size; **Home** returns it to
-     where it first loaded (not while the scale is locked).
-   - **Files** — load a `.glb`/`.gltf` from the `models/` folder next to
+     where it first loaded (not while the scale is locked). For an exact
+     value, click the **right thumbstick** — see item 8.
+   - **Tools** — see item 10.
+   - **Files** — load a model from the `models/` folder next to
      `project.godot` (or `user://models`, which also works in an exported
-     build) with no backend at all. Local files are read as metres, so 1:1
-     is the file's own size; change `local_glb_scale` on Main if yours are
-     in millimetres. The `models/` contents are git-ignored.
+     build). A `.glb`/`.gltf` loads straight from disk, no backend at all,
+     read as metres (change `local_glb_scale` on Main if yours are in
+     millimetres). A `.step`/`.stp`/`.stl`/`.obj` needs a configured backend
+     (see `secrets.cfg.example`) — the client can't decode these itself, so
+     it creates a new Part on the backend, uploads the file to
+     `POST /parts/{id}/import-features`, then fetches and renders it the
+     same way as any other backend part. The `models/` contents are
+     git-ignored.
    - **Perf** — fps, CPU/GPU render time, script and physics time, part
      count, draw calls, load times; plus the levers for speed: **Shadows**,
      **Resolution** (100/80/65% of the headset runtime's size) and **MSAA**.
@@ -89,12 +111,35 @@ live-synced.
      Resolution or MSAA; high CPU means scripts. The tablet only renders and
      measures while open.
 
-   The right thumbstick click is reserved for the popup keyboard (not built
-   yet). With no `secrets.cfg` the app now starts anyway, ready for a local
-   file.
-8. A floating status label shows what's happening (importing, downloading,
-   parse errors, part count) since you won't have a terminal visible once
-   you're in the headset.
+   With no `secrets.cfg` the app now starts anyway, ready for a local file.
+8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
+   numeric keypad floating in front of you, pre-filled with the model's
+   current scale multiple — its first real use, per the vision brief's "for
+   any text entry" (reserved since the wrist tablet was built). Type a new
+   number (the first keystroke replaces the pre-filled value rather than
+   appending to it) and press **OK** to apply it — this goes through the
+   same scale-preset code as the Scale tab's buttons, so it's undoable the
+   same way; **Cancel**, or clicking the right thumbstick again, backs out
+   without applying anything. Aim and click its keys with the right hand's
+   laser and trigger, same as the wrist tablet.
+9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
+   whole-model move (one/two-hand drag, and the Scale tab's presets/Fit/
+   Home), and Tools-tab hide/show action goes onto one shared history —
+   **Undo**/**Redo** on the wrist tablet step back/forward through it. A
+   drag that ends up back where it started doesn't push anything. The
+   history is cleared whenever the model is replaced (loading a different
+   file), since it can't point at parts that no longer exist.
+10. **Tools tab.** **Shoot to hide** — toggle it on, then point the right
+    hand's laser at a part (same hover+name as normal selection) and pull
+    the trigger to hide it. **Hide all** / **Show all** toggle every part at
+    once. **Reverse visibility** flips every part's hidden/shown state.
+    **Isolate selected** hides everything except whichever part is currently
+    laser-selected (select it first, then press Isolate). All four are
+    undoable. A hidden part is click-through for both the laser and grip —
+    it's out of the way, not just invisible.
+11. A floating status label shows what's happening (importing, downloading,
+    parse errors, part count) since you won't have a terminal visible once
+    you're in the headset.
 
 ## 1. Drop in a real assembly
 
@@ -191,19 +236,20 @@ button.
   the ratio to check first, not the model itself.
 - You can see roughly where your hands are (a small glowing marker on each
   controller — bare `XRController3D` draws nothing on its own).
-- Two of the vision brief's four manipulation modes are built: individual
+- All four of the vision brief's manipulation modes are built: individual
   part manipulation (grip to grab close, trigger-laser to select and then
-  grip/thumbstick/A-B at a distance) and user movement (thumbstick walk,
-  snap-turn, teleport). Still open: whole-model two-hand rotate/scale, and
-  scale views (jump to real-life / preset scales, with a lock).
-- Only native `.didsa`/`.DIDSAprt` import is wired up so far. STEP, glTF and
-  OBJ/STL loading (the rest of milestone 1's "done when") aren't built yet —
-  the backend already has the pieces (`POST /parts/{id}/import-features` for
-  STEP/OBJ/STL, straight-to-Godot `GLTFDocument` for a bare `.glb`), they
-  just aren't hooked up in this client yet.
-- You have a felt sense of load time and frame rate on real Quest hardware,
-  which is the actual point — the vision brief's payload estimates (~90–100
-  KB for a 186-instance test assembly) were never measured on-headset.
+  grip/thumbstick/A-B at a distance), user movement (thumbstick walk,
+  snap-turn, teleport), whole-model movement (one/two-hand drag, turn and
+  scale), and scale views (jump to real-life/preset scales, with a lock).
+- Native `.didsa`/`.DIDSAprt` import, bare `.glb`/`.gltf` (no backend round
+  trip), and STEP/STL/OBJ (via the backend's `import-features`) are all
+  wired up — milestone 1's full "done when" list of formats. (Bare glTF
+  import was never actually blocked on anything; it's Godot's own
+  `GLTFDocument`, already used for local files.)
+- You have a felt sense of load time and frame rate — but only over PCVR so
+  far, never on real Quest hardware, which was the actual point of that
+  bullet. The vision brief's payload estimates (~90–100 KB for a
+  186-instance test assembly) still haven't been measured on-headset.
 
 ## Known gaps this project doesn't solve yet
 

@@ -59,6 +59,18 @@ for conversion code — there is none). A raw glTF coordinate is 1 metre by
 spec, so **the VR client must scale the loaded scene by 0.001** or everything
 renders ~1000x too large. See `main.gd`'s `spawn_scale`.
 
+**Up-axis: Y-up, matching glTF and Godot — no correction needed.**
+`mesh_export.py` writes vertices straight through, `(x, y, z) -> (x, y, z)`,
+with no axis remap of any kind — so whatever "up" means in the backend's own
+native coordinate system is exactly what a client sees. Confirmed from
+DIDSA-CAD's own history (`docs/status.md` there, 2026-07-08 entries): "this
+app's camera and backend both already use Y-up, matching glTF's spec" — the
+mirroring bug investigated that day turned out to be a specific *imported*
+file (from Blender) that itself wasn't correctly Y-up internally, not a
+backend/glTF mismatch. Practical effect for this client: any future "standard
+views" (front/top/right) can just use Godot's own Y-up axes directly against
+a loaded assembly-mesh.glb — no axis-swap step needed first.
+
 ## Assembly mesh (the endpoint this client actually renders)
 
 ```

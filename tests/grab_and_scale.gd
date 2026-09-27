@@ -38,14 +38,18 @@ func _initialize() -> void:
 	await physics_frame; await physics_frame
 	print("SMOKE hover highlight off when away: ", bar.material_overlay == null)
 
-	# grabbing at the end: the part turns about where you took hold of it
+	# grabbing at the end: the part turns about where you took hold of it.
+	# Steadiness off: isolates the pure grab-offset geometry from the
+	# hold-steadiness filter (that's steadiness_filter.gd's job).
 	l.position = Vector3(0.45, 1, -1)
+	l.set_steadiness(0)
 	await physics_frame
 	var grab_point_local: Vector3 = bar.global_transform.affine_inverse() * l.global_position
 	l._try_grab()
 	print("SMOKE grabbed: ", l.held_node == bar)
 	l.rotation_degrees = Vector3(0, 90, 30)   # turn the hand
 	l.position += Vector3(0.2, 0.1, 0.0)      # and move it
+	await physics_frame # held_node's transform is now driven from _physics_process, not instant reparenting
 	var where_grabbed_now: Vector3 = bar.global_transform * grab_point_local
 	print("SMOKE grab point stays in the hand after moving+turning (distance): ", snappedf(where_grabbed_now.distance_to(l.global_position), 0.0001))
 	print("SMOKE part centre swung away from hand (distance ~0.45): ", snappedf(bar.global_position.distance_to(l.global_position), 0.001))

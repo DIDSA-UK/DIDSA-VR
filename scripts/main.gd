@@ -39,11 +39,13 @@ extends Node3D
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
+var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
 var _two_hand: Node
 var _tablet: Node
+var _keyboard: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -61,6 +63,10 @@ func _ready() -> void:
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_wrist_tablet()
+	_add_popup_keyboard()
+	$XROrigin3D/LeftController.command_stack = command_stack
+	$XROrigin3D/RightController.command_stack = command_stack
+	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
@@ -74,15 +80,122 @@ func _add_two_hand_model() -> void:
 	var two_hand := preload("res://scripts/two_hand_model.gd").new()
 	two_hand.name = "TwoHandModel"
 	add_child(two_hand)
-	two_hand.setup(assembly_root, $XROrigin3D/LeftController, $XROrigin3D/RightController, spawn_scale)
+	two_hand.setup(assembly_root, $XROrigin3D/LeftController, $XROrigin3D/RightController, spawn_scale, command_stack)
 	_two_hand = two_hand
 
 
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack)
 	_tablet = tablet
+
+
+func _add_popup_keyboard() -> void:
+	## The vision brief's popup keyboard, reserved on the right thumbstick
+	## click since the wrist tablet was built. First real use: typing an
+	## exact scale multiple (see _on_right_stick_click below).
+	var keyboard := preload("res://scripts/popup_keyboard.gd").new()
+	keyboard.name = "PopupKeyboard"
+	add_child(keyboard)
+	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	_keyboard = keyboard
+
+
+func _on_right_stick_click(action_name: String) -> void:
+	if action_name != "primary_click":
+		return
+	if _keyboard.is_open():
+		_keyboard.close()
+		return
+	_keyboard.open_for(_trim_number(_two_hand.current_multiple()), _on_scale_typed)
+
+
+func _on_scale_typed(text: String) -> void:
+	var value := text.to_float()
+	if value > 0.0:
+		_two_hand.set_preset(value)
+
+
+# --- Tools tab (wrist_tablet.gd): hide/show all, reverse visibility, isolate.
+# Shoot-to-hide itself is per-hand (controller.gd's hide_tool_active/_try_shoot_hide);
+# these are the whole-assembly operations, so they live here alongside
+# list_model_files()/load_glb_file() — the other model-wide API the tablet calls into.
+
+func hide_all_parts() -> void:
+	_set_all_visibility(false, "hide all")
+
+
+func show_all_parts() -> void:
+	_set_all_visibility(true, "show all")
+
+
+func reverse_visibility() -> void:
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	if parts.is_empty():
+		return
+	var before := {}
+	for p in parts:
+		before[p] = p.visible
+	for p in parts:
+		p.visible = not p.visible
+	_push_visibility_command("reverse visibility", before)
+
+
+func isolate_selected() -> void:
+	var target := _current_selected_part()
+	if target == null:
+		return
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	var before := {}
+	for p in parts:
+		before[p] = p.visible
+	for p in parts:
+		p.visible = (p == target)
+	_push_visibility_command("isolate %s" % target.name, before)
+
+
+func _current_selected_part() -> Node3D:
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		if hand.selected_node != null:
+			return hand.selected_node
+	return null
+
+
+func _set_all_visibility(vis: bool, label: String) -> void:
+	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	if parts.is_empty():
+		return
+	var before := {}
+	var changed := false
+	for p in parts:
+		before[p] = p.visible
+		if p.visible != vis:
+			changed = true
+	if not changed:
+		return # nothing to undo if it was already all hidden/shown
+	for p in parts:
+		p.visible = vis
+	_push_visibility_command(label, before)
+
+
+func _push_visibility_command(label: String, before: Dictionary) -> void:
+	var after := {}
+	for p in before:
+		after[p] = p.visible
+	var undo_fn := func() -> void:
+		for p in before:
+			if is_instance_valid(p):
+				p.visible = before[p]
+	var redo_fn := func() -> void:
+		for p in after:
+			if is_instance_valid(p):
+				p.visible = after[p]
+	command_stack.push(label, undo_fn, redo_fn)
+
+
+func _trim_number(x: float) -> String:
+	return ("%.3f" % x).rstrip("0").rstrip(".")
 
 
 func set_measuring(on: bool) -> void:
@@ -264,19 +377,40 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % _part_count)
 
 
+## source_format string for each extension the backend's ImportSourceFormat
+## enum accepts (backend/app/document/models.py) — "step"/"stl"/"obj" go
+## through the backend's importer; glb/gltf load straight into Godot with no
+## backend round trip at all (see load_glb_file()).
+const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
+
 func list_model_files() -> PackedStringArray:
-	## .glb/.gltf files the tablet's Files tab offers: res://models (next to
-	## the project, for running from the editor) and user://models (which also
-	## works in an exported build).
+	## Model files the tablet's Files tab offers: res://models (next to the
+	## project, for running from the editor) and user://models (which also
+	## works in an exported build). .glb/.gltf load locally; .step/.stp/.stl/
+	## .obj need a configured backend (see load_model_file()).
 	var found := PackedStringArray()
+	var extensions := ["glb", "gltf"] + _BACKEND_IMPORT_FORMATS.keys()
 	for dir_path in ["res://models", "user://models"]:
 		var dir := DirAccess.open(dir_path)
 		if dir == null:
 			continue
 		for file_name in dir.get_files():
-			if file_name.get_extension().to_lower() in ["glb", "gltf"]:
+			if file_name.get_extension().to_lower() in extensions:
 				found.append(dir_path.path_join(file_name))
 	return found
+
+
+func load_model_file(path: String) -> void:
+	## Dispatches on extension: a bare .glb/.gltf loads straight from disk;
+	## .step/.stp/.stl/.obj need the backend's /import-features (it's the
+	## only thing that can decode them into geometry Godot can render).
+	var ext := path.get_extension().to_lower()
+	if ext in ["glb", "gltf"]:
+		load_glb_file(path)
+	elif ext in _BACKEND_IMPORT_FORMATS:
+		_import_external_file(path, _BACKEND_IMPORT_FORMATS[ext])
+	else:
+		_set_status("Don't know how to load %s (extension .%s)" % [path.get_file(), ext])
 
 
 func load_glb_file(path: String) -> void:
@@ -291,6 +425,92 @@ func load_glb_file(path: String) -> void:
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR spike: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func _import_external_file(path: String, source_format: String) -> void:
+	## STEP/STL/OBJ, milestone 1's last "done when" item: the backend has no
+	## bare "view this file" endpoint for these, so this creates a fresh Part
+	## (POST /parts), imports the file into it as a fixed Body
+	## (POST /parts/{id}/import-features), then fetches and renders it the
+	## same way as any other backend part (GET .../assembly-mesh.glb) —
+	## mirrors _begin_import()/_fetch_mesh()'s two-step flow, just starting
+	## from a local file instead of a native document, and with a "create
+	## part" step first since there's no existing part to import into.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("%s needs a backend (see secrets.cfg.example) — STEP/STL/OBJ can't be read without one." % path.get_file())
+		return
+	if not FileAccess.file_exists(path):
+		_set_status("No such file: %s" % path)
+		return
+
+	var started_ms := Time.get_ticks_msec()
+	_set_status("Reading %s..." % path.get_file())
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var data_b64 := Marshalls.raw_to_base64(bytes)
+
+	var req := HTTPRequest.new() # a separate node from http_request, which is spoken for by the startup import chain
+	add_child(req)
+	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+
+	_set_status("Creating a part for %s..." % path.get_file())
+	req.request(backend_url + API_PREFIX + "/parts", headers, HTTPClient.METHOD_POST, JSON.stringify({"name": path.get_file().get_basename()}))
+	var create_result: Array = await req.request_completed
+	var part_json = _parse_import_response(create_result, "create a part for %s" % path.get_file(), req)
+	if part_json == null:
+		return
+	var new_part_id: String = part_json.get("id", "")
+	if new_part_id.is_empty():
+		_set_status("Create-part response for %s had no id." % path.get_file())
+		req.queue_free()
+		return
+
+	_set_status("Importing %s (part %s)..." % [path.get_file(), new_part_id])
+	req.request(
+		backend_url + API_PREFIX + "/parts/%s/import-features" % new_part_id, headers, HTTPClient.METHOD_POST,
+		JSON.stringify({"source_format": source_format, "data_base64": data_b64})
+	)
+	var import_result: Array = await req.request_completed
+	if _parse_import_response(import_result, "import %s into part %s" % [path.get_file(), new_part_id], req) == null:
+		return
+
+	_set_status("Imported. Fetching mesh...")
+	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=false" % [backend_url, API_PREFIX, new_part_id, str(quality)]
+	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	var mesh_result: Array = await req.request_completed
+	req.queue_free()
+	var mesh_result_code: int = mesh_result[0]
+	var mesh_response_code: int = mesh_result[1]
+	var mesh_body: PackedByteArray = mesh_result[3]
+	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
+		_set_status("Mesh fetch for %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		return
+
+	_set_status("Downloaded %d KB, parsing glTF..." % int(mesh_body.size() / 1024.0))
+	if not _show_model(mesh_body, "", spawn_scale): # backend units are mm regardless of the source format — spawn_scale, not local_glb_scale
+		return
+	_load_summary = "load: %s (%s, via backend), %d KB, %d ms" % [path.get_file(), source_format, int(mesh_body.size() / 1024.0), Time.get_ticks_msec() - started_ms]
+	print("DIDSA VR spike: ", _load_summary)
+	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+
+
+func _parse_import_response(result: Array, step_description: String, req: HTTPRequest):
+	## Common HTTP-result/JSON-parse checking for _import_external_file()'s
+	## three sequential calls. Returns the parsed JSON Dictionary on success,
+	## or null (having already set the status and freed req) on any failure.
+	var result_code: int = result[0]
+	var response_code: int = result[1]
+	var body: PackedByteArray = result[3]
+	if result_code != HTTPRequest.RESULT_SUCCESS or (response_code != 200 and response_code != 201):
+		_set_status("Couldn't %s: HTTP %d (result %d)" % [step_description, response_code, result_code])
+		push_error("DIDSA VR spike: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
+		req.queue_free()
+		return null
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if parsed == null or not (parsed is Dictionary):
+		_set_status("Couldn't parse the response for: %s" % step_description)
+		req.queue_free()
+		return null
+	return parsed
 
 
 func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float) -> bool:
@@ -309,7 +529,9 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 		_set_status("glTF parsed but produced no scene.")
 		return false
 
-	# Nothing may still hold, or have selected, a part that's about to go.
+	# Nothing may still hold, or have selected, a part that's about to go —
+	# and the undo/redo history can't point at nodes that are about to be freed.
+	command_stack.clear()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 	for old in assembly_root.get_children():
@@ -325,6 +547,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	for node in _all_descendants(scene):
 		if node is MeshInstance3D:
 			node.add_to_group("grabbable_parts")
+			node.create_trimesh_collision() # so controller.gd's laser-select can ray-test real geometry
 			_part_count += 1
 	return true
 

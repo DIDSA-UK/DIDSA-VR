@@ -9,9 +9,17 @@ extends Node
 ##    one_hand_gain_*): a model 10 m across would otherwise need you to
 ##    shuffle it a metre at a time with your arm.
 ##  - TWO hands: it follows your hands like a rope between two fists. Moving
-##    them together drags it, swinging the line between them turns it
-##    (shortest-arc, so it never rolls about that line), spreading/closing them
-##    scales it. Everything pivots on the midpoint between your hands.
+##    them together drags it (amplified for big models by the same
+##    size-based gain as one-hand drag — see one_hand_drag_gain(), measured
+##    once per gesture and applied to the midpoint's own movement so big
+##    models don't need endless re-grabbing two-handed either), swinging the
+##    line between them turns it (shortest-arc, so it never rolls about that
+##    line, and NOT gain-amplified — a given wrist swing always turns the
+##    model by the same angle regardless of size), spreading/closing them
+##    scales it (also ungained; scale_gain is its own separate sensitivity
+##    knob). Turn/scale pivot on a virtual point that tracks the (gained)
+##    drag rather than your hands' literal midpoint, since on a big model
+##    that point can end up well away from where your hands physically are.
 ##    Each frame applies only how your hands moved SINCE THE LAST FRAME, on top
 ##    of the model's current pose. (Measuring against the pose at the start of
 ##    the grab instead made a second rotation about a different axis feel
@@ -40,8 +48,8 @@ const STEADINESS_BETA := 10.0 ## Hz per m/s: how quickly the filter opens up whe
 @export var grab_action: String = "grip_click"
 @export var presets: Array[float] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0] ## multiples of real life; 1.0 = 1:1
 @export var scale_gain: float = 3.0 ## how strongly spreading/closing your hands scales: hands 10% farther apart = 1.1^gain (~33%) bigger
-@export var one_hand_gain_ref_radius: float = 0.6 ## metres: a model this size (or smaller, half its bounding diagonal) drags 1:1
-@export var one_hand_gain_max: float = 15.0 ## a bigger model drags proportionally faster, up to this multiple
+@export var one_hand_gain_ref_radius: float = 0.6 ## metres: a model this size (or smaller, half its bounding diagonal) drags 1:1 — shared by one- and two-hand drag
+@export var one_hand_gain_max: float = 15.0 ## a bigger model drags proportionally faster, up to this multiple — shared by one- and two-hand drag
 @export var fit_radius: float = 0.5 ## metres: half the model's bounding diagonal after Fit
 @export var fit_distance: float = 1.2 ## metres in front of your head after Fit
 
@@ -67,13 +75,19 @@ var _one_hand_gain := 1.0
 var _start_hand := Vector3.ZERO
 var _prev_mid := Vector3.ZERO
 var _prev_vec := Vector3.ZERO
+var _two_hand_gain := 1.0 ## same size-based gain as one-hand drag, measured once per gesture
+var _prev_pivot := Vector3.ZERO ## virtual pivot the transform is built around each frame — tracks _prev_mid with gain applied, so it can drift from where your hands actually are on a big model
+var _gesture_active := false
+var _gesture_start_transform: Transform3D
+var command_stack = null ## set via setup(); a shared command_stack.gd instance for undo/redo
 
 
-func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float) -> void:
+func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float, stack = null) -> void:
 	_root = root
 	_left = left
 	_right = right
 	_real_life_scale = real_life_scale
+	command_stack = stack
 
 
 func _init() -> void:
@@ -91,6 +105,8 @@ func one_hand_drag_gain() -> float:
 	## How far the model moves per unit your hand moves: 1 for anything you can
 	## reach around, growing in proportion to the model's size beyond that.
 	## Measured once when the grab starts, so it can't feed back on itself.
+	## Despite the name, also used by two-hand drag (_update_two_hand()) —
+	## the same "big models need amplified dragging" problem applies to both.
 	var radius := _model_bounds().size.length() * 0.5
 	return clampf(radius / one_hand_gain_ref_radius, 1.0, one_hand_gain_max)
 
@@ -110,6 +126,10 @@ func is_active() -> bool:
 	return _mode != Mode.NONE
 
 
+func current_multiple() -> float:
+	return _current_multiple()
+
+
 func scale_text() -> String:
 	## e.g. "scale 1:1", "scale 2:1 (locked)" — for the on-screen readout.
 	if _root == null:
@@ -127,8 +147,10 @@ func set_preset(multiple: float) -> void:
 	## Jump to `multiple` times real life (1.0 = 1:1), about the model's centre.
 	if scale_locked or _mode == Mode.TWO_HAND or _root == null:
 		return
+	var before := _root.global_transform
 	var factor := _clamped_multiple(multiple) / _current_multiple()
 	_scale_about(_model_bounds().get_center(), factor)
+	_push_move_command("scale to %s" % _ratio_hint(multiple), before)
 
 
 func fit_to_view(camera: Node3D) -> void:
@@ -136,6 +158,7 @@ func fit_to_view(camera: Node3D) -> void:
 	## Locked scale: it's moved but not resized.
 	if _root == null or _model_bounds().size == Vector3.ZERO:
 		return
+	var before := _root.global_transform
 	var box := _model_bounds()
 	var factor := 1.0
 	if not scale_locked:
@@ -151,13 +174,32 @@ func fit_to_view(camera: Node3D) -> void:
 
 	var t := _root.global_transform
 	_root.global_transform = Transform3D(t.basis * factor, target_centre + (t.origin - box.get_center()) * factor)
+	_push_move_command("fit to view", before)
 
 
 func go_home() -> void:
 	## Back to where the model first appeared. Not while the scale is locked
 	## (that would silently change it).
 	if _has_home and not scale_locked and _mode == Mode.NONE:
+		var before := _root.global_transform
 		_root.global_transform = _home
+		_push_move_command("go home", before)
+
+
+func _push_move_command(label: String, before: Transform3D) -> void:
+	if command_stack == null or _root == null:
+		return
+	var after := _root.global_transform
+	if before.is_equal_approx(after):
+		return # no net change: nothing worth undoing
+	var target := _root
+	command_stack.push(label,
+		func() -> void: target.global_transform = before,
+		func() -> void: target.global_transform = after)
+
+
+func _ratio_hint(multiple: float) -> String:
+	return "%s:1" % _trim(multiple) if multiple >= 1.0 else "1:%s" % _trim(1.0 / multiple)
 
 
 func _process(delta: float) -> void:
@@ -174,7 +216,23 @@ func _process(delta: float) -> void:
 	elif left_free != right_free:
 		_update_one_hand(_left if left_free else _right, left_pos if left_free else right_pos)
 	else:
+		_end_gesture()
 		_mode = Mode.NONE
+
+
+func _begin_gesture() -> void:
+	## One undo step per drag, however it moved between one and two hands —
+	## only remember the transform from the FIRST frame of a fresh gesture.
+	if not _gesture_active:
+		_gesture_active = true
+		_gesture_start_transform = _root.global_transform
+
+
+func _end_gesture() -> void:
+	if not _gesture_active:
+		return
+	_gesture_active = false
+	_push_move_command("move model", _gesture_start_transform)
 
 
 func _steady(filter: RefCounted, raw: Vector3, gripping: bool, delta: float) -> Vector3:
@@ -195,6 +253,7 @@ func _update_one_hand(hand: XRController3D, hand_pos: Vector3) -> void:
 		_start_root = _root.global_transform
 		_start_hand = hand_pos
 		_one_hand_gain = one_hand_drag_gain()
+		_begin_gesture()
 		return
 	var t := _start_root
 	t.origin += (hand_pos - _start_hand) * _one_hand_gain
@@ -208,6 +267,9 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 		_mode = Mode.TWO_HAND
 		_prev_mid = mid
 		_prev_vec = vec
+		_prev_pivot = mid # virtual pivot starts exactly at your hands' real midpoint
+		_two_hand_gain = one_hand_drag_gain() # measured once, like one-hand's own gain, so it can't feed back on itself
+		_begin_gesture()
 		return
 
 	# The change since last frame: how far the line between the hands swung
@@ -220,14 +282,20 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 		# telescopes, the total is still (hand distance now / at grab)^gain, whatever the path.
 		scale_factor = _clamped_multiple(current * pow(vec.length() / _prev_vec.length(), scale_gain)) / current
 
-	# Turn/scale the model about where the midpoint WAS, then hang it off where it is now.
+	# The DRAG (how far the midpoint itself moved this frame) gets the same
+	# size-based amplification one-hand drag gets; turn/scale above are
+	# deliberately left at their own raw/gain_gain sensitivity, unaffected.
+	var pivot := _prev_pivot + (mid - _prev_mid) * _two_hand_gain
+
+	# Turn/scale the model about where the (gain-amplified) pivot WAS, then hang it off where it is now.
 	var t := _root.global_transform
 	_root.global_transform = Transform3D(
 		(rot * t.basis) * scale_factor,
-		mid + (rot * (t.origin - _prev_mid)) * scale_factor
+		pivot + (rot * (t.origin - _prev_pivot)) * scale_factor
 	)
 	_prev_mid = mid
 	_prev_vec = vec
+	_prev_pivot = pivot
 
 
 func _hand_free(hand: XRController3D) -> bool:
