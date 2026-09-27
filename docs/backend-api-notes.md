@@ -71,6 +71,63 @@ backend/glTF mismatch. Practical effect for this client: any future "standard
 views" (front/top/right) can just use Godot's own Y-up axes directly against
 a loaded assembly-mesh.glb — no axis-swap step needed first.
 
+## Add a component to the live session (without a full-replace import)
+
+```
+POST /document/parts/{root_part_id}/add-component
+```
+(`backend/app/document/router.py`'s `add_component`, logic in the new
+`backend/app/document/add_component.py`)
+
+Built this session to close the gap `docs/status.md`'s "Real-headset testing
+round 2" flagged as blocking Mates testing: `POST /import/native` is a
+**full replace** — there was no way, once a file was loaded, to open a
+*different* file or add a second Part to the one already loaded, so there
+was nothing with real placed Occurrences to mate against beyond whatever
+single file happened to load at startup. This endpoint is the backend port
+of the Flutter client's own `client/lib/assembly/add_component.dart::
+mergeComponentIntoDocument` — same merge semantics, same "first Occurrence
+gets `fixed=true`" grounding rule — so both clients behave identically, but
+callable directly against the live session instead of requiring a client
+that can run that Dart code.
+
+Request body:
+```json
+{
+  "component": { "schema_version": 1, "document": {"id": "...", "parts": [...]}, "sketches": [...] },
+  "occurrence_id": null,
+  "external_ref": null,
+  "name_override": null
+}
+```
+`component` is another native file's own already-`export_native`-shaped
+payload (read a local file, same as any other native load — this backend
+still has no filesystem access of its own, decision #6 in DIDSA-CAD's
+`docs/assembly-scope.md` unchanged). `occurrence_id` is optional — leave it
+out and the backend mints one (a plain `uuid4`), handed back in the
+response so the caller can address the new Occurrence right away (e.g. to
+give it a first Mate). Response:
+```json
+{"document_id": "...", "part_ids": ["...", "..."], "occurrence_id": "..."}
+```
+404s if `root_part_id` isn't a Part in the current session; 422s for a
+schema-version mismatch, an empty/malformed component file, or inserting a
+Part into itself.
+
+**What this does and doesn't solve.** This only merges an already-fetched
+payload into the *current session's* in-memory Document — it never touches
+a filesystem or resolves a path itself. It does **not** implement the
+still-unscoped "shared network storage + server-side assembly composition"
+item in DIDSA-CAD's `docs/roadmap.md` ("Other open items") — that's a
+bigger, separate architecture question (a mounted network share, which
+supersedes `docs/assembly-scope.md` decisions #4/#6) this endpoint
+deliberately sidesteps. What it *does* give this client: a real, in-VR way
+to open a second file and place it as a component of whatever's already
+loaded — this client's `main.gd::open_native_file()` (full-replace open of
+an arbitrary native file at runtime, not just the one `native_file_path`
+started with) and `main.gd::add_component_file()` (this endpoint) are the
+two new entry points, both exposed from the wrist tablet's Files tab.
+
 ## Assembly mesh (the endpoint this client actually renders)
 
 ```

@@ -839,6 +839,116 @@ mates testing until a real multi-Occurrence test assembly (or the
 open/add-parts pathway) exists — tracked here so it's picked up as scoped
 work after Milestone 4's measurements land, not re-diagnosed from scratch.
 
+## Open/add-parts pathway built: the mates blocker's second half closed
+
+Picked up the deferred item directly above. Blocker #2 (no in-VR way to
+open a different native file, or add parts to the loaded assembly) is now
+closed; blocker #1 (the tracked test assembly having no real Occurrences)
+is a direct *consequence* of #2 having been missing — with a real add path
+in hand, building a genuine multi-Occurrence test assembly no longer needs
+anything outside this client (see below), so both close together.
+
+**Backend**: `POST /parts/{root_part_id}/add-component`
+(`backend/app/document/add_component.py`+`router.py` in DIDSA-CAD) — a
+direct port of the Flutter client's own `add_component.dart::
+mergeComponentIntoDocument`, merging another native file's own
+already-exported payload into the *live session's* Document as a new
+Occurrence, without discarding the rest of the session the way
+`/import/native` (full replace) does. Deliberately narrow: it never touches
+a filesystem itself (the caller — this client — already read the file off
+disk), so it does **not** implement the bigger, still-unscoped "shared
+network storage + server-side composition" item in DIDSA-CAD's
+`docs/roadmap.md`; see `docs/backend-api-notes.md`'s own new section for
+the exact line between what this closes and what it doesn't. Backend tests:
+`backend/tests/test_add_component.py`, 6 new cases (first Occurrence gets
+`fixed=true`, a second one doesn't, dedup by persisted Part id, an
+unrelated session Part survives untouched — the actual full-replace-vs-
+merge distinction that matters here, self-reference/unknown-root-part/
+empty-file rejections) — **6/6 passed** against a real pythonocc-core
+sandbox.
+
+**Client**: two new entry points on `main.gd`, both wired into the wrist
+tablet's Files tab (`wrist_tablet.gd::_rebuild_files()`):
+- **`open_native_file(path)`** — the first half: a full-replace open of an
+  *arbitrary* native `.didsa`/`.DIDSAprt` file at runtime (not just the one
+  `native_file_path` the scene started with), mirroring `_begin_import()`'s
+  own startup flow. Every file the Files tab lists now includes `.didsa`/
+  `.DIDSAprt` (`list_model_files()`'s extension list grew accordingly), and
+  tapping one's row button routes here via `load_model_file()`'s dispatcher
+  (same tap-to-load convention `.glb`/STEP/STL/OBJ rows already use).
+- **`add_component_file(path)`** — the second half: reads a local native
+  file the same way, then calls the new backend endpoint against whichever
+  Part is currently loaded (`current_root_part_id()`), and re-fetches
+  `assembly-mesh.glb` to render the result — never discards the loaded
+  scene's undo history, selection, etc. the way a full reopen would (though
+  in practice `_show_model()` still rebuilds the whole scene graph to draw
+  the new Occurrence, so `command_stack`/picks are still cleared, same as
+  any other reload). Shown as a second, small "Add" button next to a
+  native file's row — only once something backend-hosted is already loaded
+  (`current_root_part_id()` non-empty), since there's nothing to add an
+  Occurrence *onto* otherwise. `_import_external_file()` (the existing
+  STEP/STL/OBJ path) now also sets `_resolved_part_id` after creating its
+  fresh Part, so a part brought in that way can be added onto too, not just
+  a native-opened one.
+
+**What this actually unblocks for Mates**: John (or anyone) can now, from
+inside VR alone — no editor, no Flutter app, no manually-crafted fixture —
+open any single-Part file and then **Add** a second file onto it (even the
+same file twice) to get a real, backend-persisted Occurrence pair, exactly
+the multi-Occurrence structure the Mates tab's own picking validation
+requires (`mates_tool.gd::_validate_pick()` rejects root content — see
+"Real-headset testing round 2" above). The tracked `assembly.didsa`'s own
+history already proves the Mates *code path* itself works end-to-end
+(`tests/e2e_mates.gd`'s docstring: "Requires assembly.didsa to have at
+least 2 top-level occurrences — the tracked fixture did" at the time it
+was written) — what was missing was ever getting back to that state from
+inside VR once the real on-device test file turned out to be occurrence-
+less. This closes that gap without needing the network-storage/server-
+side-composition project at all.
+
+**Verification**: `backend/tests/test_add_component.py` — 6/6 passed
+(real pythonocc-core sandbox), full backend suite re-run clean, no
+regressions: **2517 passed**. Client-side, this session downloaded its own
+headless Godot 4.7.2 Linux build and stood up the backend locally with
+micromamba (same recipe "How this has been worked on" below documents),
+so this could actually be run rather than left as untested code:
+
+- **`tests/e2e_add_component.gd`** (needs a real running backend, same
+  class of exception as `e2e_mates.gd`/`e2e_step_import.gd` — not run by
+  `run_all.sh`): creates two bare geometry-free Parts directly against the
+  backend, opens one via `open_native_file()`, adds the other via
+  `add_component_file()`, then confirms via a fresh `GET .../occurrences`
+  that the Occurrence genuinely persisted server-side, resolved to the
+  right Part, and is `fixed`. **SMOKE PASSED**, real backend, first run
+  after one real bug fix (below).
+- **A real bug this run caught, that pure code review missed**: `wrist_
+  tablet.gd`'s new `_rebuild_files()` line (`var assembly_loaded := not
+  _main.current_root_part_id().is_empty()`) failed static type inference —
+  `--check-only` on the script reported "Cannot infer the type of
+  'assembly_loaded' variable" — which made the *whole script* fail to
+  compile, so `main.gd`'s `_tablet` stayed `null` and every `_process()`
+  tick threw "Nonexistent function 'is_open' in base 'Nil'". Silent at
+  a glance (no crash, no visible error in a screenshot), but it broke the
+  wrist tablet entirely and would have hung/stalled on a real headset,
+  not just in the test harness that happened to surface it (`tests/
+  tablet_scene.gd`, run standalone, showed the exact same spam and a
+  wrong file-listing result). Fixed with an explicit `: bool` annotation.
+  This is exactly the class of bug `tests/README.md`'s own "what headless
+  can't do" caveat doesn't cover — it's not a feel/interaction question,
+  it's a plain compile error that only surfaces by actually invoking Godot
+  against the changed files, which is why this session did that rather
+  than stopping at code review.
+- **`tests/run_all.sh` (the full headless suite, all 15 tests + the parse
+  check), re-run clean after that fix: `ALL RAN WITHOUT SCRIPT ERRORS`**,
+  every SMOKE line matching this doc's own documented expected values
+  (`tablet_scene.gd`'s Files-tab lines included) — confirmed no other
+  regression from this session's `main.gd`/`wrist_tablet.gd` changes.
+
+Genuinely still unconfirmed on a real headset, same as everything else in
+this project not explicitly marked otherwise: whether the new "Add" button
+reads clearly at wrist-tablet size, and whether re-adding a component while
+the tablet is mid-interaction feels right.
+
 ## Untested paths
 
 - **Every toggle button on the tablet (Modes, Sections, Mates, the tab row,
