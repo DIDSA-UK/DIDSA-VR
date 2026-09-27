@@ -46,6 +46,7 @@ var _main: Node
 var _command_stack = null
 var _mates_tool: Node
 var _colour_tool: Node
+var _section_tool: Node
 var _undo_button: Button
 var _redo_button: Button
 
@@ -71,6 +72,13 @@ const COLOUR_SWATCHES: Array[Dictionary] = [
 ]
 var _colour_status_label: Label
 
+# Milestone 4: Sections — a single grabbable clip-plane gizmo, client-side
+# only (see section_tool.gd's own docstring for why: the backend's real
+# section-preview endpoint re-tessellates a fresh OCCT boolean on every
+# call, much too slow for a plane you're dragging at 90 Hz).
+var _sections_status_label: Label
+var _sections_flip_button: Button
+
 var _viewport: SubViewport
 var _quad: MeshInstance3D
 var _cursor: Control
@@ -93,7 +101,7 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -103,6 +111,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_command_stack = command_stack
 	_mates_tool = mates_tool
 	_colour_tool = colour_tool
+	_section_tool = section_tool
 
 	_build_viewport()
 	_build_quad()
@@ -115,6 +124,8 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	if _mates_tool:
 		_mates_tool.picks_changed.connect(_refresh_mates_picks_display)
 		_mates_tool.mates_changed.connect(_rebuild_mates_list)
+	if _section_tool:
+		_section_tool.changed.connect(_refresh_sections_display)
 	visible = false
 
 
@@ -320,9 +331,23 @@ func _build_ui() -> Control:
 	_redo_button.pressed.connect(_on_redo_pressed)
 	history_row.add_child(_redo_button)
 
-	# Tab bar: radio-style buttons, exactly one page showing.
-	var tab_row := HBoxContainer.new()
-	tab_row.add_theme_constant_override("separation", 8)
+	# Tab bar: radio-style buttons, exactly one page showing. HFlowContainer
+	# (same choice _build_scale_page()'s presets row and _build_colours_page()'s
+	# swatch grid already make), not HBoxContainer: with 8 tabs now (Sections
+	# added this session) the row's own minimum width — driven by each
+	# button's own text, which SIZE_EXPAND_FILL can't shrink below — exceeds
+	# viewport_size.x (640px) and HBoxContainer doesn't wrap, so every tab
+	# past that point silently rendered outside the tablet's own clipped
+	# area: still "visible" by Godot's own is_visible_in_tree() (nothing
+	# hides it), but never reachable by a real laser aimed at the physical
+	# panel. Found because it also shifted EVERY control below the tab row
+	# far enough to break tests/tablet_scene.gd's existing click-position
+	# math for a button that hadn't moved (the Modes tab's own Steadiness
+	# row) — not a coincidence: the whole column below an overflowing row
+	# shifts with it. HFlowContainer wraps to a second row instead.
+	var tab_row := HFlowContainer.new()
+	tab_row.add_theme_constant_override("h_separation", 8)
+	tab_row.add_theme_constant_override("v_separation", 8)
 	column.add_child(tab_row)
 	var tab_group := ButtonGroup.new()
 	var pages_holder := VBoxContainer.new()
@@ -335,6 +360,7 @@ func _build_ui() -> Control:
 		"Tools": _build_tools_page,
 		"Mates": _build_mates_page,
 		"Colours": _build_colours_page,
+		"Sections": _build_sections_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -346,7 +372,6 @@ func _build_ui() -> Control:
 		tab.text = tab_name
 		tab.toggle_mode = true
 		tab.button_group = tab_group
-		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tab.toggled.connect(_on_tab_toggled.bind(tab_name))
 		tab_row.add_child(tab)
 		if tab_name == "Modes":
@@ -413,6 +438,8 @@ func _build_modes_page() -> Control:
 			_two_hand.set_steadiness(i) # whole-model moves
 			_left.set_steadiness(i) # a single held part (grip), each hand
 			_right.set_steadiness(i)
+			if _section_tool:
+				_section_tool.set_steadiness(i) # the section-plane gizmo, grabbed the same way
 	))
 	var hint := Label.new()
 	hint.text = "Scale views: see the Scale tab."
@@ -774,6 +801,56 @@ func _readable_text_color(hex: String) -> Color:
 	var c := Color(hex)
 	var luminance := 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
 	return Color.BLACK if luminance > 0.6 else Color.WHITE
+
+
+# --- Sections: the vision brief's Assembly tools "sections" - a single
+# grabbable clip-plane gizmo, client-side only (see section_tool.gd's own
+# docstring for why: the backend's real section-preview endpoint
+# re-tessellates a fresh OCCT boolean on every call, much too slow for a
+# plane dragged at 90 Hz). GRIP grabs the gizmo directly in-world, same feel
+# as grabbing a part - this tab just toggles it on/off and flips which side
+# is kept.
+
+func _build_sections_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	page.add_child(_mode_toggle("Section tool", func(on: bool) -> void:
+		if _section_tool:
+			_section_tool.set_active(on, _camera)
+	, false))
+
+	_sections_status_label = Label.new()
+	_sections_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_sections_status_label)
+
+	_sections_flip_button = Button.new()
+	_sections_flip_button.text = "Flip"
+	_sections_flip_button.toggle_mode = true
+	_sections_flip_button.toggled.connect(func(on: bool) -> void:
+		if _section_tool:
+			_section_tool.set_flipped(on)
+	)
+	page.add_child(_sections_flip_button)
+
+	var hint := Label.new()
+	hint.text = "Grip the plane to move/tilt it, like grabbing a part."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 18)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(hint)
+
+	_refresh_sections_display()
+	return page
+
+
+func _refresh_sections_display() -> void:
+	if not _section_tool or _sections_status_label == null:
+		return
+	if not _section_tool.active:
+		_sections_status_label.text = "Off — turn on Section tool to place the plane"
+	else:
+		_sections_status_label.text = "Sectioning%s — grip the plane to move it" % (" (flipped)" if _section_tool.flipped else "")
 
 
 # --- Files: load a local .glb ---

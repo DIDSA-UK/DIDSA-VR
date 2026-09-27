@@ -250,8 +250,14 @@ geometry back out.
 - `backend/app/document/assembly_solver.py` — what `solve_for_occurrence`
   actually does (`docs/assembly-scope.md` §3 Phase 6 in that repo).
 - `backend/app/document/section.py` — the sectioning tool's own stateless
-  `section-preview` endpoint; re-tessellates on every call, likely too slow
-  for a dragged plane at 90 Hz, so this client's own sections work is planned
-  client-side (a shader clip-plane) rather than calling this — read it anyway
-  before committing to that, in case something changed.
+  `section-preview` endpoint. **Re-read directly this session (not just this
+  summary) before building the VR client's own Sections tool, per the
+  standing instruction here to check rather than trust it: confirmed still
+  accurate.** `compute_section_mesh` does a real OCCT `BRepAlgoAPI_Common`
+  boolean per Body per plane, then a full re-tessellation of the result,
+  recomputed from scratch on every single request — no caching, no
+  persisted Feature. This client's own Sections work went client-side-only
+  (a world-space clip plane via a shared shader uniform — see
+  `scripts/section_tool.gd`), makes no call to this endpoint at all, and is
+  built (`docs/status.md`'s Milestone 4 section).
 - `backend/app/session_context.py` — session id resolution.

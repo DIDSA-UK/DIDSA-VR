@@ -165,7 +165,17 @@ live-synced.
     than reconstructing the part's exact prior look, which needs a full
     reload to see for real. Not undoable — pick a different colour (or
     Clear) rather than Undo.
-13. A floating status label shows what's happening (importing, downloading,
+13. **Sections tab** (milestone 4). Toggle **Section tool** to spawn a
+    translucent clip-plane disc (with a small arrow showing which side
+    stays) a little in front of wherever you're looking. **Grip** the disc
+    to drag/tilt it, exactly like grabbing a part; **Flip** swaps which side
+    is kept without moving it. Entirely client-side — no backend call at
+    all, since DIDSA-CAD's own sectioning endpoint re-tessellates a fresh
+    OCCT boolean on every request, much too slow for a plane you're
+    dragging in real time. One plane for now. Turning the tool off drops
+    the gizmo and restores every part's real appearance. Undoable (one
+    command per grab/drag), toggling the tool and Flip are not.
+14. A floating status label shows what's happening (importing, downloading,
     parse errors, part count) since you won't have a terminal visible once
     you're in the headset.
 

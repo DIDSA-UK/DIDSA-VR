@@ -56,6 +56,7 @@ var command_stack = null ## set by main.gd; a shared command_stack.gd instance f
 var hide_tool_active := false ## Tools tab's "Shoot to hide": trigger hides whatever the laser hits instead of selecting it
 var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate entity instead of selecting/hiding
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
+var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
 
 var _laser: MeshInstance3D
 var _select_material: StandardMaterial3D
@@ -113,6 +114,8 @@ func set_steadiness(level: int) -> void:
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
 	_update_aim_hover()
+	if section_tool:
+		section_tool.update_held(self, delta, steadiness > 0)
 	if held_node != null:
 		_update_held_part(delta)
 	if selected_node == null:
@@ -177,7 +180,11 @@ func reset_interaction() -> void:
 
 func _on_button_pressed(action_name: String) -> void:
 	if action_name == grab_action:
-		if parts_enabled:
+		# The section-plane gizmo is independent of "Individual part
+		# manipulation" mode (like mates_tool_active/hide_tool_active are for
+		# the trigger below) — parts_enabled only gates the ordinary part-grab
+		# search inside _try_grab() itself.
+		if parts_enabled or (section_tool and section_tool.active):
 			_try_grab()
 	elif action_name == select_action:
 		if has_meta("ui_hover") and get_meta("ui_hover"):
@@ -199,6 +206,8 @@ func _on_button_released(action_name: String) -> void:
 func _try_grab() -> void:
 	if held_node != null:
 		return
+	if section_tool and section_tool.try_grab(self, grab_reach):
+		return # gizmo grabbed instead — see section_tool.gd's own docstring for why this is checked first
 
 	# Deliberately ignores selected_node so grip never feels tied to the laser-select state.
 	var target := _find_grab_target()
@@ -269,6 +278,8 @@ func _set_grab_hover(target: Node3D) -> void:
 
 
 func _try_release() -> void:
+	if section_tool and section_tool.release(self):
+		return
 	if held_node == null:
 		return
 

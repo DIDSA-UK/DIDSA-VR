@@ -212,7 +212,7 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
-## Milestone 4 — assembly environment (mates, colours, sections, measurements): mates and colours built; sections and measurements not started
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): mates, colours and sections built; measurements not started
 
 Started by reading the vision brief's Assembly tools/Mates workflow sections
 and the 27 Sep cross-compatibility note (mates must be built as a client to
@@ -382,12 +382,9 @@ a VR-only representation, per the 27 Sep compatibility note.
   for it is available, rather than just trusting the shared-endpoint
   argument).
 - **Not yet built**: editing an existing mate's value/flip (only
-  create/list/delete for this pass), and edge picking. Colours is now built
-  too (see below); sections and measurements are still open — sections is
-  planned client-side (a shader clip-plane uniform, since the backend's own
-  `section.py` is a stateless, re-tessellate-on-every-request preview
-  endpoint, too slow for a dragged plane at 90 Hz); measurements reuses this
-  same picking foundation against `POST /parts/{id}/measure`.
+  create/list/delete for this pass), and edge picking. Colours and Sections
+  are now built too (see below); measurements is still open — it reuses
+  this same picking foundation against `POST /parts/{id}/measure`.
 - **Not yet headset-verified** — this whole tool, like the rest of milestone
   4 so far, has only run headless and against a real backend from a cloud
   sandbox, never with a real hand pulling a real trigger.
@@ -431,6 +428,165 @@ button (popup keyboard) and **Clear colour**.
   cleared it again. Passed on the first real run.
 - **Not yet headset-verified**, same caveat as Mates above.
 
+### Sections tool: built (headless-verified, real-backend-confirmed, and the shader's own clip behaviour confirmed with a real software render)
+
+The wrist tablet's new **Sections** tab, per the vision brief's Assembly
+tools list. The vision brief itself doesn't specify a workflow for this one
+(unlike Mates) — the interaction (a single grabbable clip-plane gizmo,
+toggled from the tablet) was this session's own design call, not a spec
+being implemented.
+
+- **Confirmed client-side-only against the real backend source, not just
+  `docs/backend-api-notes.md`'s own summary of it, before writing any
+  client code.** Read `backend/app/document/section.py` directly:
+  `compute_section_mesh` does a real OCCT `BRepAlgoAPI_Common` boolean per
+  Body per plane (`_trim_solid_by_planes`), then a full re-tessellation of
+  the result — recomputed from scratch on every single `POST
+  /parts/{id}/section-preview` call, no caching, no persisted Feature. Far
+  too slow to call every frame for a plane a real hand is dragging at 90 Hz,
+  confirming the plan already flagged. This tool makes **no backend calls
+  at all** — a world-space clip plane, applied by a small custom shader
+  (`shaders/section_clip.gdshader`) shared by every loaded part via a single
+  **global** shader uniform (one `RenderingServer.
+  global_shader_parameter_set()` call per frame while active, not one per
+  part).
+- **Scope for this pass: ONE clip plane.** The backend's own endpoint
+  supports several (AND-combined, for a quarter-cutaway), but the vision
+  brief's Assembly tools list doesn't call for that and one plane already
+  covers the common "see inside the assembly" case — the same kind of
+  narrowing Mates made for face-only picking in its own first pass.
+- **Interaction**: toggle **Section tool** on the tablet's new Sections tab
+  to spawn a translucent disc gizmo (plus a small arrow showing which side
+  stays) a short distance in front of wherever you're looking. **Grip**
+  drags/tilts it 1:1, exactly like grabbing a part. **Flip** reverses which
+  side is kept without moving the gizmo. This is its own mechanism
+  (`scripts/section_tool.gd`), not a member of the `grabbable_parts` group
+  that ordinary parts join: that group also feeds `two_hand_model.gd`'s
+  model-bounds/Fit-to-view math and `main.gd`'s Tools-tab whole-assembly
+  hide/isolate ops, and the gizmo must never be swept into either (it isn't
+  part of the assembly, shouldn't move with a Scale-view change, and
+  shouldn't be hidden by "Hide all"). `controller.gd` gained three small
+  hooks (a check in `_try_grab()`/`_try_release()`, a per-frame call in
+  `_physics_process()`) that hand GRIP to `section_tool.gd` first — mirroring
+  exactly how `mates_tool_active`/`hide_tool_active` already redirect the
+  TRIGGER for other tools, just applied to GRIP instead, and checked
+  synchronously before any part-grab search runs so a hand can never grab
+  both at once.
+- **The real design problem this tool had to work around**: `colour_tool.gd`
+  already owns `material_override` on parts (its optimistic local colour
+  preview), and Godot's clip-plane discard has to run in whichever material
+  is actually drawn — there's no way to layer a second, independent
+  discard-only pass on top (`material_overlay`/`next_pass` both draw
+  *after* the base pass has already written its fragments; neither can
+  un-draw them). Rather than touch that shipped, real-backend-confirmed
+  code, `section_tool.gd` **wraps** whatever's currently in
+  `material_override` (null, or colour_tool's own flat-colour
+  `StandardMaterial3D`) into a clip-aware `ShaderMaterial` only while
+  active, re-deriving the wrap every frame from whatever's actually there
+  right now — self-healing if colour_tool changes a part's colour while
+  sectioning is on (briefly unclipped for that one part until the next
+  frame's reconcile, not a crash) — and restores exactly what was there
+  before on deactivate, including back to a genuinely absent override, not
+  a placeholder. Zero changes were needed to `colour_tool.gd`.
+- **The clip shader's own appearance**: `mesh_export.py`'s
+  `AssemblyGlbInstance`/`encode_assembly_glb` only ever sets
+  `pbrMetallicRoughness.baseColorFactor` — never a `metallicFactor`/
+  `roughnessFactor` override, and never a texture — so a colour override
+  (or its absence) means the glTF spec's own defaults (`metallic=1.0`,
+  `roughness=1.0`) apply either way. `shaders/section_clip.gdshader`
+  hardcodes exactly those two values and takes only `albedo_color` as a
+  parameter, so it never has to reimplement texture sampling.
+- **Godot gotchas caught while building this** (new ones, beyond the
+  BoxMesh-winding/`GLTFState.get_scene_node()` pair from earlier in this
+  milestone):
+  - **A bare `Node3D`'s `global_position`/`global_transform` requires
+    `is_inside_tree()`, and `get_root().add_child(x)` inside a
+    `SceneTree`-extending `--script`'s own `_initialize()` does NOT make
+    that true until the next `await process_frame`** — unlike `add_child()`
+    during normal gameplay, which takes effect synchronously. `tests/
+    README.md`'s existing "await process_frame after add_child(main)"
+    safety note already covered `main.tscn` specifically; this generalizes
+    it — found while writing `tests/section_tool.gd`'s own plain-`Node3D`
+    hand stand-ins, confirmed with a minimal repro.
+  - **`RenderingServer.global_shader_parameter_add()` is process-wide, not
+    per-instance** — re-adding an already-registered name is a real engine
+    ERROR (`Condition "global_shader_variables.has(p_name)" is true`), not a
+    no-op. Guarded with a `static var` (shared by every `SectionTool`
+    instance in the process), not a plain instance `var` — the instance-var
+    version only breaks once more than one instance exists in the same
+    process, i.e. this project's own tests, never the real app.
+  - **`Basis` has no `affine_inverse()`** (that's a `Transform3D` method;
+    `Basis` only has `inverse()`) — caught at parse-check time, before it
+    ever ran, and turned out to be unnecessary anyway: the arrow's own local
+    offset is always exactly local ±Z (Flip just picks the sign), a
+    constant, needing no inverse-transform at all.
+  - **`command_stack.gd extends RefCounted`, and calling `.free()` on a
+    `RefCounted` is a real script error** (it frees itself when
+    unreferenced) — caught because that error, thrown during test cleanup
+    *after* every assertion had already printed, was silently swallowing
+    the test's own `quit()` call, which looked exactly like a hang
+    (`run_all.sh`'s 300s timeout, not a crash) until traced back to it.
+  - **Adding an 8th wrist-tablet tab (`plain HBoxContainer`, `SIZE_EXPAND_
+    FILL` buttons) overflowed the tablet's fixed 640px-wide viewport** —
+    HBoxContainer doesn't wrap, and `SIZE_EXPAND_FILL` can't shrink a button
+    below its own text-driven minimum width, so the tab row's total minimum
+    width silently exceeded the panel once "Sections" (the longest label)
+    was added, pushing every control below it (including the *unrelated*
+    Modes tab's own Steadiness row) far enough off to break `tests/
+    tablet_scene.gd`'s existing click-position math for a button that
+    hadn't itself changed at all. Fixed by switching the tab row to
+    `HFlowContainer` (already this file's own precedent for the Scale tab's
+    presets and the Colours tab's swatch grid) so it wraps to a second row
+    instead of overflowing — dropped `SIZE_EXPAND_FILL` from the tab
+    buttons too, matching how those other two rows never set it either.
+    Caught because a *pre-existing, already-passing* headless test broke on
+    a change to an apparently unrelated tab — a real lesson for the next
+    tool added here: always re-run the full suite, not just new tests.
+- Tests: `tests/section_tool.gd` (pure logic — grab/drag/release/undo math,
+  and the wrap/unwrap material bookkeeping including the colour_tool-changed-
+  it-while-active case, against `MeshInstance3D`/`BoxMesh` stand-ins, no
+  network, no rendering), `tests/section_tab.gd` (full-scene: `main.tscn`
+  with no backend, drives the real Sections tab and simulates a real grip
+  press via `button_pressed`/`button_released` signal emission — same
+  precedent `tools_tab.gd`/`tablet_scene.gd` already use for "a real grip
+  can't be faked headless"), and `tests/section_render.gd` (**needs a real
+  render, not `--headless`** — same class of exception as `gpu_timing.gd`,
+  but this cloud sandbox has no GPU/display at all, so Xvfb + Mesa's
+  llvmpipe software rendering stood in for both, confirmed working this
+  session specifically for this: `xvfb-run -a "$GODOT" --path . --script
+  res://tests/section_render.gd`). The real-render test is the one thing
+  the pure-logic test structurally can't check — that the shader actually
+  **discards** fragments on the excluded side rather than fading them, and
+  that Flip genuinely swaps which side survives — confirmed true on the
+  first working version (after fixing the lighting: the shader's own
+  `metallic=1.0`/`roughness=1.0` renders visibly dark under flat ambient
+  light alone with no directional light, which isn't a bug, just a mismatch
+  between the spike's original unshaded throwaway test material and the
+  real shader's PBR one).
+- **Confirmed for real, end to end, against a real backend**
+  (`tests/e2e_section.gd`, same "run manually" exception as the other
+  `e2e_*.gd` tests): stood up a throwaway backend (micromamba `didsacad`
+  env, throwaway `CAD_API_KEY`), let `main.tscn` import and load this
+  repo's own tracked `assembly.didsa` for real (3 parts), then drove
+  `section_tool.gd`'s real wrap/grab/unwrap pipeline against those real
+  glTF-imported parts and their real backend-baked materials — not the
+  synthetic `BoxMesh` stand-ins the other tests use. Every real part's own
+  real albedo survived being wrapped and unwrapped exactly; a real grip
+  grab/drag against the real scene worked; turning the tool off restored
+  every part's material_override to exactly what it was before (genuinely
+  absent, not a placeholder). This is the same "don't just trust synthetic
+  geometry" precedent the BoxMesh-winding gotcha established earlier in this
+  milestone, applied to materials/rendering instead of collision geometry.
+- **Not yet headset-verified** — like the rest of milestone 4, only run
+  headless, against a real backend, and (for the shader specifically)
+  against a real software-rendered image from a cloud sandbox; never with a
+  real hand pulling a real trigger or grip, and never seen through a real
+  headset's own eyes. In particular: whether grabbing a thin translucent
+  disc feels natural at all with a real hand (versus a part, which has real
+  volume to reach into); whether the default spawn position/size reads
+  clearly on first toggle; and whether the clip itself, correct in a flat
+  render, looks right in stereo/at real depth.
+
 ## Untested paths
 
 - **The Mates tab is headless- and real-backend-confirmed, never handset-
@@ -447,6 +603,17 @@ button (popup keyboard) and **Clear colour**.
   legibility against the panel background, whether the text-colour contrast
   pick actually reads well, tapping a swatch with a real laser) has never
   been rendered or clicked for real.
+- **The Sections tab has the same gap, plus one more layer.** Beyond the
+  usual "never clicked by a real laser" gap every tab in this milestone
+  shares: the clip plane's own real-render behaviour is confirmed correct in
+  a flat, software-rendered image (`tests/section_render.gd`, Xvfb + Mesa
+  llvmpipe), but never in stereo, at real depth, or lit by anything beyond
+  one plain directional light — whether a real cutaway reads correctly with
+  both eyes, and whether grabbing a thin translucent disc feels natural with
+  a real hand (a part has real volume to reach into; this gizmo doesn't),
+  are both open. The default gizmo size (`plane_radius`, a fixed 0.4 m) and
+  spawn distance (0.6 m in front of the camera) were picked as reasonable
+  human-scale guesses, never checked against a real arm's reach.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
   deliberately iterates on PCVR — faster). No APK has been exported or
@@ -526,27 +693,61 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 - Godot: `C:\Users\johnn\Downloads\Godot_v4.7.2-stable_win64.exe\
   Godot_v4.7.2-stable_win64_console.exe` (not on PATH) on John's own machine.
   A cloud-sandbox Claude Code session (no GPU/display, no access to John's
-  files) instead downloads its own headless Godot 4.7.2 Linux build and, for
-  anything touching the backend, stands up DIDSA-CAD's FastAPI/pythonocc
-  backend itself with micromamba (Docker wasn't available in that sandbox)
-  and a throwaway `CAD_API_KEY` — never John's real key — pointed at by a
-  local `secrets.cfg` it creates and never commits.
+  files) instead downloads its own headless Godot 4.7.2 Linux build directly
+  from its GitHub release (`https://github.com/godotengine/godot/releases/
+  download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip`, unzipped and
+  `chmod +x`'d — no package manager needed) and, for anything touching the
+  backend, stands up DIDSA-CAD's FastAPI/pythonocc backend itself with
+  micromamba (Docker wasn't available in that sandbox) and a throwaway
+  `CAD_API_KEY` — never John's real key — pointed at by a local `secrets.cfg`
+  it creates and never commits. Micromamba's own install script
+  (`micro.mamba.pm`) was blocked by this session's egress proxy policy;
+  its GitHub release worked instead (`https://github.com/mamba-org/
+  micromamba-releases/releases/latest/download/micromamba-linux-64.tar.bz2`).
+  Once extracted: `micromamba create -y -n didsacad -f backend/environment.yml
+  -r <MAMBA_ROOT_PREFIX>`, then `micromamba run -n didsacad -r
+  <MAMBA_ROOT_PREFIX> uvicorn app.main:app --host 127.0.0.1 --port 8000` from
+  `backend/` with `CAD_API_KEY` exported first — give it ~10 s: uvicorn's own
+  startup log line is buffered and doesn't appear immediately, so don't
+  conclude it's stuck before that.
+- **Real (non-headless) rendering, without a GPU or a display.** `gpu_timing.gd`
+  was already documented as needing "a GPU and a window" — this session found
+  a way to get both in a display-less cloud sandbox: `Xvfb` (a virtual X
+  server) plus Mesa's own `llvmpipe` software rasterizer (both already
+  present in this sandbox's base image) let Godot actually render — real
+  shader compilation, real fragment discard, real pixels read back via
+  `Image.get_pixel()` — where the plain `dummy` rendering driver `--headless`
+  forces would silently accept shader code without ever running it (found
+  the hard way: `RenderingServer.global_shader_parameter_get()` returns
+  `Nil` under `--headless`, even right after a successful `..._set()` call,
+  because the dummy driver doesn't actually back that state). Run with
+  `xvfb-run -a "$GODOT" --path . --script res://tests/whatever.gd` — no
+  `--headless` flag at all, Godot picks OpenGL 3 automatically once it
+  detects no Vulkan surface is available. Used to genuinely confirm
+  `shaders/section_clip.gdshader`'s own discard behaviour (`tests/
+  section_render.gd`) rather than just flagging it unverified — worth
+  reaching for again any time a shader or other real-rendering behaviour
+  needs checking from a sandbox like this one.
 - **`tests/` holds the headless tests and `tests/run_all.sh` runs them all**
   (parse-checks every script, then the steadiness filter, sensitivity,
   two-hand rotation, grab/scale, precise-picking, undo/redo, popup-keyboard,
-  Tools-tab, full-scene tablet, mesh-identity, mates-tool and colour-tool
-  tests). `tests/README.md` lists the expected values. Needs no GPU, headset
-  or backend.
+  Tools-tab, full-scene tablet, mesh-identity, mates-tool, colour-tool,
+  section-tool and section-tab tests). `tests/README.md` lists the expected
+  values. Needs no GPU, headset or backend.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
-  `e2e_mates.gd`, `e2e_colour.gd`): each deliberately points
+  `e2e_mates.gd`, `e2e_colour.gd`, `e2e_section.gd`): each deliberately points
   `main.secrets_file_path` at the real `secrets.cfg` and drives real network
   calls against a running backend, using the tracked `assembly.didsa`. Run
   them manually once your backend is up; none are part of `run_all.sh`.
   `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
   instantiating the scene to "Loaded" — the first time this path was
-  exercised outside John's own machine. `e2e_mates.gd`/`e2e_colour.gd` are
-  milestone 4's own real-backend confirmations (see that section above).
+  exercised outside John's own machine. `e2e_mates.gd`/`e2e_colour.gd`/
+  `e2e_section.gd` are milestone 4's own real-backend confirmations (see
+  that section above) — `e2e_section.gd` doesn't confirm a new endpoint
+  (Sections calls none) but confirms `section_tool.gd`'s wrap/grab/unwrap
+  pipeline against real backend-sourced parts and materials, not just a
+  synthetic stand-in.
 - Parse check: `"$G" --headless --path . --check-only --script
   res://scripts/x.gd` (reports `SCRIPT ERROR: Parse Error`; the OpenXR "no
   HMD" notice is harmless).
@@ -554,6 +755,11 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   `_initialize()`, `await process_frame`s, prints `SMOKE …`, and `quit()`s;
   run with `--headless --script`. The tablet was tested by aiming the right
   controller at button positions and emitting `button_pressed`/`released`.
+  **Any bare `Node3D` the test builds itself (not part of a loaded scene)
+  needs the exact same `await process_frame` after `add_child()` before its
+  `global_position`/`global_transform` can be touched at all** — this isn't
+  specific to `main.tscn`, it's `SceneTree._initialize()`'s own timing (see
+  `tests/section_tool.gd`'s own top-of-file note).
 - GPU timing: run non-headless with the scene in a big SubViewport and
   `viewport_get_measured_render_time_gpu`.
 - **Never run `main.tscn` without pointing `main.secrets_file_path` at a
@@ -583,8 +789,11 @@ that phase starts. Carry that note into the live doc too.
 
 **Milestone 4 progress, also not yet in the live doc**: the milestones
 table's row 4 ("Assembly environment... Parts move individually; mates,
-colours, sections and measurements work") is now partly done — mates and
-colours are built (face-only mates, headless- and real-backend-confirmed,
-not headset-verified; see the "Milestone 4" section above) — sections and
-measurements haven't been started. Update the live doc once this reaches a
+colours, sections and measurements work") is now partly done — mates,
+colours and sections are built (face-only mates; sections client-side-only,
+a single grabbable clip-plane gizmo — the vision brief itself left this
+tool's interaction unspecified, so that design call was made this session,
+not implemented from a spec; all headless- and real-backend-confirmed, not
+headset-verified; see the "Milestone 4" section above) — measurements
+hasn't been started. Update the live doc once this reaches a
 headset-verified state, not before.
