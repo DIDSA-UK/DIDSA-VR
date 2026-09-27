@@ -90,6 +90,112 @@ GET /document/parts/{part_id}/assembly-mesh.glb
   parametric assembly (not a pre-tessellated import) hasn't been measured yet
   — only estimated on the older JSON endpoint (see vision brief).
 
+**Milestone 4 addition (DIDSA-CAD PR #257, merged): occurrence/face identity
+as glTF `extras`.** Needed so a client-side raycast hit can be turned into a
+real Mate/Measure reference — see `mesh_identity.gd` in this client and that
+PR's own commit message for the full reasoning. Per node:
+```json
+"extras": {"owner_part_id": "...", "occurrence_id": "..."}
+```
+`occurrence_id: ""` means "this is `owner_part_id`'s own top-level content,
+not a placed Occurrence" (root content, or a pattern-derived copy — matches
+`MeasureEntityRefSchema.occurrence_id`'s own convention). Per mesh primitive,
+parallel to its (unindexed) triangle list:
+```json
+"extras": {"face_ids": [0, 0, 1, 1, ...], "body_ids": ["<uuid>", "<uuid>", ...]}
+```
+`(body_ids[i], face_ids[i])` for triangle `i` is a real
+`SubShapeRef{body_id, shape_type: "face", index}` (see "Mates" below) — note
+glTF JSON round-trips every number as float, so cast `face_ids[i]` back to
+`int` before sending it anywhere (`mesh_identity.gd` does this once, at tag
+time). **This client's own ray hits correctly resolve to the right face for
+geometry that came through `GLTFDocument`'s real import** (confirmed against
+real OCCT tessellation) — but Godot's own `PrimitiveMesh` generators (e.g.
+`BoxMesh`) use the *opposite* triangle winding, so don't use one as a
+stand-in for testing per-triangle face identity; build a real (or
+real-shaped) glb instead, as `tests/mesh_identity.gd` does.
+
+## Mates — a real client to a real, pre-existing API
+
+```
+GET    /document/parts/{part_id}/mates
+POST   /document/parts/{part_id}/mates
+PATCH  /document/parts/{part_id}/mates/{mate_id}
+DELETE /document/parts/{part_id}/mates/{mate_id}
+POST   /document/parts/{part_id}/occurrences/{occurrence_id}/solve
+```
+(`backend/app/document/router.py`, `create_mate`/`list_mates`/`update_mate`/
+`delete_mate`/`solve_for_occurrence`; schemas in `schemas.py`:
+`MateCreate`/`MateResponse`/`MateUpdate`.)
+
+`part_id` here is the **owning** Part — whichever Part's own `.occurrences`
+list contains both referenced Occurrences, not necessarily the loaded
+assembly's root (a sub-assembly can own its own Mates). A Mate can only
+reference a **top-level** Occurrence of that owning Part — this client
+enforces that client-side too (`mates_tool.gd`'s pick validation), since a
+solved Mate's local-to-parent transform is only directly usable as-is for a
+top-level Occurrence (see below).
+
+`POST .../mates` body (`MateCreate`):
+```json
+{
+  "type": "coincident",
+  "references": [
+    {"occurrence_id": "...", "subshape_ref": {"body_id": "...", "shape_type": "face", "index": 0}},
+    {"occurrence_id": "...", "subshape_ref": {"body_id": "...", "shape_type": "face", "index": 0}}
+  ],
+  "value": null,
+  "flipped": false,
+  "allow_rotation": true
+}
+```
+`type` is one of `coincident`/`concentric`/`parallel`/`distance`/`angle`;
+`value` is required (mm for distance, degrees for angle) for the last two,
+omit otherwise. `shape_type` is one of `"face"`/`"edge"`/`"vertex"`/`"body"`
+(`SubShapeType` in `models.py`) — **this client only ever sends `"face"`
+today**; edge/vertex picking isn't wired up client-side yet (a raycast
+against a filled mesh naturally resolves to a face; an edge needs either
+separate wireframe-pickable geometry or a nearest-boundary-edge heuristic).
+
+**Creating a Mate does not move anything by itself** — `solve_for_occurrence`
+is a separate, explicit call. The flat app calls it immediately after
+`create_mate` for the newly-driven Occurrence ("a freshly-authored Mate
+visibly snaps its target into place immediately" — that endpoint's own
+docstring); this client does the same by default (`mates_tool.gd`'s
+`relaxed` flag can suspend it to place several Mates before solving them
+all). `solve_for_occurrence`'s response's `transform` is **local to the
+Occurrence's own parent Part**, in the same raw-mm units the glb's own
+per-instance translation uses (not pre-scaled) — for a top-level Occurrence
+this equals the instance's whole world-relative-to-root transform (no
+intermediate parenting in `assembly-mesh.glb` — see above), which is exactly
+why this client restricts itself to top-level Occurrences for now; applying
+it correctly to a nested Occurrence would need walking back up the chain,
+not just writing the raw transform onto that instance's own flattened node.
+
+No bulk-solve endpoint exists — "solve every Mate on this assembly" means
+looping `solve_for_occurrence` over every distinct Occurrence any Mate
+references (`mates_tool.gd`'s `enforce_all`).
+
+## Occurrence colour
+
+```
+PATCH /document/parts/{part_id}/occurrences/{occurrence_id}
+```
+(`update_occurrence_transform` in `router.py`; `OccurrenceTransformUpdate`
+in `schemas.py` — same endpoint the gizmo's own drag-persist and
+hide/fixed/rename actions use, `color` is just one more optional field on
+it.) Body `{"color": "#RRGGBB"}` sets it; **`{"color": ""}` (empty string,
+not omitted) explicitly clears it back to no override** — omitting the
+`color` key entirely leaves the current value untouched, the same
+"omitted-means-unchanged, empty-string-means-clear" convention `hidden`/
+`fixed`/`name_override` on this same schema use. The colour string itself is
+opaque and unvalidated server-side (any string is accepted and echoed back
+verbatim) — this client always sends a `"#RRGGBB"` hex string to match how
+`mesh_export.py`'s `_color_to_base_color_factor` decodes it for rendering
+(straight 0–255→0–1 channel scaling, no sRGB conversion) — `colour_tool.gd`'s
+own local preview matches that exact scaling so its optimistic
+`material_override` renders the same shade a real reload would.
+
 ## Multi-format import (STEP/OBJ/STL) — backend exists, client doesn't use it yet
 
 ```
@@ -131,9 +237,21 @@ geometry back out.
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.
-- `backend/app/document/models.py` — `Part`, `Mate`, `ImportFeature`, and the
-  `ImportSourceFormat` enum.
+- `backend/app/document/models.py` — `Part`, `Mate`, `MateType`, `SubShapeType`,
+  `Occurrence` (incl. `color`), `ImportFeature`, and the `ImportSourceFormat`
+  enum.
+- `backend/app/document/schemas.py` — `MateCreate`/`MateResponse`/`MateUpdate`,
+  `OccurrenceTransformUpdate`, `MeasureEntityRefSchema` (measurements, not yet
+  built client-side — the same picking foundation `mates_tool.gd` uses should
+  carry straight over to `POST /parts/{id}/measure`).
 - `backend/app/document/native_format.py` — native JSON shape.
 - `backend/app/document/mesh_export.py` / `mesh_data.py` — glTF encoding, unit
-  handling (or lack of it).
+  handling (or lack of it), the milestone-4 identity `extras`.
+- `backend/app/document/assembly_solver.py` — what `solve_for_occurrence`
+  actually does (`docs/assembly-scope.md` §3 Phase 6 in that repo).
+- `backend/app/document/section.py` — the sectioning tool's own stateless
+  `section-preview` endpoint; re-tessellates on every call, likely too slow
+  for a dragged plane at 90 Hz, so this client's own sections work is planned
+  client-side (a shader clip-plane) rather than calling this — read it anyway
+  before committing to that, in case something changed.
 - `backend/app/session_context.py` — session id resolution.
