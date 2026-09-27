@@ -71,6 +71,8 @@ const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "White", "hex": "#f5f5f5"}, {"name": "Black", "hex": "#222222"},
 ]
 var _colour_status_label: Label
+var _colour_message_hold_until_ms := 0 ## _show_colour_message()'s own hold window — see that function's docstring for why this exists
+var _colour_group_toggle: Button ## "Apply to whole group" — read directly by _apply_colour(), not driven through its own toggled callback
 
 # Milestone 4: Sections — a single grabbable clip-plane gizmo, client-side
 # only (see section_tool.gd's own docstring for why: the backend's real
@@ -169,7 +171,7 @@ func _process(delta: float) -> void:
 		if _command_stack:
 			_undo_button.disabled = not _command_stack.can_undo()
 			_redo_button.disabled = not _command_stack.can_redo()
-		if _colour_status_label:
+		if _colour_status_label and Time.get_ticks_msec() >= _colour_message_hold_until_ms:
 			var selected: Node3D = _main.current_selected_part()
 			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
 
@@ -328,6 +330,21 @@ func _build_quad() -> void:
 func _build_ui() -> Control:
 	var theme := Theme.new()
 	theme.default_font_size = 26
+	# Real-headset feedback: toggle buttons (Modes' three, Sections' Section
+	# tool/Flip, Mates' Flip/Relax, the tab row, the choice rows) updated
+	# their own text ("ON"/"off") but showed no visible highlight — this
+	# theme never defined a "pressed" stylebox anywhere, so every toggle
+	# button was relying entirely on Godot's own built-in default theme,
+	# which isn't distinct enough on an unshaded SubViewport quad at arm's
+	# length. One override here, theme-wide, fixes every toggle button in
+	# the tablet at once — matches the app's own established cyan accent
+	# (controller.gd's hover/select highlight materials use the same hue).
+	var pressed_style := StyleBoxFlat.new()
+	pressed_style.bg_color = Color(0.15, 0.55, 0.68)
+	pressed_style.set_corner_radius_all(4)
+	pressed_style.set_content_margin_all(6)
+	theme.set_stylebox("pressed", "Button", pressed_style)
+	theme.set_stylebox("hover_pressed", "Button", pressed_style)
 
 	# A plain holder, so the cursor dot can sit over the panel without the
 	# PanelContainer stretching it to fill the whole thing.
@@ -782,6 +799,17 @@ func _build_colours_page() -> Control:
 	_colour_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	page.add_child(_colour_status_label)
 
+	# Colouring hierarchy, "for now" scope (docs/status.md has the full
+	# write-up): the only two levels reachable without new backend work are
+	# "this one Occurrence" (the default — laser-select it directly, exactly
+	# as before) and "every Occurrence sharing its immediate owner" (the
+	# closest approximation of "sub-assembly/pattern" this client can reach
+	# without a real assembly-tree endpoint). This toggle picks between
+	# them for every swatch/custom-hex/clear action below — no separate
+	# button set needed.
+	_colour_group_toggle = _mode_toggle("Apply to whole group", func(_on: bool) -> void: pass, false)
+	page.add_child(_colour_group_toggle)
+
 	var swatch_grid := HFlowContainer.new()
 	swatch_grid.add_theme_constant_override("h_separation", 8)
 	swatch_grid.add_theme_constant_override("v_separation", 8)
@@ -824,8 +852,22 @@ func _on_custom_colour_pressed() -> void:
 		if hex.length() == 7:
 			_apply_colour(hex)
 		else:
-			_colour_status_label.text = "Not a valid hex colour (want #RRGGBB): %s" % text
+			_show_colour_message("Not a valid hex colour (want #RRGGBB): %s" % text)
 	)
+
+
+func _show_colour_message(text: String, hold_seconds: float = 3.0) -> void:
+	## Real-headset feedback: the Colours tab's status label was also the
+	## periodic "Selected: <name>" readout (see _process()'s own refresh
+	## timer, every 0.25s while the tablet is open) — an error set via plain
+	## `.text =` got overwritten by that readout within a quarter second,
+	## nowhere near long enough to read. Anything shown through here holds
+	## the label for real (default 3s) before the periodic refresh is
+	## allowed to touch it again.
+	if not _colour_status_label:
+		return
+	_colour_status_label.text = text
+	_colour_message_hold_until_ms = Time.get_ticks_msec() + int(hold_seconds * 1000.0)
 
 
 func _apply_colour(hex: String) -> void:
@@ -833,11 +875,20 @@ func _apply_colour(hex: String) -> void:
 		return
 	var part: Node3D = _main.current_selected_part()
 	if part == null:
-		_colour_status_label.text = "Selected: nothing — laser-select a part first"
+		_show_colour_message("Selected: nothing — laser-select a part first")
+		return
+	if _colour_group_toggle and _colour_group_toggle.button_pressed:
+		var group_result: Dictionary = await _colour_tool.set_group_color(part, hex)
+		if group_result["ok"]:
+			_show_colour_message("Coloured %d occurrence(s) in the group." % group_result["count"])
+		elif group_result["count"] > 0:
+			_show_colour_message("Coloured %d, then failed: %s" % [group_result["count"], group_result["error"]])
+		else:
+			_show_colour_message("Couldn't colour the group: %s" % group_result["error"])
 		return
 	var result: Dictionary = await _colour_tool.set_color(part, hex)
 	if not result["ok"]:
-		_colour_status_label.text = "Couldn't set colour: %s" % result["error"]
+		_show_colour_message("Couldn't set colour: %s" % result["error"])
 
 
 func _readable_text_color(hex: String) -> Color:

@@ -78,6 +78,11 @@ func _initialize() -> void:
 	hand.global_position = tool.gizmo().global_position
 	var grabbed_at: Vector3 = hand.global_position
 	print("SMOKE near hand grabs the gizmo: ", tool.try_grab(hand) == true)
+	# --- grabbing sets section_gizmo_held on the hand, so two_hand_model.gd's
+	# _hand_free() knows this hand is busy with the gizmo and won't also drag
+	# the whole model on the same grip press (see two_hand_model.gd's own
+	# _hand_free() docstring for the real-headset bug this meta convention fixes)
+	print("SMOKE grabbing sets the section_gizmo_held meta on the hand: ", hand.has_meta("section_gizmo_held") and hand.get_meta("section_gizmo_held") == true)
 	print("SMOKE a second hand can't also grab it: ", tool.try_grab(Node3D.new()) == false)
 	var drag := Vector3(0.3, 0, 0)
 	hand.global_position += drag
@@ -88,6 +93,7 @@ func _initialize() -> void:
 	print("SMOKE an uninvolved hand's release is a no-op: ", tool.release(Node3D.new()) == false)
 	print("SMOKE the holding hand's release succeeds: ", tool.release(hand) == true)
 	print("SMOKE released hand can't release again: ", tool.release(hand) == false)
+	print("SMOKE releasing clears the section_gizmo_held meta: ", hand.get_meta("section_gizmo_held") == false)
 
 	# --- undo/redo: one command per grab/drag gesture, mirroring
 	# two_hand_model.gd's own _begin_gesture()/_end_gesture() precedent
@@ -112,6 +118,15 @@ func _initialize() -> void:
 	tool3.try_grab(hand3)
 	tool3.release(hand3)
 	print("SMOKE a no-op grab+release pushes nothing: ", stack3.can_undo() == false)
+
+	# --- deactivating while still gripping the gizmo (never calling
+	# release()) must still clear section_gizmo_held, or that hand would be
+	# permanently locked out of whole-model dragging — the bug caught by
+	# re-reading set_active()'s own deactivate branch during this round's fix
+	tool3.try_grab(hand3)
+	print("SMOKE re-grabbing sets the meta again: ", hand3.get_meta("section_gizmo_held") == true)
+	tool3.set_active(false)
+	print("SMOKE deactivating mid-grab clears the meta: ", hand3.get_meta("section_gizmo_held") == false)
 
 	# --- reconcile(): wraps a fresh part, preserving its own albedo, and
 	# leaves an already-wrapped, untouched part alone (no needless rebuild)

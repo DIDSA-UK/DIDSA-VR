@@ -426,6 +426,18 @@ button (popup keyboard) and **Clear colour**.
   `GET .../occurrences` fetch (not just trusting the optimistic local
   apply), confirmed the Godot node's own material changed to match, then
   cleared it again. Passed on the first real run.
+- **Colouring hierarchy (round 2): `set_group_color()`, "Apply to whole
+  group" on the tablet.** Loops the same PATCH over every Occurrence sharing
+  the picked one's immediate `owner_part_id`, fetched via the real, confirmed
+  `GET /parts/{id}/occurrences`. Tests: `tests/colour_tool.gd` (pure logic —
+  the clearer root-content message, `_apply_local_color_to_group()`'s own
+  filtering) and `tests/e2e_colour_group.gd` (real backend, same "run
+  manually" exception): stood up a throwaway backend, group-coloured
+  `assembly.didsa`'s real 2 sibling occurrences in one call, confirmed via a
+  fresh `GET .../occurrences` that *both* persisted server-side (not just
+  the one originally picked), confirmed the local preview reached every
+  loaded sibling node too, then cleared the whole group again. Passed on the
+  first real run.
 - **Not yet headset-verified**, same caveat as Mates above.
 
 ### Sections tool: built (headless-verified, real-backend-confirmed, and the shader's own clip behaviour confirmed with a real software render)
@@ -654,20 +666,207 @@ own status reporting is now console-print-only (`status_text`, a plain
 `String` property `tests/e2e_*.gd` still poll to know when a load finished,
 no 3D node needed for that).
 
+## Real-headset testing round 2: four bugs found; three fixed, one (mates) deferred as a real data/architecture gap
+
+A second real-hand round, after round 1's tablet/keyboard/laser fixes above.
+Four issues came back. Three are concrete, root-caused client bugs, now
+fixed and covered by new headless tests. The fourth (mates) is not fixable
+client-side at all — a genuine data-model/architecture gap, deferred to the
+roadmap per John's own call rather than worked around.
+
+### Colours: error message flashed and vanished; root cause was a genuine data-model gap, not a material clash
+
+The error text was visible for at most ~0.25s: `wrist_tablet.gd`'s
+`_process()` refreshed `_colour_status_label.text` unconditionally on its
+periodic 0.25s tick, clobbering whatever `_apply_colour()` had just written.
+Fixed with a hold window (`_colour_message_hold_until_ms`,
+`_show_colour_message()`) — an error (or any status message) now survives at
+least `_show_colour_message()`'s own default 3s before the periodic refresh
+is allowed to overwrite it again. Confirmed headless:
+`tests/tablet_scene.gd`'s new block clicks "Clear colour" with nothing
+selected, confirms the message survives one refresh tick, then confirms it
+reverts once the hold expires (using a directly-injected message to avoid a
+coincidental identical-text false pass — see that test's own comment).
+
+The failure itself, confirmed directly by John: he was trying to colour a
+single mesh body — the only thing his raycast pick could resolve to in that
+test data. `colour_tool.gd::set_color()` correctly rejects any pick with no
+owning Occurrence ("root content" in the backend's own terms) with a real,
+working guard, not a bug — traced the suspected material-override clash
+with `section_tool.gd`'s wrap/unwrap pipeline and confirmed it already
+preserves colour correctly through both directions (already covered by
+`tests/section_tool.gd`'s own passing assertions), ruling that out as the
+cause.
+
+**Colouring hierarchy, designed and partially built this round** (grounded
+in the real backend model — read `backend/app/document/router.py`/
+`models.py` directly, not assumed): there's no distinct "Assembly" entity in
+the backend at all — an assembly *is* a Part with Occurrences, and a
+"sub-assembly" is just an Occurrence whose own Part has further Occurrences.
+**Colour lives only on `Occurrence.color`** — one field, one endpoint
+(`PATCH /parts/{owner_part_id}/occurrences/{occurrence_id}`) — so
+assy/sub-assy/part-level colouring all reduce to the exact same mechanism,
+just a different *scope* of occurrences to apply it to:
+
+- **One Occurrence** (Part level) — already worked, unchanged.
+- **Every Occurrence sharing an immediate owner** (sub-assembly/pattern
+  level) — new this round: `colour_tool.gd::set_group_color()` fetches the
+  real, confirmed `GET /parts/{id}/occurrences` (`router.py`'s
+  `list_occurrences`) and loops the same PATCH over every sibling — same
+  "loop the per-occurrence endpoint, there's no bulk one" shape
+  `mates_tool.gd::enforce_all()` already uses. Exposed on the wrist tablet
+  as a new "Apply to whole group" toggle on the Colours tab, read by every
+  swatch/custom-hex/clear action.
+- **Mesh body** — genuinely has no backend field at all; colour was never
+  wired below Occurrence. Not client-fixable without new backend
+  schema/endpoint work — flagged, not built.
+- **Face** — the backend's `SubShapeType` enum has it for mates/measure, but
+  it was never wired to colour either. Noted, not built.
+- The bigger interaction John sketched (a floating tree window listing
+  assy/sub-assy/part with breadcrumbs, an alternate "give me context, not
+  just the raycast hit" pick gesture) is explicitly deferred to a future
+  "flat windows" milestone, per his own call — no tree UI this round.
+
+Root content (no Occurrence at all — the pick this bug report actually hit)
+now gets a clearer message naming the real limit
+(`colour_tool.gd`'s `_ROOT_CONTENT_ERROR`: "nothing here has a colour
+override in the backend's data model") instead of the old, bug-report-
+sounding generic rejection. **Important honesty note, unchanged from the
+plan**: if a loaded file genuinely has zero real Occurrences anywhere (a
+single multi-body Part with no placed structure at all — plausibly exactly
+John's test file), no client-side control can find a colourable target in
+it; that's the same root data gap as the mates issue below, not something
+this round's "Apply to whole group" toggle can paper over.
+
+Tests: `tests/colour_tool.gd` gained coverage for the clearer root-content
+message and `set_group_color()`'s filtering logic
+(`_apply_local_color_to_group()`, pure/no-network) against manually-tagged
+stand-ins, same convention the file already used.
+
+The one-off "couldn't get off the colour tool" didn't recur and matches the
+class of intermittent click failure round 1 already fixed (drift-mid-press)
+— no separate mechanism found, no action taken.
+
+### Tablet dynamic highlight: toggle buttons never had a pressed/hover style
+
+Every toggle button in the tablet (Modes' three, Sections' own
+Section-tool/Flip, Mates' Flip/Relax, the tab row, steadiness/scale choice
+rows) was relying entirely on Godot's built-in default theme fallback for
+any pressed/unpressed visual difference — `_build_ui()`'s own `Theme.new()`
+only ever set `default_font_size`; no stylebox was defined for any button
+state anywhere in this file (the Colours tab's per-swatch `"normal"`
+override is unrelated — that's each swatch's own fixed colour, not a
+pressed-state indicator). That fallback wasn't reading clearly at arm's
+length on an unshaded SubViewport quad. Fixed with one theme-wide
+`pressed`/`hover_pressed` `StyleBoxFlat` override in `_build_ui()` — lights
+up every toggle button in the tablet at once, no per-button changes needed.
+Confirmed headless: `tests/tablet_scene.gd`'s new check reads a just-toggled
+Modes button's own `pressed` stylebox via the theme and confirms it's a
+real, distinct `StyleBoxFlat` (not null, not identical to `normal`).
+
+### Section tool: gripping the gizmo also dragged the whole world; visual redesign
+
+Root cause, confirmed by reading both files: `two_hand_model.gd::
+_hand_free()` only ever checked `controller.gd`'s own `held_node` (a
+*part*) to decide whether a hand was free to drag the whole model — it had
+no idea `section_tool.gd` existed. The gizmo deliberately never sets
+`held_node` (it isn't a `grabbable_parts` member — see that script's own
+docstring), so grabbing it left `_hand_free()` believing the hand was still
+free, and the same grip press dragged the whole model underneath it at the
+same time. Fixed with the same meta-based convention already established
+for `ui_hover`/`ui_hit_distance`: `section_tool.gd`'s `try_grab()`/
+`release()` set/clear a new `section_gizmo_held` meta on the grabbing hand;
+`two_hand_model.gd::_hand_free()` checks it before falling through to the
+`held_node` check. Also fixed a related bug caught while re-reading the new
+code, not from testing: deactivating the Sections tool *while still
+gripping the gizmo* (never calling `release()`) used to leave that hand's
+meta stuck `true` forever, permanently locking it out of whole-model
+dragging — `set_active()`'s deactivate branch now clears the meta explicitly
+if a grab is in progress.
+
+Confirmed headless: `tests/section_tool.gd` gained direct assertions that
+grab/release set and clear the meta, and that deactivating mid-grab also
+clears it. **The live `two_hand_model.gd` interaction itself
+(`_hand_free()`'s real behaviour while gated on
+`hand.is_button_pressed(grab_action)`) can't be verified headless at all** —
+Godot's `is_button_pressed()` reads real XR runtime state with no way to
+inject a fake press (confirmed by trying: a script override of a native
+`XRController3D` method is a hard parse error in this project's
+strict-warnings build, not a silent no-op), so this specific interaction —
+like the rest of this project's real-device-input logic — needs John's own
+confirmation over PCVR. The meta set/clear correctness above is the closest
+thing to verifiable proxy coverage.
+
+Visual redesign, per John's own spec: disc → `BoxMesh` rectangle (was
+`CylinderMesh`); arrow → a 4-`radial_segments` `CylinderMesh` cone (a
+square-based pyramid) with `top_radius=0`; added a thin `CylinderMesh`
+"tail" spanning from the plane's own surface out to the arrowhead's base so
+the indicator reads as one continuous pin rather than a floating shape.
+`_update_global_plane()`'s existing Flip-driven arrow repositioning got a
+matching tail length/position update. Confirmed headless that nothing about
+`tests/section_render.gd`'s real-render clip-shader checks regressed (Xvfb +
+Mesa llvmpipe) — the geometry change doesn't touch the shader, but this
+re-confirms rendering still works end to end with the new meshes. **Not
+confirmed on a real headset** — the shape itself, like every other visual
+change in this project, needs John's own look.
+
+### Mates: blocked on a multi-body test file and no in-VR "open a different file" path — DEFERRED to the roadmap
+
+Not a client bug, confirmed by reading both the backend model and this
+client's own picking code:
+
+1. **The test assembly's two visually-distinct chunks are two Bodies of one
+   Part's own root content, not two placed Occurrences.** A Mate references
+   two *Occurrences* — both in the backend's data model and in
+   `mates_tool.gd`'s own validation (`_validate_pick()` rejects root
+   content, and rejects the same occurrence picked twice). If a file's
+   "parts" are really just multiple Bodies inside one Part with no
+   Occurrence structure, there is nothing to mate — by the backend's own
+   Mate semantics, not a gap in this client's picking.
+2. **There's no in-VR way to open a different native file at runtime**, and
+   no way to add parts to the currently-loaded assembly. `main.gd`'s native
+   import runs once at `_ready()` against a hardcoded path; the Files tab
+   only ever loads bare `.glb`/`.gltf` or goes through `import-features` for
+   STEP/STL/OBJ, never a native assembly through `/import/native`. That
+   endpoint is also a full-replace import (see
+   `docs/backend-api-notes.md`), not additive — "add parts to the current
+   assembly" needs real backend multi-file composition work, which the
+   vision brief already flags as an unbuilt roadmap item ("Multi-file
+   assembly composition: Port to Python").
+
+**Per John's own call: deferred entirely, no code this round.** Blocking
+mates testing until a real multi-Occurrence test assembly (or the
+open/add-parts pathway) exists — tracked here so it's picked up as scoped
+work after Milestone 4's measurements land, not re-diagnosed from scratch.
+
 ## Untested paths
 
+- **Every toggle button on the tablet (Modes, Sections, Mates, the tab row,
+  steadiness/scale choice rows) now has a real pressed/hover stylebox**
+  (round 2's tablet-highlight fix, see above) — confirmed headless that the
+  stylebox itself is real and distinct from unpressed, but whether it reads
+  clearly enough at arm's length on a real headset (the original complaint)
+  is still open; this project's whole real-vs-simulated-input gap means the
+  fix can only be confirmed by John looking at it.
 - **The Mates tab is headless- and real-backend-confirmed; the wrist tablet
   UI itself has now had one real round of laser/trigger testing too** (see
   "Real-headset testing round" above — the click-activation bug it found
-  affected every tab, not just this one, and is now fixed). Still open:
-  whether picking two faces in quick succession feels right, and whether the
-  tab's layout fits legibly on the existing panel size alongside everything
+  affected every tab, not just this one, and is now fixed). **Still blocked
+  on a real multi-Occurrence test assembly** — see "Real-headset testing
+  round 2" above; deferred, not yet scoped. Still open otherwise: whether
+  picking two faces in quick succession feels right, and whether the tab's
+  layout fits legibly on the existing panel size alongside everything
   else — feel, not mechanics, is what's left here.
 - **The Colours tab has the same residual gap** — `colour_tool.gd`'s logic is
   headless- and real-backend-confirmed, clicking now works for real (see
   above), but colour legibility against the panel background and whether the
-  text-colour contrast pick actually reads well are still open.
-- **The Sections tab has the same gap, plus one more layer.** Clicking its
+  text-colour contrast pick actually reads well are still open. **New this
+  round, also unconfirmed on a real headset**: the held error-message
+  window (does 3s read as "just long enough" or too long/short in practice)
+  and the "Apply to whole group" toggle (whether the colouring-hierarchy
+  concept — one Occurrence vs. every sibling sharing an owner — is legible
+  from the tablet alone, with no tree/breadcrumb UI yet).
+- **The Sections tab has the same gap, plus more this round.** Clicking its
   tab/toggle/Flip buttons now works for real (see above). Beyond that: the
   clip plane's own real-render behaviour is confirmed correct in a flat,
   software-rendered image (`tests/section_render.gd`, Xvfb + Mesa llvmpipe),
@@ -677,7 +876,14 @@ no 3D node needed for that).
   hand (a part has real volume to reach into; this gizmo doesn't), are both
   open. The default gizmo size (`plane_radius`, a fixed 0.4 m) and spawn
   distance (0.6 m in front of the camera) were picked as reasonable
-  human-scale guesses, never checked against a real arm's reach.
+  human-scale guesses, never checked against a real arm's reach. **New this
+  round, entirely unconfirmed on a real headset**: whether the grip-vs-
+  whole-model-drag fix (`section_gizmo_held` meta) actually stops the world
+  moving underneath the gizmo in practice — it can't be verified headless at
+  all, since Godot's `is_button_pressed()` can't be faked without a real XR
+  runtime (see the "Real-headset testing round 2" section above) — and
+  whether the new rectangle disc/pyramid arrow/tail reads clearly at real
+  depth.
 - **Standalone Quest APK.** Every test so far has been Godot editor +
   Virtual Desktop PCVR streaming to a headset from a desktop (John
   deliberately iterates on PCVR — faster). No APK has been exported or
@@ -799,10 +1005,11 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   section-tool, section-tab and laser/left-hand tests). `tests/README.md`
   lists the expected values. Needs no GPU, headset or backend.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
-  `e2e_mates.gd`, `e2e_colour.gd`, `e2e_section.gd`): each deliberately points
-  `main.secrets_file_path` at the real `secrets.cfg` and drives real network
-  calls against a running backend, using the tracked `assembly.didsa`. Run
-  them manually once your backend is up; none are part of `run_all.sh`.
+  `e2e_mates.gd`, `e2e_colour.gd`, `e2e_colour_group.gd`, `e2e_section.gd`):
+  each deliberately points `main.secrets_file_path` at the real `secrets.cfg`
+  and drives real network calls against a running backend, using the tracked
+  `assembly.didsa`. Run them manually once your backend is up; none are part
+  of `run_all.sh`.
   `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
   instantiating the scene to "Loaded" — the first time this path was
@@ -877,3 +1084,11 @@ drifted and when, since it can drift again the same way.
   session's own design call — the vision brief itself never specified one,
   unlike Mates' own spelled-out workflow (see the "Milestone 4" section
   above for the full reasoning).
+- **Mates testing blocker (this round, repo export only, not the live
+  doc).** Added a new "Open decisions and risks" bullet recording the
+  multi-body-test-file/no-open-file-path gap that's currently blocking
+  mates testing (see "Real-headset testing round 2" above for the full
+  diagnosis) — this session had no access to the live Claude Docs artifact,
+  so only this repo's own export was updated. Re-sync to the live doc next
+  time it's touched, same caveat as the two Milestones-table rewordings
+  above.

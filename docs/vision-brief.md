@@ -154,6 +154,7 @@ Shared network storage (stage 1) follows milestone 4; live presence (stage 2) is
 - [ ] Drag latency: reimplement a local solve in the VR client, or solve on release (proposed for v1).
 - [ ] Window apps: how to run DIDSA-CAD and a browser as floating panels on Quest.
 - [ ] Live presence: separate backend project, after shared-file storage.
+- [ ] Mates testing blocker: the current VR test assembly's two visually-distinct chunks are two Bodies of one Part, not two placed Occurrences, so there's nothing for the milestone-4 Mates tool to mate (a Mate references two Occurrences, by the backend's own data model — not a client bug). Also no in-VR way to open a different native file at runtime, or to add parts to the loaded assembly (`/import/native` is full-replace, not additive) — needs the multi-file assembly composition roadmap item above. Deferred past milestone 4; see DIDSA-VR's docs/status.md "Real-headset testing round 2" for the full diagnosis.
 
 **Main risk:** the size estimate (about 100 KB for 186 instances) was measured on imported meshes, not real parametric assemblies, and dragging over a network round trip may feel laggy. Test both early.
 

@@ -301,6 +301,16 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 func _hand_free(hand: XRController3D) -> bool:
 	if not hand.is_button_pressed(grab_action):
 		return false
+	# Real-headset feedback: grabbing the section-plane gizmo also dragged
+	# the whole model, because this check only ever knew about controller.gd's
+	# own held_node (a PART) — section_tool.gd's gizmo deliberately never
+	# sets that (see its own class docstring for why it isn't a
+	# grabbable_parts member), so this considered the hand "free" and dragged
+	# the whole model on the same grip press. section_tool.gd sets/clears
+	# this meta on the hand itself (same convention ui_hover/ui_hit_distance
+	# already use for controller.gd), so check it here too.
+	if hand.has_meta("section_gizmo_held") and hand.get_meta("section_gizmo_held"):
+		return false
 	# controller.gd exposes held_node; a hand carrying a part isn't free.
 	return hand.get("held_node") == null
 
