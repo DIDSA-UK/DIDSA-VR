@@ -222,7 +222,7 @@ func _update_pointer(normal: Vector3) -> void:
 	if _target_hover != _last_target_hover:
 		_last_target_hover = _target_hover
 		for mat in _target_materials:
-			mat.albedo_color = Color(1.0, 0.85, 0.1) if _target_hover else Color(0.3, 0.9, 1.0)
+			mat.albedo_color = Color(1.0, 1.0, 1.0) if _target_hover else Color(0.8, 0.83, 0.87) # brightens to pure white on hover, never leaves white
 
 	if visible:
 		var hit = Plane(normal, global_position).intersects_ray(origin, dir)
@@ -310,26 +310,49 @@ func _send_click(down: bool) -> void:
 
 
 func _build_target() -> void:
-	# A little flat bullseye (ring + centre dot) hovering over the wrist.
+	# A little flat bullseye hovering over the wrist: a thin ring with a
+	# landscape rectangle inside it — a stylised tablet — rather than the
+	# original spike's plain ring-and-dot, so the icon itself hints at what
+	# shooting it opens. Thin white lines throughout, matching this pass's
+	# visual language elsewhere (floor grid, controller discs).
 	_target = Node3D.new()
 	_left.add_child(_target)
 	_target.position = target_position
-	var parts := {"ring": TorusMesh.new(), "dot": SphereMesh.new()}
-	var ring: TorusMesh = parts["ring"]
-	ring.inner_radius = 0.02
-	ring.outer_radius = 0.03
-	var dot: SphereMesh = parts["dot"]
-	dot.radius = 0.007
-	dot.height = 0.014
-	for mesh in parts.values():
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(0.3, 0.9, 1.0)
-		mesh.material = mat
-		_target_materials.append(mat)
-		var instance := MeshInstance3D.new()
-		instance.mesh = mesh
-		_target.add_child(instance)
+
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.027
+	ring.outer_radius = 0.031
+	_add_target_mesh(ring)
+
+	# The tablet rectangle's outline, four thin bars (each extended by its
+	# own thickness so the corners meet cleanly rather than leaving a gap).
+	var half_width := 0.017
+	var half_height := 0.011
+	var bar_thickness := 0.0025
+	var bar_height := 0.001 # thin along local Y so it lies flat, matching the ring
+	var bars := [
+		{"size": Vector3(half_width * 2.0 + bar_thickness, bar_height, bar_thickness), "pos": Vector3(0.0, 0.0, -half_height)}, # top
+		{"size": Vector3(half_width * 2.0 + bar_thickness, bar_height, bar_thickness), "pos": Vector3(0.0, 0.0, half_height)}, # bottom
+		{"size": Vector3(bar_thickness, bar_height, half_height * 2.0 + bar_thickness), "pos": Vector3(-half_width, 0.0, 0.0)}, # left
+		{"size": Vector3(bar_thickness, bar_height, half_height * 2.0 + bar_thickness), "pos": Vector3(half_width, 0.0, 0.0)}, # right
+	]
+	for bar in bars:
+		var box := BoxMesh.new()
+		box.size = bar["size"]
+		var instance := _add_target_mesh(box)
+		instance.position = bar["pos"]
+
+
+func _add_target_mesh(mesh: Mesh) -> MeshInstance3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.8, 0.83, 0.87)
+	mesh.material = mat
+	_target_materials.append(mat)
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	_target.add_child(instance)
+	return instance
 
 
 func _build_viewport() -> void:
