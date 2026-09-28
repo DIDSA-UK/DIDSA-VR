@@ -1724,3 +1724,43 @@ few known coordinates on the returned `Image`) but nothing does yet.
 
 `README.md`'s wrist-tablet section (item 7) and items 10–16 are updated to
 match; item 16 is new (floor grid + Environment).
+
+## Follow-up visuals pass, same day: white laser/marker, controller button discs, tablet icon
+
+Confirmed the same way as the pass above — parse-checked every touched
+script and re-ran `tests/run_all.sh`'s full list against Godot 4.3
+headless; `ALL RAN WITHOUT SCRIPT ERRORS`, no new `false` SMOKE line
+anywhere the diff touches.
+
+- **Origin marker and laser, both white.** `controller.gd`'s
+  `_add_visible_marker()` (the small sphere at each hand the laser
+  emanates from) shrank to a third of its original 0.02m radius; the laser
+  itself (`_add_laser()`) narrowed slightly (0.003m → 0.002m radius). Both
+  recoloured from the original cyan to white, matching this pass's own
+  white-line language (floor grid, tablet icons).
+- **Controller button discs.** New `controller.gd` `_add_button_discs()`:
+  a thin ring plus small white discs at this controller's own approximate
+  real button positions — thumbstick, the two face buttons (A/B on the
+  right hand, X/Y on the left), and, **left hand only**, the Menu button —
+  matching what this project's own `openxr_action_map.tres` actually binds
+  (`menu_button` → `/user/hand/left/input/menu/click` only; the right
+  controller's real hardware has no equivalent, its System/Oculus button
+  being OS-reserved). The Menu disc additionally carries three tiny dark
+  bars so it reads as a hamburger (≡) glyph rather than a plain dot. Each
+  disc brightens to pure white on its real button's press
+  (`_on_button_pressed()`/`_on_button_released()` now call a new
+  `_flash_disc()`, independent of whatever the press actually does) and
+  fades back on release — real visual confirmation you found the right
+  button, the way many VR apps show a floating controller reference (Quest
+  home environment included) rather than making you glance at your actual
+  hardware. **Positions are a stylised approximation** (offsets in metres
+  from the controller's own tracked origin, chosen by eye against the real
+  Touch controller's general layout, not measured/traced) — worth a real-
+  headset pass to nudge them once someone can actually look at their hand.
+- **Wrist tablet icon.** `wrist_tablet.gd`'s `_build_target()` (the small
+  icon that opens the tablet) is no longer a plain ring-and-dot bullseye —
+  it's a thin ring around a thin landscape-rectangle outline (four short
+  `BoxMesh` bars), evoking a tablet rather than a target. White at rest,
+  brightening to pure white on hover (was cyan/yellow) — the hover
+  affordance is now brightness-only, no hue change, for the same reason
+  the button-disc flash above dropped the old yellow accent.

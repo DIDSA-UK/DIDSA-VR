@@ -60,12 +60,18 @@ live-synced.
    left-hand select used to block left-hand walking (see item 5) whenever a
    part was selected there, so laser-select is right-hand only for now,
    freeing the left trigger up for a later tool (not decided yet); left grip
-   is unaffected and still grabs normally. A thin cyan laser shows where
-   you're aiming, shortening to stop exactly on whatever it's actually
-   hitting (a part, or the wrist tablet/popup keyboard) rather than always
-   drawing at a fixed length; selected parts get a yellow highlight. Every
-   part move (grip-drag or laser rotate/nudge) is undoable — see the wrist
-   tablet's Undo/Redo below.
+   is unaffected and still grabs normally. A thin white laser shows where
+   you're aiming (from a small white sphere marking each hand's own
+   origin), shortening to stop exactly on whatever it's actually hitting (a
+   part, or the wrist tablet/popup keyboard) rather than always drawing at
+   a fixed length; selected parts get a yellow highlight. Every part move
+   (grip-drag or laser rotate/nudge) is undoable — see the wrist tablet's
+   Undo/Redo below. Each controller also carries a small floating reference
+   — a thin ring around a few white discs roughly where the physical
+   thumbstick, A/B (or X/Y on the left) and, left hand only, Menu button
+   sit — so you can find a button by feel without looking away from
+   whatever you're doing; a disc brightens while its real button is held
+   down.
 5. Walk with the **left thumbstick** (relative to where you're looking); the
    **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
    teleport (push forward and point the right hand's laser at the floor — a
@@ -88,9 +94,11 @@ live-synced.
    point that tracks it). Every turn builds on the model's current
    orientation, so you can rotate about one axis and then another naturally.
    Switching between one and two hands never makes the model jump.
-7. **Wrist tablet.** A small cyan bullseye floats above your left wrist.
-   Point the right hand's laser at it (it turns yellow) and pull the trigger
-   to open the tablet; press the **X** on the tablet to close it. It never
+7. **Wrist tablet.** A small thin-white-line icon — a ring with a landscape
+   rectangle inside it, like a tablet — floats above your left wrist (it
+   brightens to pure white on hover). Point the right hand's laser at it and
+   pull the trigger to open the tablet; press the **X** on the tablet to
+   close it. It never
    opens by itself, so looking at your wrist can't trigger it. While the
    laser is over the bullseye or the tablet, the trigger presses those
    instead of selecting a part — the laser itself shortens to stop exactly

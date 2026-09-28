@@ -63,6 +63,7 @@ var section_tool = null ## set by main.gd; a shared section_tool.gd instance —
 
 var _laser: MeshInstance3D
 var _laser_mesh: CylinderMesh
+var _button_discs: Dictionary = {} ## action_name -> {"material": StandardMaterial3D, "idle": Color, "pressed": Color} — see _add_button_discs()
 var _part_hit_distance := -1.0 ## metres to whatever _update_aim_hover()'s own raycast last hit, or -1 for nothing — set alongside _aim_hover_node
 var _select_material: StandardMaterial3D
 var _hover_material: StandardMaterial3D
@@ -105,6 +106,7 @@ func _ready() -> void:
 	button_released.connect(_on_button_released)
 	set_steadiness(steadiness)
 	_add_visible_marker()
+	_add_button_discs()
 	_add_laser()
 	_select_material = StandardMaterial3D.new()
 	_select_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -221,6 +223,7 @@ func reset_interaction() -> void:
 
 
 func _on_button_pressed(action_name: String) -> void:
+	_flash_disc(action_name, true) # visual-only, independent of whatever the action actually does below
 	if action_name == grab_action:
 		# The section-plane gizmo is independent of "Individual part
 		# manipulation" mode (like mates_tool_active/hide_tool_active are for
@@ -243,6 +246,7 @@ func _on_button_pressed(action_name: String) -> void:
 
 
 func _on_button_released(action_name: String) -> void:
+	_flash_disc(action_name, false)
 	if action_name == grab_action:
 		_try_release()
 
@@ -510,31 +514,121 @@ func _clear_selection() -> void:
 
 func _add_visible_marker() -> void:
 	# Bare XRController3D nodes draw nothing at all — without this you
-	# can't see your own hands in headset.
+	# can't see your own hands in headset. Shrunk to a third of its
+	# original 0.02m radius (John's own real-headset feedback: it read as
+	# too large/prominent next to the laser it just marks the origin of)
+	# and recoloured white to match the laser (see _add_laser()) and the
+	# rest of this pass's white-line visual language (floor grid, tablet
+	# icons).
 	var marker := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.02
-	sphere.height = 0.04
+	sphere.radius = 0.02 / 3.0
+	sphere.height = 0.04 / 3.0
 	marker.mesh = sphere
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.emission_enabled = true
-	mat.emission = Color(0.2, 0.9, 0.9)
-	mat.albedo_color = Color(0.2, 0.9, 0.9)
+	mat.emission = Color(1.0, 1.0, 1.0)
+	mat.albedo_color = Color(1.0, 1.0, 1.0)
 	sphere.material = mat
 	add_child(marker)
+
+
+## Small white discs at roughly this controller's own real button positions
+## (thumbstick, the two face buttons — A/B on the right hand, X/Y on the
+## left — and, left hand only, the Menu button, per this project's own
+## openxr_action_map.tres: menu_button binds only to
+## /user/hand/left/input/menu/click, matching real Touch hardware, which
+## has no equivalent on the right) plus a thin ring evoking the real
+## controller's own tracking halo — the common "floating controller"
+## reference many VR apps (the Quest home environment included) show so a
+## player can find a button by feel without breaking immersion to look at
+## their real hardware. Positions are local to this XRController3D (whose
+## own aim points down local -Z — see _add_laser()) and are a stylised
+## approximation, not a traced model. Each disc gets its own material
+## (never shared) so _on_button_pressed()/_on_button_released() can flash
+## just the one pressed, independent of the others.
+func _add_button_discs() -> void:
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.044
+	torus.outer_radius = 0.048
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.albedo_color = Color(0.82, 0.85, 0.9, 0.6)
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	torus.material = ring_mat
+	ring.mesh = torus
+	ring.position = Vector3(0.0, 0.013, -0.024)
+	add_child(ring)
+
+	_add_disc("primary_click", Vector3(0.0, 0.018, -0.018), 0.007)
+	_add_disc("ax_button", Vector3(0.012, 0.010, -0.030), 0.005)
+	_add_disc("by_button", Vector3(-0.006, 0.010, -0.034), 0.005)
+	if tracker == &"left_hand":
+		var menu_disc := _add_disc("menu_button", Vector3(-0.018, 0.012, -0.010), 0.005)
+		_add_hamburger_glyph(menu_disc)
+
+
+func _add_disc(action_name: String, local_position: Vector3, radius: float) -> MeshInstance3D:
+	var disc := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = radius
+	cylinder.bottom_radius = radius
+	cylinder.height = 0.0015
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.emission_enabled = true
+	mat.emission = Color(0.82, 0.85, 0.9)
+	mat.albedo_color = Color(0.82, 0.85, 0.9, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	cylinder.material = mat
+	disc.mesh = cylinder
+	disc.position = local_position
+	add_child(disc)
+	_button_discs[action_name] = mat
+	return disc
+
+
+func _add_hamburger_glyph(disc: MeshInstance3D) -> void:
+	## Three tiny parallel bars on the Menu disc's face, so it reads as the
+	## hamburger (≡) icon rather than a plain button dot.
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.1, 0.1, 0.12) # dark, against the disc's own white face
+	for i in 3:
+		var bar := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.006, 0.0002, 0.0008)
+		box.material = mat
+		bar.mesh = box
+		bar.position = Vector3(0.0, 0.0009, -0.0015 + float(i) * 0.0015)
+		disc.add_child(bar)
+
+
+func _flash_disc(action_name: String, on: bool) -> void:
+	## Brightens to pure white on press, same idle/hover-brightness pattern
+	## as the wrist tablet's own bullseye (wrist_tablet.gd's _update_pointer())
+	## — a real, visible jump while staying strictly within this pass's
+	## white palette rather than reusing the old yellow highlight accent.
+	var mat: StandardMaterial3D = _button_discs.get(action_name)
+	if mat == null:
+		return
+	var color := Color(1.0, 1.0, 1.0) if on else Color(0.82, 0.85, 0.9)
+	mat.albedo_color = Color(color.r, color.g, color.b, 1.0 if on else 0.85)
+	mat.emission = color
 
 
 func _add_laser() -> void:
 	_laser = MeshInstance3D.new()
 	_laser_mesh = CylinderMesh.new()
-	_laser_mesh.top_radius = 0.003
-	_laser_mesh.bottom_radius = 0.003
+	_laser_mesh.top_radius = 0.002 # slightly narrower than the original 0.003
+	_laser_mesh.bottom_radius = 0.002
 	_laser_mesh.height = laser_length
 	_laser.mesh = _laser_mesh
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.3, 0.9, 1.0, 0.5)
+	mat.albedo_color = Color(1.0, 1.0, 1.0, 0.5) # white, matching the shrunk origin marker
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_laser_mesh.material = mat
 	add_child(_laser)
