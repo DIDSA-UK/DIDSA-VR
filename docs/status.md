@@ -1017,7 +1017,7 @@ this project not explicitly marked otherwise: whether the new "Add" button
 reads clearly at wrist-tablet size, and whether re-adding a component while
 the tablet is mid-interaction feels right.
 
-## Milestone 3 — floating windows: Assembly Tree, Calculator, Image Viewer built
+## Milestone 3 — floating windows: Assembly Tree, Calculator, Image Viewer, Browser (and PDF) built
 
 The vision brief's milestone 3 named five things: calculator, browser, PDF
 reader, image viewer, and DIDSA-CAD itself, all as flat panels floating in
@@ -1108,19 +1108,16 @@ button, not `toggle_mode`, since a window can also be closed by its own
 "X" — see `wrist_tablet.gd`'s own `_window_toggle_button()` docstring for
 why keeping a separate toggle-button state in sync wasn't worth it).
 
-**Explicitly not attempted this phase** (separate, unstarted spikes):
+**Explicitly not attempted this phase** (separate, unstarted spike):
 
-- **PDF reader** — needs a Quest/Android-compatible Godot PDF-rendering
-  GDExtension; none exists in this repo or has been evaluated.
-- **Browser** — needs a CEF/webview-style GDExtension; real risk it simply
-  doesn't run on standalone Quest at all. The highest-risk item of the
-  original five.
 - **DIDSA-CAD as a flat window** — blocked on DIDSA-CAD's own Flutter
   client gaining a web build target (`flutter create --platforms=web` —
   doesn't exist today, confirmed: no `web/` folder in that repo) and
   validating `flutter_gpu`'s web support, an open, unvalidated risk per
   that repo's own recon docs (`docs/vr-recon-2026-09-24.md`/
   `-2-2026-09-24.md`). This is a DIDSA-CAD-repo spike, not a DIDSA-VR task.
+  (Browser and PDF reader, originally alongside this in the "not attempted"
+  list, are now built — see "Browser window and browser-relay" below.)
 
 **Update, same session: Godot 4.7.2 obtained and the full suite actually
 run.** The initial claim above ("no Godot available, only inspected") held
@@ -1170,6 +1167,115 @@ matching this doc's and `tests/README.md`'s own documented expected
 values). **Still open**: `tests/e2e_assembly_tree.gd` (needs a real running
 backend — none in this sandbox) and, same as every other milestone in this
 project, a real headset pass.
+
+### Browser window and browser-relay: the deferred Browser/PDF reader built, differently than originally scoped
+
+After the sections above shipped, John asked to progress this milestone
+further and reframed the deferred Browser item: "if DIDSA-CAD can run in a
+floating window, can any app? E.g. a lightweight browser?" — a real
+question, since DIDSA-CAD-as-a-window (see above) is itself just "run
+some other real app and show it in a Godot panel." Checked directly rather
+than assumed: `gdcef` (the one Godot-CEF GDExtension found) publishes
+Linux/Windows/macOS builds only, no Android — so native in-Godot CEF
+embedding was ruled out for Quest specifically, for real, not on
+suspicion. A `neko`-style WebRTC remote-desktop server was considered and
+rejected too: real and Docker-deployable, but it needs "a full WebRTC
+browser client" on the viewing end, reintroducing the same native-webview
+dependency problem one level removed.
+
+**What got built instead: a generalized "any web content as a floating
+window" mechanism**, specifically the Chrome DevTools Protocol (CDP) over
+a plain authenticated WebSocket, needing only Godot's own core APIs
+(`WebSocketPeer`, `Image.load_jpg_from_buffer()`) — no GDExtension, no
+native dependency, works identically on Android. Two new pieces:
+
+- **`browser-relay/` (DIDSA-CAD repo, new)** — a small FastAPI service,
+  deliberately a "dumb relay": it authenticates a WebSocket
+  (`X-API-Key`/`BROWSER_RELAY_API_KEY`, its own separate key from the CAD
+  backend's — see `browser-relay/app/auth.py`'s docstring for why), asks a
+  single shared headless-Chromium process it manages for a fresh tab (up
+  to `BROWSER_RELAY_MAX_SESSIONS`, default 2), and then copies raw
+  WebSocket frames verbatim between the client and that tab's own CDP
+  WebSocket until either side disconnects. It has no idea what
+  `Page.navigate` or `Input.dispatchMouseEvent` even are — every CDP
+  detail lives client-side, in `browser_window.gd`, on purpose (see that
+  service's own README for the reasoning: it keeps this service's surface
+  from growing every time the client starts using a new CDP domain).
+  Deployed as its **own** Docker container (new root `docker-compose.yml`),
+  separate from the existing OCCT `backend/` container, specifically so a
+  misbehaving Chromium tab can't starve memory the geometry solver needs —
+  both run on the same Raspberry Pi 5 (4GB), which is why this was worth
+  being deliberate about (see `docker-compose.yml`'s own comments for the
+  concrete limits: `mem_limit: 768m`, `cpus: 1.0`, `shm_size: 256mb`).
+- **`scripts/browser_window.gd` (this repo, new)** — a `diegetic_panel.gd`
+  window with a URL bar and back/forward/refresh, whose content area is a
+  live JPEG screencast of the real Chrome tab (`Page.startScreencast`,
+  decoded frame-by-frame), with clicks/drags on it forwarded as
+  `Input.dispatchMouseEvent` at the scaled CDP device coordinates. All the
+  CDP message building/parsing is pure static functions
+  (`build_message()`, `scale_to_device()`, `parse_incoming()`, etc.) —
+  deliberately split out so `tests/browser_window.gd` can test them
+  directly, the same pattern `calculator_window.gd`'s
+  `evaluate_expression()` already established.
+
+**PDF reader needed no separate work at all.** Pointing the Browser window
+at a PDF URL makes Chrome's own built-in PDF viewer render it inline —
+confirmed for real (see below), not assumed from general Chrome
+knowledge. John's instruction on this ("a browser might be able to handle
+PDFs, if not keep researching") is fully settled: it can, so there's
+nothing further to research.
+
+**This is the first piece of work this session validated with a real,
+live, multi-process end-to-end pass, not just headless unit tests against
+fakes** — made possible because this sandbox turned out to have a working
+Chromium binary after all (Playwright's own bundled build at
+`/opt/pw-browsers/chromium`), even though Ubuntu's own `chromium-browser`
+apt package does not (confirmed by actually installing it: it pulls in
+`snapd` and refuses to run — "requires the chromium snap to be installed"
+— because this sandbox has no working snapd, a dead end that would have
+otherwise stood in the way of testing any of this for real). With that
+binary:
+
+1. **The relay service itself**, run directly (`uvicorn`, no Docker — no
+   Docker daemon in this sandbox either) with
+   `BROWSER_RELAY_CHROME_BINARY` pointed at that real Chromium: a plain
+   Python WebSocket client drove a full `Page.enable` →
+   `Page.navigate` → `Page.startScreencast` → real `Page.screencastFrame`
+   → `Page.screencastFrameAck` → `Input.dispatchMouseEvent` sequence
+   through it against a real Chrome tab, and a wrong-`X-API-Key`
+   connection was confirmed rejected (HTTP 403 before the WebSocket
+   handshake even completes).
+2. **The PDF question**, settled the same way: navigating a real tab to a
+   local PDF file (`file:///tmp/test.pdf`) loads Chrome's own built-in
+   PDF-viewer extension into a child frame (`chrome-extension://…`),
+   fires a normal `Page.loadEventFired` with `isDownload: false` (no
+   download prompt), and the screencast keeps producing real frames of
+   the rendered page — this is also exactly why `extract_frame_url()`
+   only looks at the *top-level* frame's own navigation: the PDF viewer's
+   internal frame would otherwise overwrite the URL bar with its own
+   `chrome-extension://` URL.
+3. **The actual Godot client code**, not a Python stand-in: a one-off
+   script (not committed — the real coverage lives in
+   `tests/browser_window.gd`'s pure-function tests plus this record) ran
+   inside a real headless Godot 4.7.2 process, using `WebSocketPeer` with
+   `handshake_headers` set to a real `X-API-Key`, against the real running
+   relay from step 1. It confirmed: the custom-header WebSocket handshake
+   actually works from Godot's own `WebSocketPeer` (this had only been
+   confirmed to exist as a property before, via `ClassDB` reflection, not
+   exercised); a real `Page.navigate` and a real `Page.screencastFrame`
+   round-tripped through the relay; the JPEG payload decoded into a real
+   800×600 `Image` via Godot's own `Image.load_jpg_from_buffer()`; and a
+   real `Input.dispatchMouseEvent` (press + release) sent without error.
+
+**What's still unverified**: the Debian-apt `chromium` package specifically
+(the browser-relay Dockerfile's own choice, made because Ubuntu's
+`chromium-browser` is the broken snap-wrapper above — Debian's isn't, but
+a *different* Chromium binary, the Playwright one, is what was actually
+exercised above); the arm64 Raspberry Pi target; Docker actually building
+either image (no Docker daemon in this sandbox — `docker compose config`
+was validated, the Dockerfile itself was not built); and, as with every
+other window in this project, a real headset. `browser-relay/README.md`
+carries this same honest caveat on the DIDSA-CAD side.
 
 ## Untested paths
 
@@ -1463,10 +1569,10 @@ direction.
   pathway built" above) and that the separate storage/composition decision
   is narrower than it looked as a result.
 - **Milestone 3 and the "Interactive tree" bullet.** Export's milestone-3
-  row now says it's partially done (Assembly Tree/Calculator/Image Viewer
-  built; browser/PDF/DIDSA-CAD-as-a-window each flagged as their own
-  unstarted spike, not this phase's scope) rather than listing all five as
-  equally unbuilt, and the Assembly tools list's "Interactive tree" bullet
-  now notes the browse/tap-to-select half is built, with "pulled out into
-  world space" called out as further scope. See "Milestone 3 — floating
-  windows" above for the full detail.
+  row now says it's mostly done (Assembly Tree/Calculator/Image
+  Viewer/Browser built, Browser doubling as the PDF reader; only
+  DIDSA-CAD-as-a-window remains flagged as its own unstarted spike) rather
+  than listing all five as equally unbuilt, and the Assembly tools list's
+  "Interactive tree" bullet now notes the browse/tap-to-select half is
+  built, with "pulled out into world space" called out as further scope.
+  See "Milestone 3 — floating windows" above for the full detail.

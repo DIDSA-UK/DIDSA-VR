@@ -51,6 +51,7 @@ var _measure_tool: Node
 var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
+var _browser_window: Node
 var _undo_button: Button
 var _redo_button: Button
 
@@ -118,7 +119,7 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -133,6 +134,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_assembly_tree_window = assembly_tree_window
 	_calculator_window = calculator_window
 	_image_viewer_window = image_viewer_window
+	_browser_window = browser_window
 
 	_build_viewport()
 	_build_quad()
@@ -1128,6 +1130,8 @@ func _build_windows_page() -> Control:
 		page.add_child(_window_toggle_button("Calculator", _calculator_window))
 	if _image_viewer_window:
 		page.add_child(_window_toggle_button("Image Viewer", _image_viewer_window))
+	if _browser_window:
+		page.add_child(_window_toggle_button("Browser", _browser_window))
 
 	var hint := Label.new()
 	hint.text = "Each window opens in front of you and has its own close (X)."

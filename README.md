@@ -4,13 +4,15 @@ Milestones 0 (glTF endpoint + engine choice), 1 (import and viewport) and 4
 (assembly environment — mates, colours, sections, measurements) are all
 done, in the "headless- and real-backend-confirmed, not yet on a real
 headset" sense every section below spells out — see "What 'done' looks
-like" for each. Milestone 3 (floating windows) is partially done: the
-Assembly Tree, Calculator and Image Viewer windows are built (see item 15
-below); a browser, PDF reader and DIDSA-CAD-as-a-window all need a Godot
-webview/PDF/CEF-style dependency this repo doesn't have yet and aren't
-attempted — see docs/status.md. Milestone 2 (design table / in-VR part
-modelling) hasn't been started. Still plain Godot 4 core (no
-`godot-xr-tools`, no addons).
+like" for each. Milestone 3 (floating windows) is now mostly done: the
+Assembly Tree, Calculator, Image Viewer and Browser windows are all built
+(see item 15 below) — the Browser window also serves as the PDF reader
+(Chrome's own built-in PDF viewer, confirmed working through the same
+mechanism — see docs/status.md), so only "DIDSA-CAD as a flat window"
+remains unattempted. Milestone 2 (design table / in-VR part modelling)
+hasn't been started. Still plain Godot 4 core (no `godot-xr-tools`, no
+addons) — the Browser window's one exception to that is documented in
+item 15 below (a separate server-side relay, not a Godot dependency).
 
 **Picking this up fresh (including a new Claude Code session)?** Read
 [`docs/status.md`](docs/status.md) first — what's built, what's open,
@@ -204,7 +206,7 @@ live-synced.
     flat app uses). A third pick starts a fresh measurement rather than
     being capped at two. **Clear** resets it. Not undoable — there is
     nothing to undo, only a live read-only query.
-15. **Windows tab** (milestone 3). Three free-floating panels, each with its
+15. **Windows tab** (milestone 3). Four free-floating panels, each with its
     own toggle button, that can be open at the same time as each other and
     the wrist tablet — not wrist-mounted; each spawns in front of wherever
     you're looking and closes with its own **X**:
@@ -217,6 +219,19 @@ live-synced.
       children) has no geometry of its own to select and says so rather
       than doing nothing. Pulling a tree row out into world space isn't
       built yet — see docs/status.md.
+    - **Browser** — a live view of a real headless-Chromium tab (URL bar,
+      back/forward/refresh, click-to-interact), run by a separate
+      server-side "browser relay" service (`browser-relay/` in the
+      DIDSA-CAD repo) over a plain authenticated WebSocket carrying the
+      Chrome DevTools Protocol (CDP) — see `scripts/browser_window.gd`'s
+      own docstring for the full design and docs/status.md for how this
+      replaced the originally-scoped native CEF/webview approach (which
+      turned out to have no Android/Quest build at all). This is also the
+      PDF reader: point it at a PDF URL and Chrome's own built-in PDF
+      viewer renders it inline — confirmed for real (see docs/status.md),
+      not a separate feature. Needs `[browser_relay]` set in
+      `secrets.cfg` (see `secrets.cfg.example`); shows "No browser relay
+      configured" instead of failing if it isn't.
     - **Calculator** — a plain arithmetic keypad, no backend involved.
     - **Image Viewer** — picks an image (`.png`/`.jpg`/`.jpeg`/`.webp`/
       `.bmp`) from the same `models/`/`user://models` folder the Files tab
@@ -380,7 +395,7 @@ double-pick feel right now that it's no longer silently dropped).
 
 ## What "done" looks like for milestone 3
 
-Three of the five things the vision brief named under "floating windows"
+Four of the five things the vision brief named under "floating windows"
 are built, on a shared free-floating-panel mechanism
 (`scripts/diegetic_panel.gd`) new windows can build on:
 
@@ -391,14 +406,27 @@ are built, on a shared free-floating-panel mechanism
   attempted here.
 - **Calculator** and **Image Viewer** — round out this phase's realistic
   scope; see item 15 above.
+- **Browser** (and, for free, **PDF reader**) — the originally-scoped
+  native CEF/webview approach turned out to have no Android/Quest build at
+  all (confirmed by checking `gdcef`'s own supported-platforms list).
+  What's built instead is a generalized one: a separate server-side
+  "browser relay" service (`browser-relay/` in the DIDSA-CAD repo) that
+  authenticates a WebSocket and proxies raw Chrome DevTools Protocol (CDP)
+  frames to a real headless-Chromium tab it manages, with every CDP detail
+  — navigate, screencast, mouse input — living in
+  `scripts/browser_window.gd` on this end, using only Godot core APIs
+  (`WebSocketPeer`, `Image.load_jpg_from_buffer()`). PDF needed no separate
+  implementation: navigating to a PDF URL makes Chrome's own built-in PDF
+  viewer render it inline, confirmed for real (see below), not assumed.
 
-**Browser, PDF reader and "DIDSA-CAD as a flat window" are explicitly not
-attempted this phase** — all three need a Godot webview/PDF/CEF-style
-dependency that doesn't exist anywhere in this repo (no addon, no
-scaffolding), with real uncertainty about whether such a thing even runs
-on standalone Quest; "DIDSA-CAD as a window" additionally needs DIDSA-CAD's
-Flutter client to grow a web build target it doesn't have today. Each is a
-separate scoping spike, not a small addition — see `docs/status.md`.
+**"DIDSA-CAD as a flat window" is the one item explicitly not attempted
+this phase** — it needs DIDSA-CAD's Flutter client to grow a web build
+target it doesn't have today, a DIDSA-CAD-repo spike, not a DIDSA-VR task.
+(Note this is now a narrower gap than it looked at the start of this
+phase: once DIDSA-CAD has a web build, it's plausible the same
+browser-relay mechanism above could serve it too, rather than needing its
+own separate solution — not attempted or verified, just no longer as
+clearly a dead end.)
 
 **Headless-confirmed (Godot 4.7.2, `tests/run_all.sh` clean), not yet
 confirmed on a real headset.** Actually running the suite — not just
@@ -408,7 +436,19 @@ every panel, which wrist_tablet.gd (three levels deep, not a direct
 sibling) disproved in practice, and the Calculator did real integer
 division for two integer literals ("10/4" → 2, not 2.5) — see
 `docs/status.md`'s "Milestone 3" section for both. `tests/e2e_assembly_tree.gd`
-still needs a real backend to run.
+still needs a real backend to run. The Browser window's CDP layer went
+further than headless-only: a real headless-Chromium binary, a real
+running instance of `browser-relay`, and a real Godot process (not a
+mock) were connected end-to-end in this repo's own dev sandbox — real
+`X-API-Key` WebSocket handshake, real `Page.navigate`, a real JPEG
+screencast frame decoded by Godot's own `Image.load_jpg_from_buffer()`,
+and a real `Input.dispatchMouseEvent` round trip, all through the actual
+relay — see `docs/status.md` for exactly what was run. What's still
+unverified: the Debian-apt `chromium` package specifically (a different,
+but same-surface, Chromium binary was used for the check above), the
+arm64 Raspberry Pi target, Docker actually building either image (no
+Docker daemon in this sandbox), and — as with every other window — a real
+headset.
 
 ## Known gaps this project doesn't solve yet
 

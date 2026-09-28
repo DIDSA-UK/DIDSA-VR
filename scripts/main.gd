@@ -18,6 +18,9 @@ extends Node3D
 @export var api_key: String = "" ## Matches the backend's CAD_API_KEY. Also loaded from secrets.cfg.
 @export var secrets_file_path: String = "res://secrets.cfg" ## Untracked (see .gitignore); holds the real
 ## backend_url/api_key for this machine. See secrets.cfg.example for the format.
+@export var relay_url: String = "" ## Loaded from secrets.cfg's [browser_relay] section - the Browser window's
+## own separate service (DIDSA-CAD repo, browser-relay/), not the CAD backend above.
+@export var relay_api_key: String = "" ## Matches the relay's BROWSER_RELAY_API_KEY.
 @export var native_file_path: String = "res://assembly.didsa" ## The exported native file to import before loading.
 @export var part_id_override: String = "" ## Leave blank to auto-read root_part_id from native_file_path.
 @export var quality: float = 0.5 ## 0..1, same slider as the JSON endpoint.
@@ -54,6 +57,7 @@ var _section_tool: Node
 var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
+var _browser_window: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -77,6 +81,7 @@ func _ready() -> void:
 	_add_assembly_tree_window()
 	_add_calculator_window()
 	_add_image_viewer_window()
+	_add_browser_window()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
 	$XROrigin3D/LeftController.command_stack = command_stack
@@ -94,6 +99,7 @@ func _ready() -> void:
 	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
 	_assembly_tree_window.configure_backend(backend_url, api_key)
+	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
@@ -169,10 +175,20 @@ func _add_image_viewer_window() -> void:
 	_image_viewer_window = window
 
 
+func _add_browser_window() -> void:
+	## Milestone 3's Browser window (and, via Chrome's own built-in PDF
+	## viewer, its PDF reader too) - see browser_window.gd's own docstring.
+	var window := preload("res://scripts/browser_window.gd").new()
+	window.name = "BrowserWindow"
+	add_child(window)
+	window.setup_browser($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	_browser_window = window
+
+
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window)
 	_tablet = tablet
 
 
@@ -378,6 +394,8 @@ func _load_secrets() -> void:
 		return
 	backend_url = config.get_value("backend", "url", backend_url)
 	api_key = config.get_value("backend", "api_key", api_key)
+	relay_url = config.get_value("browser_relay", "url", relay_url)
+	relay_api_key = config.get_value("browser_relay", "api_key", relay_api_key)
 
 
 func _start_xr() -> void:

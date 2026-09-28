@@ -16,6 +16,7 @@ var tablet
 var calc
 var tree_window
 var image_window
+var browser_window
 var l: XRController3D
 var r: XRController3D
 var cam: XRCamera3D
@@ -97,10 +98,11 @@ func _initialize() -> void:
 	calc = main._calculator_window
 	tree_window = main._assembly_tree_window
 	image_window = main._image_viewer_window
+	browser_window = main._browser_window
 	for i in 4:
 		await process_frame
 
-	print("SMOKE all three windows start closed: ", not calc.is_open() and not tree_window.is_open() and not image_window.is_open())
+	print("SMOKE all four windows start closed: ", not calc.is_open() and not tree_window.is_open() and not image_window.is_open() and not browser_window.is_open())
 
 	tablet.open_tablet()
 	await process_frame
@@ -133,11 +135,17 @@ func _initialize() -> void:
 	print("SMOKE all three windows can be open at once: ", calc.is_open() and tree_window.is_open() and image_window.is_open())
 	print("SMOKE image viewer's file list populates on open (empty models/ is fine - it's git-ignored and empty by default): ", image_window._list_box.get_child_count() > 0)
 
+	var browser_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Browser")
+	await aim_and_click_tablet(browser_button)
+	print("SMOKE Browser window ALSO opens, alongside the other three: ", browser_window.is_open() and calc.is_open() and tree_window.is_open() and image_window.is_open())
+	print("SMOKE with no relay configured, its status says so rather than hanging: ", browser_window._status_label.text.begins_with("No browser relay"))
+
 	# Close them via each window's own close() - independent of the tablet.
 	calc.close()
 	tree_window.close()
 	image_window.close()
-	print("SMOKE each window closes independently of the others and the tablet: ", not calc.is_open() and not tree_window.is_open() and not image_window.is_open() and tablet.is_open())
+	browser_window.close()
+	print("SMOKE each window closes independently of the others and the tablet: ", not calc.is_open() and not tree_window.is_open() and not image_window.is_open() and not browser_window.is_open() and tablet.is_open())
 
 	# First-claim-per-frame arbitration: place two windows so their panels
 	# genuinely overlap along the same laser ray, aim there, and confirm
@@ -164,5 +172,6 @@ func _initialize() -> void:
 	calc.close()
 	tree_window.close()
 	image_window.close()
+	browser_window.close()
 	tablet.close_tablet()
 	quit()
