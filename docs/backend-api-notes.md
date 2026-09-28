@@ -303,6 +303,31 @@ verbatim) — this client always sends a `"#RRGGBB"` hex string to match how
 own local preview matches that exact scaling so its optimistic
 `material_override` renders the same shade a real reload would.
 
+## Listing an Occurrence's direct children
+
+```
+GET /document/parts/{part_id}/occurrences
+```
+(`list_occurrences` in `router.py`; response is `list[OccurrenceResponse]`
+— `id`, `external_ref`, `resolved_part_id`, `name_override`, `transform`,
+`suppressed`, `hidden`, `fixed`, `color`.) One row per *direct* child
+Occurrence of the given Part — not recursive. `colour_tool.gd`'s
+`set_group_color()` (see "Occurrence colour" above) was this client's
+first use of it, for "every sibling sharing an owner". Milestone 3's
+Assembly Tree window (`scripts/assembly_tree_window.gd`) is the second and
+more direct one: it recurses this call from the loaded assembly's
+`root_part_id` down through each row's own `resolved_part_id`, lazily as a
+row is expanded, to build a real (if shallow-fetched) tree view — there is
+still no single nested-tree endpoint, so a client wanting the whole
+hierarchy either recurses this call itself or, for the eager alternative,
+reads `GET .../assembly-mesh` (the JSON, non-glb endpoint)'s own
+`instances[].occurrence_path`, which already carries the full chain per
+placed leaf instance in one round trip — not used here, since it costs a
+second full-assembly fetch (~460 KB on DIDSA-CAD's own measured test
+assembly, per the vision brief) on every model load whether or not the
+tree is ever opened, versus this endpoint's pay-only-if-you-look-at-it
+shape.
+
 ## Multi-format import (STEP/OBJ/STL) — backend exists, client doesn't use it yet
 
 ```

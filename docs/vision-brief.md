@@ -84,7 +84,7 @@ A wrist-mounted tablet controls the environment: UI and UX settings, tool select
 - Relax all mates and enforce all mates buttons.
 - Shoot to hide: with the tool active, laser-target a part and fire to hide it.
 - Reverse visible and hidden state of all parts.
-- Interactive tree with sub-assemblies and parts that can be pulled out into world space or onto the design table.
+- Interactive tree with sub-assemblies and parts that can be pulled out into world space or onto the design table. **Partially built, 28 Sep 2026**: browse and tap-to-select, as the VR client's own Assembly Tree window (`docs/status.md`). Pulling a node out into world space is further scope of its own, not attempted yet.
 - Colours, sections and measurements.
 - Import parts from network storage into the assembly.
 
@@ -139,7 +139,7 @@ The four original milestones stand, with a recon step and an engine spike added 
 | 0 | glTF endpoint and engine choice | Done. Backend built and merged (PR #250): GET /parts/{id}/assembly-mesh.glb, node-instanced, hidden filtered server-side by default. Engine spike (Godot 4 OpenXR core, PCVR via Virtual Desktop) succeeded end-to-end: import → glb fetch → correct-scale render → grab → locomotion. Godot is the pick. |
 | 1 | Import and viewport | **Done except for measuring it on real Quest hardware.** Native import, STEP/OBJ/STL import, individual part manipulation (proximity grab, and trigger-laser select with thumbstick rotate / A-B nudge), user movement (walk, snap-turn, teleport), whole-model one/two-hand movement (drag, turn, scale), scale views (presets, lock, Fit, Home), the wrist tablet (Modes, Scale, Tools, Files, Perf, Undo/Redo), the popup keyboard, and local glb import (no backend round-trip) are all built and running — the only thing left is measuring performance on a real Quest headset (everything so far has been PCVR via Virtual Desktop), not more building. |
 | 2 | Design table | A summonable drawing board where sketches on the table drive geometry floating above it |
-| 3 | Floating windows | Calculator, browser, PDF reader, image viewer and DIDSA-CAD run as flat windows in the arena |
+| 3 | Floating windows | **Partially done, 28 Sep 2026.** Calculator, image viewer and the vision brief's own "interactive tree" (from the Assembly tools list) are built as free-floating panels that can be open together. Browser, PDF reader and DIDSA-CAD-as-a-window all need a Godot webview/PDF/CEF-style dependency this repo doesn't have — each its own scoping spike, not attempted this phase. |
 | 4 | Assembly environment | **Done, 28 Sep 2026.** Parts move individually; mates, colours, sections and measurements all work — Measurements (the last of the four) is a thin client to DIDSA-CAD's existing `POST /parts/{id}/measure`, needing no backend changes at all. Headless- and real-backend-confirmed (`tests/measure_tool.gd`, `tests/e2e_measure.gd`); not yet confirmed on a real headset. |
 
 Shared network storage (stage 1) follows milestone 4; live presence (stage 2) is a separate backend project.

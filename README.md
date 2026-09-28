@@ -4,8 +4,12 @@ Milestones 0 (glTF endpoint + engine choice), 1 (import and viewport) and 4
 (assembly environment — mates, colours, sections, measurements) are all
 done, in the "headless- and real-backend-confirmed, not yet on a real
 headset" sense every section below spells out — see "What 'done' looks
-like" for each. Milestones 2 (design table / in-VR part modelling) and 3
-(floating windows) haven't been started. Still plain Godot 4 core (no
+like" for each. Milestone 3 (floating windows) is partially done: the
+Assembly Tree, Calculator and Image Viewer windows are built (see item 15
+below); a browser, PDF reader and DIDSA-CAD-as-a-window all need a Godot
+webview/PDF/CEF-style dependency this repo doesn't have yet and aren't
+attempted — see docs/status.md. Milestone 2 (design table / in-VR part
+modelling) hasn't been started. Still plain Godot 4 core (no
 `godot-xr-tools`, no addons).
 
 **Picking this up fresh (including a new Claude Code session)?** Read
@@ -200,6 +204,29 @@ live-synced.
     flat app uses). A third pick starts a fresh measurement rather than
     being capped at two. **Clear** resets it. Not undoable — there is
     nothing to undo, only a live read-only query.
+15. **Windows tab** (milestone 3). Three free-floating panels, each with its
+    own toggle button, that can be open at the same time as each other and
+    the wrist tablet — not wrist-mounted; each spawns in front of wherever
+    you're looking and closes with its own **X**:
+    - **Assembly Tree** — browses the loaded assembly's Occurrence
+      hierarchy (a real client to `GET /parts/{id}/occurrences`, recursed
+      lazily as you expand a row — the same endpoint the Colours tab's
+      "whole group" already uses) and lets you tap a row to select that
+      part, the same way laser-selecting it would, without first having to
+      already be looking at it. A row for a sub-assembly (one with its own
+      children) has no geometry of its own to select and says so rather
+      than doing nothing. Pulling a tree row out into world space isn't
+      built yet — see docs/status.md.
+    - **Calculator** — a plain arithmetic keypad, no backend involved.
+    - **Image Viewer** — picks an image (`.png`/`.jpg`/`.jpeg`/`.webp`/
+      `.bmp`) from the same `models/`/`user://models` folder the Files tab
+      already reads and displays it full-size; no pan/zoom yet.
+
+    All three are built on a shared free-floating-panel mechanism
+    (`scripts/diegetic_panel.gd`) that any future window can reuse. Several
+    can be open together: each frame, only the first one the laser actually
+    hits claims the trigger, so at most one ever reacts to a given pull —
+    see that script's own docstring if you're adding a fourth window.
 
 ## 1. Drop in a real assembly
 
@@ -350,6 +377,37 @@ but never yet felt through a real hand pulling a real trigger. See
 specifically is still open (mostly: does picking read clearly, does the
 result/list layout fit the tablet at arm's length, does a quick real
 double-pick feel right now that it's no longer silently dropped).
+
+## What "done" looks like for milestone 3
+
+Three of the five things the vision brief named under "floating windows"
+are built, on a shared free-floating-panel mechanism
+(`scripts/diegetic_panel.gd`) new windows can build on:
+
+- **Assembly Tree** — the vision brief's own "interactive tree" from its
+  Assembly tools list, never built until now. Browse and tap-to-select;
+  pulling a row out into world space is real further scope of its own
+  (duplicating geometry, or breaking a mate server-side) and isn't
+  attempted here.
+- **Calculator** and **Image Viewer** — round out this phase's realistic
+  scope; see item 15 above.
+
+**Browser, PDF reader and "DIDSA-CAD as a flat window" are explicitly not
+attempted this phase** — all three need a Godot webview/PDF/CEF-style
+dependency that doesn't exist anywhere in this repo (no addon, no
+scaffolding), with real uncertainty about whether such a thing even runs
+on standalone Quest; "DIDSA-CAD as a window" additionally needs DIDSA-CAD's
+Flutter client to grow a web build target it doesn't have today. Each is a
+separate scoping spike, not a small addition — see `docs/status.md`.
+
+**Nothing in this milestone has been confirmed on a real headset, or even
+by actually running Godot** — this session had no Godot available to run
+`tests/run_all.sh` at all, so everything here is verified by careful
+inspection against this repo's own existing, proven patterns
+(`popup_keyboard.gd`'s panel mechanism, `colour_tool.gd`'s HTTP client
+shape) rather than by execution. Run the new tests
+(`assembly_tree_window`, `calculator_window`, `windows_tab`) before
+trusting this on a headset.
 
 ## Known gaps this project doesn't solve yet
 

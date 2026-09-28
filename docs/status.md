@@ -1017,8 +1017,140 @@ this project not explicitly marked otherwise: whether the new "Add" button
 reads clearly at wrist-tablet size, and whether re-adding a component while
 the tablet is mid-interaction feels right.
 
+## Milestone 3 — floating windows: Assembly Tree, Calculator, Image Viewer built
+
+The vision brief's milestone 3 named five things: calculator, browser, PDF
+reader, image viewer, and DIDSA-CAD itself, all as flat panels floating in
+the arena. Two rounds of exploration before building anything turned up a
+real split in risk: three of the five are buildable now, on existing
+patterns, with no new dependency. The other two need something this repo
+(and, for DIDSA-CAD-as-a-window, the DIDSA-CAD repo) doesn't have at all —
+forcing all five into one phase would have blocked the high-value, low-risk
+item (the assembly tree) on unscoped native-dependency research. This phase
+ships the three; the other two are called out below as separate, unstarted
+spikes, not silently dropped.
+
+**Framework (`scripts/diegetic_panel.gd`).** `popup_keyboard.gd` was
+already a complete template for a free-floating (not wrist-mounted),
+laser-interactive panel: a `SubViewport`+quad, hand-built plane-raycast hit
+testing against the right hand's laser, synthetic mouse events, and the
+frozen-press-position fix for the real-headset drift-during-a-squeeze bug
+(see the "Real-headset testing round" section above). This extracts that
+mechanism into a reusable base so a new window doesn't have to duplicate it
+from scratch — deliberately **not** retrofitted onto `wrist_tablet.gd`/
+`popup_keyboard.gd` themselves: both are proven, headset-tested files, and
+this session had no Godot available to verify a refactor of them hadn't
+changed behaviour, so they're left exactly as they were.
+
+Multiple windows being open at once raised a real question `wrist_tablet.gd`/
+`popup_keyboard.gd` never had to answer: which one does the trigger belong
+to if two are both being aimed at? The first design ("claim the shared
+`ui_hover` meta if you're nearer than whoever already claimed it this
+frame") turned out to have a real bug, caught by `tests/windows_tab.gd`
+trying to assert it: an earlier-processed panel that had already set its
+own `_hovering = true` was never told it got outbid later in the same
+frame by a nearer panel stealing the meta, so both could end up believing a
+single trigger pull was theirs. Fixed by simplifying to first-claim-per-
+frame (whoever's `_process()` runs first and is genuinely hit, wins, full
+stop — not the true geometric nearest, but provably exactly one winner).
+Correctness mattered more than optimality here, and normal use doesn't
+overlap panels anyway (each window's own `open_distance`/
+`open_lateral_offset` keeps them apart) — see `diegetic_panel.gd`'s own
+docstring for the full story. A new, small, additive change to
+`controller.gd` (a `_process()` resetting the shared meta to neutral at the
+very start of every frame, before any panel gets a turn) is what makes this
+work at all — `XROrigin3D` is always `main.gd`'s first child, so this
+always runs first.
+
+**Assembly Tree** (`scripts/assembly_tree_window.gd`) — the vision brief's
+own "interactive tree" from its Assembly tools list, named there since the
+very first version of the brief and never built until now. Lazily recurses
+`GET /parts/{id}/occurrences` from the loaded assembly's root, expanding a
+row's own children only when tapped — the same real endpoint
+`colour_tool.gd`'s "whole group" colouring already proved (see
+`docs/backend-api-notes.md`'s new "Listing an Occurrence's direct children"
+section), chosen over an eager `GET .../assembly-mesh` JSON fetch
+specifically so opening the tree doesn't tax every model load, only the
+ones where it's actually used (that endpoint measured ~460 KB on DIDSA-CAD's
+own test assembly, per the vision brief — not a cost to add to every
+startup for a window that might not even be opened). Tapping a row selects
+the matching part the same way laser-select does — `main.gd`'s new
+`select_part_by_occurrence_id()` walks the loaded, `mesh_identity.gd`-tagged
+parts for a matching `occurrence_id` and calls `controller.gd`'s new
+`select_external()`, a thin public wrapper around the same private
+`_set_selection()`/`_clear_selection()` laser-select already uses (same
+`command_stack` bookkeeping, same toggle-to-deselect behaviour). An
+intermediate row (a sub-assembly with its own children) has no rendered
+geometry of its own to select at all — `assembly-mesh.glb` is one node per
+placed *leaf* instance only, per `mesh_identity.gd`'s own docstring — so
+tapping one shows a status message rather than silently doing nothing.
+`main.gd::_show_model()` calls the tree's `mark_stale()` alongside its
+existing `command_stack.clear()`/`_mates_tool.clear_picks()` reset, so the
+tree rebuilds whenever a new file is opened or a component added.
+
+**v1 scope, on purpose**: browse and tap-to-select only. "Pull a tree node
+into world space" (the vision brief's own literal wording) is real further
+scope — duplicating geometry, or breaking a mate server-side, either one a
+design question worth its own pass — and isn't attempted here.
+
+**Calculator** (`scripts/calculator_window.gd`) and **Image Viewer**
+(`scripts/image_viewer_window.gd`) round out this phase's realistic scope.
+Calculator was deliberately built first and simplest, specifically to prove
+several `diegetic_panel.gd` windows can be open and independently
+interactive at once before trusting the arbitration fix with the tree
+window (the real deliverable). Image Viewer sources from the same
+`models/`/`user://models` folders and git-ignored-local-asset convention
+the Files tab already uses for `.glb` files, just filtered to image
+extensions; v1 is deliberately just "load and look at it," no pan/zoom.
+
+New wrist-tablet **Windows** tab, one toggle button per window (a plain
+button, not `toggle_mode`, since a window can also be closed by its own
+"X" — see `wrist_tablet.gd`'s own `_window_toggle_button()` docstring for
+why keeping a separate toggle-button state in sync wasn't worth it).
+
+**Explicitly not attempted this phase** (separate, unstarted spikes):
+
+- **PDF reader** — needs a Quest/Android-compatible Godot PDF-rendering
+  GDExtension; none exists in this repo or has been evaluated.
+- **Browser** — needs a CEF/webview-style GDExtension; real risk it simply
+  doesn't run on standalone Quest at all. The highest-risk item of the
+  original five.
+- **DIDSA-CAD as a flat window** — blocked on DIDSA-CAD's own Flutter
+  client gaining a web build target (`flutter create --platforms=web` —
+  doesn't exist today, confirmed: no `web/` folder in that repo) and
+  validating `flutter_gpu`'s web support, an open, unvalidated risk per
+  that repo's own recon docs (`docs/vr-recon-2026-09-24.md`/
+  `-2-2026-09-24.md`). This is a DIDSA-CAD-repo spike, not a DIDSA-VR task.
+
+**Nothing in this milestone has been confirmed on a real headset, or even
+by actually running Godot at all** — this cloud sandbox had no Godot binary
+available (only `godot3-server` via `apt`, incompatible with this Godot-4
+project) and outbound access to fetch one was denied by the environment's
+network policy, so `tests/run_all.sh` was never run this session. Every
+claim above is verified by careful inspection against this repo's own
+existing, proven patterns — bracket-balance- and indentation-checked by
+hand with a small script, nothing more — not by execution. The three new
+headless tests (`tests/assembly_tree_window.gd`, `tests/calculator_window.gd`,
+`tests/windows_tab.gd` — the last one is the one that actually caught and
+drove the fix to the double-claim bug above, by trying to assert the
+original "nearest wins" design and finding it couldn't honestly satisfy
+that) and the real-backend `tests/e2e_assembly_tree.gd` are all written and
+added to `tests/run_all.sh`/`tests/README.md`, ready to run — running them
+(and then a real headset pass) is the actual next step before trusting any
+of this in use, not a "nice to have."
+
 ## Untested paths
 
+- **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
+  `diegetic_panel.gd` framework they're built on) — not headless-run, not
+  real-backend-run, not headset-run.** See "Milestone 3 — floating windows"
+  above for the full detail and why (no Godot available this session at
+  all). Everything else in this list was at least confirmed by actually
+  running Godot; this is the one entry in this file that hasn't cleared
+  even that first bar yet — run `tests/run_all.sh` (the three new tests:
+  `assembly_tree_window`, `calculator_window`, `windows_tab`) before
+  anything else here, then `tests/e2e_assembly_tree.gd` against a real
+  backend, then a real headset.
 - **28 Sep 2026 session's two additions — Open/Add (Files tab) and the
   Measure tab — are both headless- and real-backend-confirmed only, same
   as everything else in this list.** See "Open/add-parts pathway built"
@@ -1251,8 +1383,9 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 ## Vision brief drift
 
 **As of 28 Sep 2026, this repo's own `docs/vision-brief.md` export is fully
-caught up with everything below** — milestone 1's and milestone 4's table
-rows, the Mates cross-compatibility note, and the Mates-testing-blocker
+caught up with everything below** — milestone 1's, milestone 3's and
+milestone 4's table rows, the "Interactive tree" bullet under Assembly
+tools, the Mates cross-compatibility note, and the Mates-testing-blocker
 checkbox have all been hand-edited into the export directly. **What's still
 open: none of this has been pushed back into the live Claude Docs
 artifact** — no session so far (this one included) has had access to it,
@@ -1297,3 +1430,11 @@ direction.
   actually closed it (`POST /parts/{id}/add-component` — see "Open/add-parts
   pathway built" above) and that the separate storage/composition decision
   is narrower than it looked as a result.
+- **Milestone 3 and the "Interactive tree" bullet.** Export's milestone-3
+  row now says it's partially done (Assembly Tree/Calculator/Image Viewer
+  built; browser/PDF/DIDSA-CAD-as-a-window each flagged as their own
+  unstarted spike, not this phase's scope) rather than listing all five as
+  equally unbuilt, and the Assembly tools list's "Interactive tree" bullet
+  now notes the browse/tap-to-select half is built, with "pulled out into
+  world space" called out as further scope. See "Milestone 3 — floating
+  windows" above for the full detail.
