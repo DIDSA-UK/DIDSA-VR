@@ -1,9 +1,9 @@
 extends SceneTree
-## Tools tab (main.gd's hide_all_parts/show_all_parts/reverse_visibility/
-## isolate_selected, plus controller.gd's shoot-to-hide): instantiates
-## main.tscn (NO backend), loads a generated multi-part .glb the same way
-## tablet_scene.gd does, and drives the real Tools tab buttons plus a
-## simulated shoot-to-hide trigger pull.
+## View > Visibility sub-tab (main.gd's hide_all_parts/show_all_parts/
+## reverse_visibility/isolate_selected, plus controller.gd's shoot-to-hide):
+## instantiates main.tscn (NO backend), loads a generated multi-part .glb
+## the same way tablet_scene.gd does, and drives the real Visibility buttons
+## plus a simulated shoot-to-hide trigger pull.
 ## Run: "$GODOT" --headless --path . --script res://tests/tools_tab.gd  (see tests/README.md)
 
 var main
@@ -77,8 +77,10 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE loaded parts: ", main._part_count)
 
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Tools"))
-	print("SMOKE Tools tab opens: ", tab._pages["Tools"].visible)
+	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "View"))
+	var visibility_tab := find_button(func(b: Button) -> bool: return b.text == "Visibility")
+	await aim_and_click(visibility_tab)
+	print("SMOKE View > Visibility opens: ", tab._pages["View"].visible and visibility_tab.button_pressed)
 
 	# hide all / show all
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Hide all"))

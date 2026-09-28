@@ -1607,3 +1607,120 @@ direction.
   "Interactive tree" bullet now notes the browse/tap-to-select half is
   built, with "pulled out into world space" called out as further scope.
   See "Milestone 3 — floating windows" above for the full detail.
+
+## Visuals pass, 28 Sep 2026: infinite floor grid, mixed-reality Environment scenes, wrist tablet reorganised into categories
+
+**Headless-confirmed this session** (Godot 4.3 fetched into the container
+specifically to check this work, since none was preinstalled) — parse-
+checked every script in `scripts/*.gd` and ran the full `tests/run_all.sh`
+list end to end: `ALL RAN WITHOUT SCRIPT ERRORS`, and every SMOKE line the
+new navigation touches reads correctly (matched line-for-line against a
+`git stash`ed baseline run of the pre-this-session code, to tell a real
+regression apart from an already-flaky line — see "A real layout bug this
+caught" below). **Not confirmed on a real headset or against OpenXR
+passthrough** — flagged per-item below where that gap is sharpest.
+
+**A real layout bug this caught, worth keeping in mind for any future
+tablet page.** The first version of the sub-tab redesign put "User
+movement" (View > Navigate) and several other buttons far enough down the
+panel that clicks silently landed outside the SubViewport and did nothing
+— caught by diffing SMOKE output against the stashed baseline (`locomotion`
+staying `true` after a click that should have flipped it), not by reading
+the code. Root cause: `BoxContainer` (the `VBoxContainer`s every page and
+sub-page use) distributes its own leftover space *equally among whichever
+children are currently visible* when none of them carry the expand size
+flag — with only one page/sub-page visible at a time, that one page (and,
+recursively, its own children) ballooned to fill the holder's entire
+`SIZE_EXPAND_FILL`ed height, pushing later content off the bottom. Fixed
+two ways: every page/sub-page now gets `size_flags_vertical =
+Control.SIZE_SHRINK_BEGIN` right where it's added to its holder (see
+`_build_ui()`'s and `_build_subtabbed()`'s own comments), and the panel
+itself grew (`panel_size` 0.24×0.18m → 0.24×0.225m, `viewport_size`
+640×480 → 640×600) to give the now-two-level navigation the extra room
+a single flat tab row didn't need. Confirmed: `tests/tablet_scene.gd`'s
+"2:1" scale click, the Navigate/Visibility/Sections toggle clicks, and the
+Settings > Steadiness "Strong" click (the last of which turned out to be
+silently broken in the *original* flat-tab layout too — baseline's own
+"steadiness after clicking Strong" stayed on "Medium"; the extra panel
+room fixed that as a side effect, not something this session set out to
+fix) all now read correctly against the stashed baseline.
+
+**Floor.** The original spike's floor (`scenes/main.tscn`'s `Ground` node)
+was a small (6×6 m) opaque `PlaneMesh` with no material — the "square plane"
+that hid anything dropping below floor level, since an opaque surface
+correctly (if unhelpfully) occludes geometry behind it along the camera
+ray. Replaced with a much larger (300×300 m) plane driven by a new shader,
+`shaders/infinite_grid.gdshader`: thin white lines on an otherwise fully
+transparent surface (600×600mm cells, ~60% transparent lines, distance-fade
+so the plane's own edge is never seen, `depth_draw_never` so it can never
+occlude anything even through its own gaps). The `Ground` StaticBody3D's
+collision box grew to match (still 0.1m thick, sitting at y=0) — locomotion
+itself doesn't raycast this body (teleport uses a maths `Plane`, see
+`locomotion.gd`), so this only matters for something standing/resting on
+the floor's own physics body.
+
+**Environment (View > Environment tab).** New `scripts/environment_manager.gd`
+(a `WorldEnvironment` subclass, new `WorldEnvironment` node in `main.tscn`)
+switches between three rendered presets — **Light**/**Dark**/**Mid**,
+differing in background colour, ambient light and the scene's one
+`DirectionalLight3D`'s energy/colour — and **Passthrough**, OpenXR mixed
+reality via `OpenXRInterface.start_passthrough()`/`stop_passthrough()`
+(added alongside `is_passthrough_supported()`), with the viewport's
+`transparent_bg` and `RenderingServer.set_default_clear_color()` cleared
+per Godot's own documented passthrough flow. **Unverified**: passthrough
+specifically needs a real Quest (or another passthrough-capable OpenXR
+runtime) to confirm at all — desktop/PCVR preview can only exercise the
+"not supported, falls back to black" branch. The last-picked scene
+persists across restarts via a new `scripts/app_settings.gd`
+(`user://settings.cfg`), loaded in `main.gd`'s `_ready()`.
+
+**Wrist tablet reorganised.** The old ten flat tabs (Modes, Scale, Tools,
+Mates, Colours, Sections, Measure, Windows, Files, Perf) are now four
+categories on a left-hand rail — **View** (Navigate/Scale/Visibility/
+Environment sub-tabs), **Assembly** (Mates/Colours/Sections/Measure
+sub-tabs), **Windows**, **Files** — plus a small **Settings** cogwheel
+pinned to the panel's own top-right corner, out of the main rail, holding
+what John asked to be "set and forget": Steadiness (moved out of Modes),
+the old Perf tab's Display levers (Shadows/Resolution/MSAA) and readout,
+and a new **project folder** setting (an arbitrary absolute path the Files
+category also scans — `main.gd`'s `list_model_files()`/`project_folder()`/
+`set_project_folder()` — persisted the same way as the last-picked scene).
+`wrist_tablet.gd`'s `_build_subtabbed()` is the new generic
+one-category's-own-sub-navigation helper (same radio-button-group
+mechanism the top-level rail already used, just scoped one level down);
+`_show_page()` still exists for the five top-level pages.
+
+Buttons on the rail and the Environment/Settings pages now carry a small
+icon next to their label — stamped into a Godot `Image` at UI-build time
+(`_make_icon_texture()`/`_stamp_disc()`/`_stamp_ring()`/`_stamp_rect_*()`/
+`_stamp_line()`) and handed to `Button.icon` as a real `ImageTexture`, in
+the same single-stroke style DIDSA-CAD's own SVG icon set uses
+(`client/assets/icons/` — `stroke="currentColor"`). Deliberately *not*
+Godot's SVG import pipeline (no editor available in this environment to
+generate `.import` files) and deliberately *not* a hand-drawn child
+`Control` overlaid on the button (an earlier draft did this, and in doing
+so also emptied `Button.text` — which broke every `tests/*.gd` lookup that
+finds a button by its exact label; caught in review, not by running
+anything, since nothing here runs). `Button.icon` + `Button.text` together
+keeps Godot's own native icon+text layout and keeps every button's real
+text intact.
+
+**Test suite.** `tests/tablet_scene.gd`, `tests/tools_tab.gd` and
+`tests/section_tab.gd` are updated for the new navigation (an extra
+category click before a sub-tab click; `Modes`→`Navigate`, `Tools`→`View`
++`Visibility`, `Sections`→`Assembly`+`Sections`, `Colours`→`Assembly`+
+`Colours`, `Strong`/the old Perf levers → `Settings`) and confirmed
+running clean this session (see above). `tests/windows_tab.gd` needed no
+change (Windows stayed a flat, top-level category) — its pre-existing
+`false` SMOKE lines (Calculator/Browser computing something real through a
+laser click) are unchanged from the stashed baseline, i.e. not something
+this session touched or broke; consistent with "No browser relay
+configured"/no-backend, both expected in a from-scratch headless run.
+`tests/steadiness_filter.gd` doesn't touch the tablet UI at all. **No new
+automated test covers the Environment tab, passthrough, or the
+project-folder setting** — worth adding; the icon-stamping helpers
+(`_stamp_disc()` etc.) are also unit-testable in isolation (pixel-check a
+few known coordinates on the returned `Image`) but nothing does yet.
+
+`README.md`'s wrist-tablet section (item 7) and items 10–16 are updated to
+match; item 16 is new (floor grid + Environment).
