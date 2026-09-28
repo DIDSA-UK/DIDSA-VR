@@ -1764,3 +1764,108 @@ anywhere the diff touches.
   brightening to pure white on hover (was cyan/yellow) — the hover
   affordance is now brightness-only, no hue change, for the same reason
   the button-disc flash above dropped the old yellow accent.
+
+## Bug-fix round, same day: controller discs repositioned, real section-clip fix, Files "Add" feedback, tablet-icon hover, window grab handles
+
+Real-headset feedback (John's own bug list) on the previous two passes, all
+five items fixed and confirmed this session — three of them (button
+positions, the section shader, the drag-handle timing) specifically
+**because** a real Godot render was available to check against, not just
+read code. `tests/run_all.sh`: ALL RAN WITHOUT SCRIPT ERRORS; no `false`
+SMOKE line anywhere this diff touches beyond the same pre-existing three in
+`windows_tab.gd` (no relay/backend configured — unchanged from before this
+session, see the previous pass's own note).
+
+**Controller discs and the tablet icon, moved back.** Both read as too far
+forward. `controller.gd`'s `_add_button_discs()`: each disc nudged back
+(+Z, toward the user) by its own diameter (0.014m for the thumbstick disc,
+0.010m for the two face-button discs and the Menu disc), the ring by their
+0.011m average so it stays centred over the moved cluster.
+`wrist_tablet.gd`'s `target_position` (the icon floating above the wrist)
+moved back by its own ring's 0.062m outer diameter, same fix, same
+reasoning.
+
+**Section tool: a real bug, not a limitation — parts genuinely vanished
+instead of getting cut open.** Traced with an actual render, not just
+code-reading: `tests/section_render.gd`'s own Xvfb+llvmpipe setup (no GPU
+here either, same as that test's own docstring explains — Mesa's llvmpipe
+under a virtual X server stands in) pointed a camera straight into an open
+cut on a solid, sectioned test cube and got a fully black frame — 0 of 144
+sampled points lit. Two compounding causes, both real, both fixed in
+`shaders/section_clip.gdshader`:
+1. **No cap, and the interior was culled away.** `cull_back` (Godot's
+   default) means the discarded half's own interior surfaces — the only
+   thing left where it used to be — are invisible from outside; looking
+   into the cut showed pure background. Fixed with `render_mode
+   cull_disabled` plus `NORMAL = FRONT_FACING ? NORMAL : -NORMAL` in the
+   fragment shader — a real second render pass (a true stencil cap) isn't
+   possible from one fragment shader, but for this app's actual parts
+   (simple, near-solid mechanical shapes) rendering the now-flipped
+   interior face reads as a real filled cross-section at zero extra draw
+   calls. The interior face is also darkened (`albedo * 0.6`) so a cut
+   reads as "inside", not just more outer surface.
+2. **Even fixed, the interior rendered black anyway.** The shader's
+   in-place METALLIC=1.0/ROUGHNESS=1.0 (matching the glTF spec's own
+   unset-field defaults, which is what the docstring assumed
+   `mesh_export.py` always produces) has near-zero diffuse response and
+   needs a strong, well-aimed specular light to read as anything but black
+   — fine under the render test's own compensating `light_energy = 3.0`,
+   not fine under this app's actual directional light (0.55–1.15 across
+   the Light/Dark/Mid presets). Confirmed empirically (re-ran the same
+   Xvfb render at each candidate value): METALLIC=0.0/ROUGHNESS=0.6 makes
+   the interior reliably visible under realistic lighting. A deliberate
+   departure from matching the export's own literal PBR values — see the
+   shader's own updated docstring.
+   Both fixes verified with a throwaway Xvfb render script (not committed
+   - the existing `tests/section_render.gd` already covers the shader's
+   core clip/flip/restore behaviour and was re-run clean after each
+   change) and cross-checked against a solid (non-paper-thin) cube at
+   several clip fractions to confirm the basic clip itself was never
+   actually broken (proportional, continuous — 28/14/7 lit-sample counts
+   at 50%/25%/10% kept) — the "disappears" bug was specifically the
+   hollow-interior-when-viewed-face-on case above, not a threshold glitch.
+
+**Files tab "Add" gave no feedback at all.** `main.gd`'s own
+`add_component_file()` (and every other load/add/import path) only ever
+calls `_set_status()`, which — per that function's own one-line body — is
+console-print-only; deliberately no floating 3D status text since an
+earlier pass found that distracting. Clicking **Add** with no
+`secrets.cfg` configured (the reported case: testing with the native
+fixture files, no backend running) hits `add_component_file()`'s very
+first guard clause and returns, and from inside a headset that reads as
+"nothing happened" - there was nowhere else for that message to go. Fixed
+with a new status label on the Files page itself
+(`_files_status_label`, refreshed the same way the Colours tab's own
+status label already is, in `_process()`'s 0.25s tick) — now shows
+whatever `main.status_text` last said, success or failure, whichever tab
+triggered it.
+
+**Wrist tablet icon hover: swell + blue tint**, replacing last pass's
+brightness-only hover (which itself replaced the original cyan/yellow) -
+`_update_pointer()` now also sets `_target.scale = Vector3.ONE * 1.2` on
+hover, and the tint is `Color(0.75, 0.85, 1.0)` rather than pure white.
+
+**Floating windows had no way to move.** `_place_in_front_of_camera()`
+only ever runs once, on `open()` - a window opened once always reopens
+exactly where it first appeared, whatever else has moved. New
+`diegetic_panel.gd` `_build_handle()`: a small white capsule at the centre
+of the panel's own lower edge; `_on_grip_pressed()`/`_on_grip_released()`
+(both hands, `grip_click`) grab it by proximity and drag the whole panel
+1:1, self-contained rather than routed through controller.gd's own
+part-grab search (this file's own top docstring already explains why that
+class of fix stays out of proven files - same reasoning applies here: a
+window handle floats well clear of the assembly in normal use, so it
+doesn't need arbitration against an ordinary part-grab). Required adding
+a `left` controller parameter to `setup()` and to all four subclasses'
+`setup_xyz()` (`assembly_tree_window.gd`, `calculator_window.gd`,
+`image_viewer_window.gd`, `browser_window.gd`) and their call sites in
+`main.gd` - previously only `right` was ever passed, since laser/click
+interaction is right-hand-only, but grabbing a physical handle isn't.
+New `tests/windows_tab.gd` coverage (grip near the handle grabs it, drag
+follows 1:1, release stops the follow) needed **three** `await
+process_frame`s after moving the hand, not one, to see the moved
+position - confirmed by direct instrumentation that this was purely a
+test-timing gap (the panel's own `_process()` demonstrably runs and
+computes the right transform; it just hadn't been called yet after a
+single awaited frame in this harness), not a product bug, and matches the
+extra-settle-time convention this same test file already uses elsewhere.

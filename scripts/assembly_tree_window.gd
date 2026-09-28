@@ -37,14 +37,14 @@ var _rows_box: VBoxContainer
 const INDENT_PX := 24.0
 
 
-func setup_tree(right: XRController3D, camera: XRCamera3D, main: Node) -> void:
+func setup_tree(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node) -> void:
 	_main = main
 	panel_title = "Assembly Tree"
 	panel_size = Vector2(0.28, 0.34)
 	viewport_size = Vector2i(480, 600)
 	open_distance = 0.55
 	open_lateral_offset = -0.22
-	super.setup(right, camera)
+	super.setup(left, right, camera)
 
 
 func configure_backend(url: String, key: String) -> void:

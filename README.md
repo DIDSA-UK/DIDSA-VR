@@ -96,9 +96,9 @@ live-synced.
    Switching between one and two hands never makes the model jump.
 7. **Wrist tablet.** A small thin-white-line icon — a ring with a landscape
    rectangle inside it, like a tablet — floats above your left wrist (it
-   brightens to pure white on hover). Point the right hand's laser at it and
-   pull the trigger to open the tablet; press the **X** on the tablet to
-   close it. It never
+   swells slightly and tints pale blue on hover). Point the right hand's
+   laser at it and pull the trigger to open the tablet; press the **X** on
+   the tablet to close it. It never
    opens by itself, so looking at your wrist can't trigger it. While the
    laser is over the bullseye or the tablet, the trigger presses those
    instead of selecting a part — the laser itself shortens to stop exactly
@@ -132,7 +132,14 @@ live-synced.
      it creates a new Part on the backend, uploads the file to
      `POST /parts/{id}/import-features`, then fetches and renders it the
      same way as any other backend part. The `models/` contents are
-     git-ignored.
+     git-ignored. A `.didsa`/`.DIDSAprt` file already backend-loaded also
+     gets an **Add** button, merging its own Part into the *currently
+     loaded* assembly instead of replacing it (`POST
+     /parts/{id}/add-component`) — needs a configured backend, same as
+     STEP/STL/OBJ; a status line under the file list (fed by the same
+     text `main.gd`'s own load/add/import functions always set) says why
+     nothing happened if it can't, rather than the button just silently
+     doing nothing.
    - **Settings** (corner cogwheel) — **Steadiness** (Off / Light / Medium /
      Strong): an adaptive filter on your hands while you hold the model *or*
      grip a single part, so a held hand doesn't shake it but deliberate moves
@@ -209,9 +216,18 @@ live-synced.
     is kept without moving it. Entirely client-side — no backend call at
     all, since DIDSA-CAD's own sectioning endpoint re-tessellates a fresh
     OCCT boolean on every request, much too slow for a plane you're
-    dragging in real time. One plane for now. Turning the tool off drops
-    the gizmo and restores every part's real appearance. Undoable (one
-    command per grab/drag), toggling the tool and Flip are not.
+    dragging in real time. One plane for now. A cut part shows a real
+    (if not perfectly stencil-capped) filled cross-section rather than a
+    hollow shell — real-headset feedback found a solid part clipped past
+    its own midpoint looked like it had simply vanished, not been cut open,
+    tracked to two things at once: the discarded half's own interior
+    surfaces were being culled away instead of shown, and the fully
+    metallic/fully rough material this pass wraps parts in rendered close
+    to black under this app's own directional light anyway (see
+    `shaders/section_clip.gdshader`'s own docstring for both fixes).
+    Turning the tool off drops the gizmo and restores every part's real
+    appearance. Undoable (one command per grab/drag), toggling the tool and
+    Flip are not.
 14. **Assembly > Measure** (milestone 4 — the last of the four assembly tools).
     Toggle **Measure tool** on, then point the right hand's laser at a
     vertex/edge/face and pull the trigger to pick it (same hover+name as
@@ -229,7 +245,10 @@ live-synced.
 15. **Windows** (milestone 3). Four free-floating panels, each with its
     own toggle button, that can be open at the same time as each other and
     the wrist tablet — not wrist-mounted; each spawns in front of wherever
-    you're looking and closes with its own **X**:
+    you're looking and closes with its own **X**. Each also has a small
+    grab handle at the centre of its own lower edge — **grip** it with
+    either hand to drag the whole panel somewhere else, release to drop it;
+    windows otherwise stay exactly where they first opened:
     - **Assembly Tree** — browses the loaded assembly's Occurrence
       hierarchy (a real client to `GET /parts/{id}/occurrences`, recursed
       lazily as you expand a row — the same endpoint the Colours tab's

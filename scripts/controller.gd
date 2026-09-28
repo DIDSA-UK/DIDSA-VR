@@ -559,14 +559,19 @@ func _add_button_discs() -> void:
 	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	torus.material = ring_mat
 	ring.mesh = torus
-	ring.position = Vector3(0.0, 0.013, -0.024)
+	# Real-headset feedback: the whole cluster read as too far forward (out
+	# past where the real buttons actually are). Nudged back (+Z, towards
+	# the user — see _add_laser()'s own -Z-is-forward convention) by one
+	# disc-diameter's worth: each disc by its own diameter, the ring by
+	# their average (0.011m) so it stays centred over the now-moved discs.
+	ring.position = Vector3(0.0, 0.013, -0.024 + 0.011)
 	add_child(ring)
 
-	_add_disc("primary_click", Vector3(0.0, 0.018, -0.018), 0.007)
-	_add_disc("ax_button", Vector3(0.012, 0.010, -0.030), 0.005)
-	_add_disc("by_button", Vector3(-0.006, 0.010, -0.034), 0.005)
+	_add_disc("primary_click", Vector3(0.0, 0.018, -0.018 + 0.014), 0.007) # 0.014 = 2 * this disc's own 0.007 radius
+	_add_disc("ax_button", Vector3(0.012, 0.010, -0.030 + 0.010), 0.005) # 0.010 = 2 * this disc's own 0.005 radius
+	_add_disc("by_button", Vector3(-0.006, 0.010, -0.034 + 0.010), 0.005)
 	if tracker == &"left_hand":
-		var menu_disc := _add_disc("menu_button", Vector3(-0.018, 0.012, -0.010), 0.005)
+		var menu_disc := _add_disc("menu_button", Vector3(-0.018, 0.012, -0.010 + 0.010), 0.005)
 		_add_hamburger_glyph(menu_disc)
 
 
