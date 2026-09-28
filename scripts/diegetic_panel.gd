@@ -16,23 +16,34 @@ extends Node3D
 ## can override _on_opened()/_on_closed() for any refresh-on-open behaviour.
 ##
 ## Multiple panels built on this base can be open at once. Each frame, a
-## panel only claims the right controller's shared "ui_hover"/
-## "ui_hit_distance" meta (the same convention wrist_tablet.gd/
-## popup_keyboard.gd already use, and controller.gd already reads to know
-## whether the trigger belongs to a UI panel instead of a part, and how far
-## to shorten the laser) if nothing else has already claimed a NEARER hit
-## that same frame - so whichever panel the laser is actually closest to
-## wins, regardless of which panel's _process() happens to run first. This
-## only works because controller.gd resets that meta to neutral at the very
-## start of every frame, before any panel (wrist tablet, popup keyboard, or
-## one of these) gets a chance to claim it - see controller.gd's own
-## _process() docstring. The wrist tablet and popup keyboard predate this
-## arbitration and always claim unconditionally when they're hovered - an
-## accepted, documented gap (not fixed by touching either of those two
-## already-proven, headset-tested files) that only matters if one of THEM
-## geometrically overlaps a new panel in the same laser path, which the
-## placement conventions each subclass uses (different open_distance/
-## open_lateral_offset) are chosen to avoid in practice.
+## panel claims the right controller's shared "ui_hover"/"ui_hit_distance"
+## meta (the same convention wrist_tablet.gd/popup_keyboard.gd already use,
+## and controller.gd already reads to know whether the trigger belongs to a
+## UI panel instead of a part, and how far to shorten the laser) only if
+## nothing has already claimed it THIS frame - so at most one panel ever
+## ends up hovered per frame, with no risk of two panels both thinking a
+## single trigger pull is "for them". This is first-claim, not nearest-hit:
+## among panels added in main.gd's _ready() (assembly tree, then
+## calculator, then image viewer, then the wrist tablet, then the popup
+## keyboard), whichever one runs first each frame and is genuinely
+## geometrically hit wins, even if a later-processed panel is actually
+## closer along the same ray - an earlier, cheaper "claim if nearer"
+## version of this was dropped after tests/windows_tab.gd caught it letting
+## an outbid panel keep believing it was still hovered for the rest of that
+## frame (nothing ever told it otherwise), so two panels could both react
+## to the same trigger pull at once. This only works because controller.gd
+## resets the meta to neutral at the very start of every frame, before any
+## panel gets a chance to claim it - see controller.gd's own _process()
+## docstring. Correctness (never two panels believing they're both hovered
+## at once) matters more here than optimality (always picking the true
+## nearest) - each new window's own open_distance/open_lateral_offset is
+## chosen so panels don't normally overlap in the first place, so true ray
+## overlap between two open windows is an edge case, not the common path.
+## The wrist tablet and popup keyboard predate this arbitration entirely
+## and always claim unconditionally when they're hovered - an accepted,
+## documented gap (not fixed by touching either of those two already-
+## proven, headset-tested files) that only matters if one of THEM
+## geometrically overlaps a new panel in the same laser path.
 
 @export var panel_size := Vector2(0.26, 0.30) ## metres
 @export var viewport_size := Vector2i(460, 560) ## pixels the UI is laid out in
@@ -151,17 +162,15 @@ func _update_pointer() -> void:
 				(0.5 - local.y / panel_size.y) * viewport_size.y
 			)
 
-	if geometrically_hit:
-		var existing_hover: bool = _right.get_meta("ui_hover", false)
-		var existing_distance: float = _right.get_meta("ui_hit_distance", -1.0)
-		# Claim it only if nothing else already claimed a nearer hit this
-		# frame - see this class's own top docstring for the full picture.
-		if not existing_hover or existing_distance < 0.0 or hit_distance < existing_distance:
-			_hovering = true
-			if not _pressed:
-				_pointer_px = local_hit_px
-			_right.set_meta("ui_hover", true)
-			_right.set_meta("ui_hit_distance", hit_distance)
+	# Claim only if nothing has already claimed the shared meta THIS frame -
+	# see this class's own top docstring for why this is first-claim, not
+	# nearest-hit, and why that's the right trade-off here.
+	if geometrically_hit and not _right.get_meta("ui_hover", false):
+		_hovering = true
+		if not _pressed:
+			_pointer_px = local_hit_px
+		_right.set_meta("ui_hover", true)
+		_right.set_meta("ui_hit_distance", hit_distance)
 
 	_cursor.visible = _hovering
 	if _hovering:

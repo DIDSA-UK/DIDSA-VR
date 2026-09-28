@@ -124,11 +124,13 @@ func _process(_delta: float) -> void:
 	## own _process() runs. XROrigin3D (and so this controller) is always
 	## the first child under main.gd's root — every tool/UI panel is added
 	## later, inside main.gd's own _ready() — so this always runs first each
-	## frame (Godot processes nodes in scene-tree/child order). Without it, a
-	## floating window nobody's aiming at any more could keep "owning" these
-	## two values indefinitely, since diegetic_panel.gd's own arbitration
-	## only ever claims a NEARER hit, never unclaims a lost one — see that
-	## script's own top docstring for the full picture this is one half of.
+	## frame (Godot processes nodes in scene-tree/child order). Without this
+	## reset, a floating window nobody's aiming at any more could keep
+	## "owning" these two values indefinitely, since diegetic_panel.gd's own
+	## arbitration only ever CLAIMS the meta, never unclaims it on its own —
+	## see that script's own top docstring for the full picture this is one
+	## half of (a first-claim-per-frame scheme, not nearest-hit, chosen so
+	## at most one panel can ever believe it's hovered in a given frame).
 	set_meta("ui_hover", false)
 	set_meta("ui_hit_distance", -1.0)
 
