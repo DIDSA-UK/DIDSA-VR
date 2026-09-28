@@ -47,13 +47,13 @@ var _url_bar: LineEdit
 var _texture: ImageTexture
 
 
-func setup_browser(right: XRController3D, camera: XRCamera3D) -> void:
+func setup_browser(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	panel_title = "Browser"
 	panel_size = Vector2(0.36, 0.26)
 	viewport_size = Vector2i(640, 460)
 	open_distance = 0.65
 	open_lateral_offset = 0.15
-	super.setup(right, camera)
+	super.setup(left, right, camera)
 
 
 func configure_relay(relay_url: String, relay_api_key: String, start_url: String = "about:blank") -> void:

@@ -32,7 +32,7 @@ extends Node3D
 @export var viewport_size := Vector2i(640, 600) ## pixels the UI is laid out in
 @export var mount_position := Vector3(0.0, 0.06, 0.07) ## relative to the left controller: above and a little behind it
 @export var mount_tilt_degrees: float = 0.0 ## extra tilt about X; tweak if it sits awkwardly on your wrist
-@export var target_position := Vector3(0.0, 0.05, 0.06) ## the wrist bullseye, relative to the left controller
+@export var target_position := Vector3(0.0, 0.05, 0.122) ## the wrist bullseye/tablet icon, relative to the left controller — was too far forward (0.06); nudged back by its own ring's 0.062m outer diameter, same fix as the controller button discs (controller.gd's _add_button_discs())
 @export var target_radius: float = 0.035 ## metres; how generous the "shot" hit area is (the drawn ring is smaller)
 @export var max_point_distance: float = 2.0 ## metres; laser reach for pressing buttons
 @export var click_action: String = "trigger_click"
@@ -106,6 +106,7 @@ var _info_label: Label
 var _scale_label: Label
 var _lock_button: Button
 var _files_box: VBoxContainer
+var _files_status_label: Label
 var _environment_status_label: Label
 var _project_folder_label: Label
 
@@ -201,6 +202,8 @@ func _process(delta: float) -> void:
 		if _colour_status_label and Time.get_ticks_msec() >= _colour_message_hold_until_ms:
 			var selected: Node3D = _main.current_selected_part()
 			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
+		if _files_status_label:
+			_files_status_label.text = _main.status_text
 
 
 func _update_pointer(normal: Vector3) -> void:
@@ -222,7 +225,8 @@ func _update_pointer(normal: Vector3) -> void:
 	if _target_hover != _last_target_hover:
 		_last_target_hover = _target_hover
 		for mat in _target_materials:
-			mat.albedo_color = Color(1.0, 1.0, 1.0) if _target_hover else Color(0.8, 0.83, 0.87) # brightens to pure white on hover, never leaves white
+			mat.albedo_color = Color(0.75, 0.85, 1.0) if _target_hover else Color(0.8, 0.83, 0.87) # a slight blue tint plus a swell (below) on hover, rather than a hue-free brightness change
+		_target.scale = Vector3.ONE * (1.2 if _target_hover else 1.0)
 
 	if visible:
 		var hit = Plane(normal, global_position).intersects_ray(origin, dir)
@@ -1422,6 +1426,18 @@ func _build_files_page() -> Control:
 	hint.add_theme_font_size_override("font_size", 16)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	page.add_child(hint)
+	# Real-headset feedback: "Add" (and Open/import) failing silently — the
+	# only feedback main.gd's own load/add/import functions ever gave was
+	# _set_status()'s console print, invisible in a headset (see that
+	# function's own docstring: no floating 3D text, deliberately, per
+	# earlier feedback that it was distracting). "Add" needing a configured
+	# backend in particular has no other symptom at all otherwise — from
+	# inside the headset, clicking it with no secrets.cfg just does nothing.
+	_files_status_label = Label.new()
+	_files_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_files_status_label.add_theme_font_size_override("font_size", 16)
+	_files_status_label.add_theme_color_override("font_color", Color(0.6, 0.95, 1.0))
+	page.add_child(_files_status_label)
 	_files_box = VBoxContainer.new()
 	_files_box.add_theme_constant_override("separation", 8)
 	page.add_child(_files_box)

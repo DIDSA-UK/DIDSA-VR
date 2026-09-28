@@ -14,13 +14,13 @@ var _texture_rect: TextureRect
 var _list_box: VBoxContainer
 
 
-func setup_image_viewer(right: XRController3D, camera: XRCamera3D) -> void:
+func setup_image_viewer(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	panel_title = "Image Viewer"
 	panel_size = Vector2(0.30, 0.24)
 	viewport_size = Vector2i(560, 440)
 	open_distance = 0.55
 	open_lateral_offset = 0.22
-	super.setup(right, camera)
+	super.setup(left, right, camera)
 
 
 func _on_opened() -> void:

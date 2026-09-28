@@ -158,7 +158,7 @@ func _add_assembly_tree_window() -> void:
 	var window := preload("res://scripts/assembly_tree_window.gd").new()
 	window.name = "AssemblyTreeWindow"
 	add_child(window)
-	window.setup_tree($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, self)
+	window.setup_tree($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, self)
 	_assembly_tree_window = window
 
 
@@ -167,7 +167,7 @@ func _add_calculator_window() -> void:
 	var window := preload("res://scripts/calculator_window.gd").new()
 	window.name = "CalculatorWindow"
 	add_child(window)
-	window.setup_calculator($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	window.setup_calculator($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
 	_calculator_window = window
 
 
@@ -176,7 +176,7 @@ func _add_image_viewer_window() -> void:
 	var window := preload("res://scripts/image_viewer_window.gd").new()
 	window.name = "ImageViewerWindow"
 	add_child(window)
-	window.setup_image_viewer($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	window.setup_image_viewer($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
 	_image_viewer_window = window
 
 
@@ -186,7 +186,7 @@ func _add_browser_window() -> void:
 	var window := preload("res://scripts/browser_window.gd").new()
 	window.name = "BrowserWindow"
 	add_child(window)
-	window.setup_browser($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	window.setup_browser($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
 	_browser_window = window
 
 

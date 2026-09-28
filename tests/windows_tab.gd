@@ -169,7 +169,31 @@ func _initialize() -> void:
 	print("SMOKE with two overlapping panels, exactly one ends up hovered, never both: ", tree_window._hovering != calc._hovering)
 	print("SMOKE the earlier-processed panel (assembly tree) wins the shared claim, per this scheme's documented trade-off: ", tree_window._hovering and not calc._hovering)
 
+	# Grab handle: GRIP it with a hand near it and the whole panel should
+	# follow 1:1; releasing should leave it exactly where dropped.
+	calc.open()
+	await process_frame
+	calc.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, -1.0))
+	l.position = calc._handle.global_position
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	print("SMOKE gripping near the handle grabs the panel: ", calc._held_by == l)
+	var before: Vector3 = calc.global_position
+	l.position += Vector3(0.3, 0.1, -0.2)
+	for i in 3:
+		await process_frame
+	var moved: Vector3 = calc.global_position - before
+	print("SMOKE dragging the handle moves the panel 1:1 with the hand: ", moved.is_equal_approx(Vector3(0.3, 0.1, -0.2)))
+	l.button_released.emit("grip_click")
+	for i in 3:
+		await process_frame
+	var after_release: Vector3 = calc.global_position
+	l.position += Vector3(1.0, 0, 0) # hand keeps moving after release
+	for i in 3:
+		await process_frame
+	print("SMOKE releasing the handle stops the panel from following further hand movement: ", calc._held_by == null and calc.global_position.is_equal_approx(after_release))
 	calc.close()
+
 	tree_window.close()
 	image_window.close()
 	browser_window.close()

@@ -9,6 +9,14 @@ extends Node3D
 ## two proven, already-headset-tested files - see docs/status.md's
 ## "Floating windows" section for why).
 ##
+## Real-headset feedback: these panels opened in front of the camera and
+## then just stayed exactly there forever, with no way to move one out of
+## the way. A small grab handle at the centre of the panel's lower edge
+## (_build_handle()) fixes that: GRIP it with either hand to drag the whole
+## panel 1:1, release to let go — self-contained (both controllers'
+## grip_click, not routed through controller.gd's own part-grab search),
+## since a window handle floats well clear of the assembly in normal use.
+##
 ## Subclasses override _build_content() to supply their own UI (a header
 ## with the panel's title and a close button are added automatically around
 ## whatever that returns), call setup() last from their own setup_xyz()
@@ -52,9 +60,16 @@ extends Node3D
 @export var max_point_distance: float = 2.0 ## metres; laser reach
 @export var click_action: String = "trigger_click"
 @export var panel_title: String = "Window"
+@export var grab_action: String = "grip_click"
+@export var handle_grab_reach: float = 0.03 ## metres beyond the handle's own radius - it's small, so a bit of slack makes it easier to catch, same reasoning as controller.gd's own grab_reach
 
+var _left: XRController3D
 var _right: XRController3D
 var _camera: XRCamera3D
+var _handle: MeshInstance3D
+var _handle_material: StandardMaterial3D
+var _held_by: XRController3D = null ## whichever hand grabbed the handle, or null - see _try_grab_handle()/_release_handle()
+var _grab_offset: Transform3D = Transform3D.IDENTITY ## this panel's pose in the holding hand's local frame, captured at grab time
 
 var _viewport: SubViewport
 var _quad: MeshInstance3D
@@ -69,13 +84,19 @@ var _last_sent_px := Vector2(-1, -1)
 var _pressed := false
 
 
-func setup(right: XRController3D, camera: XRCamera3D) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
+	_left = left
 	_right = right
 	_camera = camera
 	_build_viewport()
 	_build_quad()
+	_build_handle()
 	_right.button_pressed.connect(_on_right_pressed)
 	_right.button_released.connect(_on_right_released)
+	_left.button_pressed.connect(_on_grip_pressed.bind(_left))
+	_left.button_released.connect(_on_grip_released.bind(_left))
+	_right.button_pressed.connect(_on_grip_pressed.bind(_right))
+	_right.button_released.connect(_on_grip_released.bind(_right))
 	visible = false
 
 
@@ -95,6 +116,7 @@ func close() -> void:
 	_open = false
 	visible = false
 	_hovering = false
+	_held_by = null # don't leave the panel following a hand that's still gripping when it closes
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if _right:
 		_right.set_meta("ui_hover", false)
@@ -138,6 +160,12 @@ func _place_in_front_of_camera() -> void:
 func _process(_delta: float) -> void:
 	if not _open or _camera == null or _right == null:
 		return
+	if _held_by:
+		# Rigid 1:1 follow, same approach section_tool.gd's own gizmo grab
+		# uses - a floating window doesn't need the part-grab path's
+		# steadiness filtering, it's not a precision placement task.
+		global_transform = _held_by.global_transform * _grab_offset
+		return # being dragged by its handle - not also hoverable/clickable at the same time
 	_update_pointer()
 
 
@@ -212,6 +240,30 @@ func _send_click(down: bool) -> void:
 	_viewport.push_input(click)
 
 
+func _on_grip_pressed(action_name: String, hand: XRController3D) -> void:
+	## These windows aren't wrist- or camera-attached - once placed in front
+	## of you on open, they stay exactly there until dragged by this handle.
+	## Self-contained (not routed through controller.gd's own part-grab
+	## search, unlike section_tool.gd's gizmo - see this file's own top
+	## docstring on why that class of fix stays out of proven, tested
+	## files): a window handle floats well clear of the assembly in normal
+	## use, so it doesn't need arbitration against an ordinary part-grab.
+	if action_name != grab_action or not _open or _held_by != null or _handle == null:
+		return
+	var reach: float = (_handle.mesh as CapsuleMesh).radius + handle_grab_reach
+	if hand.global_position.distance_to(_handle.global_position) <= reach:
+		_held_by = hand
+		_grab_offset = hand.global_transform.affine_inverse() * global_transform
+		_handle_material.albedo_color = Color(1.0, 1.0, 1.0)
+		hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
+
+
+func _on_grip_released(action_name: String, hand: XRController3D) -> void:
+	if action_name == grab_action and _held_by == hand:
+		_held_by = null
+		_handle_material.albedo_color = Color(0.82, 0.85, 0.9)
+
+
 func _build_viewport() -> void:
 	_viewport = SubViewport.new()
 	_viewport.size = viewport_size
@@ -232,6 +284,32 @@ func _build_quad() -> void:
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.material = mat
 	add_child(_quad)
+
+
+## A small grab handle at the centre of the panel's lower edge, the common
+## "drag this to move the window" affordance most VR UI toolkits use (Quest
+## home/system panels included) - these windows otherwise just sit exactly
+## where they opened forever (_place_in_front_of_camera(), once, on open),
+## with no other way to reposition one. A thin white horizontal pill,
+## matching this session's own white-line visual language (floor grid,
+## wrist tablet icon, controller button discs) rather than a bespoke look.
+func _build_handle() -> void:
+	_handle = MeshInstance3D.new()
+	var capsule := CapsuleMesh.new()
+	capsule.radius = 0.008
+	capsule.height = 0.05
+	_handle_material = StandardMaterial3D.new()
+	_handle_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_handle_material.emission_enabled = true
+	_handle_material.emission = Color(0.82, 0.85, 0.9)
+	_handle_material.albedo_color = Color(0.82, 0.85, 0.9)
+	capsule.material = _handle_material
+	_handle.mesh = capsule
+	# Capsule's long axis is local Y by default; rotate 90 about Z so it lies
+	# horizontal, spanning the panel's own lower edge left-to-right.
+	_handle.rotation_degrees.z = 90.0
+	_handle.position = Vector3(0.0, -panel_size.y * 0.5 - 0.02, 0.01)
+	add_child(_handle)
 
 
 func _build_root_ui() -> Control:

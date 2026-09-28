@@ -10,13 +10,13 @@ var _display: Label
 var _expression_text := ""
 
 
-func setup_calculator(right: XRController3D, camera: XRCamera3D) -> void:
+func setup_calculator(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	panel_title = "Calculator"
 	panel_size = Vector2(0.20, 0.28)
 	viewport_size = Vector2i(360, 500)
 	open_distance = 0.55
 	open_lateral_offset = 0.0
-	super.setup(right, camera)
+	super.setup(left, right, camera)
 
 
 func _build_content() -> Control:
