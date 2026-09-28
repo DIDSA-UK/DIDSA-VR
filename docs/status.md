@@ -1122,35 +1122,67 @@ why keeping a separate toggle-button state in sync wasn't worth it).
   that repo's own recon docs (`docs/vr-recon-2026-09-24.md`/
   `-2-2026-09-24.md`). This is a DIDSA-CAD-repo spike, not a DIDSA-VR task.
 
-**Nothing in this milestone has been confirmed on a real headset, or even
-by actually running Godot at all** — this cloud sandbox had no Godot binary
-available (only `godot3-server` via `apt`, incompatible with this Godot-4
-project) and outbound access to fetch one was denied by the environment's
-network policy, so `tests/run_all.sh` was never run this session. Every
-claim above is verified by careful inspection against this repo's own
-existing, proven patterns — bracket-balance- and indentation-checked by
-hand with a small script, nothing more — not by execution. The three new
-headless tests (`tests/assembly_tree_window.gd`, `tests/calculator_window.gd`,
-`tests/windows_tab.gd` — the last one is the one that actually caught and
-drove the fix to the double-claim bug above, by trying to assert the
-original "nearest wins" design and finding it couldn't honestly satisfy
-that) and the real-backend `tests/e2e_assembly_tree.gd` are all written and
-added to `tests/run_all.sh`/`tests/README.md`, ready to run — running them
-(and then a real headset pass) is the actual next step before trusting any
-of this in use, not a "nice to have."
+**Update, same session: Godot 4.7.2 obtained and the full suite actually
+run.** The initial claim above ("no Godot available, only inspected") held
+for the first pass — `apt` only has `godot3-server`, incompatible with this
+Godot-4 project, and the obvious release-download hosts
+(`downloads.tuxfamily.org`, `godotengine.org`) are both blocked by this
+sandbox's network policy. `github.com`'s own release-asset redirect
+(`objects.githubusercontent.com`/`release-assets.githubusercontent.com`)
+was not blocked, though, and `project.godot`'s `config/features` names the
+exact version this project actually targets (`"4.7"`, not assumed) — Godot
+4.7.2-stable downloaded from there and `tests/run_all.sh` genuinely run
+against it caught two real bugs neither inspection nor Godot 4.2.2
+(tried first, wrong minor version, masked one of them entirely) surfaced:
+
+- **A real production bug in `controller.gd`.** The per-frame `ui_hover`/
+  `ui_hit_distance` reset (added for the arbitration fix above) assumed
+  being `main.gd`'s first child meant it always ran before every panel's
+  own `_process()` — wrong: `wrist_tablet.gd` is three levels deep
+  (parented under the LEFT controller, not a sibling of the right one),
+  and in practice sometimes ran first instead, silently wiping out a hover
+  it had just legitimately claimed. `tests/laser_and_left_hand.gd` (pre-
+  existing, not written this session) caught it — its own "shortens to the
+  tablet via ui_hit_distance" line came back `false`, a genuine regression
+  confirmed by disabling the new reset and re-running (passed) before
+  re-enabling it with the real fix: `process_priority = -1000` on
+  `controller.gd`, Godot's own explicit ordering mechanism, not tree
+  position.
+- **A real bug in the Calculator itself.** Godot's `Expression` class does
+  true integer division for two integer literals, exactly like GDScript's
+  own `/` operator — `"10/4"` evaluated to `2`, not `2.5`. Not a cosmetic
+  formatting issue: a user typing that on the in-VR calculator would get a
+  silently wrong answer. Fixed with `_floatify()` in
+  `calculator_window.gd`, appending `.0` to every bare integer literal
+  before parsing.
+
+Two more bugs turned out to be in this session's own *test* code, not the
+shipped app: `tests/windows_tab.gd`'s first draft aimed at the wrist tablet
+with `look_at()`, degenerate for a panel that lies flat (its quad faces
+straight up) — fixed by porting `tests/section_tab.gd`'s own proven fixed-
+orientation aim; and it opened the tablet directly via `open_tablet()`
+without also waiting out `open_settle_seconds` (0.4s, real wall-clock time,
+ignores an immediate press) the way every other full-scene test already
+does, silently swallowing its very first click.
+
+`tests/run_all.sh` now passes clean end to end (exit 0, every SMOKE line
+matching this doc's and `tests/README.md`'s own documented expected
+values). **Still open**: `tests/e2e_assembly_tree.gd` (needs a real running
+backend — none in this sandbox) and, same as every other milestone in this
+project, a real headset pass.
 
 ## Untested paths
 
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
-  `diegetic_panel.gd` framework they're built on) — not headless-run, not
-  real-backend-run, not headset-run.** See "Milestone 3 — floating windows"
-  above for the full detail and why (no Godot available this session at
-  all). Everything else in this list was at least confirmed by actually
-  running Godot; this is the one entry in this file that hasn't cleared
-  even that first bar yet — run `tests/run_all.sh` (the three new tests:
-  `assembly_tree_window`, `calculator_window`, `windows_tab`) before
-  anything else here, then `tests/e2e_assembly_tree.gd` against a real
-  backend, then a real headset.
+  `diegetic_panel.gd` framework they're built on) — now headless-confirmed
+  (Godot 4.7.2, `tests/run_all.sh` clean), not yet real-backend- or
+  headset-confirmed.** See "Milestone 3 — floating windows" above for the
+  two real bugs actually running the suite caught and fixed (a
+  `controller.gd` process-ordering bug and a real Calculator wrong-answer
+  bug) — the headless bar is cleared, same as everything else in this
+  list, but `tests/e2e_assembly_tree.gd` still needs a real backend (none
+  in this sandbox) and nothing here has felt a real hand pulling a real
+  trigger yet.
 - **28 Sep 2026 session's two additions — Open/Add (Files tab) and the
   Measure tab — are both headless- and real-backend-confirmed only, same
   as everything else in this list.** See "Open/add-parts pathway built"

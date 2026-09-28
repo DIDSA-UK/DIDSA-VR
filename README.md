@@ -400,14 +400,15 @@ on standalone Quest; "DIDSA-CAD as a window" additionally needs DIDSA-CAD's
 Flutter client to grow a web build target it doesn't have today. Each is a
 separate scoping spike, not a small addition — see `docs/status.md`.
 
-**Nothing in this milestone has been confirmed on a real headset, or even
-by actually running Godot** — this session had no Godot available to run
-`tests/run_all.sh` at all, so everything here is verified by careful
-inspection against this repo's own existing, proven patterns
-(`popup_keyboard.gd`'s panel mechanism, `colour_tool.gd`'s HTTP client
-shape) rather than by execution. Run the new tests
-(`assembly_tree_window`, `calculator_window`, `windows_tab`) before
-trusting this on a headset.
+**Headless-confirmed (Godot 4.7.2, `tests/run_all.sh` clean), not yet
+confirmed on a real headset.** Actually running the suite — not just
+inspecting the code — caught and fixed two real bugs: `controller.gd`'s
+per-frame UI-claim reset assumed tree position guaranteed it ran before
+every panel, which wrist_tablet.gd (three levels deep, not a direct
+sibling) disproved in practice, and the Calculator did real integer
+division for two integer literals ("10/4" → 2, not 2.5) — see
+`docs/status.md`'s "Milestone 3" section for both. `tests/e2e_assembly_tree.gd`
+still needs a real backend to run.
 
 ## Known gaps this project doesn't solve yet
 

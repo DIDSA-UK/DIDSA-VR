@@ -78,9 +78,15 @@ static func evaluate_expression(text: String) -> Dictionary:
 	## Pure (no UI): {"ok": bool, "text": String} - "text" is the formatted
 	## result on success, or empty on failure. Used directly by
 	## tests/calculator_window.gd. Godot's own Expression class does the
-	## actual parsing/arithmetic.
+	## actual parsing/arithmetic - but, caught by actually running this
+	## against a real Godot instead of only inspecting the code (see
+	## docs/status.md), it does real integer division for two integer
+	## literals exactly like GDScript itself does ("10/4" -> 2, not 2.5),
+	## so every bare integer literal is floatified first via _floatify()
+	## below - a calculator silently truncating "10/4" to "2" would be a
+	## real, user-facing wrong-answer bug, not just a formatting quirk.
 	var expr := Expression.new()
-	if expr.parse(text) != OK:
+	if expr.parse(_floatify(text)) != OK:
 		return {"ok": false, "text": ""}
 	var value = expr.execute([], null, false)
 	if expr.has_execute_failed():
@@ -88,6 +94,25 @@ static func evaluate_expression(text: String) -> Dictionary:
 	if typeof(value) != TYPE_FLOAT and typeof(value) != TYPE_INT:
 		return {"ok": false, "text": ""}
 	return {"ok": true, "text": _trim_number(float(value))}
+
+
+static func _floatify(text: String) -> String:
+	## Appends ".0" to every bare integer literal (one not already part of
+	## a decimal number) so Expression always divides as float - matching
+	## `\d+\.\d+|\d+`'s own alternation order (try the full decimal-number
+	## shape first) is what keeps an already-typed "2.5" as one match
+	## rather than splitting it into "2" + "." + "5" and mangling it.
+	var re := RegEx.new()
+	re.compile("\\d+\\.\\d+|\\d+")
+	var result := ""
+	var last_end := 0
+	for m in re.search_all(text):
+		var matched: String = m.get_string()
+		result += text.substr(last_end, m.get_start() - last_end)
+		result += matched if matched.contains(".") else matched + ".0"
+		last_end = m.get_end()
+	result += text.substr(last_end)
+	return result
 
 
 static func _trim_number(x: float) -> String:

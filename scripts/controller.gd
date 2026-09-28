@@ -86,6 +86,21 @@ var _camera: XRCamera3D
 
 
 func _ready() -> void:
+	# Guarantees this node's own _process() (the ui_hover/ui_hit_distance
+	# reset below) runs before every UI panel's — including wrist_tablet.gd,
+	# which is three levels deep (parented under the LEFT controller, not a
+	# sibling of this one) rather than a direct child of main.gd's root as
+	# first assumed. Confirmed by actually running this against a real
+	# Godot instead of only inspecting the code (see docs/status.md): tree
+	# depth/add-order alone did NOT reliably put this first, and without
+	# this fix the reset sometimes ran AFTER wrist_tablet.gd's own
+	# _process() within the same frame, wiping out a hover it had just
+	# legitimately claimed — tests/laser_and_left_hand.gd's own
+	# "shortens to the tablet via ui_hit_distance" check caught this.
+	# process_priority is Godot's own explicit, documented ordering
+	# mechanism for exactly this (lower runs first) — a real fix, not a
+	# workaround.
+	process_priority = -1000
 	button_pressed.connect(_on_button_pressed)
 	button_released.connect(_on_button_released)
 	set_steadiness(steadiness)
@@ -121,10 +136,12 @@ func _process(_delta: float) -> void:
 	## wrist_tablet.gd, popup_keyboard.gd, and any scripts/diegetic_panel.gd
 	## -based floating window — see that script's own top docstring) to
 	## neutral at the very start of every frame, before any of those panels'
-	## own _process() runs. XROrigin3D (and so this controller) is always
-	## the first child under main.gd's root — every tool/UI panel is added
-	## later, inside main.gd's own _ready() — so this always runs first each
-	## frame (Godot processes nodes in scene-tree/child order). Without this
+	## own _process() runs — guaranteed by this node's process_priority
+	## (set in _ready()), not by tree position: wrist_tablet.gd is three
+	## levels deep (parented under the LEFT controller, not a sibling of
+	## this one), so plain child/add order does NOT reliably put this
+	## first — confirmed the hard way by actually running the tests against
+	## a real Godot instead of only inspecting the code. Without this
 	## reset, a floating window nobody's aiming at any more could keep
 	## "owning" these two values indefinitely, since diegetic_panel.gd's own
 	## arbitration only ever CLAIMS the meta, never unclaims it on its own —
