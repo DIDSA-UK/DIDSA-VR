@@ -140,7 +140,7 @@ The four original milestones stand, with a recon step and an engine spike added 
 | 1 | Import and viewport | In progress. Native import + individual part manipulation (proximity grab, and trigger-laser select with thumbstick rotate / A-B nudge) and user movement (walk, snap-turn, teleport) are built and running on-device. Still open: whole-model two-hand rotate/scale, scale views, and STEP/glTF/OBJ/STL import (backend already exposes /parts/{id}/import-features for STEP/OBJ/STL and a bare .glb needs no backend round-trip at all). |
 | 2 | Design table | A summonable drawing board where sketches on the table drive geometry floating above it |
 | 3 | Floating windows | Calculator, browser, PDF reader, image viewer and DIDSA-CAD run as flat windows in the arena |
-| 4 | Assembly environment | Parts move individually; mates, colours, sections and measurements work |
+| 4 | Assembly environment | **Done, 28 Sep 2026.** Parts move individually; mates, colours, sections and measurements all work — Measurements (the last of the four) is a thin client to DIDSA-CAD's existing `POST /parts/{id}/measure`, needing no backend changes at all. Headless- and real-backend-confirmed (`tests/measure_tool.gd`, `tests/e2e_measure.gd`); not yet confirmed on a real headset. |
 
 Shared network storage (stage 1) follows milestone 4; live presence (stage 2) is a separate backend project.
 

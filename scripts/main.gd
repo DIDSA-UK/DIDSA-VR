@@ -48,6 +48,7 @@ var _two_hand: Node
 var _tablet: Node
 var _keyboard: Node
 var _mates_tool: Node
+var _measure_tool: Node
 var _colour_tool: Node
 var _section_tool: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
@@ -67,6 +68,7 @@ func _ready() -> void:
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_mates_tool()
+	_add_measure_tool()
 	_add_colour_tool()
 	_add_section_tool()
 	_add_wrist_tablet()
@@ -75,12 +77,15 @@ func _ready() -> void:
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
 	$XROrigin3D/RightController.mates_tool = _mates_tool
+	$XROrigin3D/LeftController.measure_tool = _measure_tool
+	$XROrigin3D/RightController.measure_tool = _measure_tool
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
 	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
 	_mates_tool.configure_backend(backend_url, api_key)
+	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
@@ -106,6 +111,13 @@ func _add_mates_tool() -> void:
 	_mates_tool = mates
 
 
+func _add_measure_tool() -> void:
+	var measure := preload("res://scripts/measure_tool.gd").new()
+	measure.name = "MeasureTool"
+	add_child(measure)
+	_measure_tool = measure
+
+
 func _add_colour_tool() -> void:
 	var colours := preload("res://scripts/colour_tool.gd").new()
 	colours.name = "ColourTool"
@@ -124,7 +136,7 @@ func _add_section_tool() -> void:
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool)
 	_tablet = tablet
 
 

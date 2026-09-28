@@ -212,7 +212,7 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
-## Milestone 4 — assembly environment (mates, colours, sections, measurements): mates, colours and sections built; measurements not started
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): all four tools built
 
 Started by reading the vision brief's Assembly tools/Mates workflow sections
 and the 27 Sep cross-compatibility note (mates must be built as a client to
@@ -598,6 +598,74 @@ being implemented.
   volume to reach into); whether the default spawn position/size reads
   clearly on first toggle; and whether the clip itself, correct in a flat
   render, looks right in stereo/at real depth.
+
+### Measurements: the last milestone-4 tool - a thin client to DIDSA-CAD's real, stateless Measure endpoint
+
+Closes milestone 4. Read `backend/app/document/measure.py`/`schemas.py`
+directly (in the `DIDSA-CAD` repo) first: `POST /parts/{part_id}/measure`
+already existed (the same endpoint the flat app's own
+`measurement_panel.dart` uses) and needed no backend changes at all - every
+piece the VR client needed (a `MeasureEntityRefSchema{occurrence_id,
+subshape_ref}` per pick, root content allowed via `occurrence_id: ""`) was
+already there, and this client's own `mesh_identity.gd` already produces
+exactly that shape from a raycast hit (built for Mates, reused verbatim
+here).
+
+**`scripts/measure_tool.gd`** (new): laser-pick 1-2 entities, live result -
+no create/persist step at all (`measure.py`'s own docstring: "never a
+Feature, never mutates Part, no undo/redo entry"), so picking the first
+entity queries and shows a single-entity result immediately, picking a
+second re-queries for the two-entity relationship. Deliberately **looser**
+validation than Mates: a Measure entity can be the currently-open Part's
+own root content, and both picks can land on the same Occurrence or root
+content - measuring across two features of one part (a hole's spacing, a
+wall's thickness) is the common case, not Mates' "two different parts"
+requirement. A third pick starts a fresh measurement rather than being
+ignored once full (Mates' own cap-at-2 behaviour) - Measure is for picking
+through several things in a row.
+
+**A real overlapping-request race, found by an e2e run against a real
+backend, not by reasoning about the code**: the first design gated
+`try_pick()` on `is_busy()`, so a real second pick thrown quickly - before
+the first pick's own network round trip had returned - was silently
+dropped waiting on a request that hadn't finished yet. `tests/e2e_measure.gd`
+caught this directly: the two-entity case never even fired, `status_text()`
+still asked for "a second entity" after both picks. Fixed with a monotonic
+`_measure_token` instead of a hard gate: every pick always fires its own
+`_run_measure()` call immediately (never dropped), and a request that
+comes back after a *newer* pick has already superseded it (token mismatch)
+discards its own now-stale result instead of clobbering the current one -
+`clear_picks()` also bumps the token, so an old in-flight request can't
+land after an explicit Clear either. Re-ran the same e2e test afterward:
+real distance (83.34 mm), real delta, and real per-body volumes came back
+for a genuine two-pick sequence.
+
+**Wrist tablet**: new "Measure" tab (`wrist_tablet.gd`) - a tool toggle,
+status/picked-entities labels, a live result list, and Clear. Result row
+order/labels/formatting deliberately match the flat app's own
+`MeasurementPanel._resultRows` exactly (Length, Diameter, Radius, Area,
+Point, Axis distance, Normal distance, Distance, Delta, then per-body
+Volume/Mass) so a user moving between VR and flat sees the same numbers
+laid out the same way, not a VR-specific reinterpretation.
+
+**Tests**: `tests/measure_tool.gd` (new, added to `run_all.sh`) - pure
+pick-validation logic against manually-tagged stand-ins, 14/14 boolean
+lines `true`, including the looser-than-Mates cases (root content and
+same-occurrence picks both accepted) and confirming a failed/no-backend
+measure attempt still leaves `is_busy()` correctly `false` rather than
+stuck. `tests/e2e_measure.gd` (new, needs a real backend, not run by
+`run_all.sh`, same class of exception as `e2e_mates.gd`) - real single- and
+two-entity measurements against `assembly.didsa`'s own two placed
+occurrences, **SMOKE PASSED** after the race-condition fix above. Full
+headless suite (`run_all.sh`) re-run clean after the fix: **ALL RAN WITHOUT
+SCRIPT ERRORS**, no regressions.
+
+**Not yet headset-verified** - like the rest of milestone 4, only run
+headless and against a real backend: whether the result list reads clearly
+at wrist-tablet size with several rows populated at once, and whether
+picking two faces in quick succession (the exact race the token fix
+handles server-side) feels right from a real hand, not just correct over
+the wire.
 
 ## Real-headset testing round: three bugs found and fixed
 

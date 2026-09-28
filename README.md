@@ -184,6 +184,20 @@ live-synced.
     dragging in real time. One plane for now. Turning the tool off drops
     the gizmo and restores every part's real appearance. Undoable (one
     command per grab/drag), toggling the tool and Flip are not.
+14. **Measure tab** (milestone 4 — the last of the four assembly tools).
+    Toggle **Measure tool** on, then point the right hand's laser at a
+    vertex/edge/face and pull the trigger to pick it (same hover+name as
+    normal selection) — unlike Mates, the currently-open Part's own
+    unplaced content is a valid pick here, and so is a second pick on the
+    very same part (measuring across two features of one part is the
+    common case, not a "two different parts" rule). One pick shows that
+    entity's own length/area/radius/diameter/point immediately; a second
+    pick re-queries for the distance/delta between them (plus axis/normal
+    distance when detected) — no Create button, nothing is persisted
+    (`POST /parts/{id}/measure` — the same read-only endpoint DIDSA-CAD's
+    flat app uses). A third pick starts a fresh measurement rather than
+    being capped at two. **Clear** resets it. Not undoable — there is
+    nothing to undo, only a live read-only query.
 
 ## 1. Drop in a real assembly
 
