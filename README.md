@@ -443,11 +443,17 @@ mock) were connected end-to-end in this repo's own dev sandbox — real
 `X-API-Key` WebSocket handshake, real `Page.navigate`, a real JPEG
 screencast frame decoded by Godot's own `Image.load_jpg_from_buffer()`,
 and a real `Input.dispatchMouseEvent` round trip, all through the actual
-relay — see `docs/status.md` for exactly what was run. What's still
-unverified: the Debian-apt `chromium` package specifically (a different,
-but same-surface, Chromium binary was used for the check above), the
-arm64 Raspberry Pi target, Docker actually building either image (no
-Docker daemon in this sandbox), and — as with every other window — a real
+relay — see `docs/status.md` for exactly what was run. A Docker daemon was
+later obtained in this same sandbox and confirmed the browser-relay
+image's non-Chromium layers build and run for real (including the app's
+own fail-fast startup check, confirmed by intentionally pointing it at a
+non-Chrome binary), but its one `apt-get install chromium` line hit a
+real wall: `deb.debian.org` is blocked by this sandbox's own network
+policy (confirmed with `curl`, not assumed). What's still unverified as a
+result: that specific apt install actually resolving Chromium's runtime
+dependencies (a bind-mounted real Chromium binary confirmed exactly which
+dependency is missing without confirming apt can supply it here), the
+arm64 Raspberry Pi target, and — as with every other window — a real
 headset.
 
 ## Known gaps this project doesn't solve yet

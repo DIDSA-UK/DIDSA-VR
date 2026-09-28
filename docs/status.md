@@ -1267,15 +1267,46 @@ binary:
    800×600 `Image` via Godot's own `Image.load_jpg_from_buffer()`; and a
    real `Input.dispatchMouseEvent` (press + release) sent without error.
 
-**What's still unverified**: the Debian-apt `chromium` package specifically
-(the browser-relay Dockerfile's own choice, made because Ubuntu's
-`chromium-browser` is the broken snap-wrapper above — Debian's isn't, but
-a *different* Chromium binary, the Playwright one, is what was actually
-exercised above); the arm64 Raspberry Pi target; Docker actually building
-either image (no Docker daemon in this sandbox — `docker compose config`
-was validated, the Dockerfile itself was not built); and, as with every
-other window in this project, a real headset. `browser-relay/README.md`
-carries this same honest caveat on the DIDSA-CAD side.
+**Update, same session: John asked whether installing Docker would allow
+more thorough testing — yes, and it did, up to a real network-policy
+wall.** A Docker daemon wasn't available in this sandbox initially; asked
+to install it, `dockerd` turned out to already be present and started
+cleanly (containerd, buildkit, overlayfs all came up without issue). With
+it:
+
+- **The `browser-relay` image's non-Chromium layers built and ran for
+  real**: the exact base image, a `pip install` of the exact
+  `requirements.txt` (needing a documented workaround for this sandbox
+  specifically — installing this sandbox's proxy CA bundle as a trusted CA
+  in an early build layer, since a plain container doesn't trust it by
+  default), and the app code copied in.
+- **The actual containerized app was run as a real Docker container** (not
+  just `python -m uvicorn` on the host) and its fail-fast startup
+  behaviour was confirmed for real: pointing `BROWSER_RELAY_CHROME_BINARY`
+  at a non-Chrome binary inside the running container made it refuse to
+  start with a clear error, rather than come up silently broken.
+- **What it still couldn't reach: the Dockerfile's one Chromium-installing
+  line.** `deb.debian.org` returns `403 Forbidden` on both HTTP and HTTPS
+  from this sandbox — confirmed directly with `curl`, not assumed, and
+  not transient (retried once, same result) — which is this specific
+  sandbox's own network egress policy, not a Dockerfile problem. As a
+  substitute check of what that line is *for*, a real working Chromium
+  binary (the same Playwright one from the check above) was bind-mounted
+  into the built image and run directly: it failed with `error while
+  loading shared libraries: libglib-2.0.so.0: cannot open shared object
+  file` — exactly the runtime dependency `apt-get install chromium` exists
+  to pull in, confirming what was missing without confirming apt itself
+  can supply it here.
+
+**What's still unverified, net of all of the above**: the Debian-apt
+`chromium` package specifically actually resolving and installing its
+full dependency set (blocked only by this sandbox's `deb.debian.org`
+access, not by anything about the package or the Dockerfile) and the
+arm64 Raspberry Pi target — both reasonable to expect to behave like any
+other environment where that domain is reachable, but neither run for
+real yet — and, as with every other window in this project, a real
+headset. `browser-relay/README.md` carries this same detail on the
+DIDSA-CAD side.
 
 ## Untested paths
 
