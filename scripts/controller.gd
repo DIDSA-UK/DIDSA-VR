@@ -116,6 +116,23 @@ func set_steadiness(level: int) -> void:
 	_grab_filter.beta = TwoHandModel.STEADINESS_BETA
 
 
+func _process(_delta: float) -> void:
+	## Resets the shared "ui_hover"/"ui_hit_distance" meta (written by
+	## wrist_tablet.gd, popup_keyboard.gd, and any scripts/diegetic_panel.gd
+	## -based floating window — see that script's own top docstring) to
+	## neutral at the very start of every frame, before any of those panels'
+	## own _process() runs. XROrigin3D (and so this controller) is always
+	## the first child under main.gd's root — every tool/UI panel is added
+	## later, inside main.gd's own _ready() — so this always runs first each
+	## frame (Godot processes nodes in scene-tree/child order). Without it, a
+	## floating window nobody's aiming at any more could keep "owning" these
+	## two values indefinitely, since diegetic_panel.gd's own arbitration
+	## only ever claims a NEARER hit, never unclaims a lost one — see that
+	## script's own top docstring for the full picture this is one half of.
+	set_meta("ui_hover", false)
+	set_meta("ui_hit_distance", -1.0)
+
+
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
 	_update_aim_hover()
@@ -368,6 +385,23 @@ func _try_select() -> void:
 	if target != null:
 		var pivot_point: Vector3 = hit.get("point", target.global_position)
 		_set_selection(target, pivot_point)
+
+
+func select_external(node: Node3D, point: Vector3) -> void:
+	## Lets something other than this hand's own laser drive selection
+	## through the exact same path laser-select uses (_set_selection()/
+	## _clear_selection() and their command_stack bookkeeping) instead of
+	## reaching into private state — the assembly tree window's tap-to-
+	## select (assembly_tree_window.gd, called via main.gd's
+	## select_part_by_occurrence_id()) is the first caller. Re-selecting the
+	## already-selected node deselects it, matching _try_select()'s own
+	## toggle behaviour.
+	if selected_node == node:
+		_clear_selection()
+		return
+	if selected_node != null:
+		_clear_selection()
+	_set_selection(node, point)
 
 
 func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> Dictionary:
