@@ -43,6 +43,8 @@ var status_text: String = "" ## what _set_status() last said — console-only no
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
+var _settings := preload("res://scripts/app_settings.gd").new() ## project folder + last-picked scene — see app_settings.gd
+@onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
@@ -72,6 +74,7 @@ const API_PREFIX := "/document"
 
 
 func _ready() -> void:
+	_settings.load_from_disk()
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_mates_tool()
@@ -101,6 +104,8 @@ func _ready() -> void:
 	_assembly_tree_window.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
+	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport())
+	_world_environment.set_scene(_settings.last_scene)
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
 		return
@@ -355,6 +360,37 @@ func set_msaa(level: int) -> void:
 	get_viewport().msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X][level]
 
 
+# --- Environment (View > Environment tab): Light/Dark/Mid rendered presets
+# plus Passthrough (OpenXR mixed reality) — see environment_manager.gd.
+
+func available_scenes() -> Array[String]:
+	return _world_environment.SCENES
+
+
+func current_scene() -> String:
+	return _world_environment.current_scene
+
+
+func set_scene(scene_name: String) -> void:
+	_world_environment.set_scene(scene_name)
+	_settings.set_last_scene(scene_name)
+
+
+func is_passthrough_supported() -> bool:
+	return _world_environment.is_passthrough_supported()
+
+
+# --- Settings page: the project folder the Files tab scans, on top of the
+# built-in res://models and user://models.
+
+func project_folder() -> String:
+	return _settings.project_folder
+
+
+func set_project_folder(path: String) -> void:
+	_settings.set_project_folder(path)
+
+
 func _process(delta: float) -> void:
 	_worst_frame_ms = maxf(_worst_frame_ms, delta * 1000.0)
 	if _section_tool.active: # no-ops internally when inactive, but skip the group lookup entirely when there's nothing to do
@@ -525,13 +561,19 @@ const _NATIVE_FORMATS := ["didsa", "didsaprt"] ## a plain JSON native save/expor
 
 func list_model_files() -> PackedStringArray:
 	## Model files the tablet's Files tab offers: res://models (next to the
-	## project, for running from the editor) and user://models (which also
-	## works in an exported build). .glb/.gltf load locally; .step/.stp/.stl/
-	## .obj need a configured backend (see load_model_file()); .didsa/
-	## .DIDSAprt also need one (open_native_file()/add_component_file()).
+	## project, for running from the editor), user://models (which also
+	## works in an exported build), and the Settings page's own project
+	## folder if one's been set (an arbitrary absolute path — e.g. a shared
+	## network mount — DirAccess.open() isn't limited to res://user://).
+	## .glb/.gltf load locally; .step/.stp/.stl/.obj need a configured
+	## backend (see load_model_file()); .didsa/.DIDSAprt also need one
+	## (open_native_file()/add_component_file()).
 	var found := PackedStringArray()
 	var extensions := ["glb", "gltf"] + _NATIVE_FORMATS + _BACKEND_IMPORT_FORMATS.keys()
-	for dir_path in ["res://models", "user://models"]:
+	var dirs := ["res://models", "user://models"]
+	if not _settings.project_folder.is_empty():
+		dirs.append(_settings.project_folder)
+	for dir_path in dirs:
 		var dir := DirAccess.open(dir_path)
 		if dir == null:
 			continue

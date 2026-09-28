@@ -12,9 +12,11 @@ extends Node3D
 ## belongs to them: that sets the "ui_hover" meta on the right controller,
 ## which controller.gd checks before laser-selecting a part.
 ##
-## Tabs: Modes (switch the brief's manipulation modes on/off, hold-still
-## steadiness), Scale (scale views, Fit, Home), Files (load a local .glb),
-## Perf (frame timings, and the levers for speed: shadows, resolution, MSAA).
+## Navigation: a left-hand category rail (View, Assembly, Windows, Files),
+## each with its own row of sub-tabs, plus a small cogwheel pinned in the
+## panel's top-right corner for Settings — the set-and-forget stuff
+## (Steadiness, display quality, the project folder) that doesn't belong in
+## day-to-day flow. See _build_ui() for the exact tree.
 ##
 ## While closed it costs almost nothing: its panel isn't rendered and nothing
 ## is measured.
@@ -26,8 +28,8 @@ extends Node3D
 ## The right thumbstick click is deliberately NOT used here: the vision brief
 ## reserves it for the popup keyboard, everywhere.
 
-@export var panel_size := Vector2(0.24, 0.18) ## metres
-@export var viewport_size := Vector2i(640, 480) ## pixels the UI is laid out in
+@export var panel_size := Vector2(0.24, 0.225) ## metres — taller than the original spike's 0.18: the new category-rail-plus-sub-tab navigation needs the extra room (see wrist_tablet.gd's own _build_ui() history)
+@export var viewport_size := Vector2i(640, 600) ## pixels the UI is laid out in
 @export var mount_position := Vector3(0.0, 0.06, 0.07) ## relative to the left controller: above and a little behind it
 @export var mount_tilt_degrees: float = 0.0 ## extra tilt about X; tweak if it sits awkwardly on your wrist
 @export var target_position := Vector3(0.0, 0.05, 0.06) ## the wrist bullseye, relative to the left controller
@@ -104,6 +106,8 @@ var _info_label: Label
 var _scale_label: Label
 var _lock_button: Button
 var _files_box: VBoxContainer
+var _environment_status_label: Label
+var _project_folder_label: Label
 
 var _open := false
 var _last_target_hover := false
@@ -350,9 +354,17 @@ func _build_quad() -> void:
 	add_child(_quad)
 
 
+const _CATEGORY_ACCENTS := {
+	"View": Color(0.35, 0.78, 0.95),
+	"Assembly": Color(0.95, 0.72, 0.35),
+	"Windows": Color(0.72, 0.6, 0.95),
+	"Files": Color(0.5, 0.85, 0.6),
+}
+
+
 func _build_ui() -> Control:
 	var theme := Theme.new()
-	theme.default_font_size = 26
+	theme.default_font_size = 24
 	# Real-headset feedback: toggle buttons (Modes' three, Sections' Section
 	# tool/Flip, Mates' Flip/Relax, the tab row, the choice rows) updated
 	# their own text ("ON"/"off") but showed no visible highlight — this
@@ -364,8 +376,8 @@ func _build_ui() -> Control:
 	# (controller.gd's hover/select highlight materials use the same hue).
 	var pressed_style := StyleBoxFlat.new()
 	pressed_style.bg_color = Color(0.15, 0.55, 0.68)
-	pressed_style.set_corner_radius_all(4)
-	pressed_style.set_content_margin_all(6)
+	pressed_style.set_corner_radius_all(6)
+	pressed_style.set_content_margin_all(8)
 	theme.set_stylebox("pressed", "Button", pressed_style)
 	theme.set_stylebox("hover_pressed", "Button", pressed_style)
 
@@ -378,7 +390,10 @@ func _build_ui() -> Control:
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.08, 0.1, 0.13)
+	bg.bg_color = Color(0.07, 0.085, 0.11)
+	bg.border_color = Color(0.18, 0.4, 0.48)
+	bg.set_border_width_all(1)
+	bg.set_corner_radius_all(12)
 	bg.set_content_margin_all(18)
 	panel.add_theme_stylebox_override("panel", bg)
 	root.add_child(panel)
@@ -387,8 +402,8 @@ func _build_ui() -> Control:
 	column.add_theme_constant_override("separation", 12)
 	panel.add_child(column)
 
-	# Undo/redo: always visible, regardless of which tab is open, since it
-	# applies across all of them (part moves, model moves, and whatever
+	# Undo/redo: always visible, regardless of which category is open, since
+	# it applies across all of them (part moves, model moves, and whatever
 	# later tools push to the same command_stack.gd history).
 	var history_row := HBoxContainer.new()
 	history_row.add_theme_constant_override("separation", 8)
@@ -406,59 +421,95 @@ func _build_ui() -> Control:
 	_redo_button.pressed.connect(_on_redo_pressed)
 	history_row.add_child(_redo_button)
 
-	# Tab bar: radio-style buttons, exactly one page showing. HFlowContainer
-	# (same choice _build_scale_page()'s presets row and _build_colours_page()'s
-	# swatch grid already make), not HBoxContainer: with 8 tabs now (Sections
-	# added this session) the row's own minimum width — driven by each
-	# button's own text, which SIZE_EXPAND_FILL can't shrink below — exceeds
-	# viewport_size.x (640px) and HBoxContainer doesn't wrap, so every tab
-	# past that point silently rendered outside the tablet's own clipped
-	# area: still "visible" by Godot's own is_visible_in_tree() (nothing
-	# hides it), but never reachable by a real laser aimed at the physical
-	# panel. Found because it also shifted EVERY control below the tab row
-	# far enough to break tests/tablet_scene.gd's existing click-position
-	# math for a button that hadn't moved (the Modes tab's own Steadiness
-	# row) — not a coincidence: the whole column below an overflowing row
-	# shifts with it. HFlowContainer wraps to a second row instead.
-	var tab_row := HFlowContainer.new()
-	tab_row.add_theme_constant_override("h_separation", 8)
-	tab_row.add_theme_constant_override("v_separation", 8)
-	column.add_child(tab_row)
-	var tab_group := ButtonGroup.new()
+	# Header: a left-hand category rail (View / Assembly / Windows / Files —
+	# each holding its own row of sub-tabs, built by _build_subtabbed()) plus
+	# a small Settings cogwheel and Close pinned to the corner on the right,
+	# out of the main flow — set-and-forget stuff doesn't belong beside the
+	# tools used every session. HFlowContainer for the rail itself for the
+	# same reason the old flat tab row used it (see git history): it wraps
+	# instead of silently overflowing the panel's own clipped area.
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 8)
+	column.add_child(header_row)
+
+	var category_rail := HFlowContainer.new()
+	category_rail.add_theme_constant_override("h_separation", 6)
+	category_rail.add_theme_constant_override("v_separation", 6)
+	category_rail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(category_rail)
+
+	var corner_row := HBoxContainer.new()
+	corner_row.add_theme_constant_override("separation", 6)
+	header_row.add_child(corner_row)
+
 	var pages_holder := VBoxContainer.new()
 	pages_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(pages_holder)
 
-	var builders := {
-		"Modes": _build_modes_page,
+	var tab_group := ButtonGroup.new()
+
+	var view_page := _build_subtabbed({
+		"Navigate": _build_navigate_page,
 		"Scale": _build_scale_page,
-		"Tools": _build_tools_page,
+		"Visibility": _build_visibility_page,
+		"Environment": _build_environment_page,
+	}, "Navigate", _CATEGORY_ACCENTS["View"])
+	var assembly_page := _build_subtabbed({
 		"Mates": _build_mates_page,
 		"Colours": _build_colours_page,
 		"Sections": _build_sections_page,
 		"Measure": _build_measure_page,
-		"Windows": _build_windows_page,
-		"Files": _build_files_page,
-		"Perf": _build_perf_page,
+	}, "Mates", _CATEGORY_ACCENTS["Assembly"])
+
+	var category_pages := {
+		"View": view_page,
+		"Assembly": assembly_page,
+		"Windows": _build_windows_page(),
+		"Files": _build_files_page(),
 	}
-	for tab_name in builders:
-		var page: Control = builders[tab_name].call()
-		_pages[tab_name] = page
+	for category_name in category_pages:
+		var page: Control = category_pages[category_name]
+		_pages[category_name] = page
+		# SHRINK_BEGIN, not the Control default: pages_holder is itself
+		# SIZE_EXPAND_FILL, and BoxContainer distributes its own leftover
+		# space equally among children that have no expand flag of their
+		# own — with only one page visible at a time, that one page (and
+		# everything inside it, recursively) would otherwise balloon to
+		# fill the tablet's whole remaining height, pushing later buttons
+		# below the panel's clipped 480px canvas: still found by a laser
+		# raycast (is_visible_in_tree() doesn't check clip bounds) but
+		# never actually reachable by one aimed at the physical panel —
+		# the same class of bug the old flat tab row's own HFlowContainer
+		# fix (see git history) was for, just vertical instead of horizontal.
+		page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		pages_holder.add_child(page)
-		var tab := Button.new()
-		tab.text = tab_name
-		tab.toggle_mode = true
-		tab.button_group = tab_group
-		tab.toggled.connect(_on_tab_toggled.bind(tab_name))
-		tab_row.add_child(tab)
-		if tab_name == "Modes":
-			tab.button_pressed = true
-	_show_page("Modes")
+		var btn := _build_icon_button(category_name, category_name.to_lower(), _CATEGORY_ACCENTS[category_name], 130.0)
+		btn.toggle_mode = true
+		btn.button_group = tab_group
+		btn.toggled.connect(_on_tab_toggled.bind(category_name))
+		category_rail.add_child(btn)
+		if category_name == "View":
+			btn.button_pressed = true
+
+	# Settings: a smaller cogwheel button pinned in the corner, out of the
+	# main category rail — set-and-forget stuff (Steadiness, display
+	# quality, project folder), not a tool reached for mid-task.
+	var settings_page := _build_settings_page()
+	_pages["Settings"] = settings_page
+	settings_page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	pages_holder.add_child(settings_page)
+	var settings_btn := _build_icon_button("Settings", "settings", Color(0.78, 0.81, 0.85), 92.0)
+	settings_btn.button_group = tab_group
+	settings_btn.toggled.connect(_on_tab_toggled.bind("Settings"))
+	corner_row.add_child(settings_btn)
 
 	var close := Button.new()
 	close.text = "X"
+	close.custom_minimum_size = Vector2(40, 46)
 	close.pressed.connect(close_tablet)
-	tab_row.add_child(close)
+	corner_row.add_child(close)
+
+	_show_page("View")
 
 	# A soft glow showing where the laser terminates on the panel — real-
 	# headset feedback wanted the laser to visibly stop and glow here rather
@@ -501,20 +552,209 @@ func _show_page(tab_name: String) -> void:
 		_pages[page_name].visible = (page_name == tab_name)
 	if tab_name == "Files":
 		_rebuild_files()
-	elif tab_name == "Mates":
+
+
+## A category's own internal navigation: a row of sub-tab buttons above a
+## stack of pages, exactly one visible — the same radio-button-group
+## mechanism _build_ui()'s own category rail uses one level up, just scoped
+## to this one category instead of the whole tablet. Used by View (Navigate/
+## Scale/Visibility/Environment) and Assembly (Mates/Colours/Sections/
+## Measure); Windows and Files are short enough to stay flat, single pages.
+func _build_subtabbed(subbuilders: Dictionary, default_name: String, accent: Color) -> Control:
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 10)
+
+	var sub_row := HFlowContainer.new()
+	sub_row.add_theme_constant_override("h_separation", 6)
+	sub_row.add_theme_constant_override("v_separation", 6)
+	outer.add_child(sub_row)
+
+	var holder := VBoxContainer.new()
+	holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_child(holder)
+
+	var group := ButtonGroup.new()
+	var subpages := {}
+	var pressed_style := StyleBoxFlat.new()
+	pressed_style.bg_color = accent.darkened(0.62)
+	pressed_style.set_corner_radius_all(4)
+	pressed_style.set_content_margin_all(6)
+
+	for sub_name in subbuilders:
+		var page: Control = subbuilders[sub_name].call()
+		subpages[sub_name] = page
+		page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN # see the matching comment in _build_ui() — same fix, one level down
+		holder.add_child(page)
+		var btn := Button.new()
+		btn.text = sub_name
+		btn.toggle_mode = true
+		btn.button_group = group
+		btn.add_theme_font_size_override("font_size", 20)
+		btn.add_theme_stylebox_override("pressed", pressed_style)
+		btn.add_theme_stylebox_override("hover_pressed", pressed_style)
+		btn.toggled.connect(_on_subtab_toggled.bind(subpages, sub_name))
+		sub_row.add_child(btn)
+		if sub_name == default_name:
+			btn.button_pressed = true
+	_show_subpage(subpages, default_name)
+	return outer
+
+
+func _on_subtab_toggled(on: bool, subpages: Dictionary, sub_name: String) -> void:
+	if on:
+		_show_subpage(subpages, sub_name)
+
+
+func _show_subpage(subpages: Dictionary, sub_name: String) -> void:
+	for page_name in subpages:
+		subpages[page_name].visible = (page_name == sub_name)
+	if sub_name == "Mates":
 		_refresh_mates_picks_display()
 		var owner_part_id: String = _main.current_root_part_id()
 		if _mates_tool and owner_part_id != "":
 			_mates_last_owner_part_id = owner_part_id
 			_mates_tool.refresh_mates(owner_part_id)
-	elif tab_name == "Measure":
+	elif sub_name == "Measure":
 		_refresh_measure_picks_display()
 		_rebuild_measure_result()
 
 
-# --- Modes: the brief's four manipulation modes, switchable on their own ---
+## --- Icons: small glyphs stamped into an Image and handed to Button.icon as
+## a real Texture2D — in the same single-stroke, single-colour style
+## DIDSA-CAD's own SVG icon set uses (client/assets/icons/ —
+## stroke="currentColor", round joins) — so every category/scene button
+## keeps Godot's own native icon+text layout (and Button.text stays real
+## text, not folded into a child Control) rather than a hand-rolled overlay.
+## No image assets, no import step: built at UI-construction time from
+## plain circle/rect/line stamps, recoloured per category with a Color.
 
-func _build_modes_page() -> Control:
+func _stamp_disc(img: Image, center: Vector2, radius: float, color: Color) -> void:
+	var x0 := maxi(int(floor(center.x - radius)), 0)
+	var x1 := mini(int(ceil(center.x + radius)), img.get_width())
+	var y0 := maxi(int(floor(center.y - radius)), 0)
+	var y1 := mini(int(ceil(center.y + radius)), img.get_height())
+	for x in range(x0, x1):
+		for y in range(y0, y1):
+			if Vector2(x + 0.5, y + 0.5).distance_to(center) <= radius:
+				img.set_pixel(x, y, color)
+
+
+func _stamp_ring(img: Image, center: Vector2, radius: float, width: float, color: Color) -> void:
+	var outer: float = radius + width * 0.5
+	var inner: float = radius - width * 0.5
+	var x0 := maxi(int(floor(center.x - outer)), 0)
+	var x1 := mini(int(ceil(center.x + outer)), img.get_width())
+	var y0 := maxi(int(floor(center.y - outer)), 0)
+	var y1 := mini(int(ceil(center.y + outer)), img.get_height())
+	for x in range(x0, x1):
+		for y in range(y0, y1):
+			var d: float = Vector2(x + 0.5, y + 0.5).distance_to(center)
+			if d <= outer and d >= inner:
+				img.set_pixel(x, y, color)
+
+
+func _stamp_rect_fill(img: Image, rect: Rect2, color: Color) -> void:
+	var x0 := maxi(int(floor(rect.position.x)), 0)
+	var x1 := mini(int(ceil(rect.position.x + rect.size.x)), img.get_width())
+	var y0 := maxi(int(floor(rect.position.y)), 0)
+	var y1 := mini(int(ceil(rect.position.y + rect.size.y)), img.get_height())
+	for x in range(x0, x1):
+		for y in range(y0, y1):
+			img.set_pixel(x, y, color)
+
+
+func _stamp_rect_outline(img: Image, rect: Rect2, width: float, color: Color) -> void:
+	_stamp_rect_fill(img, Rect2(rect.position, Vector2(rect.size.x, width)), color) # top
+	_stamp_rect_fill(img, Rect2(rect.position + Vector2(0, rect.size.y - width), Vector2(rect.size.x, width)), color) # bottom
+	_stamp_rect_fill(img, Rect2(rect.position, Vector2(width, rect.size.y)), color) # left
+	_stamp_rect_fill(img, Rect2(rect.position + Vector2(rect.size.x - width, 0), Vector2(width, rect.size.y)), color) # right
+
+
+func _stamp_line(img: Image, from: Vector2, to: Vector2, width: float, color: Color) -> void:
+	var min_x := maxi(int(floor(minf(from.x, to.x) - width)), 0)
+	var max_x := mini(int(ceil(maxf(from.x, to.x) + width)), img.get_width())
+	var min_y := maxi(int(floor(minf(from.y, to.y) - width)), 0)
+	var max_y := mini(int(ceil(maxf(from.y, to.y) + width)), img.get_height())
+	var seg: Vector2 = to - from
+	var seg_len2: float = maxf(seg.length_squared(), 0.0001)
+	for x in range(min_x, max_x):
+		for y in range(min_y, max_y):
+			var p := Vector2(x + 0.5, y + 0.5)
+			var t: float = clampf((p - from).dot(seg) / seg_len2, 0.0, 1.0)
+			var closest: Vector2 = from + seg * t
+			if p.distance_to(closest) <= width * 0.5:
+				img.set_pixel(x, y, color)
+
+
+func _make_icon_texture(icon_name: String, sz: int, color: Color) -> ImageTexture:
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	var o := Vector2(sz, sz) * 0.5
+	var s := float(sz)
+	var w: float = maxf(s * 0.1, 1.5)
+	match icon_name:
+		"view":
+			_stamp_ring(img, o, s * 0.32, w, color)
+			_stamp_disc(img, o, s * 0.09, color)
+		"assembly":
+			_stamp_rect_outline(img, Rect2(o + Vector2(-s * 0.30, -s * 0.12), Vector2(s * 0.42, s * 0.42)), w, color)
+			_stamp_rect_outline(img, Rect2(o + Vector2(-s * 0.12, -s * 0.30), Vector2(s * 0.42, s * 0.42)), w, color)
+		"windows":
+			var r := Rect2(o + Vector2(-s * 0.36, -s * 0.30), Vector2(s * 0.72, s * 0.60))
+			_stamp_rect_outline(img, r, w, color)
+			_stamp_line(img, r.position + Vector2(0, s * 0.16), r.position + Vector2(r.size.x, s * 0.16), w, color)
+		"files":
+			_stamp_rect_outline(img, Rect2(o + Vector2(-s * 0.34, -s * 0.20), Vector2(s * 0.68, s * 0.50)), w, color)
+			_stamp_rect_outline(img, Rect2(o + Vector2(-s * 0.34, -s * 0.30), Vector2(s * 0.32, s * 0.14)), w, color)
+		"settings":
+			_stamp_ring(img, o, s * 0.26, w, color)
+			_stamp_disc(img, o, s * 0.08, color)
+			for i in 8:
+				var a: float = TAU * float(i) / 8.0
+				var dir := Vector2(cos(a), sin(a))
+				_stamp_line(img, o + dir * s * 0.34, o + dir * s * 0.45, w, color)
+		"scene_light":
+			_stamp_disc(img, o, s * 0.20, color)
+			for i in 8:
+				var a: float = TAU * float(i) / 8.0
+				var dir := Vector2(cos(a), sin(a))
+				_stamp_line(img, o + dir * s * 0.30, o + dir * s * 0.42, w, color)
+		"scene_dark":
+			_stamp_disc(img, o, s * 0.22, color)
+			_stamp_disc(img, o + Vector2(s * 0.28, -s * 0.24), s * 0.05, color)
+			_stamp_disc(img, o + Vector2(-s * 0.30, -s * 0.12), s * 0.035, color)
+			_stamp_disc(img, o + Vector2(s * 0.14, s * 0.28), s * 0.04, color)
+		"scene_mid":
+			_stamp_ring(img, o, s * 0.28, w, color)
+			_stamp_rect_fill(img, Rect2(o + Vector2(-s * 0.28, -s * 0.28), Vector2(s * 0.28, s * 0.56)), color)
+		"scene_passthrough":
+			_stamp_ring(img, o + Vector2(-s * 0.17, 0), s * 0.16, w, color)
+			_stamp_ring(img, o + Vector2(s * 0.17, 0), s * 0.16, w, color)
+			_stamp_line(img, o + Vector2(-s * 0.02, 0), o + Vector2(s * 0.02, 0), w, color)
+		_:
+			_stamp_ring(img, o, s * 0.28, w, color)
+	return ImageTexture.create_from_image(img)
+
+
+## A toggle button with a real icon + real text, side by side via Godot's
+## own native Button layout (Button.text stays real text, not folded into a
+## drawn/child-Control label — buttons found by their text, e.g. tests/*.gd
+## and screen readers alike, still work exactly as before).
+func _build_icon_button(label_text: String, icon_name: String, accent: Color, min_width: float = 120.0) -> Button:
+	var btn := Button.new()
+	btn.text = label_text
+	btn.icon = _make_icon_texture(icon_name, 24, accent)
+	btn.toggle_mode = true
+	btn.custom_minimum_size = Vector2(min_width, 46)
+	btn.clip_text = true
+	return btn
+
+
+# --- Navigate (View category): the brief's three manipulation modes,
+# switchable on their own. Steadiness moved to the Settings cogwheel — it's
+# a set-and-forget comfort setting, not something toggled mid-task like
+# these three are.
+
+func _build_navigate_page() -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 10)
 	page.add_child(_mode_toggle("Model movement", func(on: bool) -> void: _two_hand.enabled = on))
@@ -523,17 +763,10 @@ func _build_modes_page() -> Control:
 		_left.set_parts_enabled(on)
 		_right.set_parts_enabled(on)
 	))
-	page.add_child(_choice_row("Steadiness (hold-still shake)", _two_hand.STEADINESS_NAMES, _two_hand.steadiness,
-		func(i: int) -> void:
-			_two_hand.set_steadiness(i) # whole-model moves
-			_left.set_steadiness(i) # a single held part (grip), each hand
-			_right.set_steadiness(i)
-			if _section_tool:
-				_section_tool.set_steadiness(i) # the section-plane gizmo, grabbed the same way
-	))
 	var hint := Label.new()
-	hint.text = "Scale views: see the Scale tab."
-	hint.add_theme_font_size_override("font_size", 20)
+	hint.text = "Scale views: see View > Scale. Steadiness: the Settings cogwheel."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 18)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	page.add_child(hint)
 	return page
@@ -591,9 +824,10 @@ func _build_scale_page() -> Control:
 	return page
 
 
-# --- Tools: assembly tools from the vision brief's "Assembly tools" list ---
+# --- Visibility (View category): assembly tools from the vision brief's
+# "Assembly tools" list ---
 
-func _build_tools_page() -> Control:
+func _build_visibility_page() -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 10)
 
@@ -1159,6 +1393,12 @@ func _window_toggle_button(label: String, window: Node) -> Button:
 func _build_files_page() -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 8)
+	var hint := Label.new()
+	hint.text = "Loads from res://models, user://models, and the Settings cogwheel's project folder."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(hint)
 	_files_box = VBoxContainer.new()
 	_files_box.add_theme_constant_override("separation", 8)
 	page.add_child(_files_box)
@@ -1210,14 +1450,98 @@ func _rebuild_files() -> void:
 	_files_box.add_child(refresh)
 
 
-# --- Perf: numbers, and the levers ---
+# --- Environment (View category): Light/Dark/Mid rendered presets plus
+# Passthrough (OpenXR mixed reality) — see environment_manager.gd, which
+# owns the actual WorldEnvironment/DirectionalLight3D/passthrough switch.
 
-func _build_perf_page() -> Control:
+const _SCENE_ICONS := {
+	"Light": "scene_light", "Dark": "scene_dark", "Mid": "scene_mid", "Passthrough": "scene_passthrough",
+}
+
+func _build_environment_page() -> Control:
 	var page := VBoxContainer.new()
-	page.add_theme_constant_override("separation", 6)
+	page.add_theme_constant_override("separation", 12)
+
+	var hint := Label.new()
+	hint.text = "How the room around the model looks — pick a rendered backdrop, or step into mixed reality."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(hint)
+
+	var scenes: Array = _main.available_scenes()
+	var current: String = _main.current_scene()
+	var grid := HFlowContainer.new()
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	page.add_child(grid)
+
+	var group := ButtonGroup.new()
+	for scene_name in scenes:
+		var btn := _build_icon_button(scene_name, _SCENE_ICONS.get(scene_name, "scene_mid"), _CATEGORY_ACCENTS["View"], 140.0)
+		btn.button_group = group
+		btn.button_pressed = (scene_name == current)
+		btn.toggled.connect(_on_scene_toggled.bind(scene_name))
+		grid.add_child(btn)
+
+	_environment_status_label = Label.new()
+	_environment_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_environment_status_label.add_theme_font_size_override("font_size", 18)
+	_environment_status_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(_environment_status_label)
+	_refresh_environment_status()
+	return page
+
+
+func _on_scene_toggled(on: bool, scene_name: String) -> void:
+	if on:
+		_main.set_scene(scene_name)
+		_refresh_environment_status()
+
+
+func _refresh_environment_status() -> void:
+	if not _environment_status_label:
+		return
+	if _main.current_scene() == "Passthrough" and not _main.is_passthrough_supported():
+		_environment_status_label.text = "Passthrough isn't supported on this headset/runtime — showing black instead of a camera feed."
+	else:
+		_environment_status_label.text = "Scene: %s" % _main.current_scene()
+
+
+# --- Settings (corner cogwheel): set-and-forget stuff — Steadiness, display
+# quality and the perf readout that goes with it, and the project folder
+# the Files tab scans. Deliberately separate from the main category rail
+# (see _build_ui()) since none of this is touched mid-task.
+
+func _build_settings_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 14)
+
+	var hint := Label.new()
+	hint.text = "Set-and-forget: steadiness, display quality and where the Files tab looks for models."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(hint)
+
+	page.add_child(_choice_row("Steadiness (hold-still shake)", _two_hand.STEADINESS_NAMES, _two_hand.steadiness,
+		func(i: int) -> void:
+			_two_hand.set_steadiness(i) # whole-model moves
+			_left.set_steadiness(i) # a single held part (grip), each hand
+			_right.set_steadiness(i)
+			if _section_tool:
+				_section_tool.set_steadiness(i) # the section-plane gizmo, grabbed the same way
+	))
+
+	var display_heading := Label.new()
+	display_heading.text = "Display"
+	display_heading.add_theme_font_size_override("font_size", 18)
+	display_heading.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(display_heading)
+
 	_info_label = Label.new()
 	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_info_label.add_theme_font_size_override("font_size", 20)
+	_info_label.add_theme_font_size_override("font_size", 18)
 	_info_label.add_theme_color_override("font_color", Color(0.6, 0.95, 1.0))
 	page.add_child(_info_label)
 
@@ -1226,7 +1550,52 @@ func _build_perf_page() -> Control:
 		func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1,
 		func(i: int) -> void: _main.set_msaa(i)))
+
+	var files_heading := Label.new()
+	files_heading.text = "Project folder"
+	files_heading.add_theme_font_size_override("font_size", 18)
+	files_heading.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(files_heading)
+
+	_project_folder_label = Label.new()
+	_project_folder_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_project_folder_label)
+	_refresh_project_folder_label()
+
+	var folder_row := HBoxContainer.new()
+	folder_row.add_theme_constant_override("separation", 8)
+	page.add_child(folder_row)
+	var set_folder := Button.new()
+	set_folder.text = "Set folder…"
+	set_folder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	set_folder.pressed.connect(_on_set_project_folder_pressed)
+	folder_row.add_child(set_folder)
+	var clear_folder := Button.new()
+	clear_folder.text = "Clear"
+	clear_folder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clear_folder.pressed.connect(_on_clear_project_folder_pressed)
+	folder_row.add_child(clear_folder)
+
 	return page
+
+
+func _on_set_project_folder_pressed() -> void:
+	_main.open_keyboard_for(_main.project_folder(), func(text: String) -> void:
+		_main.set_project_folder(text.strip_edges())
+		_refresh_project_folder_label()
+	)
+
+
+func _on_clear_project_folder_pressed() -> void:
+	_main.set_project_folder("")
+	_refresh_project_folder_label()
+
+
+func _refresh_project_folder_label() -> void:
+	if not _project_folder_label:
+		return
+	var path: String = _main.project_folder()
+	_project_folder_label.text = "Scanning: %s" % path if not path.is_empty() else "Scanning res://models and user://models only — no project folder set."
 
 
 func _choice_row(title: String, options: Array, selected: int, on_pick: Callable) -> Control:

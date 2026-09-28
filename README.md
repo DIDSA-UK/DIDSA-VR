@@ -95,39 +95,51 @@ live-synced.
    laser is over the bullseye or the tablet, the trigger presses those
    instead of selecting a part — the laser itself shortens to stop exactly
    there, with a soft glow where it lands, rather than passing through.
-   **Undo**/**Redo** buttons sit above the tabs, visible whatever tab is
-   open — see item 9 below. Tabs:
-   - **Modes** — switch model movement, user movement and part manipulation
-     on or off independently, and set **Steadiness** (Off / Light / Medium /
-     Strong): an adaptive filter on your hands while you hold the model *or*
-     grip a single part, so a held hand doesn't shake it but deliberate moves
-     stay direct (measured: Medium removes ~80% of a simulated 2 mm hand
-     tremor and adds about 1 mm of lag on a slow 2 cm/s move — same numbers
-     either way, whole-model or a single held part).
-   - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
-     about the model's centre; lock the scale (also stops the two-hand
-     spread/close and Fit from resizing); **Fit to view** brings the whole
-     model in front of you at a comfortable size; **Home** returns it to
-     where it first loaded (not while the scale is locked). For an exact
-     value, click the **right thumbstick** — see item 8.
-   - **Tools** — see item 10.
-   - **Mates** — see item 11.
+   **Undo**/**Redo** buttons sit above the categories, visible whatever
+   category is open — see item 9 below. Navigation is a left-hand category
+   rail plus a small **Settings** cogwheel pinned to the top-right corner
+   for set-and-forget stuff (day-to-day tools don't belong beside it):
+   - **View** — how you move around and look at the model.
+     - **Navigate** — switch model movement, user movement and part
+       manipulation on or off independently.
+     - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
+       about the model's centre; lock the scale (also stops the two-hand
+       spread/close and Fit from resizing); **Fit to view** brings the whole
+       model in front of you at a comfortable size; **Home** returns it to
+       where it first loaded (not while the scale is locked). For an exact
+       value, click the **right thumbstick** — see item 8.
+     - **Visibility** — see item 10.
+     - **Environment** — see item 16 below: Light/Dark/Mid rendered
+       backdrops, plus Passthrough (OpenXR mixed reality).
+   - **Assembly** — the vision brief's assembly tools: **Mates** (item 11),
+     **Colours** (item 12), **Sections** (item 13), **Measure** (item 14).
+   - **Windows** — see item 15.
    - **Files** — load a model from the `models/` folder next to
      `project.godot` (or `user://models`, which also works in an exported
-     build). A `.glb`/`.gltf` loads straight from disk, no backend at all,
-     read as metres (change `local_glb_scale` on Main if yours are in
+     build), plus the Settings cogwheel's own project folder if one's been
+     set (item 16). A `.glb`/`.gltf` loads straight from disk, no backend at
+     all, read as metres (change `local_glb_scale` on Main if yours are in
      millimetres). A `.step`/`.stp`/`.stl`/`.obj` needs a configured backend
      (see `secrets.cfg.example`) — the client can't decode these itself, so
      it creates a new Part on the backend, uploads the file to
      `POST /parts/{id}/import-features`, then fetches and renders it the
      same way as any other backend part. The `models/` contents are
      git-ignored.
-   - **Perf** — fps, CPU/GPU render time, script and physics time, part
-     count, draw calls, load times; plus the levers for speed: **Shadows**,
-     **Resolution** (100/80/65% of the headset runtime's size) and **MSAA**.
-     Read GPU vs CPU ms first: over about 11 ms GPU (at 90 Hz) means lower
-     Resolution or MSAA; high CPU means scripts. The tablet only renders and
-     measures while open.
+   - **Settings** (corner cogwheel) — **Steadiness** (Off / Light / Medium /
+     Strong): an adaptive filter on your hands while you hold the model *or*
+     grip a single part, so a held hand doesn't shake it but deliberate moves
+     stay direct (measured: Medium removes ~80% of a simulated 2 mm hand
+     tremor and adds about 1 mm of lag on a slow 2 cm/s move — same numbers
+     either way, whole-model or a single held part). **Display**: fps,
+     CPU/GPU render time, script and physics time, part count, draw calls,
+     load times; plus the levers for speed: **Shadows**, **Resolution**
+     (100/80/65% of the headset runtime's size) and **MSAA**. Read GPU vs
+     CPU ms first: over about 11 ms GPU (at 90 Hz) means lower Resolution or
+     MSAA; high CPU means scripts. **Project folder** — an arbitrary
+     absolute path (e.g. a shared network mount) the Files category also
+     scans, typed on the popup keyboard; persisted to `user://settings.cfg`
+     so it survives a restart. The tablet only renders and measures while
+     open.
 
    With no `secrets.cfg` the app now starts anyway, ready for a local file.
 8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
@@ -141,21 +153,21 @@ live-synced.
    without applying anything. Aim and click its keys with the right hand's
    laser and trigger, same as the wrist tablet.
 9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
-   whole-model move (one/two-hand drag, and the Scale tab's presets/Fit/
-   Home), and Tools-tab hide/show action goes onto one shared history —
-   **Undo**/**Redo** on the wrist tablet step back/forward through it. A
-   drag that ends up back where it started doesn't push anything. The
+   whole-model move (one/two-hand drag, and the Scale sub-tab's
+   presets/Fit/Home), and Visibility hide/show action goes onto one shared
+   history — **Undo**/**Redo** on the wrist tablet step back/forward through
+   it. A drag that ends up back where it started doesn't push anything. The
    history is cleared whenever the model is replaced (loading a different
    file), since it can't point at parts that no longer exist.
-10. **Tools tab.** **Shoot to hide** — toggle it on, then point the right
-    hand's laser at a part (same hover+name as normal selection) and pull
-    the trigger to hide it. **Hide all** / **Show all** toggle every part at
-    once. **Reverse visibility** flips every part's hidden/shown state.
-    **Isolate selected** hides everything except whichever part is currently
-    laser-selected (select it first, then press Isolate). All four are
-    undoable. A hidden part is click-through for both the laser and grip —
-    it's out of the way, not just invisible.
-11. **Mates tab** (milestone 4). Toggle **Mates tool** on, then point the
+10. **View > Visibility.** **Shoot to hide** — toggle it on, then point the
+    right hand's laser at a part (same hover+name as normal selection) and
+    pull the trigger to hide it. **Hide all** / **Show all** toggle every
+    part at once. **Reverse visibility** flips every part's hidden/shown
+    state. **Isolate selected** hides everything except whichever part is
+    currently laser-selected (select it first, then press Isolate). All
+    four are undoable. A hidden part is click-through for both the laser
+    and grip — it's out of the way, not just invisible.
+11. **Assembly > Mates** (milestone 4). Toggle **Mates tool** on, then point the
     right hand's laser at a face and pull the trigger to pick it (same
     hover+name as normal selection) — pick a face on a second, different
     part to complete a pair; a status line explains why a pick didn't count
@@ -172,7 +184,7 @@ live-synced.
     all**. Existing mates are listed below with a **Delete** button each,
     refreshed whenever the tab opens or a mate changes. Face-only for now —
     edge picking isn't wired up yet (see `docs/status.md`).
-12. **Colours tab** (milestone 4). Laser-select a part as usual (no separate
+12. **Assembly > Colours** (milestone 4). Laser-select a part as usual (no separate
     picking tool — it acts on whatever's already selected), then tap a
     swatch to colour it, or **Custom hex…** to type an exact `#RRGGBB` on
     the popup keyboard. **Clear colour** removes the override. Each tap
@@ -182,7 +194,7 @@ live-synced.
     than reconstructing the part's exact prior look, which needs a full
     reload to see for real. Not undoable — pick a different colour (or
     Clear) rather than Undo.
-13. **Sections tab** (milestone 4). Toggle **Section tool** to spawn a
+13. **Assembly > Sections** (milestone 4). Toggle **Section tool** to spawn a
     translucent clip-plane disc (with a small arrow showing which side
     stays) a little in front of wherever you're looking. **Grip** the disc
     to drag/tilt it, exactly like grabbing a part; **Flip** swaps which side
@@ -192,7 +204,7 @@ live-synced.
     dragging in real time. One plane for now. Turning the tool off drops
     the gizmo and restores every part's real appearance. Undoable (one
     command per grab/drag), toggling the tool and Flip are not.
-14. **Measure tab** (milestone 4 — the last of the four assembly tools).
+14. **Assembly > Measure** (milestone 4 — the last of the four assembly tools).
     Toggle **Measure tool** on, then point the right hand's laser at a
     vertex/edge/face and pull the trigger to pick it (same hover+name as
     normal selection) — unlike Mates, the currently-open Part's own
@@ -206,7 +218,7 @@ live-synced.
     flat app uses). A third pick starts a fresh measurement rather than
     being capped at two. **Clear** resets it. Not undoable — there is
     nothing to undo, only a live read-only query.
-15. **Windows tab** (milestone 3). Four free-floating panels, each with its
+15. **Windows** (milestone 3). Four free-floating panels, each with its
     own toggle button, that can be open at the same time as each other and
     the wrist tablet — not wrist-mounted; each spawns in front of wherever
     you're looking and closes with its own **X**:
@@ -242,6 +254,20 @@ live-synced.
     can be open together: each frame, only the first one the laser actually
     hits claims the trigger, so at most one ever reacts to a given pull —
     see that script's own docstring if you're adding a fourth window.
+16. **Floor and Environment.** The floor is an infinite-looking grid
+    (`shaders/infinite_grid.gdshader`, a large plane that fades out well
+    before its own edge) — thin white 600×600mm lines at ~60% transparency,
+    replacing the original spike's opaque square plane, which used to hide
+    anything that dropped below floor level. **View > Environment** switches
+    the rendered backdrop between **Light**, **Dark** and **Mid** presets
+    (`scripts/environment_manager.gd`, a `WorldEnvironment` node driving
+    background colour, ambient light and the one `DirectionalLight3D`), plus
+    **Passthrough** — real OpenXR mixed reality (the headset's own camera
+    feed) on a Quest or another passthrough-capable runtime; on desktop or
+    an unsupported runtime it falls back to a plain black background and
+    says so. The last-picked scene is remembered across restarts
+    (`user://settings.cfg`, via the Settings cogwheel's own project-folder
+    setting — see item 7).
 
 ## 1. Drop in a real assembly
 

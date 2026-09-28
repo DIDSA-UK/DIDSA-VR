@@ -1,8 +1,8 @@
 extends SceneTree
-## Sections tab (wrist_tablet.gd's new tab, section_tool.gd's real
+## Assembly > Sections sub-tab (wrist_tablet.gd, section_tool.gd's real
 ## grab/reconcile pipeline): instantiates main.tscn (NO backend), loads a
 ## generated multi-part .glb the same way tools_tab.gd/tablet_scene.gd do,
-## drives the real Sections tab buttons, and simulates a grip grab on the
+## drives the real Sections buttons, and simulates a grip grab on the
 ## plane gizmo by calling controller.gd's own grab routines directly — same
 ## "a real grip press can't be faked headless" precedent tablet_scene.gd's
 ## own one-hand-drag check and tools_tab.gd's own grip-grab check both use.
@@ -77,8 +77,10 @@ func _initialize() -> void:
 	print("SMOKE loaded parts: ", main._part_count)
 	var parts: Array = main.get_tree().get_nodes_in_group("grabbable_parts")
 
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Sections"))
-	print("SMOKE Sections tab opens: ", tab._pages["Sections"].visible)
+	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Assembly"))
+	var sections_tab := find_button(func(b: Button) -> bool: return b.text == "Sections")
+	await aim_and_click(sections_tab)
+	print("SMOKE Assembly > Sections opens: ", tab._pages["Assembly"].visible and sections_tab.button_pressed)
 	print("SMOKE section tool starts off: ", main._section_tool.active == false)
 
 	# turn the tool on: spawns a gizmo, no parts wrapped yet until the next process frame's reconcile()

@@ -1,5 +1,5 @@
 extends SceneTree
-## Full-scene test: instantiates main.tscn (with NO backend) and drives the wrist tablet with a simulated right laser: bullseye open/close and false positives, Files tab loading a generated .glb, Fit/Home/presets, Modes toggles, Steadiness, Perf tab levers, one-hand drag.
+## Full-scene test: instantiates main.tscn (with NO backend) and drives the wrist tablet with a simulated right laser: bullseye open/close and false positives, Files category loading a generated .glb, View > Scale Fit/Home/presets, View > Navigate toggles, Settings cogwheel (Steadiness, display levers), Assembly > Colours, one-hand drag.
 ## Run: "$GODOT" --headless --path . --script res://tests/tablet_scene.gd  (see tests/README.md)
 
 var main
@@ -92,7 +92,8 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b): return b.text == "smoke_test.glb"))
 	print("SMOKE reloaded: parts=", main._part_count, " children=", main.assembly_root.get_child_count())
 
-	# Fit and Home on the Scale tab
+	# Fit and Home on View > Scale
+	await aim_and_click(find_button(func(b): return b.text == "View"))
 	await aim_and_click(find_button(func(b): return b.text == "Scale"))
 	await aim_and_click(find_button(func(b): return b.text == "Fit to view"))
 	var box: AABB = th._model_bounds()
@@ -111,8 +112,10 @@ func _initialize() -> void:
 	print("SMOKE one-hand drag: hand moved (0.3,0,-0.2), model moved ", moved, " = x", snappedf(moved.length() / Vector3(0.3, 0, -0.2).length(), 0.01), " (gain grows with model size; 1.0 for a small model)")
 	l.position = Vector3(0, 1.0, 0)
 
-	# Modes tab
-	await aim_and_click(find_button(func(b): return b.text == "Modes"))
+	# View > Navigate (View is already the active category from the Scale
+	# click above; its own sub-tab row stays reachable regardless of which
+	# of its pages is currently showing)
+	await aim_and_click(find_button(func(b): return b.text == "Navigate"))
 	await aim_and_click(find_button(func(b): return b.text.begins_with("User movement")))
 	print("SMOKE  after user-movement click: locomotion=", origin.enabled)
 	await aim_and_click(find_button(func(b): return b.text.begins_with("Model movement")))
@@ -125,22 +128,23 @@ func _initialize() -> void:
 	# an unpressed one at arm's length — _build_ui()'s theme never defined a
 	# "pressed"/"hover_pressed" stylebox, so every toggle relied on Godot's
 	# own default theme fallback. Confirm the shared theme now gives a
-	# pressed button a real, visually distinct stylebox (any one of Modes'
-	# now-ON toggles works; "User movement" was just clicked above).
+	# pressed button a real, visually distinct stylebox (any one of
+	# Navigate's now-ON toggles works; "User movement" was just clicked
+	# above).
 	var user_movement_btn := find_button(func(b): return b.text.begins_with("User movement"))
 	var pressed_style: StyleBox = user_movement_btn.get_theme_stylebox("pressed")
 	var normal_style: StyleBox = user_movement_btn.get_theme_stylebox("normal")
 	var styles_differ := pressed_style != null and pressed_style is StyleBoxFlat and normal_style is StyleBoxFlat and not (pressed_style as StyleBoxFlat).bg_color.is_equal_approx((normal_style as StyleBoxFlat).bg_color)
 	print("SMOKE a pressed toggle now has a real, visually distinct stylebox: ", styles_differ)
 
-	# steadiness row (Modes tab is showing): pick "Strong"
+	# Settings cogwheel: Steadiness ("Strong") and Display (Shadows/
+	# Resolution/MSAA, formerly the Perf tab) both live here now
 	print("SMOKE steadiness default: ", th.STEADINESS_NAMES[th.steadiness])
+	await aim_and_click(find_button(func(b): return b.text == "Settings"))
 	await aim_and_click(find_button(func(b): return b.text == "Strong"))
 	print("SMOKE steadiness after clicking Strong: ", th.STEADINESS_NAMES[th.steadiness], " cutoff=", th._left_filter.min_cutoff)
-	# perf tab
-	await aim_and_click(find_button(func(b): return b.text == "Perf"))
 	await create_timer(0.7).timeout
-	print("SMOKE perf tab text: ", tab._info_label.text.replace("
+	print("SMOKE settings display info text: ", tab._info_label.text.replace("
 ", " / "))
 	var light: DirectionalLight3D = main.get_node("DirectionalLight3D")
 	print("SMOKE shadows before: ", light.shadow_enabled)
@@ -157,6 +161,7 @@ func _initialize() -> void:
 	# before it could be read — a held error is only worth anything if it
 	# actually survives at least one of those ticks. Nothing is laser-selected
 	# here, so "Clear" hits _apply_colour()'s own no-selection branch.
+	await aim_and_click(find_button(func(b): return b.text == "Assembly"))
 	await aim_and_click(find_button(func(b): return b.text == "Colours"))
 	await aim_and_click(find_button(func(b): return b.text == "Clear colour"))
 	var message_text: String = tab._colour_status_label.text
@@ -192,6 +197,11 @@ func _initialize() -> void:
 		await process_frame
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
 	await create_timer(0.5).timeout # open_settle_seconds
+	# tablet reopened on whichever category/sub-tab was last active (Assembly
+	# > Colours, from the block above) — View's own sub-tab row (holding the
+	# "Scale" button below) is only reachable once View is the visible
+	# top-level page again.
+	await aim_and_click(find_button(func(b): return b.text == "View"))
 	var scale_tab := find_button(func(b): return b.text == "Scale")
 	var c: Vector2 = scale_tab.global_position + scale_tab.size * 0.5
 	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
@@ -206,7 +216,7 @@ func _initialize() -> void:
 		await process_frame # _update_pointer() keeps tracking the drifted aim every frame, same as it would on a real headset
 	r.button_released.emit("trigger_click") # UP now aimed somewhere else entirely
 	await process_frame
-	print("SMOKE a click still registers despite the hand drifting mid-press: ", tab._pages["Scale"].visible)
+	print("SMOKE a click still registers despite the hand drifting mid-press: ", scale_tab.button_pressed)
 
 	DirAccess.remove_absolute("user://models/smoke_test.glb")
 	quit()
