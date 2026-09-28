@@ -1,14 +1,16 @@
 # DIDSA VR spike (Godot)
 
-Milestone 0's engine spike (glTF endpoint + engine choice) is done: Godot
-won, proven on a real assembly over PCVR. This project is now milestone 1's
-working ground — "Import and viewport" — building out the real interaction
-model and multi-format loading. Still plain Godot 4 core (no
+Milestones 0 (glTF endpoint + engine choice), 1 (import and viewport) and 4
+(assembly environment — mates, colours, sections, measurements) are all
+done, in the "headless- and real-backend-confirmed, not yet on a real
+headset" sense every section below spells out — see "What 'done' looks
+like" for each. Milestones 2 (design table / in-VR part modelling) and 3
+(floating windows) haven't been started. Still plain Godot 4 core (no
 `godot-xr-tools`, no addons).
 
 **Picking this up fresh (including a new Claude Code session)?** Read
-[`docs/status.md`](docs/status.md) first — what's built, what's open, the
-known teleport bug, untested paths. [`docs/backend-api-notes.md`](docs/backend-api-notes.md)
+[`docs/status.md`](docs/status.md) first — what's built, what's open,
+untested paths. [`docs/backend-api-notes.md`](docs/backend-api-notes.md)
 covers the DIDSA-CAD endpoints this client depends on.
 [`docs/vision-brief.md`](docs/vision-brief.md) is the fuller product vision
 (milestones, interaction model, open decisions) — a point-in-time export, not
@@ -309,6 +311,45 @@ button.
   far, never on real Quest hardware, which was the actual point of that
   bullet. The vision brief's payload estimates (~90–100 KB for a
   186-instance test assembly) still haven't been measured on-headset.
+
+## What "done" looks like for milestone 4
+
+All four of the vision brief's assembly tools are built, each as a thin
+client to a real, pre-existing (or, for Mates/Measure's identity plumbing,
+newly-added) DIDSA-CAD endpoint — never a VR-only representation, so
+anything authored here is readable and editable in the flat app and vice
+versa:
+
+- **Mates** — face-only picking (top-level Occurrences of the loaded root
+  Part only), a real client to `POST/GET/PATCH/DELETE .../mates` and
+  `.../occurrences/{id}/solve`. Relax-all/Enforce-all supported.
+- **Colours** — `PATCH .../occurrences/{id}`'s existing `color` field,
+  including a "whole group" (every Occurrence sharing an owner) option.
+- **Sections** — a single grabbable clip-plane gizmo, entirely client-side
+  (the backend's own section-preview endpoint re-tessellates a fresh OCCT
+  boolean per call, too slow for 90 Hz dragging).
+- **Measure** — `POST .../measure`, 1–2 picks, live result (length, area,
+  distance, delta, and more depending on what's picked) — no create step,
+  nothing persisted. Looser picking than Mates: the open Part's own root
+  content and a repeated pick on one Occurrence are both valid, since
+  measuring across two features of one part is the common case.
+
+Also built alongside these: opening a different native file at runtime and
+adding a second file's Part onto the loaded assembly as a real Occurrence
+(`open_native_file()`/`add_component_file()`, backend's new
+`POST /parts/{id}/add-component`) — not one of the four named tools, but
+what actually makes it possible to build a real multi-Occurrence assembly
+to test Mates/Measure against from inside VR at all, without the bigger,
+still-unscoped shared-network-storage project.
+
+**Nothing in this milestone has been confirmed on a real headset** — every
+tool above is headless-test-covered and confirmed against a real running
+backend (real create/solve/PATCH/measure calls, real persisted results),
+but never yet felt through a real hand pulling a real trigger. See
+`docs/status.md`'s own per-tool "Not yet headset-verified" notes for what
+specifically is still open (mostly: does picking read clearly, does the
+result/list layout fit the tablet at arm's length, does a quick real
+double-pick feel right now that it's no longer silently dropped).
 
 ## Known gaps this project doesn't solve yet
 

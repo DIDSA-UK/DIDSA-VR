@@ -233,6 +233,56 @@ No bulk-solve endpoint exists — "solve every Mate on this assembly" means
 looping `solve_for_occurrence` over every distinct Occurrence any Mate
 references (`mates_tool.gd`'s `enforce_all`).
 
+## Measure — read-only, stateless, no create/persist step
+
+```
+POST /document/parts/{part_id}/measure
+```
+(`backend/app/document/router.py`'s `measure_entities`; domain logic in
+`app.document.measure.measure`; schemas: `MeasureRequest`/
+`MeasureEntityRefSchema`/`MeasurementResultSchema`. The same endpoint the
+flat app's own `client/lib/viewport3d/measurement_panel.dart` uses.)
+
+Body (`MeasureRequest`):
+```json
+{"refs": [{"occurrence_id": "...", "subshape_ref": {"body_id": "...", "shape_type": "face", "index": 0}}]}
+```
+1 or 2 refs (422 otherwise). Unlike Mates, `occurrence_id: ""` (root
+content — the currently-open Part's own unplaced body) is a perfectly
+valid ref, and **both refs can name the same Occurrence, or both be root
+content** — `measure_tool.gd`'s own validation is deliberately looser than
+`mates_tool.gd`'s for exactly this reason (measuring across two features of
+one part is the common case, not a "two different parts" rule). Every
+`occurrence_id` is resolved as a top-level Occurrence of the URL's own
+`part_id` (`resolve_occurrence_target` — same restriction Mates has), so
+both refs still need to belong to whichever Part is currently loaded.
+
+Response (`MeasurementResultSchema`) is one flat, mostly-`null` object —
+which fields are populated depends on what was sent, never a tagged union:
+1 ref populates whichever of `point`/`length`/`area`/`radius`/`diameter`/
+`center`/`axis`/`normal`/`point_on_face` applies to that entity's own
+geometry type; 2 refs always populate `distance`/`point_a`/`point_b`/
+`delta`, plus `axis_distance`/`axes_parallel` or `normal_distance`/
+`faces_parallel` when that specific relationship is detected (e.g. two
+circular edges' axes, two planar faces' normals). `body_volumes`/
+`body_masses` (keyed by `body_id`) are **always** included for every
+distinct Body among the refs, regardless of what was actually picked on
+it — mass only for a Body with a material assigned. This client's own
+wrist-tablet result rows (`wrist_tablet.gd`'s Measure tab) list these in
+the exact same order the flat app's `MeasurementPanel._resultRows` does,
+so the two apps read identically.
+
+**No create/persist step at all** (`measure.py`'s own docstring: never a
+`Feature`, never mutates `Part`, no undo/redo entry) — `measure_tool.gd`
+re-queries on every pick rather than requiring an explicit "Measure"
+action, and a real overlapping-request race is worth knowing about if
+extending this further: a quick second pick fires its own request before
+the first one's response has necessarily come back, so anything caching
+or applying a response needs to guard against a stale one landing after a
+newer pick has already superseded it (`measure_tool.gd`'s own
+`_measure_token`, found necessary by a real e2e run against a live
+backend, not anticipated up front).
+
 ## Occurrence colour
 
 ```
