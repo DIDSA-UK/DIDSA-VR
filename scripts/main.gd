@@ -5,8 +5,8 @@ extends Node3D
 ## drops it into the world so it can be grabbed with controller.gd.
 ##
 ## Setup: drop a real assembly export (a .DIDSAprt/.didsa file whose root
-## Part has occurrences on it — i.e. an assembly, not a bare part) into
-## this project folder, next to project.godot, named exactly what
+## Part has occurrences on it — i.e. an assembly, not a bare single part)
+## into this project folder, next to project.godot, named exactly what
 ## native_file_path below says (default "assembly.didsa"). Its
 ## document.root_part_id is read automatically — no part id to hunt for
 ## or type in by hand. Only backend_url and api_key need editing in the
@@ -51,6 +51,9 @@ var _mates_tool: Node
 var _measure_tool: Node
 var _colour_tool: Node
 var _section_tool: Node
+var _assembly_tree_window: Node
+var _calculator_window: Node
+var _image_viewer_window: Node
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -71,6 +74,9 @@ func _ready() -> void:
 	_add_measure_tool()
 	_add_colour_tool()
 	_add_section_tool()
+	_add_assembly_tree_window()
+	_add_calculator_window()
+	_add_image_viewer_window()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
 	$XROrigin3D/LeftController.command_stack = command_stack
@@ -87,6 +93,7 @@ func _ready() -> void:
 	_mates_tool.configure_backend(backend_url, api_key)
 	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
+	_assembly_tree_window.configure_backend(backend_url, api_key)
 	_start_xr()
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
@@ -133,10 +140,39 @@ func _add_section_tool() -> void:
 	_section_tool = sections
 
 
+func _add_assembly_tree_window() -> void:
+	## Milestone 3: the vision brief's interactive assembly tree — browse
+	## and select occurrences without laser-pointing at their geometry
+	## first. See assembly_tree_window.gd's own docstring.
+	var window := preload("res://scripts/assembly_tree_window.gd").new()
+	window.name = "AssemblyTreeWindow"
+	add_child(window)
+	window.setup_tree($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, self)
+	_assembly_tree_window = window
+
+
+func _add_calculator_window() -> void:
+	## Milestone 3's Calculator window — see calculator_window.gd's own docstring.
+	var window := preload("res://scripts/calculator_window.gd").new()
+	window.name = "CalculatorWindow"
+	add_child(window)
+	window.setup_calculator($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	_calculator_window = window
+
+
+func _add_image_viewer_window() -> void:
+	## Milestone 3's Image Viewer window — see image_viewer_window.gd's own docstring.
+	var window := preload("res://scripts/image_viewer_window.gd").new()
+	window.name = "ImageViewerWindow"
+	add_child(window)
+	window.setup_image_viewer($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	_image_viewer_window = window
+
+
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window)
 	_tablet = tablet
 
 
@@ -178,8 +214,9 @@ func open_keyboard_for(initial_text: String, on_confirm: Callable) -> void:
 func current_root_part_id() -> String:
 	## The loaded assembly's own root Part id — every top-level Occurrence's
 	## own owner_part_id (see mesh_identity.gd) matches this, so it's what
-	## the Mates tab's "Enforce all"/mate-list refresh operate on. Empty if
-	## nothing backend-backed is loaded yet (a bare local .glb, say).
+	## the Mates tab's "Enforce all"/mate-list refresh (and the Assembly Tree
+	## window's own root fetch) operate on. Empty if nothing backend-backed
+	## is loaded yet (a bare local .glb, say).
 	return _resolved_part_id
 
 
@@ -226,6 +263,22 @@ func current_selected_part() -> Node3D:
 		if hand.selected_node != null:
 			return hand.selected_node
 	return null
+
+
+func select_part_by_occurrence_id(occurrence_id: String) -> bool:
+	## The Assembly Tree window's tap-to-select (assembly_tree_window.gd):
+	## finds the currently loaded mesh tagged (mesh_identity.gd) with this
+	## occurrence id and selects it the same way laser-select would, via
+	## RightController's select_external(). Returns false if nothing loaded
+	## right now carries that id — e.g. the row is an intermediate sub-
+	## assembly with no rendered geometry of its own (assembly-mesh.glb has
+	## one node per placed *leaf* instance only — see mesh_identity.gd's own
+	## docstring), or the occurrence is hidden.
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if node.has_meta("occurrence_id") and node.get_meta("occurrence_id") == occurrence_id and node.visible:
+			$XROrigin3D/RightController.select_external(node, node.global_position)
+			return true
+	return false
 
 
 func _set_all_visibility(vis: bool, label: String) -> void:
@@ -735,6 +788,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	command_stack.clear()
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
+	_assembly_tree_window.mark_stale() # the Occurrence tree it's shown is about to point at parts that no longer exist — see that script's own mark_stale()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 	for old in assembly_root.get_children():
