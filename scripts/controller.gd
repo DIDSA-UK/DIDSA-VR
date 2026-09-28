@@ -57,6 +57,8 @@ var command_stack = null ## set by main.gd; a shared command_stack.gd instance f
 var hide_tool_active := false ## Tools tab's "Shoot to hide": trigger hides whatever the laser hits instead of selecting it
 var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate entity instead of selecting/hiding
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
+var measure_tool_active := false ## wrist tablet's Measure tab: trigger picks a measure entity instead of selecting/hiding
+var measure_tool = null ## set by main.gd; a shared measure_tool.gd instance
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
 
 var _laser: MeshInstance3D
@@ -195,6 +197,8 @@ func _on_button_pressed(action_name: String) -> void:
 			return # laser is over the wrist tablet or popup keyboard: the click is for them, not a part.
 		if mates_tool_active:
 			_try_pick_mate_entity()
+		elif measure_tool_active:
+			_try_pick_measure_entity()
 		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
@@ -340,6 +344,17 @@ func _try_pick_mate_entity() -> void:
 	mates_tool.try_pick(part, hit.get("face_index", -1))
 
 
+func _try_pick_measure_entity() -> void:
+	## Measure tab active: same ray test, handed to measure_tool.gd instead —
+	## see that script's own try_pick()/_validate_pick() for its (looser
+	## than Mates') validation.
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var part: Node3D = hit.get("part")
+	if part == null or measure_tool == null:
+		return
+	measure_tool.try_pick(part, hit.get("face_index", -1))
+
+
 func _try_select() -> void:
 	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	var target: Node3D = hit.get("part")
@@ -391,7 +406,7 @@ func _update_aim_hover() -> void:
 	## select right now, so you know what a trigger pull will pick before
 	## you commit to it.
 	var hit := {}
-	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active) and held_node == null:
+	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active or measure_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
 	_part_hit_distance = global_position.distance_to(hit["point"]) if hit.has("point") else -1.0

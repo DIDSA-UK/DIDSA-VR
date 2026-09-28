@@ -47,6 +47,7 @@ var _command_stack = null
 var _mates_tool: Node
 var _colour_tool: Node
 var _section_tool: Node
+var _measure_tool: Node
 var _undo_button: Button
 var _redo_button: Button
 
@@ -81,6 +82,16 @@ var _colour_group_toggle: Button ## "Apply to whole group" — read directly by 
 var _sections_status_label: Label
 var _sections_flip_button: Button
 
+# Milestone 4: Measurements — laser-pick 1-2 entities, live result from
+# DIDSA-CAD's real POST .../measure endpoint (see measure_tool.gd's own
+# docstring). Row ordering/formatting mirrors the flat app's own
+# MeasurementPanel (client/lib/viewport3d/measurement_panel.dart) exactly,
+# so a user moving between VR and flat sees the same numbers laid out the
+# same way.
+var _measure_status_label: Label
+var _measure_picks_label: Label
+var _measure_result_box: VBoxContainer
+
 var _viewport: SubViewport
 var _quad: MeshInstance3D
 var _cursor: Control
@@ -104,7 +115,7 @@ var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -115,6 +126,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_mates_tool = mates_tool
 	_colour_tool = colour_tool
 	_section_tool = section_tool
+	_measure_tool = measure_tool
 
 	_build_viewport()
 	_build_quad()
@@ -129,6 +141,9 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 		_mates_tool.mates_changed.connect(_rebuild_mates_list)
 	if _section_tool:
 		_section_tool.changed.connect(_refresh_sections_display)
+	if _measure_tool:
+		_measure_tool.picks_changed.connect(_refresh_measure_picks_display)
+		_measure_tool.result_changed.connect(_rebuild_measure_result)
 	visible = false
 
 
@@ -413,6 +428,7 @@ func _build_ui() -> Control:
 		"Mates": _build_mates_page,
 		"Colours": _build_colours_page,
 		"Sections": _build_sections_page,
+		"Measure": _build_measure_page,
 		"Files": _build_files_page,
 		"Perf": _build_perf_page,
 	}
@@ -482,6 +498,9 @@ func _show_page(tab_name: String) -> void:
 		if _mates_tool and owner_part_id != "":
 			_mates_last_owner_part_id = owner_part_id
 			_mates_tool.refresh_mates(owner_part_id)
+	elif tab_name == "Measure":
+		_refresh_measure_picks_display()
+		_rebuild_measure_result()
 
 
 # --- Modes: the brief's four manipulation modes, switchable on their own ---
@@ -947,6 +966,141 @@ func _refresh_sections_display() -> void:
 		_sections_status_label.text = "Off — turn on Section tool to place the plane"
 	else:
 		_sections_status_label.text = "Sectioning%s — grip the plane to move it" % (" (flipped)" if _section_tool.flipped else "")
+
+
+# --- Measure: milestone 4's last assembly tool - laser-pick 1-2 entities,
+# live result from measure_tool.gd's real POST .../measure client. No
+# create step (unlike Mates) and nothing to relax/enforce - see that
+# script's own docstring.
+
+func _build_measure_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+
+	page.add_child(_mode_toggle("Measure tool", func(on: bool) -> void:
+		_left.measure_tool_active = on
+		_right.measure_tool_active = on
+		if _measure_tool:
+			_measure_tool.set_active(on)
+	, false))
+
+	_measure_status_label = Label.new()
+	_measure_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(_measure_status_label)
+
+	_measure_picks_label = Label.new()
+	_measure_picks_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_measure_picks_label.add_theme_font_size_override("font_size", 18)
+	_measure_picks_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(_measure_picks_label)
+
+	var clear := Button.new()
+	clear.text = "Clear"
+	clear.pressed.connect(func() -> void:
+		if _measure_tool:
+			_measure_tool.clear_picks()
+	)
+	page.add_child(clear)
+
+	var result_label := Label.new()
+	result_label.text = "Result:"
+	result_label.add_theme_font_size_override("font_size", 18)
+	result_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	page.add_child(result_label)
+	_measure_result_box = VBoxContainer.new()
+	_measure_result_box.add_theme_constant_override("separation", 2)
+	page.add_child(_measure_result_box)
+
+	_refresh_measure_picks_display()
+	_rebuild_measure_result()
+	return page
+
+
+func _refresh_measure_picks_display() -> void:
+	if not _measure_tool or _measure_status_label == null:
+		return
+	_measure_status_label.text = _measure_tool.status_text()
+	var labels: Array = _measure_tool.picked_labels()
+	_measure_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
+
+
+# Row order/labels/formatting deliberately match the flat app's own
+# MeasurementPanel._resultRows exactly (client/lib/viewport3d/
+# measurement_panel.dart) - a user moving between VR and flat sees the same
+# numbers laid out the same way. Named two-entity results (axis/normal
+# distance) are shown ahead of, never instead of, the generic distance -
+# both stay meaningful together (e.g. the gap between two coaxial
+# cylindrical faces is still worth showing alongside its axis distance).
+func _rebuild_measure_result() -> void:
+	if _measure_result_box == null:
+		return
+	for child in _measure_result_box.get_children():
+		_measure_result_box.remove_child(child)
+		child.queue_free()
+
+	var r: Dictionary = _measure_tool.result if _measure_tool else {}
+	var rows: Array = []
+	if r.get("length") != null:
+		rows.append(["Length", _fmt_measure_unit(r["length"], "mm")])
+	if r.get("diameter") != null:
+		rows.append(["Diameter", _fmt_measure_unit(r["diameter"], "mm")])
+	if r.get("radius") != null:
+		rows.append(["Radius", _fmt_measure_unit(r["radius"], "mm")])
+	if r.get("area") != null:
+		rows.append(["Area", _fmt_measure_unit(r["area"], "mm²")])
+	if r.get("point") != null:
+		rows.append(["Point", _fmt_measure_vec_unit(r["point"], "mm")])
+	if r.get("axis_distance") != null:
+		rows.append(["Axis distance", _fmt_measure_unit(r["axis_distance"], "mm")])
+	if r.get("normal_distance") != null:
+		rows.append(["Normal distance", _fmt_measure_unit(r["normal_distance"], "mm")])
+	if r.get("distance") != null:
+		rows.append(["Distance", _fmt_measure_unit(r["distance"], "mm")])
+	if r.get("delta") != null:
+		rows.append(["ΔX, ΔY, ΔZ", _fmt_measure_vec_unit(r["delta"], "mm")])
+
+	var body_volumes: Dictionary = r.get("body_volumes", {})
+	var body_masses: Dictionary = r.get("body_masses", {})
+	var multi_body: bool = body_volumes.size() > 1
+	var i := 0
+	for body_id in body_volumes:
+		i += 1
+		rows.append(["Volume%s" % (" (body %d)" % i if multi_body else ""), _fmt_measure_unit(body_volumes[body_id], "mm³")])
+	i = 0
+	for body_id in body_masses:
+		i += 1
+		rows.append(["Mass%s" % (" (body %d)" % i if multi_body else ""), _fmt_measure_unit(body_masses[body_id], "g")])
+
+	for row in rows:
+		var hbox := HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 6)
+		var label := Label.new()
+		label.text = row[0]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hbox.add_child(label)
+		var value := Label.new()
+		value.text = row[1]
+		hbox.add_child(value)
+		_measure_result_box.add_child(hbox)
+	if rows.is_empty():
+		var none := Label.new()
+		none.text = "No measurements yet."
+		_measure_result_box.add_child(none)
+
+
+static func _fmt_measure_num(x: float) -> String:
+	return ("%.3f" % x).rstrip("0").rstrip(".")
+
+
+static func _fmt_measure_unit(x: float, unit: String) -> String:
+	return "%s %s" % [_fmt_measure_num(x), unit]
+
+
+static func _fmt_measure_vec_unit(v: Array, unit: String) -> String:
+	var parts := []
+	for x in v:
+		parts.append(_fmt_measure_num(x))
+	return "%s %s" % [", ".join(parts), unit]
 
 
 # --- Files: load a local .glb ---

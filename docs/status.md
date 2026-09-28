@@ -212,7 +212,7 @@ worked on" below for the numbers).
 Out of scope for this phase (unchanged): STEP/OBJ/STL import, the Quest
 APK / cleartext HTTP, multiplayer, mates, sections, measurements.
 
-## Milestone 4 — assembly environment (mates, colours, sections, measurements): mates, colours and sections built; measurements not started
+## Milestone 4 — assembly environment (mates, colours, sections, measurements): all four tools built
 
 Started by reading the vision brief's Assembly tools/Mates workflow sections
 and the 27 Sep cross-compatibility note (mates must be built as a client to
@@ -599,6 +599,74 @@ being implemented.
   clearly on first toggle; and whether the clip itself, correct in a flat
   render, looks right in stereo/at real depth.
 
+### Measurements: the last milestone-4 tool - a thin client to DIDSA-CAD's real, stateless Measure endpoint
+
+Closes milestone 4. Read `backend/app/document/measure.py`/`schemas.py`
+directly (in the `DIDSA-CAD` repo) first: `POST /parts/{part_id}/measure`
+already existed (the same endpoint the flat app's own
+`measurement_panel.dart` uses) and needed no backend changes at all - every
+piece the VR client needed (a `MeasureEntityRefSchema{occurrence_id,
+subshape_ref}` per pick, root content allowed via `occurrence_id: ""`) was
+already there, and this client's own `mesh_identity.gd` already produces
+exactly that shape from a raycast hit (built for Mates, reused verbatim
+here).
+
+**`scripts/measure_tool.gd`** (new): laser-pick 1-2 entities, live result -
+no create/persist step at all (`measure.py`'s own docstring: "never a
+Feature, never mutates Part, no undo/redo entry"), so picking the first
+entity queries and shows a single-entity result immediately, picking a
+second re-queries for the two-entity relationship. Deliberately **looser**
+validation than Mates: a Measure entity can be the currently-open Part's
+own root content, and both picks can land on the same Occurrence or root
+content - measuring across two features of one part (a hole's spacing, a
+wall's thickness) is the common case, not Mates' "two different parts"
+requirement. A third pick starts a fresh measurement rather than being
+ignored once full (Mates' own cap-at-2 behaviour) - Measure is for picking
+through several things in a row.
+
+**A real overlapping-request race, found by an e2e run against a real
+backend, not by reasoning about the code**: the first design gated
+`try_pick()` on `is_busy()`, so a real second pick thrown quickly - before
+the first pick's own network round trip had returned - was silently
+dropped waiting on a request that hadn't finished yet. `tests/e2e_measure.gd`
+caught this directly: the two-entity case never even fired, `status_text()`
+still asked for "a second entity" after both picks. Fixed with a monotonic
+`_measure_token` instead of a hard gate: every pick always fires its own
+`_run_measure()` call immediately (never dropped), and a request that
+comes back after a *newer* pick has already superseded it (token mismatch)
+discards its own now-stale result instead of clobbering the current one -
+`clear_picks()` also bumps the token, so an old in-flight request can't
+land after an explicit Clear either. Re-ran the same e2e test afterward:
+real distance (83.34 mm), real delta, and real per-body volumes came back
+for a genuine two-pick sequence.
+
+**Wrist tablet**: new "Measure" tab (`wrist_tablet.gd`) - a tool toggle,
+status/picked-entities labels, a live result list, and Clear. Result row
+order/labels/formatting deliberately match the flat app's own
+`MeasurementPanel._resultRows` exactly (Length, Diameter, Radius, Area,
+Point, Axis distance, Normal distance, Distance, Delta, then per-body
+Volume/Mass) so a user moving between VR and flat sees the same numbers
+laid out the same way, not a VR-specific reinterpretation.
+
+**Tests**: `tests/measure_tool.gd` (new, added to `run_all.sh`) - pure
+pick-validation logic against manually-tagged stand-ins, 14/14 boolean
+lines `true`, including the looser-than-Mates cases (root content and
+same-occurrence picks both accepted) and confirming a failed/no-backend
+measure attempt still leaves `is_busy()` correctly `false` rather than
+stuck. `tests/e2e_measure.gd` (new, needs a real backend, not run by
+`run_all.sh`, same class of exception as `e2e_mates.gd`) - real single- and
+two-entity measurements against `assembly.didsa`'s own two placed
+occurrences, **SMOKE PASSED** after the race-condition fix above. Full
+headless suite (`run_all.sh`) re-run clean after the fix: **ALL RAN WITHOUT
+SCRIPT ERRORS**, no regressions.
+
+**Not yet headset-verified** - like the rest of milestone 4, only run
+headless and against a real backend: whether the result list reads clearly
+at wrist-tablet size with several rows populated at once, and whether
+picking two faces in quick succession (the exact race the token fix
+handles server-side) feels right from a real hand, not just correct over
+the wire.
+
 ## Real-headset testing round: three bugs found and fixed
 
 The first real hand pulling a real trigger at any of this project's UI
@@ -951,6 +1019,20 @@ the tablet is mid-interaction feels right.
 
 ## Untested paths
 
+- **28 Sep 2026 session's two additions — Open/Add (Files tab) and the
+  Measure tab — are both headless- and real-backend-confirmed only, same
+  as everything else in this list.** See "Open/add-parts pathway built"
+  and "Measurements: the last milestone-4 tool" above for the full detail;
+  summarized here so this list stays the one place that names every
+  still-open verification gap. Specifically open: whether the Files tab's
+  new small "Add" button (next to a native file's row) reads clearly and
+  is easy to hit at arm's length; whether opening/adding a file feels
+  right as an interaction (versus just being correct over the wire);
+  whether the Measure tab's result list reads clearly with several rows
+  populated; and whether picking two entities in quick succession — the
+  exact overlapping-request race `measure_tool.gd`'s own `_measure_token`
+  fix handles server-side — feels right from a real hand, not just correct
+  over the wire.
 - **Every toggle button on the tablet (Modes, Sections, Mates, the tab row,
   steadiness/scale choice rows) now has a real pressed/hover stylebox**
   (round 2's tablet-highlight fix, see above) — confirmed headless that the
@@ -1052,7 +1134,10 @@ script defaults, which would have leaked the real API key into git history —
 if you ever see a real credential as a literal default value in a script
 again, that's a bug, pull it out the same way. `models/*` is also
 git-ignored (models are often proprietary; only `models/.gitkeep` is
-tracked).
+tracked) — real test parts John provided are tracked instead under
+`tests/fixtures/` (see that folder's own `README.md`), which is **not**
+what the Files tab reads from; copy a fixture into `models/` (or push it to
+`user://models` on-device) to actually load it in VR.
 
 `scenes/main.tscn` previously had uncommitted, accidental-looking editor
 changes (the status label, camera and light shifted by the same offset and
@@ -1089,7 +1174,14 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   <MAMBA_ROOT_PREFIX> uvicorn app.main:app --host 127.0.0.1 --port 8000` from
   `backend/` with `CAD_API_KEY` exported first — give it ~10 s: uvicorn's own
   startup log line is buffered and doesn't appear immediately, so don't
-  conclude it's stuck before that.
+  conclude it's stuck before that. **Check for a pre-existing env first** —
+  the 27/28 Sep 2026 sessions' own sandbox already had one at
+  `/opt/sdks/micromamba_root/envs/didsa-backend` (`.../bin/uvicorn` runs
+  directly from it, no `micromamba run` wrapper even needed), so the whole
+  from-scratch `create`/pythonocc-core install wasn't needed either time;
+  look before spending the ~10+ minutes that takes. Godot itself still had
+  to be downloaded fresh each time (no pre-existing binary) — same GitHub
+  release URL as above.
 - **Real (non-headless) rendering, without a GPU or a display.** `gpu_timing.gd`
   was already documented as needing "a GPU and a window" — this session found
   a way to get both in a display-less cloud sandbox: `Xvfb` (a virtual X
@@ -1111,15 +1203,17 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 - **`tests/` holds the headless tests and `tests/run_all.sh` runs them all**
   (parse-checks every script, then the steadiness filter, sensitivity,
   two-hand rotation, grab/scale, precise-picking, undo/redo, popup-keyboard,
-  Tools-tab, full-scene tablet, mesh-identity, mates-tool, colour-tool,
-  section-tool, section-tab and laser/left-hand tests). `tests/README.md`
-  lists the expected values. Needs no GPU, headset or backend.
+  Tools-tab, full-scene tablet, mesh-identity, mates-tool, measure-tool,
+  colour-tool, section-tool, section-tab and laser/left-hand tests).
+  `tests/README.md` lists the expected values. Needs no GPU, headset or
+  backend.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
-  `e2e_mates.gd`, `e2e_colour.gd`, `e2e_colour_group.gd`, `e2e_section.gd`):
-  each deliberately points `main.secrets_file_path` at the real `secrets.cfg`
-  and drives real network calls against a running backend, using the tracked
-  `assembly.didsa`. Run them manually once your backend is up; none are part
-  of `run_all.sh`.
+  `e2e_mates.gd`, `e2e_colour.gd`, `e2e_colour_group.gd`, `e2e_section.gd`,
+  `e2e_add_component.gd`, `e2e_measure.gd`): each deliberately points
+  `main.secrets_file_path` at the real `secrets.cfg` and drives real network
+  calls against a running backend, using the tracked `assembly.didsa` (or,
+  for `e2e_add_component.gd`, two throwaway Parts it creates itself).
+  Run them manually once your backend is up; none are part of `run_all.sh`.
   `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
   instantiating the scene to "Loaded" — the first time this path was
@@ -1128,7 +1222,12 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   that section above) — `e2e_section.gd` doesn't confirm a new endpoint
   (Sections calls none) but confirms `section_tool.gd`'s wrap/grab/unwrap
   pipeline against real backend-sourced parts and materials, not just a
-  synthetic stand-in.
+  synthetic stand-in. `e2e_add_component.gd`/`e2e_measure.gd` are the 28 Sep
+  2026 session's own real-backend confirmations (see "Open/add-parts
+  pathway built" and "Measurements" above) — the latter is also the one
+  that caught the `_measure_token` overlapping-request race, a real bug an
+  e2e run found that pure code review and the headless unit test both
+  missed (neither exercises a genuine, non-instant network round trip).
 - Parse check: `"$G" --headless --path . --check-only --script
   res://scripts/x.gd` (reports `SCRIPT ERROR: Parse Error`; the OpenXR "no
   HMD" notice is harmless).
@@ -1151,23 +1250,26 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 
 ## Vision brief drift
 
-**Resolved this session, but only in the live Claude Docs artifact — this
-repo's own `docs/vision-brief.md` export was only re-synced for the Mates
-cross-compatibility note below, not the two Milestones-table rewordings.**
-The export is a point-in-time snapshot by design ("re-export after any
-significant change" per its own header), so its Milestones table still
-reads exactly as it did before this session for milestone 1 and milestone
-4's own "Done when" cells — re-export it (or hand-edit those two rows to
-match) next time it's touched, so a future reader of the export alone
-doesn't see stale milestone status. Kept here as the record of what
-drifted and when, since it can drift again the same way.
+**As of 28 Sep 2026, this repo's own `docs/vision-brief.md` export is fully
+caught up with everything below** — milestone 1's and milestone 4's table
+rows, the Mates cross-compatibility note, and the Mates-testing-blocker
+checkbox have all been hand-edited into the export directly. **What's still
+open: none of this has been pushed back into the live Claude Docs
+artifact** — no session so far (this one included) has had access to it,
+only to this repo's own point-in-time export ("re-export after any
+significant change" per its own header). So the live doc and this repo's
+export have now diverged the other way: the export is current, the live
+doc is stale, and only John (or a session with access to that artifact)
+can bring the live doc back in sync. Kept here as the record of what
+drifted and when, since it can drift again the same way in either
+direction.
 
-- **Milestone 1.** The live doc's milestone table used to say whole-model
-  two-hand rotate/scale and scale views were open. Both were built, and so
-  was STEP/OBJ/STL import since. Live doc now says: "Done except for
-  measuring it on real Quest hardware. Native import, STEP/OBJ/STL import,
-  individual part manipulation (proximity grab, and trigger-laser select
-  with thumbstick rotate / A-B nudge), user movement (walk, snap-turn,
+- **Milestone 1** (originally drifted stale: the live doc said whole-model
+  two-hand rotate/scale and scale views were open, and predated STEP/OBJ/
+  STL import entirely). Export's row now says: "Done except for measuring
+  it on real Quest hardware. Native import, STEP/OBJ/STL import, individual
+  part manipulation (proximity grab, and trigger-laser select with
+  thumbstick rotate / A-B nudge), user movement (walk, snap-turn,
   teleport), whole-model one/two-hand movement (drag, turn, scale), scale
   views (presets, lock, Fit, Home), the wrist tablet (Modes, Scale, Tools,
   Files, Perf, Undo/Redo), the popup keyboard, and local glb import (no
@@ -1177,28 +1279,21 @@ drifted and when, since it can drift again the same way.
 - **Mates cross-compatibility note.** The "Mates workflow" section's note
   (added 27 Sep 2026) that VR mates must be readable/editable in DIDSA-CAD's
   flat app and vice versa — John's own requirement, added ahead of the mates
-  work itself so it wouldn't be missed when that phase started — had only
-  ever made it into this repo's own export, not the live doc. Now in both.
-- **Milestone 4 progress.** The milestones table's row 4 ("Assembly
-  environment... Parts move individually; mates, colours, sections and
-  measurements work") now says: "In progress. Parts move individually
-  (built since milestone 1). Mates (face-only picking, a real client to
-  DIDSA-CAD's own Mate create/solve endpoints — a mate authored in VR is
-  readable and editable in the flat app and vice versa), Colours (a real
-  client to the existing occurrence-colour PATCH endpoint) and Sections
-  (client-side only: a grabbable clip-plane gizmo; the backend's own
-  section-preview endpoint re-tessellates a fresh OCCT boolean on every
-  call, too slow for a plane dragged at 90 Hz) are built — confirmed
-  headless and against a real backend, not yet on a real headset.
-  Measurements hasn't been started." Sections' interaction was this
-  session's own design call — the vision brief itself never specified one,
-  unlike Mates' own spelled-out workflow (see the "Milestone 4" section
-  above for the full reasoning).
-- **Mates testing blocker (this round, repo export only, not the live
-  doc).** Added a new "Open decisions and risks" bullet recording the
-  multi-body-test-file/no-open-file-path gap that's currently blocking
-  mates testing (see "Real-headset testing round 2" above for the full
-  diagnosis) — this session had no access to the live Claude Docs artifact,
-  so only this repo's own export was updated. Re-sync to the live doc next
-  time it's touched, same caveat as the two Milestones-table rewordings
-  above.
+  work itself so it wouldn't be missed when that phase started — is in the
+  export.
+- **Milestone 4.** Export's row now says: "**Done, 28 Sep 2026.** Parts move
+  individually; mates, colours, sections and measurements all work —
+  Measurements (the last of the four) is a thin client to DIDSA-CAD's
+  existing `POST /parts/{id}/measure`, needing no backend changes at all.
+  Headless- and real-backend-confirmed (`tests/measure_tool.gd`,
+  `tests/e2e_measure.gd`); not yet confirmed on a real headset." Sections'
+  interaction was a design call made along the way — the vision brief
+  itself never specified one, unlike Mates' own spelled-out workflow (see
+  the "Milestone 4" section above for the full reasoning) — worth flagging
+  if the live doc is ever revised, since it's this repo's own addition, not
+  something being faithfully carried over from an existing spec.
+- **Mates testing blocker.** The "Open decisions and risks" list's entry
+  for this is now marked `[x]` resolved in the export, with a note on what
+  actually closed it (`POST /parts/{id}/add-component` — see "Open/add-parts
+  pathway built" above) and that the separate storage/composition decision
+  is narrower than it looked as a result.
