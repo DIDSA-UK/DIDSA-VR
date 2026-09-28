@@ -1,0 +1,238 @@
+extends "res://scripts/diegetic_panel.gd"
+## Milestone 3: the interactive assembly tree named in the vision brief's
+## Assembly-tools list but never built until now. Browses the loaded
+## assembly's Occurrence hierarchy - GET /document/parts/{id}/occurrences,
+## recursed lazily on expand, the same real endpoint colour_tool.gd's own
+## "whole group" feature already proved (see that script's docstring for
+## why there's no single nested-tree endpoint to call instead) - and lets
+## you select a part by name/structure instead of only by already looking
+## at it and laser-pointing at its geometry.
+##
+## v1 scope: browse and tap-to-select. "Pull a tree node into world space"
+## (the vision brief's literal wording) is real further scope of its own -
+## duplicating geometry, or breaking a mate server-side, either one a
+## design question worth its own pass - and isn't attempted here; see
+## docs/status.md.
+##
+## Only LEAF placed Occurrences (the ones with their own rendered geometry)
+## can actually be selected in the 3D view - an intermediate row (a sub-
+## assembly with its own children) has no mesh of its own in
+## assembly-mesh.glb at all (see mesh_identity.gd's own docstring: one node
+## per placed *leaf* instance), so tapping one shows a status message
+## instead of silently doing nothing.
+
+const API_PREFIX := "/document"
+
+var backend_url := ""
+var api_key := ""
+var _main: Node
+var _root_part_id := ""
+var _tree: Array = [] ## top-level rows: [{id, name, resolved_part_id, children: Array|null, expanded: bool}, ...]
+var _stale := true
+var _busy := false
+
+var _status_label: Label
+var _rows_box: VBoxContainer
+
+const INDENT_PX := 24.0
+
+
+func setup_tree(right: XRController3D, camera: XRCamera3D, main: Node) -> void:
+	_main = main
+	panel_title = "Assembly Tree"
+	panel_size = Vector2(0.28, 0.34)
+	viewport_size = Vector2i(480, 600)
+	open_distance = 0.55
+	open_lateral_offset = -0.22
+	super.setup(right, camera)
+
+
+func configure_backend(url: String, key: String) -> void:
+	backend_url = url
+	api_key = key
+
+
+func mark_stale() -> void:
+	## Called by main.gd whenever the loaded assembly changes (a new file
+	## opened, a component added) - see that script's own _show_model().
+	## Doesn't refetch immediately: only pays the network cost if/when the
+	## tree is actually being looked at, per this window's own docstring
+	## above on why it's a lazy client to GET .../occurrences rather than
+	## an eager assembly-mesh JSON fetch.
+	_stale = true
+	_tree = []
+	if is_open():
+		_refresh_root()
+
+
+func _on_opened() -> void:
+	if _stale:
+		_refresh_root()
+
+
+func _refresh_root() -> void:
+	_root_part_id = _main.current_root_part_id() if _main else ""
+	if _root_part_id == "":
+		_set_status("No assembly loaded yet.")
+		return
+	_set_status("Loading...")
+	var result := await _list_occurrences(_root_part_id)
+	if not result["ok"]:
+		_set_status("Couldn't load the assembly tree: %s" % result["error"])
+		return
+	_tree = _occurrences_to_rows(result["json"])
+	_stale = false
+	_set_status("" if not _tree.is_empty() else "This assembly has no placed occurrences.")
+	_rebuild_rows()
+
+
+static func _occurrences_to_rows(occurrences: Array) -> Array:
+	## Pure (no network): OccurrenceResponse-shaped dicts -> this window's own
+	## row shape. Split out so tests/assembly_tree_window.gd can exercise it
+	## directly against a synthetic response, same precedent as colour_tool.gd's
+	## _hex_to_color()/mates_tool.gd's build_create_payload().
+	var rows: Array = []
+	for occ in occurrences:
+		var resolved: String = str(occ.get("resolved_part_id", ""))
+		rows.append({
+			"id": str(occ.get("id", "")),
+			"name": _row_label(occ),
+			"resolved_part_id": resolved,
+			"children": null, # not fetched yet - see _expand_row()
+			"expanded": false,
+		})
+	return rows
+
+
+static func _row_label(occ: Dictionary) -> String:
+	var override_name = occ.get("name_override")
+	if override_name != null and str(override_name) != "":
+		return str(override_name)
+	var occ_id: String = str(occ.get("id", ""))
+	return "Occurrence %s" % occ_id.substr(0, 8)
+
+
+func _expand_row(row: Dictionary) -> void:
+	if row["resolved_part_id"] == "" or _busy:
+		return
+	if row["children"] != null: # already fetched: just toggle
+		row["expanded"] = not row["expanded"]
+		_rebuild_rows()
+		return
+	_busy = true
+	var result := await _list_occurrences(row["resolved_part_id"])
+	_busy = false
+	row["children"] = _occurrences_to_rows(result["json"]) if result["ok"] else []
+	row["expanded"] = true
+	if not result["ok"]:
+		_set_status("Couldn't load children: %s" % result["error"])
+	_rebuild_rows()
+
+
+func _on_row_selected(occurrence_id: String, is_expandable: bool) -> void:
+	if _main == null:
+		return
+	var found: bool = _main.select_part_by_occurrence_id(occurrence_id)
+	if not found:
+		if is_expandable:
+			_set_status("That's a sub-assembly - expand it and select one of its own parts.")
+		else:
+			_set_status("Not shown in the current view (hidden, or has no body of its own).")
+	else:
+		_set_status("")
+
+
+func _set_status(text: String) -> void:
+	if _status_label:
+		_status_label.text = text
+
+
+func _build_content() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+
+	_status_label = Label.new()
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_status_label)
+
+	var refresh := Button.new()
+	refresh.text = "Refresh"
+	refresh.pressed.connect(func() -> void:
+		_stale = true
+		_refresh_root()
+	)
+	box.add_child(refresh)
+
+	var rows_scroll := ScrollContainer.new()
+	rows_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(rows_scroll)
+	_rows_box = VBoxContainer.new()
+	_rows_box.add_theme_constant_override("separation", 4)
+	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows_scroll.add_child(_rows_box)
+
+	return box
+
+
+func _rebuild_rows() -> void:
+	if _rows_box == null:
+		return
+	for child in _rows_box.get_children():
+		_rows_box.remove_child(child)
+		child.queue_free()
+	_add_rows(_tree, 0)
+	if _tree.is_empty():
+		var none := Label.new()
+		none.text = "Nothing to show."
+		_rows_box.add_child(none)
+
+
+func _add_rows(rows: Array, depth: int) -> void:
+	for row in rows:
+		var is_expandable: bool = row["resolved_part_id"] != ""
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 4)
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(depth * INDENT_PX, 0)
+		line.add_child(spacer)
+		if is_expandable:
+			var arrow := Button.new()
+			arrow.text = "v" if row["expanded"] else ">"
+			arrow.custom_minimum_size = Vector2(36, 0)
+			arrow.pressed.connect(_expand_row.bind(row))
+			line.add_child(arrow)
+		else:
+			var pad := Control.new()
+			pad.custom_minimum_size = Vector2(36, 0)
+			line.add_child(pad)
+		var name_button := Button.new()
+		name_button.text = row["name"]
+		name_button.clip_text = true
+		name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_button.pressed.connect(_on_row_selected.bind(row["id"], is_expandable))
+		line.add_child(name_button)
+		_rows_box.add_child(line)
+		if is_expandable and row["expanded"] and row["children"] != null:
+			_add_rows(row["children"], depth + 1)
+
+
+func _list_occurrences(part_id: String) -> Dictionary:
+	## Same fresh-HTTPRequest-per-call pattern as colour_tool.gd/mates_tool.gd's
+	## own _api_request - see either for the docstring this mirrors.
+	var req := HTTPRequest.new()
+	add_child(req)
+	var headers := ["X-API-Key: %s" % api_key]
+	var err := req.request(backend_url + API_PREFIX + "/parts/%s/occurrences" % part_id, headers, HTTPClient.METHOD_GET)
+	if err != OK:
+		req.queue_free()
+		return {"ok": false, "json": null, "error": "request failed to start (error %d)" % err}
+	var result: Array = await req.request_completed
+	req.queue_free()
+	var result_code: int = result[0]
+	var response_code: int = result[1]
+	var raw: PackedByteArray = result[3]
+	if result_code != HTTPRequest.RESULT_SUCCESS:
+		return {"ok": false, "json": null, "error": "network error (result %d)" % result_code}
+	var parsed = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
+	var ok: bool = response_code >= 200 and response_code < 300
+	return {"ok": ok, "json": (parsed if ok else null), "error": ("" if ok else str(parsed))}

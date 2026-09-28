@@ -1017,8 +1017,309 @@ this project not explicitly marked otherwise: whether the new "Add" button
 reads clearly at wrist-tablet size, and whether re-adding a component while
 the tablet is mid-interaction feels right.
 
+## Milestone 3 — floating windows: Assembly Tree, Calculator, Image Viewer, Browser (and PDF) built
+
+The vision brief's milestone 3 named five things: calculator, browser, PDF
+reader, image viewer, and DIDSA-CAD itself, all as flat panels floating in
+the arena. Two rounds of exploration before building anything turned up a
+real split in risk: three of the five are buildable now, on existing
+patterns, with no new dependency. The other two need something this repo
+(and, for DIDSA-CAD-as-a-window, the DIDSA-CAD repo) doesn't have at all —
+forcing all five into one phase would have blocked the high-value, low-risk
+item (the assembly tree) on unscoped native-dependency research. This phase
+ships the three; the other two are called out below as separate, unstarted
+spikes, not silently dropped.
+
+**Framework (`scripts/diegetic_panel.gd`).** `popup_keyboard.gd` was
+already a complete template for a free-floating (not wrist-mounted),
+laser-interactive panel: a `SubViewport`+quad, hand-built plane-raycast hit
+testing against the right hand's laser, synthetic mouse events, and the
+frozen-press-position fix for the real-headset drift-during-a-squeeze bug
+(see the "Real-headset testing round" section above). This extracts that
+mechanism into a reusable base so a new window doesn't have to duplicate it
+from scratch — deliberately **not** retrofitted onto `wrist_tablet.gd`/
+`popup_keyboard.gd` themselves: both are proven, headset-tested files, and
+this session had no Godot available to verify a refactor of them hadn't
+changed behaviour, so they're left exactly as they were.
+
+Multiple windows being open at once raised a real question `wrist_tablet.gd`/
+`popup_keyboard.gd` never had to answer: which one does the trigger belong
+to if two are both being aimed at? The first design ("claim the shared
+`ui_hover` meta if you're nearer than whoever already claimed it this
+frame") turned out to have a real bug, caught by `tests/windows_tab.gd`
+trying to assert it: an earlier-processed panel that had already set its
+own `_hovering = true` was never told it got outbid later in the same
+frame by a nearer panel stealing the meta, so both could end up believing a
+single trigger pull was theirs. Fixed by simplifying to first-claim-per-
+frame (whoever's `_process()` runs first and is genuinely hit, wins, full
+stop — not the true geometric nearest, but provably exactly one winner).
+Correctness mattered more than optimality here, and normal use doesn't
+overlap panels anyway (each window's own `open_distance`/
+`open_lateral_offset` keeps them apart) — see `diegetic_panel.gd`'s own
+docstring for the full story. A new, small, additive change to
+`controller.gd` (a `_process()` resetting the shared meta to neutral at the
+very start of every frame, before any panel gets a turn) is what makes this
+work at all — `XROrigin3D` is always `main.gd`'s first child, so this
+always runs first.
+
+**Assembly Tree** (`scripts/assembly_tree_window.gd`) — the vision brief's
+own "interactive tree" from its Assembly tools list, named there since the
+very first version of the brief and never built until now. Lazily recurses
+`GET /parts/{id}/occurrences` from the loaded assembly's root, expanding a
+row's own children only when tapped — the same real endpoint
+`colour_tool.gd`'s "whole group" colouring already proved (see
+`docs/backend-api-notes.md`'s new "Listing an Occurrence's direct children"
+section), chosen over an eager `GET .../assembly-mesh` JSON fetch
+specifically so opening the tree doesn't tax every model load, only the
+ones where it's actually used (that endpoint measured ~460 KB on DIDSA-CAD's
+own test assembly, per the vision brief — not a cost to add to every
+startup for a window that might not even be opened). Tapping a row selects
+the matching part the same way laser-select does — `main.gd`'s new
+`select_part_by_occurrence_id()` walks the loaded, `mesh_identity.gd`-tagged
+parts for a matching `occurrence_id` and calls `controller.gd`'s new
+`select_external()`, a thin public wrapper around the same private
+`_set_selection()`/`_clear_selection()` laser-select already uses (same
+`command_stack` bookkeeping, same toggle-to-deselect behaviour). An
+intermediate row (a sub-assembly with its own children) has no rendered
+geometry of its own to select at all — `assembly-mesh.glb` is one node per
+placed *leaf* instance only, per `mesh_identity.gd`'s own docstring — so
+tapping one shows a status message rather than silently doing nothing.
+`main.gd::_show_model()` calls the tree's `mark_stale()` alongside its
+existing `command_stack.clear()`/`_mates_tool.clear_picks()` reset, so the
+tree rebuilds whenever a new file is opened or a component added.
+
+**v1 scope, on purpose**: browse and tap-to-select only. "Pull a tree node
+into world space" (the vision brief's own literal wording) is real further
+scope — duplicating geometry, or breaking a mate server-side, either one a
+design question worth its own pass — and isn't attempted here.
+
+**Calculator** (`scripts/calculator_window.gd`) and **Image Viewer**
+(`scripts/image_viewer_window.gd`) round out this phase's realistic scope.
+Calculator was deliberately built first and simplest, specifically to prove
+several `diegetic_panel.gd` windows can be open and independently
+interactive at once before trusting the arbitration fix with the tree
+window (the real deliverable). Image Viewer sources from the same
+`models/`/`user://models` folders and git-ignored-local-asset convention
+the Files tab already uses for `.glb` files, just filtered to image
+extensions; v1 is deliberately just "load and look at it," no pan/zoom.
+
+New wrist-tablet **Windows** tab, one toggle button per window (a plain
+button, not `toggle_mode`, since a window can also be closed by its own
+"X" — see `wrist_tablet.gd`'s own `_window_toggle_button()` docstring for
+why keeping a separate toggle-button state in sync wasn't worth it).
+
+**Explicitly not attempted this phase** (separate, unstarted spike):
+
+- **DIDSA-CAD as a flat window** — blocked on DIDSA-CAD's own Flutter
+  client gaining a web build target (`flutter create --platforms=web` —
+  doesn't exist today, confirmed: no `web/` folder in that repo) and
+  validating `flutter_gpu`'s web support, an open, unvalidated risk per
+  that repo's own recon docs (`docs/vr-recon-2026-09-24.md`/
+  `-2-2026-09-24.md`). This is a DIDSA-CAD-repo spike, not a DIDSA-VR task.
+  (Browser and PDF reader, originally alongside this in the "not attempted"
+  list, are now built — see "Browser window and browser-relay" below.)
+
+**Update, same session: Godot 4.7.2 obtained and the full suite actually
+run.** The initial claim above ("no Godot available, only inspected") held
+for the first pass — `apt` only has `godot3-server`, incompatible with this
+Godot-4 project, and the obvious release-download hosts
+(`downloads.tuxfamily.org`, `godotengine.org`) are both blocked by this
+sandbox's network policy. `github.com`'s own release-asset redirect
+(`objects.githubusercontent.com`/`release-assets.githubusercontent.com`)
+was not blocked, though, and `project.godot`'s `config/features` names the
+exact version this project actually targets (`"4.7"`, not assumed) — Godot
+4.7.2-stable downloaded from there and `tests/run_all.sh` genuinely run
+against it caught two real bugs neither inspection nor Godot 4.2.2
+(tried first, wrong minor version, masked one of them entirely) surfaced:
+
+- **A real production bug in `controller.gd`.** The per-frame `ui_hover`/
+  `ui_hit_distance` reset (added for the arbitration fix above) assumed
+  being `main.gd`'s first child meant it always ran before every panel's
+  own `_process()` — wrong: `wrist_tablet.gd` is three levels deep
+  (parented under the LEFT controller, not a sibling of the right one),
+  and in practice sometimes ran first instead, silently wiping out a hover
+  it had just legitimately claimed. `tests/laser_and_left_hand.gd` (pre-
+  existing, not written this session) caught it — its own "shortens to the
+  tablet via ui_hit_distance" line came back `false`, a genuine regression
+  confirmed by disabling the new reset and re-running (passed) before
+  re-enabling it with the real fix: `process_priority = -1000` on
+  `controller.gd`, Godot's own explicit ordering mechanism, not tree
+  position.
+- **A real bug in the Calculator itself.** Godot's `Expression` class does
+  true integer division for two integer literals, exactly like GDScript's
+  own `/` operator — `"10/4"` evaluated to `2`, not `2.5`. Not a cosmetic
+  formatting issue: a user typing that on the in-VR calculator would get a
+  silently wrong answer. Fixed with `_floatify()` in
+  `calculator_window.gd`, appending `.0` to every bare integer literal
+  before parsing.
+
+Two more bugs turned out to be in this session's own *test* code, not the
+shipped app: `tests/windows_tab.gd`'s first draft aimed at the wrist tablet
+with `look_at()`, degenerate for a panel that lies flat (its quad faces
+straight up) — fixed by porting `tests/section_tab.gd`'s own proven fixed-
+orientation aim; and it opened the tablet directly via `open_tablet()`
+without also waiting out `open_settle_seconds` (0.4s, real wall-clock time,
+ignores an immediate press) the way every other full-scene test already
+does, silently swallowing its very first click.
+
+`tests/run_all.sh` now passes clean end to end (exit 0, every SMOKE line
+matching this doc's and `tests/README.md`'s own documented expected
+values). **Still open**: `tests/e2e_assembly_tree.gd` (needs a real running
+backend — none in this sandbox) and, same as every other milestone in this
+project, a real headset pass.
+
+### Browser window and browser-relay: the deferred Browser/PDF reader built, differently than originally scoped
+
+After the sections above shipped, John asked to progress this milestone
+further and reframed the deferred Browser item: "if DIDSA-CAD can run in a
+floating window, can any app? E.g. a lightweight browser?" — a real
+question, since DIDSA-CAD-as-a-window (see above) is itself just "run
+some other real app and show it in a Godot panel." Checked directly rather
+than assumed: `gdcef` (the one Godot-CEF GDExtension found) publishes
+Linux/Windows/macOS builds only, no Android — so native in-Godot CEF
+embedding was ruled out for Quest specifically, for real, not on
+suspicion. A `neko`-style WebRTC remote-desktop server was considered and
+rejected too: real and Docker-deployable, but it needs "a full WebRTC
+browser client" on the viewing end, reintroducing the same native-webview
+dependency problem one level removed.
+
+**What got built instead: a generalized "any web content as a floating
+window" mechanism**, specifically the Chrome DevTools Protocol (CDP) over
+a plain authenticated WebSocket, needing only Godot's own core APIs
+(`WebSocketPeer`, `Image.load_jpg_from_buffer()`) — no GDExtension, no
+native dependency, works identically on Android. Two new pieces:
+
+- **`browser-relay/` (DIDSA-CAD repo, new)** — a small FastAPI service,
+  deliberately a "dumb relay": it authenticates a WebSocket
+  (`X-API-Key`/`BROWSER_RELAY_API_KEY`, its own separate key from the CAD
+  backend's — see `browser-relay/app/auth.py`'s docstring for why), asks a
+  single shared headless-Chromium process it manages for a fresh tab (up
+  to `BROWSER_RELAY_MAX_SESSIONS`, default 2), and then copies raw
+  WebSocket frames verbatim between the client and that tab's own CDP
+  WebSocket until either side disconnects. It has no idea what
+  `Page.navigate` or `Input.dispatchMouseEvent` even are — every CDP
+  detail lives client-side, in `browser_window.gd`, on purpose (see that
+  service's own README for the reasoning: it keeps this service's surface
+  from growing every time the client starts using a new CDP domain).
+  Deployed as its **own** Docker container (new root `docker-compose.yml`),
+  separate from the existing OCCT `backend/` container, specifically so a
+  misbehaving Chromium tab can't starve memory the geometry solver needs —
+  both run on the same Raspberry Pi 5 (4GB), which is why this was worth
+  being deliberate about (see `docker-compose.yml`'s own comments for the
+  concrete limits: `mem_limit: 768m`, `cpus: 1.0`, `shm_size: 256mb`).
+- **`scripts/browser_window.gd` (this repo, new)** — a `diegetic_panel.gd`
+  window with a URL bar and back/forward/refresh, whose content area is a
+  live JPEG screencast of the real Chrome tab (`Page.startScreencast`,
+  decoded frame-by-frame), with clicks/drags on it forwarded as
+  `Input.dispatchMouseEvent` at the scaled CDP device coordinates. All the
+  CDP message building/parsing is pure static functions
+  (`build_message()`, `scale_to_device()`, `parse_incoming()`, etc.) —
+  deliberately split out so `tests/browser_window.gd` can test them
+  directly, the same pattern `calculator_window.gd`'s
+  `evaluate_expression()` already established.
+
+**PDF reader needed no separate work at all.** Pointing the Browser window
+at a PDF URL makes Chrome's own built-in PDF viewer render it inline —
+confirmed for real (see below), not assumed from general Chrome
+knowledge. John's instruction on this ("a browser might be able to handle
+PDFs, if not keep researching") is fully settled: it can, so there's
+nothing further to research.
+
+**This is the first piece of work this session validated with a real,
+live, multi-process end-to-end pass, not just headless unit tests against
+fakes** — made possible because this sandbox turned out to have a working
+Chromium binary after all (Playwright's own bundled build at
+`/opt/pw-browsers/chromium`), even though Ubuntu's own `chromium-browser`
+apt package does not (confirmed by actually installing it: it pulls in
+`snapd` and refuses to run — "requires the chromium snap to be installed"
+— because this sandbox has no working snapd, a dead end that would have
+otherwise stood in the way of testing any of this for real). With that
+binary:
+
+1. **The relay service itself**, run directly (`uvicorn`, no Docker — no
+   Docker daemon in this sandbox either) with
+   `BROWSER_RELAY_CHROME_BINARY` pointed at that real Chromium: a plain
+   Python WebSocket client drove a full `Page.enable` →
+   `Page.navigate` → `Page.startScreencast` → real `Page.screencastFrame`
+   → `Page.screencastFrameAck` → `Input.dispatchMouseEvent` sequence
+   through it against a real Chrome tab, and a wrong-`X-API-Key`
+   connection was confirmed rejected (HTTP 403 before the WebSocket
+   handshake even completes).
+2. **The PDF question**, settled the same way: navigating a real tab to a
+   local PDF file (`file:///tmp/test.pdf`) loads Chrome's own built-in
+   PDF-viewer extension into a child frame (`chrome-extension://…`),
+   fires a normal `Page.loadEventFired` with `isDownload: false` (no
+   download prompt), and the screencast keeps producing real frames of
+   the rendered page — this is also exactly why `extract_frame_url()`
+   only looks at the *top-level* frame's own navigation: the PDF viewer's
+   internal frame would otherwise overwrite the URL bar with its own
+   `chrome-extension://` URL.
+3. **The actual Godot client code**, not a Python stand-in: a one-off
+   script (not committed — the real coverage lives in
+   `tests/browser_window.gd`'s pure-function tests plus this record) ran
+   inside a real headless Godot 4.7.2 process, using `WebSocketPeer` with
+   `handshake_headers` set to a real `X-API-Key`, against the real running
+   relay from step 1. It confirmed: the custom-header WebSocket handshake
+   actually works from Godot's own `WebSocketPeer` (this had only been
+   confirmed to exist as a property before, via `ClassDB` reflection, not
+   exercised); a real `Page.navigate` and a real `Page.screencastFrame`
+   round-tripped through the relay; the JPEG payload decoded into a real
+   800×600 `Image` via Godot's own `Image.load_jpg_from_buffer()`; and a
+   real `Input.dispatchMouseEvent` (press + release) sent without error.
+
+**Update, same session: John asked whether installing Docker would allow
+more thorough testing — yes, and it did, up to a real network-policy
+wall.** A Docker daemon wasn't available in this sandbox initially; asked
+to install it, `dockerd` turned out to already be present and started
+cleanly (containerd, buildkit, overlayfs all came up without issue). With
+it:
+
+- **The `browser-relay` image's non-Chromium layers built and ran for
+  real**: the exact base image, a `pip install` of the exact
+  `requirements.txt` (needing a documented workaround for this sandbox
+  specifically — installing this sandbox's proxy CA bundle as a trusted CA
+  in an early build layer, since a plain container doesn't trust it by
+  default), and the app code copied in.
+- **The actual containerized app was run as a real Docker container** (not
+  just `python -m uvicorn` on the host) and its fail-fast startup
+  behaviour was confirmed for real: pointing `BROWSER_RELAY_CHROME_BINARY`
+  at a non-Chrome binary inside the running container made it refuse to
+  start with a clear error, rather than come up silently broken.
+- **What it still couldn't reach: the Dockerfile's one Chromium-installing
+  line.** `deb.debian.org` returns `403 Forbidden` on both HTTP and HTTPS
+  from this sandbox — confirmed directly with `curl`, not assumed, and
+  not transient (retried once, same result) — which is this specific
+  sandbox's own network egress policy, not a Dockerfile problem. As a
+  substitute check of what that line is *for*, a real working Chromium
+  binary (the same Playwright one from the check above) was bind-mounted
+  into the built image and run directly: it failed with `error while
+  loading shared libraries: libglib-2.0.so.0: cannot open shared object
+  file` — exactly the runtime dependency `apt-get install chromium` exists
+  to pull in, confirming what was missing without confirming apt itself
+  can supply it here.
+
+**What's still unverified, net of all of the above**: the Debian-apt
+`chromium` package specifically actually resolving and installing its
+full dependency set (blocked only by this sandbox's `deb.debian.org`
+access, not by anything about the package or the Dockerfile) and the
+arm64 Raspberry Pi target — both reasonable to expect to behave like any
+other environment where that domain is reachable, but neither run for
+real yet — and, as with every other window in this project, a real
+headset. `browser-relay/README.md` carries this same detail on the
+DIDSA-CAD side.
+
 ## Untested paths
 
+- **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
+  `diegetic_panel.gd` framework they're built on) — now headless-confirmed
+  (Godot 4.7.2, `tests/run_all.sh` clean), not yet real-backend- or
+  headset-confirmed.** See "Milestone 3 — floating windows" above for the
+  two real bugs actually running the suite caught and fixed (a
+  `controller.gd` process-ordering bug and a real Calculator wrong-answer
+  bug) — the headless bar is cleared, same as everything else in this
+  list, but `tests/e2e_assembly_tree.gd` still needs a real backend (none
+  in this sandbox) and nothing here has felt a real hand pulling a real
+  trigger yet.
 - **28 Sep 2026 session's two additions — Open/Add (Files tab) and the
   Measure tab — are both headless- and real-backend-confirmed only, same
   as everything else in this list.** See "Open/add-parts pathway built"
@@ -1251,8 +1552,9 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
 ## Vision brief drift
 
 **As of 28 Sep 2026, this repo's own `docs/vision-brief.md` export is fully
-caught up with everything below** — milestone 1's and milestone 4's table
-rows, the Mates cross-compatibility note, and the Mates-testing-blocker
+caught up with everything below** — milestone 1's, milestone 3's and
+milestone 4's table rows, the "Interactive tree" bullet under Assembly
+tools, the Mates cross-compatibility note, and the Mates-testing-blocker
 checkbox have all been hand-edited into the export directly. **What's still
 open: none of this has been pushed back into the live Claude Docs
 artifact** — no session so far (this one included) has had access to it,
@@ -1297,3 +1599,11 @@ direction.
   actually closed it (`POST /parts/{id}/add-component` — see "Open/add-parts
   pathway built" above) and that the separate storage/composition decision
   is narrower than it looked as a result.
+- **Milestone 3 and the "Interactive tree" bullet.** Export's milestone-3
+  row now says it's mostly done (Assembly Tree/Calculator/Image
+  Viewer/Browser built, Browser doubling as the PDF reader; only
+  DIDSA-CAD-as-a-window remains flagged as its own unstarted spike) rather
+  than listing all five as equally unbuilt, and the Assembly tools list's
+  "Interactive tree" bullet now notes the browse/tap-to-select half is
+  built, with "pulled out into world space" called out as further scope.
+  See "Milestone 3 — floating windows" above for the full detail.

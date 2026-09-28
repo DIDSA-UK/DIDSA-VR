@@ -86,6 +86,21 @@ var _camera: XRCamera3D
 
 
 func _ready() -> void:
+	# Guarantees this node's own _process() (the ui_hover/ui_hit_distance
+	# reset below) runs before every UI panel's — including wrist_tablet.gd,
+	# which is three levels deep (parented under the LEFT controller, not a
+	# sibling of this one) rather than a direct child of main.gd's root as
+	# first assumed. Confirmed by actually running this against a real
+	# Godot instead of only inspecting the code (see docs/status.md): tree
+	# depth/add-order alone did NOT reliably put this first, and without
+	# this fix the reset sometimes ran AFTER wrist_tablet.gd's own
+	# _process() within the same frame, wiping out a hover it had just
+	# legitimately claimed — tests/laser_and_left_hand.gd's own
+	# "shortens to the tablet via ui_hit_distance" check caught this.
+	# process_priority is Godot's own explicit, documented ordering
+	# mechanism for exactly this (lower runs first) — a real fix, not a
+	# workaround.
+	process_priority = -1000
 	button_pressed.connect(_on_button_pressed)
 	button_released.connect(_on_button_released)
 	set_steadiness(steadiness)
@@ -114,6 +129,27 @@ func set_steadiness(level: int) -> void:
 	steadiness = clampi(level, 0, TwoHandModel.STEADINESS_NAMES.size() - 1)
 	_grab_filter.min_cutoff = maxf(TwoHandModel.STEADINESS_CUTOFF_HZ[steadiness], 0.01)
 	_grab_filter.beta = TwoHandModel.STEADINESS_BETA
+
+
+func _process(_delta: float) -> void:
+	## Resets the shared "ui_hover"/"ui_hit_distance" meta (written by
+	## wrist_tablet.gd, popup_keyboard.gd, and any scripts/diegetic_panel.gd
+	## -based floating window — see that script's own top docstring) to
+	## neutral at the very start of every frame, before any of those panels'
+	## own _process() runs — guaranteed by this node's process_priority
+	## (set in _ready()), not by tree position: wrist_tablet.gd is three
+	## levels deep (parented under the LEFT controller, not a sibling of
+	## this one), so plain child/add order does NOT reliably put this
+	## first — confirmed the hard way by actually running the tests against
+	## a real Godot instead of only inspecting the code. Without this
+	## reset, a floating window nobody's aiming at any more could keep
+	## "owning" these two values indefinitely, since diegetic_panel.gd's own
+	## arbitration only ever CLAIMS the meta, never unclaims it on its own —
+	## see that script's own top docstring for the full picture this is one
+	## half of (a first-claim-per-frame scheme, not nearest-hit, chosen so
+	## at most one panel can ever believe it's hovered in a given frame).
+	set_meta("ui_hover", false)
+	set_meta("ui_hit_distance", -1.0)
 
 
 func _physics_process(delta: float) -> void:
@@ -368,6 +404,23 @@ func _try_select() -> void:
 	if target != null:
 		var pivot_point: Vector3 = hit.get("point", target.global_position)
 		_set_selection(target, pivot_point)
+
+
+func select_external(node: Node3D, point: Vector3) -> void:
+	## Lets something other than this hand's own laser drive selection
+	## through the exact same path laser-select uses (_set_selection()/
+	## _clear_selection() and their command_stack bookkeeping) instead of
+	## reaching into private state — the assembly tree window's tap-to-
+	## select (assembly_tree_window.gd, called via main.gd's
+	## select_part_by_occurrence_id()) is the first caller. Re-selecting the
+	## already-selected node deselects it, matching _try_select()'s own
+	## toggle behaviour.
+	if selected_node == node:
+		_clear_selection()
+		return
+	if selected_node != null:
+		_clear_selection()
+	_set_selection(node, point)
 
 
 func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> Dictionary:
