@@ -178,6 +178,7 @@ func _initialize() -> void:
 	await physics_frame
 	l.button_pressed.emit("grip_click")
 	print("SMOKE gripping near the handle grabs the panel: ", calc._held_by == l)
+	print("SMOKE gripping a window sets the window_held meta, so two_hand_model.gd won't also drag the world: ", l.get_meta("window_held", false) == true and not main._two_hand._hand_free_ignoring_button(l))
 	var before: Vector3 = calc.global_position
 	l.position += Vector3(0.3, 0.1, -0.2)
 	for i in 3:
@@ -192,6 +193,28 @@ func _initialize() -> void:
 	for i in 3:
 		await process_frame
 	print("SMOKE releasing the handle stops the panel from following further hand movement: ", calc._held_by == null and calc.global_position.is_equal_approx(after_release))
+	print("SMOKE releasing the window clears the window_held meta: ", l.get_meta("window_held", true) == false)
+
+	# Closing a window while still gripping its handle must not leave the meta
+	# stuck true (that would block whole-model drags with that hand forever).
+	calc.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, -1.0))
+	l.position = calc._handle.global_position
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	var grabbed_again: bool = l.get_meta("window_held", false) == true
+	calc.close()
+	print("SMOKE closing a window mid-grab clears the window_held meta: ", grabbed_again and l.get_meta("window_held", true) == false)
+	l.button_released.emit("grip_click")
+
+	# controller.gd must NOT also grab a part/gizmo on a grip aimed at a window handle.
+	calc.open()
+	await process_frame
+	calc.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, -1.0))
+	l.position = calc._handle.global_position
+	await physics_frame
+	print("SMOKE a hand at a window's handle reports it in reach (controller.gd defers to the window): ", calc.handle_in_reach(l))
+	l.position = calc._handle.global_position + Vector3(0.5, 0, 0)
+	print("SMOKE a hand 50cm from the handle does not: ", not calc.handle_in_reach(l))
 	calc.close()
 
 	tree_window.close()

@@ -52,7 +52,7 @@ func _initialize() -> void:
 	while window._stale and Time.get_ticks_msec() - tree_started_ms < 20000:
 		await process_frame
 	print("SMOKE the tree finished a real GET .../occurrences fetch: ", not window._stale)
-	print("SMOKE assembly.didsa's real root occurrences came back non-empty: ", not window._tree.is_empty())
+	print("SMOKE assembly.didsa's real root occurrences came back non-empty: ", not window._tree.is_empty() and window._tree[0]["children"] != null and not window._tree[0]["children"].is_empty())
 
 	# Tap-to-select: find a row whose occurrence_id matches a currently
 	# rendered leaf part (mesh_identity.gd-tagged), same lookup
@@ -68,10 +68,24 @@ func _initialize() -> void:
 		quit(1)
 		return
 
+	# The tree's single top row is the root Part itself; its placed Occurrences
+	# are that row's children.
 	var found_row := false
-	for row in window._tree:
-		if row["id"] == target_occurrence_id:
-			found_row = true
+	for top in window._tree:
+		for row in (top["children"] if top["children"] != null else []):
+			if row["id"] == target_occurrence_id:
+				found_row = true
+	# Real Part names, not "Occurrence <uuid>" placeholders, once the names resolve:
+	var names_deadline := Time.get_ticks_msec() + 10000
+	var all_named := false
+	while not all_named and Time.get_ticks_msec() < names_deadline:
+		await process_frame
+		all_named = true
+		for top in window._tree:
+			for row in (top["children"] if top["children"] != null else []):
+				if row["name"].begins_with("Occurrence"):
+					all_named = false
+	print("SMOKE every occurrence row was relabelled with its real Part name: ", all_named)
 	print("SMOKE the tree includes a row for a real rendered occurrence: ", found_row)
 
 	var selected: bool = main.select_part_by_occurrence_id(target_occurrence_id)

@@ -91,6 +91,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	_build_viewport()
 	_build_quad()
 	_build_handle()
+	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
 	_right.button_pressed.connect(_on_right_pressed)
 	_right.button_released.connect(_on_right_released)
 	_left.button_pressed.connect(_on_grip_pressed.bind(_left))
@@ -116,7 +117,7 @@ func close() -> void:
 	_open = false
 	visible = false
 	_hovering = false
-	_held_by = null # don't leave the panel following a hand that's still gripping when it closes
+	_clear_held()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if _right:
 		_right.set_meta("ui_hover", false)
@@ -240,19 +241,29 @@ func _send_click(down: bool) -> void:
 	_viewport.push_input(click)
 
 
+func handle_in_reach(hand: Node3D) -> bool:
+	## True if this open panel's drag handle is within this hand's grab reach.
+	## controller.gd's _try_grab() asks every panel first (its own grip handler
+	## runs before this one's), so a grip aimed at a window never also grabs a
+	## part or the section gizmo.
+	if not _open or _handle == null or not visible:
+		return false
+	var reach: float = (_handle.mesh as CapsuleMesh).radius + handle_grab_reach
+	return hand.global_position.distance_to(_handle.global_position) <= reach
+
+
 func _on_grip_pressed(action_name: String, hand: XRController3D) -> void:
 	## These windows aren't wrist- or camera-attached - once placed in front
 	## of you on open, they stay exactly there until dragged by this handle.
-	## Self-contained (not routed through controller.gd's own part-grab
-	## search, unlike section_tool.gd's gizmo - see this file's own top
-	## docstring on why that class of fix stays out of proven, tested
-	## files): a window handle floats well clear of the assembly in normal
-	## use, so it doesn't need arbitration against an ordinary part-grab.
-	if action_name != grab_action or not _open or _held_by != null or _handle == null:
+	## Grabbing sets a "window_held" meta on the hand (same convention as
+	## section_tool.gd's "section_gizmo_held") so two_hand_model.gd's
+	## _hand_free() doesn't also drag the whole model with the same grip press
+	## - real-headset feedback: grabbing a window moved the world too.
+	if action_name != grab_action or not _open or _held_by != null:
 		return
-	var reach: float = (_handle.mesh as CapsuleMesh).radius + handle_grab_reach
-	if hand.global_position.distance_to(_handle.global_position) <= reach:
+	if handle_in_reach(hand):
 		_held_by = hand
+		hand.set_meta("window_held", true)
 		_grab_offset = hand.global_transform.affine_inverse() * global_transform
 		_handle_material.albedo_color = Color(1.0, 1.0, 1.0)
 		hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
@@ -260,7 +271,16 @@ func _on_grip_pressed(action_name: String, hand: XRController3D) -> void:
 
 func _on_grip_released(action_name: String, hand: XRController3D) -> void:
 	if action_name == grab_action and _held_by == hand:
-		_held_by = null
+		_clear_held()
+
+
+func _clear_held() -> void:
+	## Shared by release and close(): a window closed mid-grab must not leave
+	## that hand's meta stuck true, permanently blocking whole-model drags.
+	if _held_by != null and is_instance_valid(_held_by):
+		_held_by.set_meta("window_held", false)
+	_held_by = null
+	if _handle_material:
 		_handle_material.albedo_color = Color(0.82, 0.85, 0.9)
 
 
@@ -358,7 +378,15 @@ func _build_root_ui() -> Control:
 	_content_holder = VBoxContainer.new()
 	_content_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(_content_holder)
-	_content_holder.add_child(_build_content())
+	# The content must EXPAND to fill the holder: a BoxContainer child without
+	# an expand flag only gets its own minimum size, so a subclass's inner
+	# SIZE_EXPAND_FILL ScrollContainer (the Assembly Tree's row list) collapsed
+	# to ~0 px tall and its rows were never visible — real-headset report
+	# "nothing ever populates in the tree".
+	var content := _build_content()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content_holder.add_child(content)
 
 	# A soft glow where the laser terminates - same convention as
 	# wrist_tablet.gd/popup_keyboard.gd's own cursor, for the same real-

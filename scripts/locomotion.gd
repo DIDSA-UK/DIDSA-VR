@@ -61,8 +61,16 @@ func _handle_move(delta: float) -> void:
 	global_position += direction * move_speed * delta
 
 
+func _right_stick_owned_by_ui() -> bool:
+	## The right laser is on the wrist tablet / a floating window: the right
+	## stick scrolls that panel (wrist_tablet.gd), so it must not also turn or
+	## teleport you. "ui_hover" is reset and re-claimed in _process() before
+	## this _physics_process() runs (see controller.gd).
+	return right_controller.has_meta("ui_hover") and right_controller.get_meta("ui_hover")
+
+
 func _handle_snap_turn() -> void:
-	if right_controller.has_method("is_manipulating") and right_controller.is_manipulating():
+	if (right_controller.has_method("is_manipulating") and right_controller.is_manipulating()) or _right_stick_owned_by_ui():
 		_snap_ready = true
 		return
 
@@ -73,17 +81,24 @@ func _handle_snap_turn() -> void:
 	if not _snap_ready:
 		return
 
-	var angle := deg_to_rad(snap_turn_degrees) * signf(input.x)
+	_snap_turn(signf(input.x))
+	_snap_ready = false
+
+
+func _snap_turn(direction: float) -> void:
+	## direction: +1 = turn right, -1 = turn left.
+	# Negated: a positive rotation about +Y is counter-clockwise (a LEFT turn),
+	# so a right push (positive x) used to turn you left — real-headset report.
+	var angle := -deg_to_rad(snap_turn_degrees) * direction
 	# Rotate about the camera's current position, not the origin's own, so
 	# a snap-turn reorients you in place instead of also flinging you sideways.
 	var pivot := camera.global_position
 	global_position = pivot + (global_position - pivot).rotated(Vector3.UP, angle)
 	rotate_y(angle)
-	_snap_ready = false
 
 
 func _handle_teleport() -> void:
-	if right_controller.has_method("is_manipulating") and right_controller.is_manipulating():
+	if (right_controller.has_method("is_manipulating") and right_controller.is_manipulating()) or _right_stick_owned_by_ui():
 		_hide_teleport_preview()
 		return
 

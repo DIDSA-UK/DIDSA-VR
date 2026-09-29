@@ -38,6 +38,7 @@ extends Node3D
 
 @onready var http_request: HTTPRequest = $HTTPRequest
 @onready var assembly_root: Node3D = $AssemblyRoot
+var _load_busy := false ## true while an Open/Add/import (or the startup import) is mid-flight — see _claim_load()
 var status_text: String = "" ## what _set_status() last said — console-only now (see that function): no floating 3D text in the scene, per John's own real-headset feedback that it was distracting. Kept as a plain string (not just a print) so tests/e2e_*.gd can still poll it to know when a load finished.
 
 var xr_interface: XRInterface
@@ -104,7 +105,7 @@ func _ready() -> void:
 	_assembly_tree_window.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
-	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport())
+	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
 	_world_environment.set_scene(_settings.last_scene)
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
@@ -472,6 +473,7 @@ func _begin_import() -> void:
 		# to the mesh fetch (the old, manual-part-id behaviour).
 		_resolved_part_id = part_id_override
 		_download_started_ms = Time.get_ticks_msec()
+		_load_busy = true # released by _on_mesh_completed()
 		_fetch_mesh()
 		return
 
@@ -498,8 +500,10 @@ func _begin_import() -> void:
 
 	var url := "%s%s/import/native" % [backend_url, API_PREFIX]
 	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	_load_busy = true # released by _on_import_completed() (on failure) or _on_mesh_completed()
 	var error := http_request.request(url, headers, HTTPClient.METHOD_POST, raw_text)
 	if error != OK:
+		_load_busy = false
 		_set_status("Import request failed to start (error %d)" % error)
 
 
@@ -510,7 +514,8 @@ func _on_import_completed(result: int, response_code: int, _headers: PackedStrin
 	http_request.request_completed.disconnect(_on_import_completed)
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
-		_set_status("Import failed: HTTP %d (result %d)" % [response_code, result])
+		_load_busy = false
+		_set_status("Import failed: %s" % _http_error_text(response_code, result, body))
 		push_error("DIDSA VR spike: /import/native failed: result=%d code=%d body=%s" % [result, response_code, body.get_string_from_utf8()])
 		return
 
@@ -533,8 +538,9 @@ func _fetch_mesh() -> void:
 
 
 func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_load_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
-		_set_status("Mesh load failed: HTTP %d (result %d)" % [response_code, result])
+		_set_status("Mesh load failed: %s" % _http_error_text(response_code, result, body))
 		push_error("DIDSA VR spike: assembly-mesh.glb fetch failed: result=%d code=%d" % [result, response_code])
 		return
 
@@ -600,6 +606,33 @@ func load_model_file(path: String) -> void:
 		_set_status("Don't know how to load %s (extension .%s)" % [path.get_file(), ext])
 
 
+var _native_root_id_cache: Dictionary = {} ## path -> {"mtime": int, "id": String}
+
+func native_file_root_part_id(path: String) -> String:
+	## The root Part id a native .didsa/.DIDSAprt file would load as (its
+	## document.root_part_id, else its first Part — the backend's own fallback),
+	## or "" if unreadable. Quiet (no status message): the Files tab uses it to
+	## hide "Add" on the file that IS the loaded root, since the backend rejects
+	## that with 422 "Cannot insert a Part into itself". Cached per file mtime.
+	var mtime := FileAccess.get_modified_time(path)
+	var cached = _native_root_id_cache.get(path)
+	if cached != null and cached["mtime"] == mtime:
+		return cached["id"]
+	var found := ""
+	if not FileAccess.file_exists(path):
+		return found
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if parsed is Dictionary and parsed.get("document") is Dictionary:
+		var document: Dictionary = parsed["document"]
+		found = str(document.get("root_part_id", ""))
+		if found.is_empty() and document.get("parts") is Array and not (document["parts"] as Array).is_empty():
+			var first = document["parts"][0]
+			if first is Dictionary:
+				found = str(first.get("id", ""))
+	_native_root_id_cache[path] = {"mtime": mtime, "id": found}
+	return found
+
+
 func _read_native_json(path: String) -> Variant:
 	## Shared by open_native_file()/add_component_file(): reads and JSON-
 	## parses a local native file, or null (having already set the status)
@@ -620,6 +653,13 @@ func _read_native_json(path: String) -> Variant:
 
 
 func open_native_file(path: String) -> void:
+	if not _claim_load("Open"):
+		return
+	await _open_native_file_impl(path)
+	_load_busy = false
+
+
+func _open_native_file_impl(path: String) -> void:
 	## Files tab "Open": a full-replace load of a different native .didsa/
 	## .DIDSAprt file at runtime — mirrors _begin_import()'s startup flow
 	## (import, then fetch+render), just callable at any time and from an
@@ -656,14 +696,13 @@ func open_native_file(path: String) -> void:
 	]
 	if tier != "":
 		mesh_url += "&tier=%s" % tier
-	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
-	var mesh_result: Array = await req.request_completed
+	var mesh_result: Array = await _get_mesh_result(req, mesh_url)
 	req.queue_free()
 	var mesh_result_code: int = mesh_result[0]
 	var mesh_response_code: int = mesh_result[1]
 	var mesh_body: PackedByteArray = mesh_result[3]
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
-		_set_status("Mesh load for %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		_set_status("Mesh load for %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
 		return
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
@@ -671,6 +710,13 @@ func open_native_file(path: String) -> void:
 
 
 func add_component_file(path: String) -> void:
+	if not _claim_load("Add"):
+		return
+	await _add_component_file_impl(path)
+	_load_busy = false
+
+
+func _add_component_file_impl(path: String) -> void:
 	## Files tab "Add": merges a second native file's own Part into the
 	## *currently loaded* assembly's root Part as a new Occurrence, via the
 	## backend's POST /parts/{root_id}/add-component
@@ -711,14 +757,13 @@ func add_component_file(path: String) -> void:
 	]
 	if tier != "":
 		mesh_url += "&tier=%s" % tier
-	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
-	var mesh_result: Array = await req.request_completed
+	var mesh_result: Array = await _get_mesh_result(req, mesh_url)
 	req.queue_free()
 	var mesh_result_code: int = mesh_result[0]
 	var mesh_response_code: int = mesh_result[1]
 	var mesh_body: PackedByteArray = mesh_result[3]
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
-		_set_status("Mesh refresh after adding %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		_set_status("Mesh refresh after adding %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
 		return
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
@@ -740,6 +785,13 @@ func load_glb_file(path: String) -> void:
 
 
 func _import_external_file(path: String, source_format: String) -> void:
+	if not _claim_load("the import"):
+		return
+	await _import_external_file_impl(path, source_format)
+	_load_busy = false
+
+
+func _import_external_file_impl(path: String, source_format: String) -> void:
 	## STEP/STL/OBJ, milestone 1's last "done when" item: the backend has no
 	## bare "view this file" endpoint for these, so this creates a fresh Part
 	## (POST /parts), imports the file into it as a fixed Body
@@ -788,14 +840,13 @@ func _import_external_file(path: String, source_format: String) -> void:
 
 	_set_status("Imported. Fetching mesh...")
 	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=false" % [backend_url, API_PREFIX, new_part_id, str(quality)]
-	req.request(mesh_url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
-	var mesh_result: Array = await req.request_completed
+	var mesh_result: Array = await _get_mesh_result(req, mesh_url)
 	req.queue_free()
 	var mesh_result_code: int = mesh_result[0]
 	var mesh_response_code: int = mesh_result[1]
 	var mesh_body: PackedByteArray = mesh_result[3]
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
-		_set_status("Mesh fetch for %s failed: HTTP %d (result %d)" % [path.get_file(), mesh_response_code, mesh_result_code])
+		_set_status("Mesh fetch for %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
 		return
 
 	_set_status("Downloaded %d KB, parsing glTF..." % int(mesh_body.size() / 1024.0))
@@ -806,6 +857,50 @@ func _import_external_file(path: String, source_format: String) -> void:
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
 
 
+func _http_error_text(response_code: int, result_code: int, body: PackedByteArray) -> String:
+	## "HTTP 422 (result 0): Cannot insert a Part into itself" — the backend's
+	## own FastAPI `detail` is what says WHY, and the tablet's Files status
+	## label is the only place it can be read from inside a headset.
+	var text := "HTTP %d (result %d)" % [response_code, result_code]
+	if body.size() > 0:
+		var parsed = JSON.parse_string(body.get_string_from_utf8())
+		if parsed is Dictionary and parsed.has("detail"):
+			var detail = parsed["detail"]
+			text += ": %s" % (detail if detail is String else JSON.stringify(detail))
+	return text
+
+
+func _get_mesh_result(req: HTTPRequest, url: String) -> Array:
+	## GETs an assembly-mesh.glb, retrying ONCE after a 5xx (the backend keeps a
+	## single global in-memory Document, so a request that overlaps another
+	## client's import/add can 500 transiently). The failing body is logged so
+	## a repeat is diagnosable from the console.
+	var result: Array = []
+	for attempt in 2:
+		req.request(url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+		result = await req.request_completed
+		if attempt == 0 and result[0] == HTTPRequest.RESULT_SUCCESS and int(result[1]) >= 500:
+			push_error("DIDSA VR: assembly-mesh.glb fetch got HTTP %d, retrying once: %s" % [result[1], (result[3] as PackedByteArray).get_string_from_utf8().left(300)])
+			await get_tree().create_timer(0.6).timeout
+			continue
+		break
+	return result
+
+
+func _claim_load(what: String) -> bool:
+	## Open / Add / STEP-import each replace or mutate the backend's ONE global
+	## Document across several awaited round trips, and each was an un-guarded
+	## coroutine — a second tap (or a tap while the startup import was still in
+	## flight) interleaved with the first and could 500 it or leave the session
+	## in a state the client no longer matched (real-headset report: HTTP 500,
+	## fixed by restarting). One at a time.
+	if _load_busy:
+		_set_status("Busy: still working on the previous file — try %s again in a moment." % what)
+		return false
+	_load_busy = true
+	return true
+
+
 func _parse_import_response(result: Array, step_description: String, req: HTTPRequest):
 	## Common HTTP-result/JSON-parse checking for _import_external_file()'s
 	## three sequential calls. Returns the parsed JSON Dictionary on success,
@@ -814,7 +909,7 @@ func _parse_import_response(result: Array, step_description: String, req: HTTPRe
 	var response_code: int = result[1]
 	var body: PackedByteArray = result[3]
 	if result_code != HTTPRequest.RESULT_SUCCESS or (response_code != 200 and response_code != 201):
-		_set_status("Couldn't %s: HTTP %d (result %d)" % [step_description, response_code, result_code])
+		_set_status("Couldn't %s: %s" % [step_description, _http_error_text(response_code, result_code, body)])
 		push_error("DIDSA VR spike: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
 		req.queue_free()
 		return null

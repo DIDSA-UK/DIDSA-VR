@@ -30,6 +30,8 @@ var _root_part_id := ""
 var _tree: Array = [] ## top-level rows: [{id, name, resolved_part_id, children: Array|null, expanded: bool}, ...]
 var _stale := true
 var _busy := false
+var _refresh_token := 0 ## bumped by every _refresh_root(), so a slower earlier fetch can't overwrite a newer one (mark_stale() + _on_opened() can both fire)
+var _part_names: Dictionary = {} ## resolved_part_id -> the Part's own name (GET /parts/{id}), so rows read "Assy Test Peg" instead of "Occurrence d3c102e0"
 
 var _status_label: Label
 var _rows_box: VBoxContainer
@@ -71,19 +73,65 @@ func _on_opened() -> void:
 
 
 func _refresh_root() -> void:
+	_refresh_token += 1
+	var token := _refresh_token
 	_root_part_id = _main.current_root_part_id() if _main else ""
 	if _root_part_id == "":
 		_set_status("No assembly loaded yet.")
 		return
 	_set_status("Loading...")
 	var result := await _list_occurrences(_root_part_id)
+	if token != _refresh_token:
+		return # a newer refresh started while this one was in flight
 	if not result["ok"]:
 		_set_status("Couldn't load the assembly tree: %s" % result["error"])
 		return
-	_tree = _occurrences_to_rows(result["json"])
+	var occurrence_rows := _occurrences_to_rows(result["json"])
+	# The root Part itself is the tree's top row (its placed Occurrences are its
+	# children), so a part opened on its own, or an assembly's own root
+	# content, is visible too — not only what was added onto it.
+	_tree = [{
+		"id": "",
+		"name": _part_names.get(_root_part_id, "Assembly"),
+		"named": true,
+		"resolved_part_id": _root_part_id,
+		"children": occurrence_rows,
+		"expanded": true,
+	}]
 	_stale = false
-	_set_status("" if not _tree.is_empty() else "This assembly has no placed occurrences.")
+	_set_status("" if not occurrence_rows.is_empty() else "This assembly has no placed occurrences.")
 	_rebuild_rows()
+	await _apply_part_names(_tree)
+
+
+func _apply_part_names(rows: Array) -> void:
+	## Fills in real Part names (one cached GET /parts/{id} per distinct Part):
+	## an Occurrence with no name_override would otherwise only ever read as
+	## "Occurrence <uuid prefix>", which says nothing about which part it is.
+	var token := _refresh_token
+	var changed := false
+	for row in rows:
+		var part_id: String = row["resolved_part_id"]
+		if part_id != "" and (not row.get("named", false) or row["id"] == ""):
+			if not _part_names.has(part_id):
+				var fetched := await _get_json("/parts/%s" % part_id)
+				if token != _refresh_token:
+					return
+				if fetched["ok"] and fetched["json"] is Dictionary:
+					_part_names[part_id] = str(fetched["json"].get("name", ""))
+				else:
+					_part_names[part_id] = ""
+			var part_name: String = _part_names[part_id]
+			if part_name != "":
+				row["name"] = part_name
+				row["named"] = true
+				changed = true
+		if row["children"] != null:
+			await _apply_part_names(row["children"])
+			if token != _refresh_token:
+				return
+	if changed:
+		_rebuild_rows()
 
 
 static func _occurrences_to_rows(occurrences: Array) -> Array:
@@ -97,6 +145,7 @@ static func _occurrences_to_rows(occurrences: Array) -> Array:
 		rows.append({
 			"id": str(occ.get("id", "")),
 			"name": _row_label(occ),
+			"named": occ.get("name_override") != null and str(occ.get("name_override")) != "", # false = still the "Occurrence <id>" placeholder; _apply_part_names() replaces it with the Part's own name
 			"resolved_part_id": resolved,
 			"children": null, # not fetched yet - see _expand_row()
 			"expanded": false,
@@ -127,6 +176,7 @@ func _expand_row(row: Dictionary) -> void:
 	if not result["ok"]:
 		_set_status("Couldn't load children: %s" % result["error"])
 	_rebuild_rows()
+	await _apply_part_names(row["children"])
 
 
 func _on_row_selected(occurrence_id: String, is_expandable: bool) -> void:
@@ -217,12 +267,16 @@ func _add_rows(rows: Array, depth: int) -> void:
 
 
 func _list_occurrences(part_id: String) -> Dictionary:
+	return await _get_json("/parts/%s/occurrences" % part_id)
+
+
+func _get_json(path: String) -> Dictionary:
 	## Same fresh-HTTPRequest-per-call pattern as colour_tool.gd/mates_tool.gd's
 	## own _api_request - see either for the docstring this mirrors.
 	var req := HTTPRequest.new()
 	add_child(req)
 	var headers := ["X-API-Key: %s" % api_key]
-	var err := req.request(backend_url + API_PREFIX + "/parts/%s/occurrences" % part_id, headers, HTTPClient.METHOD_GET)
+	var err := req.request(backend_url + API_PREFIX + path, headers, HTTPClient.METHOD_GET)
 	if err != OK:
 		req.queue_free()
 		return {"ok": false, "json": null, "error": "request failed to start (error %d)" % err}

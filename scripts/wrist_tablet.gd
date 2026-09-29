@@ -28,15 +28,16 @@ extends Node3D
 ## The right thumbstick click is deliberately NOT used here: the vision brief
 ## reserves it for the popup keyboard, everywhere.
 
-@export var panel_size := Vector2(0.24, 0.225) ## metres — taller than the original spike's 0.18: the new category-rail-plus-sub-tab navigation needs the extra room (see wrist_tablet.gd's own _build_ui() history)
-@export var viewport_size := Vector2i(640, 600) ## pixels the UI is laid out in
+@export var panel_size := Vector2(0.3375, 0.27) ## metres — real-headset feedback: wider so the four categories + Settings/Close fit on ONE row with their labels unclipped (they need ~900 px: 4x160 + 150 + close + gaps + margins), and 20% taller (0.225 -> 0.27). Same 2667 px/m as the old 0.24 m / 640 px, so text stays the same physical size.
+@export var viewport_size := Vector2i(900, 720) ## pixels the UI is laid out in (was 640x600)
+@export var scroll_speed_px: float = 900.0 ## pixels/second the right thumbstick scrolls the tablet at full deflection while the right laser is on it
+@export var scroll_deadzone: float = 0.2
 @export var mount_position := Vector3(0.0, 0.06, 0.07) ## relative to the left controller: above and a little behind it
 @export var mount_tilt_degrees: float = 0.0 ## extra tilt about X; tweak if it sits awkwardly on your wrist
 @export var target_position := Vector3(0.0, 0.05, 0.122) ## the wrist bullseye/tablet icon, relative to the left controller — was too far forward (0.06); nudged back by its own ring's 0.062m outer diameter, same fix as the controller button discs (controller.gd's _add_button_discs())
 @export var target_radius: float = 0.035 ## metres; how generous the "shot" hit area is (the drawn ring is smaller)
 @export var max_point_distance: float = 2.0 ## metres; laser reach for pressing buttons
 @export var click_action: String = "trigger_click"
-@export var max_files_listed: int = 5
 @export var open_settle_seconds: float = 0.4 ## presses are ignored this long after opening: your laser is still resting where the bullseye was, so a quick second pull would hit whatever button appears there
 
 var _left: XRController3D
@@ -122,6 +123,8 @@ var _pointer_px := Vector2.ZERO
 var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger went down — see _send_click()'s own docstring for why this isn't just _pointer_px
 var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
+var _pages_scroll: ScrollContainer ## wraps every page — content taller than the panel used to be clipped with no way to reach it
+var _scroll_f := 0.0 ## sub-pixel accumulator for the thumbstick scroll (ScrollContainer.scroll_vertical is an int)
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null) -> void:
@@ -190,6 +193,9 @@ func _process(delta: float) -> void:
 	_target.visible = not _open
 	_update_pointer(global_transform.basis.z.normalized())
 
+	if _open and _hovering:
+		_scroll_with_stick(delta)
+
 	_refresh_left -= delta
 	if _open and _refresh_left <= 0.0:
 		_refresh_left = 0.25
@@ -204,6 +210,27 @@ func _process(delta: float) -> void:
 			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
 		if _files_status_label:
 			_files_status_label.text = _main.status_text
+
+
+func _scroll_with_stick(delta: float) -> void:
+	## Right thumbstick Y scrolls the tablet while the right laser is on it
+	## (push down = scroll down). locomotion.gd and controller.gd stand their
+	## own use of that stick down whenever "ui_hover" is set, so it can't also
+	## teleport or spin a selected part.
+	if _pages_scroll == null:
+		return
+	_scroll_by_stick(_right.get_vector2("primary").y, delta)
+
+
+func _scroll_by_stick(stick_y: float, delta: float) -> void:
+	## Split from _scroll_with_stick() so tests can drive it without a real XR runtime.
+	if absf(stick_y) < scroll_deadzone:
+		_scroll_f = float(_pages_scroll.scroll_vertical)
+		return
+	_scroll_f = maxf(_scroll_f - stick_y * scroll_speed_px * delta, 0.0)
+	_pages_scroll.scroll_vertical = int(_scroll_f)
+	if float(_pages_scroll.scroll_vertical) < _scroll_f - 1.0:
+		_scroll_f = float(_pages_scroll.scroll_vertical) # clamped at the bottom: don't keep accumulating past it
 
 
 func _update_pointer(normal: Vector3) -> void:
@@ -469,9 +496,17 @@ func _build_ui() -> Control:
 	corner_row.add_theme_constant_override("separation", 6)
 	header_row.add_child(corner_row)
 
+	# Real-headset feedback: the tablet overflowed at the bottom with no way to
+	# scroll. Every page sits in one ScrollContainer; while the right laser is
+	# on the tablet the right thumbstick scrolls it (see _scroll_with_stick()).
+	_pages_scroll = ScrollContainer.new()
+	_pages_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pages_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pages_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(_pages_scroll)
 	var pages_holder := VBoxContainer.new()
-	pages_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(pages_holder)
+	pages_holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pages_scroll.add_child(pages_holder)
 
 	var tab_group := ButtonGroup.new()
 
@@ -510,7 +545,7 @@ func _build_ui() -> Control:
 		# fix (see git history) was for, just vertical instead of horizontal.
 		page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		pages_holder.add_child(page)
-		var btn := _build_icon_button(category_name, category_name.to_lower(), _CATEGORY_ACCENTS[category_name], 130.0)
+		var btn := _build_icon_button(category_name, category_name.to_lower(), _CATEGORY_ACCENTS[category_name], 160.0)
 		btn.toggle_mode = true
 		btn.button_group = tab_group
 		btn.toggled.connect(_on_tab_toggled.bind(category_name))
@@ -525,7 +560,7 @@ func _build_ui() -> Control:
 	_pages["Settings"] = settings_page
 	settings_page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	pages_holder.add_child(settings_page)
-	var settings_btn := _build_icon_button("Settings", "settings", Color(0.78, 0.81, 0.85), 92.0)
+	var settings_btn := _build_icon_button("Settings", "settings", Color(0.78, 0.81, 0.85), 150.0)
 	settings_btn.button_group = tab_group
 	settings_btn.toggled.connect(_on_tab_toggled.bind("Settings"))
 	corner_row.add_child(settings_btn)
@@ -1455,9 +1490,9 @@ func _rebuild_files() -> void:
 		none.text = "No model files found.\nPut a .glb/.gltf/.didsa/.step/.stl/.obj in the project's models folder."
 		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_files_box.add_child(none)
-	var assembly_loaded: bool = not _main.current_root_part_id().is_empty()
-	for i in mini(files.size(), max_files_listed):
-		var path := files[i]
+	var loaded_root: String = _main.current_root_part_id()
+	var assembly_loaded: bool = not loaded_root.is_empty()
+	for path in files: # every file — the tablet scrolls (right thumbstick over it) instead of capping the list at 5
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 6)
 		var button := Button.new()
@@ -1471,18 +1506,15 @@ func _rebuild_files() -> void:
 		# of whichever assembly is currently loaded (main.gd's
 		# add_component_file()), rather than replacing it. Only meaningful
 		# once something backend-hosted is already loaded to add onto.
-		if path.get_extension().to_lower() in ["didsa", "didsaprt"] and assembly_loaded:
+		# Not offered on the file that IS the loaded root: the backend rejects
+		# that with 422 "Cannot insert a Part into itself".
+		if path.get_extension().to_lower() in ["didsa", "didsaprt"] and assembly_loaded and _main.native_file_root_part_id(path) != loaded_root:
 			var add_button := Button.new()
 			add_button.text = "Add"
 			add_button.tooltip_text = "Add this file's Part to the loaded assembly"
 			add_button.pressed.connect(_main.add_component_file.bind(path))
 			row.add_child(add_button)
 		_files_box.add_child(row)
-	if files.size() > max_files_listed:
-		var more := Label.new()
-		more.text = "+ %d more (not listed yet)" % (files.size() - max_files_listed)
-		_files_box.add_child(more)
-
 	var refresh := Button.new()
 	refresh.text = "Refresh list"
 	refresh.pressed.connect(_rebuild_files)

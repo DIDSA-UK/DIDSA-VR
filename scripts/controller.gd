@@ -46,6 +46,8 @@ const OneEuro := preload("res://scripts/one_euro.gd")
 ## 0.6 m/s at 1 m, 3 m/s at 5 m, 0.18 m/s at 30 cm. Far parts travel fast, near ones can be placed finely.
 @export var nudge_min_speed: float = 0.03 ## metres/second floor, so a part right by your hand can still be pushed out
 @export var nudge_max_speed: float = 8.0 ## metres/second ceiling
+@export var nudge_min_distance: float = 0.15 ## metres: A/X stops pulling a part this close to your hand, so it can't pass through it
+@export var nudge_steer_rate: float = 6.0 ## per second: how quickly A/X's pull swings the part's direction from your hand round to where you're aiming
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
@@ -63,7 +65,6 @@ var section_tool = null ## set by main.gd; a shared section_tool.gd instance —
 
 var _laser: MeshInstance3D
 var _laser_mesh: CylinderMesh
-var _button_discs: Dictionary = {} ## action_name -> {"material": StandardMaterial3D, "idle": Color, "pressed": Color} — see _add_button_discs()
 var _part_hit_distance := -1.0 ## metres to whatever _update_aim_hover()'s own raycast last hit, or -1 for nothing — set alongside _aim_hover_node
 var _select_material: StandardMaterial3D
 var _hover_material: StandardMaterial3D
@@ -106,7 +107,7 @@ func _ready() -> void:
 	button_released.connect(_on_button_released)
 	set_steadiness(steadiness)
 	_add_visible_marker()
-	_add_button_discs()
+	_add_tracking_ring()
 	_add_laser()
 	_select_material = StandardMaterial3D.new()
 	_select_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -166,7 +167,9 @@ func _physics_process(delta: float) -> void:
 		return
 
 	var stick: Vector2 = get_vector2("primary")
-	if stick.length() >= stick_deadzone:
+	# The laser on the wrist tablet / a floating window means the stick scrolls
+	# that panel (wrist_tablet.gd) — it must not also spin the selected part.
+	if stick.length() >= stick_deadzone and not bool(get_meta("ui_hover", false)):
 		var pitch_axis := Vector3.RIGHT
 		if _camera:
 			var camera_right := _camera.global_transform.basis.x
@@ -185,19 +188,45 @@ func _physics_process(delta: float) -> void:
 	var forward := -global_transform.basis.z.normalized()
 	var speed := nudge_speed_for(selected_node)
 	if is_button_pressed("ax_button"):
-		selected_node.global_position -= forward * speed * delta
+		_nudge_towards_hand(selected_node, forward, speed, delta)
 	if is_button_pressed("by_button"):
 		selected_node.global_position += forward * speed * delta
+
+
+func _nudge_towards_hand(part: Node3D, aim: Vector3, speed: float, delta: float) -> void:
+	## A/X: pull the part towards your hand, steered by where you're aiming —
+	## the same "bead on the laser" feel B/Y has when pushing away. Simply
+	## moving by -aim (the old behaviour) inverted the steering: tilt the
+	## controller up and the part went DOWN, swing it right and the part went
+	## left (real-headset report). Here the hand-to-part direction eases
+	## towards the aim direction (nudge_steer_rate) while the distance closes,
+	## so sweeping the controller sweeps the part the same way it does when
+	## pushing away, with no jump on the first frame.
+	var centre := part_centre(part)
+	var offset := centre - global_position
+	var dist := offset.length()
+	if dist <= nudge_min_distance:
+		return
+	var dir := offset / dist
+	if dir.dot(aim) > -0.99: # part directly behind the hand: no meaningful steering, just come in
+		dir = dir.slerp(aim, clampf(nudge_steer_rate * delta, 0.0, 1.0))
+	var new_dist := maxf(dist - speed * delta, nudge_min_distance)
+	part.global_position += (global_position + dir * new_dist) - centre
+
+
+func part_centre(part: Node3D) -> Vector3:
+	## World-space middle of the part's bounds (a part's origin can sit far
+	## from its geometry).
+	if part is MeshInstance3D:
+		return part.global_transform * (part as MeshInstance3D).get_aabb().get_center()
+	return part.global_position
 
 
 func nudge_speed_for(part: Node3D) -> float:
 	## A/B speed for this part: proportional to how far it is from your hand
 	## (measured to the middle of its bounds, since a part's origin can sit far
 	## from its geometry), clamped to a sensible range.
-	var centre := part.global_position
-	if part is MeshInstance3D:
-		centre = part.global_transform * (part as MeshInstance3D).get_aabb().get_center()
-	return clampf(nudge_rate * global_position.distance_to(centre), nudge_min_speed, nudge_max_speed)
+	return clampf(nudge_rate * global_position.distance_to(part_centre(part)), nudge_min_speed, nudge_max_speed)
 
 
 func is_manipulating() -> bool:
@@ -223,7 +252,6 @@ func reset_interaction() -> void:
 
 
 func _on_button_pressed(action_name: String) -> void:
-	_flash_disc(action_name, true) # visual-only, independent of whatever the action actually does below
 	if action_name == grab_action:
 		# The section-plane gizmo is independent of "Individual part
 		# manipulation" mode (like mates_tool_active/hide_tool_active are for
@@ -246,7 +274,6 @@ func _on_button_pressed(action_name: String) -> void:
 
 
 func _on_button_released(action_name: String) -> void:
-	_flash_disc(action_name, false)
 	if action_name == grab_action:
 		_try_release()
 
@@ -254,6 +281,9 @@ func _on_button_released(action_name: String) -> void:
 func _try_grab() -> void:
 	if held_node != null:
 		return
+	for panel in get_tree().get_nodes_in_group("diegetic_panels"):
+		if panel.handle_in_reach(self):
+			return # a floating window's drag handle is what this grip is for (diegetic_panel.gd grabs it itself) — never also a part or the section gizmo
 	if section_tool and section_tool.try_grab(self, grab_reach):
 		return # gizmo grabbed instead — see section_tool.gd's own docstring for why this is checked first
 
@@ -534,21 +564,14 @@ func _add_visible_marker() -> void:
 	add_child(marker)
 
 
-## Small white discs at roughly this controller's own real button positions
-## (thumbstick, the two face buttons — A/B on the right hand, X/Y on the
-## left — and, left hand only, the Menu button, per this project's own
-## openxr_action_map.tres: menu_button binds only to
-## /user/hand/left/input/menu/click, matching real Touch hardware, which
-## has no equivalent on the right) plus a thin ring evoking the real
-## controller's own tracking halo — the common "floating controller"
-## reference many VR apps (the Quest home environment included) show so a
-## player can find a button by feel without breaking immersion to look at
-## their real hardware. Positions are local to this XRController3D (whose
-## own aim points down local -Z — see _add_laser()) and are a stylised
-## approximation, not a traced model. Each disc gets its own material
-## (never shared) so _on_button_pressed()/_on_button_released() can flash
-## just the one pressed, independent of the others.
-func _add_button_discs() -> void:
+## A thin ring evoking the real controller's own tracking halo — the only
+## controller reference left. Real-headset feedback removed the thumbstick /
+## A-B / X-Y / Menu button discs (and their press flash) that used to sit on
+## it, and asked for the ring itself to sit further back, towards the user:
+## +Z is back (this XRController3D's aim points down local -Z — see
+## _add_laser()), and it moved by one ring diameter (0.096 m, twice its 0.048 m
+## outer radius) on top of the earlier 0.011 m nudge.
+func _add_tracking_ring() -> void:
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
 	torus.inner_radius = 0.044
@@ -559,69 +582,8 @@ func _add_button_discs() -> void:
 	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	torus.material = ring_mat
 	ring.mesh = torus
-	# Real-headset feedback: the whole cluster read as too far forward (out
-	# past where the real buttons actually are). Nudged back (+Z, towards
-	# the user — see _add_laser()'s own -Z-is-forward convention) by one
-	# disc-diameter's worth: each disc by its own diameter, the ring by
-	# their average (0.011m) so it stays centred over the now-moved discs.
-	ring.position = Vector3(0.0, 0.013, -0.024 + 0.011)
+	ring.position = Vector3(0.0, 0.013, -0.024 + 0.011 + 0.096)
 	add_child(ring)
-
-	_add_disc("primary_click", Vector3(0.0, 0.018, -0.018 + 0.014), 0.007) # 0.014 = 2 * this disc's own 0.007 radius
-	_add_disc("ax_button", Vector3(0.012, 0.010, -0.030 + 0.010), 0.005) # 0.010 = 2 * this disc's own 0.005 radius
-	_add_disc("by_button", Vector3(-0.006, 0.010, -0.034 + 0.010), 0.005)
-	if tracker == &"left_hand":
-		var menu_disc := _add_disc("menu_button", Vector3(-0.018, 0.012, -0.010 + 0.010), 0.005)
-		_add_hamburger_glyph(menu_disc)
-
-
-func _add_disc(action_name: String, local_position: Vector3, radius: float) -> MeshInstance3D:
-	var disc := MeshInstance3D.new()
-	var cylinder := CylinderMesh.new()
-	cylinder.top_radius = radius
-	cylinder.bottom_radius = radius
-	cylinder.height = 0.0015
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.emission_enabled = true
-	mat.emission = Color(0.82, 0.85, 0.9)
-	mat.albedo_color = Color(0.82, 0.85, 0.9, 0.85)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	cylinder.material = mat
-	disc.mesh = cylinder
-	disc.position = local_position
-	add_child(disc)
-	_button_discs[action_name] = mat
-	return disc
-
-
-func _add_hamburger_glyph(disc: MeshInstance3D) -> void:
-	## Three tiny parallel bars on the Menu disc's face, so it reads as the
-	## hamburger (≡) icon rather than a plain button dot.
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.1, 0.1, 0.12) # dark, against the disc's own white face
-	for i in 3:
-		var bar := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(0.006, 0.0002, 0.0008)
-		box.material = mat
-		bar.mesh = box
-		bar.position = Vector3(0.0, 0.0009, -0.0015 + float(i) * 0.0015)
-		disc.add_child(bar)
-
-
-func _flash_disc(action_name: String, on: bool) -> void:
-	## Brightens to pure white on press, same idle/hover-brightness pattern
-	## as the wrist tablet's own bullseye (wrist_tablet.gd's _update_pointer())
-	## — a real, visible jump while staying strictly within this pass's
-	## white palette rather than reusing the old yellow highlight accent.
-	var mat: StandardMaterial3D = _button_discs.get(action_name)
-	if mat == null:
-		return
-	var color := Color(1.0, 1.0, 1.0) if on else Color(0.82, 0.85, 0.9)
-	mat.albedo_color = Color(color.r, color.g, color.b, 1.0 if on else 0.85)
-	mat.emission = color
 
 
 func _add_laser() -> void:
