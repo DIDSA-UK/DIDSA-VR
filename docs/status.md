@@ -1946,7 +1946,7 @@ render tests under Xvfb, and the `e2e_*` tests against a throwaway real backend.
   stand the stick down whenever the right hand's `ui_hover` is set, so it can't
   also teleport, snap-turn or spin a selected part.
 - **A/X "towards me" felt inverted.** It moved the part by `-aim`, so tilting
-  up moved it down. Now `_nudge_towards_hand()`: the hand→part direction eases
+  up moved it down. Now `_nudge_along_aim()` (see the follow-up below): the hand→part direction eases
   toward the aim (`nudge_steer_rate`) while the distance closes (stops at
   `nudge_min_distance` 0.15 m) — the same "bead on the laser" feel as B/Y,
   which is unchanged.
@@ -1965,3 +1965,35 @@ New fixture `tests/fixtures/real_assembly_mesh.glb` (a real backend glb).
 and beyond; snap-turn direction; A/X feel; grab a window (world must stay put);
 tablet stick-scroll feel and bottom clipping; Files list with many files; the
 Tree window with a real Open + Add; Light/Dark/Mid grey; the ring position.
+
+### Follow-up, same day: A/B nudge speeds matched; tablet clicks hardened (cause not reproduced)
+
+- **A/X vs B/Y.** John: A now goes the right way but tracks the laser too
+  fast; B is too slow — they should feel the same, mid-point. B was a plain
+  move-by-aim with no steering, A steered at 6/s. Both now share
+  `controller.gd`'s `_nudge_along_aim()` at `nudge_steer_rate = 3.0`/s (the
+  mid-point); the distance rate is unchanged (`nudge_speed_for()`, which
+  he said is fine). Test: `tests/bug_round.gd` asserts A and B swing by the
+  same angle (35.3° after 0.5 s at a 45° aim change).
+- **"I can no longer select on the tablet; the laser briefly goes through it
+  when I click."** **Not reproduced.** A realistic oblique-aim click with hand
+  jitter during the press (throwaway probe, real `main.tscn`) toggles a button
+  correctly on both this build and the pre-round baseline, `Files` builds
+  correctly with a real backend-loaded assembly and no script errors, and the
+  full suite is clean, so the click path itself works headless — whatever
+  breaks it needs real controller input. Two changes aimed at the strongest
+  candidate (my new stick-scroll acting on real thumb input during a click),
+  both in `wrist_tablet.gd`:
+  1. Scrolling now needs a deliberate push (`scroll_deadzone` 0.2 -> 0.5) and
+     is locked out while a click is held and for 400 ms after
+     (`scroll_click_lockout_ms`): a resting thumb drifting the stick while
+     the index finger pulls the trigger would otherwise slide the page under
+     the frozen press point, so the release lands on a different control and
+     nothing activates.
+  2. Hover has 3 cm of edge slack while a click is held: losing hover
+     mid-press releases the click (`elif was_hovering and _pressed`) and the
+     laser stops being shortened to the panel — the "laser goes through"
+     look — so a trigger-squeeze tilt at the panel's edge no longer does it.
+  **If this doesn't fix it**, the next thing needed is the Godot console output
+  from a run where it fails (a script error inside the tablet's `_process`
+  would produce exactly this), and which page/button you were aiming at.
