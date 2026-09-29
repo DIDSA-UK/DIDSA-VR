@@ -111,7 +111,12 @@ live-synced.
    for set-and-forget stuff (day-to-day tools don't belong beside it):
    - **View** — how you move around and look at the model.
      - **Navigate** — switch model movement, user movement and part
-       manipulation on or off independently.
+       manipulation on or off independently; **Travel speed** slider —
+       how fast the left thumbstick walks you, from your normal walking
+       pace (1.5 m/s, the bottom of the slider and the default) up to 30 m/s
+       for crossing a large open space such as a house's grounds or a small
+       village (exponential, so the low end stays fine-grained). Press the
+       trigger on the slider and sweep the laser to drag it.
      - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
        about the model's centre; lock the scale (also stops the two-hand
        spread/close and Fit from resizing); **Fit to view** brings the whole
@@ -251,7 +256,12 @@ live-synced.
     you're looking and closes with its own **X**. Each also has a small
     grab handle at the centre of its own lower edge — **grip** it with
     either hand to drag the whole panel somewhere else, release to drop it;
-    windows otherwise stay exactly where they first opened:
+    windows otherwise stay exactly where they first opened. They're also
+    **resizable**: four small brackets sit just outside the corners — aim
+    the right laser at one and it lights up cyan; hold the trigger and drag
+    (the opposite corner stays put). It's a true resize, not a zoom: the
+    window's content area grows at the same text size, so a bigger Browser
+    shows more page and a bigger Tree more rows:
     - **Assembly Tree** — browses the loaded assembly's Occurrence
       hierarchy (a real client to `GET /parts/{id}/occurrences`, recursed
       lazily as you expand a row — the same endpoint the Colours tab's

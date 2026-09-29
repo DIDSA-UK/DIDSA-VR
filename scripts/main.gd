@@ -777,7 +777,7 @@ func load_glb_file(path: String) -> void:
 		return
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
-	if not _show_model(bytes, path.get_base_dir(), local_glb_scale):
+	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
 		return
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR spike: ", _load_summary)
@@ -921,7 +921,7 @@ func _parse_import_response(result: Array, step_description: String, req: HTTPRe
 	return parsed
 
 
-func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float) -> bool:
+func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float, pick_from_inside: bool = false) -> bool:
 	## Parse glTF bytes and make them THE model, replacing whatever is loaded.
 	## Returns false (with a status message) if it couldn't.
 	var gltf_document := GLTFDocument.new()
@@ -956,12 +956,34 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	_two_hand.remember_home()
 
 	_part_count = 0
-	for node in _all_descendants(scene):
+	# The scene ROOT itself can be the mesh: a glTF whose only scene node is a
+	# mesh (what most single-object OBJ/STL/glTF exports from other tools come
+	# out as) is generated with that MeshInstance3D AS the root, and walking
+	# only its descendants missed it — "Loaded ... 0 part mesh(es)", no group,
+	# no collision, so it could be neither gripped nor laser-picked.
+	var candidates: Array[Node] = _all_descendants(scene)
+	candidates.push_front(scene)
+	for node in candidates:
 		if node is MeshInstance3D:
 			node.add_to_group("grabbable_parts")
 			node.create_trimesh_collision() # so controller.gd's laser-select can ray-test real geometry
+			if pick_from_inside:
+				_make_picks_double_sided(node)
 			_part_count += 1
 	return true
+
+
+func _make_picks_double_sided(part: MeshInstance3D) -> void:
+	## Third-party meshes (a bare glTF/scan/converted file) often have flipped
+	## winding or open surfaces, and a trimesh collider is one-sided by
+	## default, so a laser from outside passed straight through them.
+	## Backend-tessellated parts keep the proven one-sided behaviour (see the
+	## BoxMesh-winding note in docs/status.md).
+	for child in part.get_children():
+		if child is StaticBody3D:
+			for shape_owner in (child as StaticBody3D).get_children():
+				if shape_owner is CollisionShape3D and (shape_owner as CollisionShape3D).shape is ConcavePolygonShape3D:
+					((shape_owner as CollisionShape3D).shape as ConcavePolygonShape3D).backface_collision = true
 
 
 func _all_descendants(root: Node) -> Array[Node]:

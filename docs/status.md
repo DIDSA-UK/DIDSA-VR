@@ -1997,3 +1997,48 @@ Tree window with a real Open + Add; Light/Dark/Mid grey; the ring position.
   **If this doesn't fix it**, the next thing needed is the Godot console output
   from a run where it fails (a script error inside the tablet's `_process`
   would produce exactly this), and which page/button you were aiming at.
+
+## Features round, 29 Sep 2026: travel-speed slider, grabbable single-mesh files, resizable windows
+
+John's report on the previous round: the tablet-selection problem "came and went
+and then stayed OK" (left unchanged; the earlier hardening stays), and three new
+asks. All headless-tested (`tests/features_round.gd`, in `run_all.sh`) and
+rendered under Xvfb for a visual check; not yet in a headset.
+
+- **Travel speed slider** (View > Navigate). `locomotion.gd`: `min_move_speed`
+  1.5 m/s (the old fixed pace — the slider's bottom and the default),
+  `max_move_speed` 30 m/s, exponential (`set_speed_fraction()`/
+  `speed_fraction()`), applied to the left-stick walk only. **Teleport reach
+  (5 m) is unchanged** — say if you want it to scale with the slider. Not
+  persisted across restarts (the default is always walking pace). The tablet
+  had no slider before, and its pointer is deliberately *frozen* during a press
+  (to keep buttons from cancelling), which makes a drag impossible — so a press
+  that *starts on a slider* now keeps tracking the laser and releases where the
+  laser is (`_drag_slider`, `_slider_at()` in `wrist_tablet.gd`); every other
+  press keeps the frozen behaviour. Big knob/track styling for arm's length.
+- **OBJ/STL/glTF not grabbable — a real bug, reproduced.** A glTF whose only
+  scene node is the mesh (what most single-object exports from other tools look
+  like) is generated with that `MeshInstance3D` *as the scene root*, and
+  `main.gd`'s `_show_model()` only walked the root's *descendants* — so it loaded
+  as "0 part mesh(es)" with no `grabbable_parts` group and no collider: neither
+  grip nor laser could touch it. Now the root is included. Also, local files
+  (`load_glb_file()`) get a **double-sided** pick collider
+  (`backface_collision`): third-party meshes often have flipped winding or open
+  surfaces and a trimesh collider is one-sided, so the laser passed through them;
+  backend-tessellated parts keep the proven one-sided behaviour. **Caveat:** an
+  OBJ/STL/glTF that came through the backend wrapper (`_import_external_file()`)
+  *did* already load as a grabbable part when I tried a generated cube, so if a
+  specific real file still can't be gripped after this, the likeliest remaining
+  cause is scale (grip needs your hand within 5 cm of the part's bounding box;
+  STL/OBJ go through the backend as millimetres → ×0.001, a local glTF is read as
+  metres) — tell me the file's units and what you see.
+- **Resizable floating windows** (`diegetic_panel.gd`, so Tree, Calculator,
+  Image Viewer and Browser all get it). Four L-shaped brackets sit just outside
+  the corners; aiming the right laser at one (a zone reaching 5 cm outward,
+  4 mm back inside the edge so it never steals a content control such as the
+  close button) highlights it cyan and enlarges it, and the laser stops on it
+  like on the panel. Hold the trigger and drag: the opposite corner stays fixed,
+  size clamps to 0.16–1.6 × 0.16–1.3 m. It is a **true resize**: the SubViewport
+  grows with the panel at the same pixels-per-metre (re-allocated only every
+  ~4 px of change, exact on release), so a bigger window shows more content and
+  text stays the same physical size. Not persisted.

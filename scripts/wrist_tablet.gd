@@ -125,6 +125,10 @@ var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger we
 var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 var _pages_scroll: ScrollContainer ## wraps every page — content taller than the panel used to be clipped with no way to reach it
+var _sliders: Array[Slider] = [] ## every Slider on the tablet: a press that starts on one keeps tracking the laser (a slider has to be DRAGGED), unlike a button press, whose pointer is frozen — see _update_pointer()
+var _drag_slider := false
+var _speed_label: Label
+var _speed_slider: HSlider
 var _last_click_ms := -100000 ## when the last click (press OR release) was sent — see _scroll_with_stick()
 var _scroll_f := 0.0 ## sub-pixel accumulator for the thumbstick scroll (ScrollContainer.scroll_vertical is an int)
 
@@ -212,6 +216,9 @@ func _process(delta: float) -> void:
 			_colour_status_label.text = "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
 		if _files_status_label:
 			_files_status_label.text = _main.status_text
+		if _speed_slider and not _drag_slider:
+			_speed_slider.set_value_no_signal(_locomotion.speed_fraction())
+			_refresh_speed_label()
 
 
 func _scroll_with_stick(delta: float) -> void:
@@ -283,7 +290,7 @@ func _update_pointer(normal: Vector3) -> void:
 				# send at least one such motion event if this keeps tracking
 				# the live aim, silently cancelling the click before release
 				# even sees it.
-				if not _pressed:
+				if not _pressed or _drag_slider:
 					_pointer_px = Vector2(
 						(local.x / panel_size.x + 0.5) * viewport_size.x,
 						(0.5 - local.y / panel_size.y) * viewport_size.y
@@ -294,10 +301,11 @@ func _update_pointer(normal: Vector3) -> void:
 	_cursor.visible = _hovering
 	if _hovering:
 		_cursor.position = _pointer_px - _cursor.size * 0.5
-		if not _pressed and _pointer_px != _last_sent_px:
+		if (not _pressed or _drag_slider) and _pointer_px != _last_sent_px:
 			var motion := InputEventMouseMotion.new()
 			motion.position = _pointer_px
 			motion.global_position = _pointer_px
+			motion.button_mask = MOUSE_BUTTON_MASK_LEFT if _pressed else 0
 			motion.relative = _pointer_px - (_last_sent_px if was_hovering else _pointer_px)
 			_viewport.push_input(motion)
 			_last_sent_px = _pointer_px
@@ -314,6 +322,7 @@ func _on_right_pressed(action_name: String) -> void:
 		if (Time.get_ticks_msec() - _opened_at_ms) < open_settle_seconds * 1000.0:
 			return
 		_press_px = _pointer_px
+		_drag_slider = _slider_at(_press_px)
 		_send_click(true)
 		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
 
@@ -345,10 +354,15 @@ func _send_click(down: bool) -> void:
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down
-	click.position = _press_px
-	click.global_position = _press_px
+	# A slider drag is released wherever the laser has got to (that's where the
+	# value ends up); every other press releases at its frozen press point.
+	var at := _pointer_px if (_drag_slider and not down) else _press_px
+	click.position = at
+	click.global_position = at
 	click.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
 	_viewport.push_input(click)
+	if not down:
+		_drag_slider = false
 
 
 func _build_target() -> void:
@@ -836,6 +850,7 @@ func _build_navigate_page() -> Control:
 		_left.set_parts_enabled(on)
 		_right.set_parts_enabled(on)
 	))
+	page.add_child(_build_speed_row())
 	var hint := Label.new()
 	hint.text = "Scale views: see View > Scale. Steadiness: the Settings cogwheel."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -843,6 +858,99 @@ func _build_navigate_page() -> Control:
 	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	page.add_child(hint)
 	return page
+
+
+func _build_speed_row() -> Control:
+	## Travel speed: how fast the LEFT thumbstick walks you. The bottom of the
+	## slider is the original walking pace and the default, so nothing changes
+	## until you push it up to cross a large open space (a house's grounds, a
+	## small village). Exponential (locomotion.gd's set_speed_fraction()).
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_speed_label = Label.new()
+	box.add_child(_speed_label)
+	_speed_slider = _make_slider(0.0, 1.0, 0.01)
+	_speed_slider.value = _locomotion.speed_fraction()
+	_speed_slider.value_changed.connect(func(value: float) -> void:
+		_locomotion.set_speed_fraction(value)
+		_refresh_speed_label()
+	)
+	box.add_child(_speed_slider)
+	var ends := HBoxContainer.new()
+	var low := Label.new()
+	low.text = "Walking"
+	low.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var high := Label.new()
+	high.text = "Village"
+	for end_label in [low, high]:
+		end_label.add_theme_font_size_override("font_size", 16)
+		end_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	ends.add_child(low)
+	ends.add_child(high)
+	box.add_child(ends)
+	_refresh_speed_label()
+	return box
+
+
+func _refresh_speed_label() -> void:
+	if _speed_label == null or _locomotion == null:
+		return
+	_speed_label.text = "Travel speed: %.1f m/s  (%.0f× walking)" % [_locomotion.move_speed, _locomotion.move_speed / _locomotion.min_move_speed]
+
+
+func _make_slider(min_value: float, max_value: float, step: float) -> HSlider:
+	## A slider readable and grabbable at arm's length: a fat track and a big
+	## round knob (Godot's default knob is a few pixels).
+	var slider := HSlider.new()
+	slider.min_value = min_value
+	slider.max_value = max_value
+	slider.step = step
+	slider.scrollable = false
+	slider.custom_minimum_size = Vector2(0, 52)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.16, 0.19, 0.24)
+	track.set_corner_radius_all(6)
+	track.content_margin_top = 6
+	track.content_margin_bottom = 6
+	var filled := StyleBoxFlat.new()
+	filled.bg_color = Color(0.15, 0.55, 0.68)
+	filled.set_corner_radius_all(6)
+	filled.content_margin_top = 6
+	filled.content_margin_bottom = 6
+	var filled_hot := filled.duplicate() as StyleBoxFlat
+	filled_hot.bg_color = Color(0.3, 0.75, 0.9)
+	slider.add_theme_stylebox_override("slider", track)
+	slider.add_theme_stylebox_override("grabber_area", filled)
+	slider.add_theme_stylebox_override("grabber_area_highlight", filled_hot)
+	var knob := _make_knob_texture(40, Color(0.85, 0.93, 1.0))
+	var knob_hot := _make_knob_texture(40, Color(1.0, 1.0, 1.0))
+	slider.add_theme_icon_override("grabber", knob)
+	slider.add_theme_icon_override("grabber_highlight", knob_hot)
+	slider.add_theme_icon_override("grabber_disabled", knob)
+	_sliders.append(slider)
+	return slider
+
+
+static func _make_knob_texture(diameter: int, color: Color) -> ImageTexture:
+	var img := Image.create(diameter, diameter, false, Image.FORMAT_RGBA8)
+	var c := (diameter - 1) * 0.5
+	var radius := diameter * 0.5 - 1.0
+	for y in diameter:
+		for x in diameter:
+			var d := Vector2(x - c, y - c).length()
+			if d <= radius:
+				var edge := clampf(radius - d, 0.0, 1.0) # 1px antialiased rim
+				var shade := color if d < radius - 3.0 else color.darkened(0.35)
+				img.set_pixel(x, y, Color(shade.r, shade.g, shade.b, edge))
+	return ImageTexture.create_from_image(img)
+
+
+func _slider_at(px: Vector2) -> bool:
+	for slider in _sliders:
+		if slider.is_visible_in_tree() and Rect2(slider.global_position, slider.size).has_point(px):
+			return true
+	return false
 
 
 func _mode_toggle(label: String, apply: Callable, default_on: bool = true) -> Button:
