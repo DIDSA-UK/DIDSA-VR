@@ -71,7 +71,10 @@ extends Node3D
 @export var grab_action: String = "grip_click"
 @export var min_panel_size := Vector2(0.16, 0.16) ## metres; resize limits
 @export var max_panel_size := Vector2(1.6, 1.3)
-@export var corner_hit_reach: float = 0.05 ## metres outward from a corner (along both edges) that counts as aiming at it; generous, since a laser at arm's length is shaky
+@export var corner_hit_reach: float = 0.10 ## metres outward from a corner (along both edges) that counts as aiming at it — doubled (was 0.05) after headset testing found the corners fiddly to hit
+@export var free_on_close: bool = false ## extra windows spawned on demand (main.gd's spawn_window()) delete themselves when closed; the primary ones just hide
+@export var scroll_deadzone: float = 0.5 ## right stick push (0..1) needed to scroll the window's scroll_target while the laser is on it
+@export var scroll_speed_px: float = 900.0
 @export var handle_grab_reach: float = 0.03 ## metres beyond the handle's own radius - it's small, so a bit of slack makes it easier to catch, same reasoning as controller.gd's own grab_reach
 
 var _left: XRController3D
@@ -83,10 +86,18 @@ var _held_by: XRController3D = null ## whichever hand grabbed the handle, or nul
 var _grab_offset: Transform3D = Transform3D.IDENTITY ## this panel's pose in the holding hand's local frame, captured at grab time
 
 const _CORNER_DIRS: Array[Vector2] = [Vector2(-1, 1), Vector2(1, 1), Vector2(-1, -1), Vector2(1, -1)] ## top-left, top-right, bottom-left, bottom-right (x, y signs in the panel's local frame)
-const _CORNER_INSET := 0.004 ## metres the hit zone reaches back INSIDE the panel edge — just enough to catch an aim on the edge itself without stealing the content's own corner controls (e.g. the close button)
+const _CORNER_INSET := 0.008 ## metres the hit zone reaches back INSIDE the panel edge — just enough to catch an aim on the edge itself without stealing the content's own corner controls (e.g. the close button)
 const _CORNER_IDLE := Color(0.82, 0.85, 0.9, 0.55)
 const _CORNER_HOT := Color(0.35, 0.85, 1.0, 1.0)
 
+var scroll_target: ScrollContainer = null ## set by a subclass's _build_content(): the right thumbstick scrolls it while the laser is on this window
+var _header: HBoxContainer
+var _title_label: Label
+var _chrome: Array = [] ## header buttons that grow with the window: [{button, min_size, font_size}] — see _apply_chrome_scale()
+var _base_width := 0.26 ## panel width when set up: chrome scale is panel_size.x / this
+var _last_delta := 0.016
+var _last_click_ms := -100000
+var _scroll_f := 0.0
 var _corners: Array[Node3D] = []
 var _corner_materials: Array[StandardMaterial3D] = []
 var _hover_corner := -1 ## corner the right laser is on (claims ui_hover like the panel does), or -1
@@ -112,6 +123,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	_right = right
 	_camera = camera
 	_pixels_per_metre = float(viewport_size.x) / panel_size.x
+	_base_width = panel_size.x
 	_build_viewport()
 	_build_quad()
 	_build_handle()
@@ -145,6 +157,8 @@ func close() -> void:
 	_clear_held()
 	_resize_corner = -1
 	_set_hover_corner(-1)
+	if free_on_close:
+		queue_free.call_deferred() # after _on_closed() below has run
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if _right:
 		_right.set_meta("ui_hover", false)
@@ -185,7 +199,8 @@ func _place_in_front_of_camera() -> void:
 	global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), target_position)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_last_delta = delta
 	if not _open or _camera == null or _right == null:
 		return
 	if _held_by:
@@ -198,6 +213,35 @@ func _process(_delta: float) -> void:
 		_update_resize()
 		return # being resized - not also hoverable/clickable at the same time
 	_update_pointer()
+	_scroll_with_stick(delta)
+
+
+func _scroll_with_stick(delta: float) -> void:
+	## Right thumbstick Y scrolls this window's scroll_target while the laser is
+	## on the window (push down = scroll down) — the same control the wrist
+	## tablet has. locomotion.gd/controller.gd already stand the stick down
+	## while a panel owns the laser ("ui_hover"). Not while a click is held or
+	## just after one, or a resting thumb would slide rows out from under it.
+	if not _hovering or scroll_target == null or not is_instance_valid(scroll_target) or not scroll_target.is_visible_in_tree():
+		return
+	if _pressed or Time.get_ticks_msec() - _last_click_ms < 400:
+		_scroll_f = float(scroll_target.scroll_vertical)
+		return
+	var stick_y: float = _right.get_vector2("primary").y
+	scroll_by_stick(stick_y, delta)
+
+
+func scroll_by_stick(stick_y: float, delta: float) -> void:
+	## Split out so tests can drive it without a real XR runtime.
+	if scroll_target == null:
+		return
+	if absf(stick_y) < scroll_deadzone:
+		_scroll_f = float(scroll_target.scroll_vertical)
+		return
+	_scroll_f = maxf(_scroll_f - stick_y * scroll_speed_px * delta, 0.0)
+	scroll_target.scroll_vertical = int(_scroll_f)
+	if float(scroll_target.scroll_vertical) < _scroll_f - 1.0:
+		_scroll_f = float(scroll_target.scroll_vertical) # clamped at the bottom
 
 
 func _update_pointer() -> void:
@@ -283,6 +327,7 @@ func _send_click(down: bool) -> void:
 	## both down and up - see popup_keyboard.gd's own _send_click() for the
 	## full real-headset reasoning this mirrors exactly.
 	_pressed = down
+	_last_click_ms = Time.get_ticks_msec()
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down
@@ -393,8 +438,8 @@ func _layout_handle() -> void:
 ## on top of the content's own controls): dim at rest, bright cyan and a
 ## little larger while the laser is on one or it's being dragged.
 func _build_corners() -> void:
-	var length := 0.035
-	var thickness := 0.006
+	var length := 0.07 # doubled with the hit zone: the bracket is what you aim at
+	var thickness := 0.010
 	for i in _CORNER_DIRS.size():
 		var dir := _CORNER_DIRS[i]
 		var holder := Node3D.new()
@@ -501,6 +546,53 @@ func _apply_panel_size(new_size: Vector2, force_viewport: bool) -> void:
 	(_quad.mesh as QuadMesh).size = new_size
 	_layout_handle()
 	_layout_corners()
+	_apply_chrome_scale()
+
+
+func _register_chrome(button: Button, min_size: Vector2, font_size: int) -> void:
+	_chrome.append({"button": button, "min_size": min_size, "font_size": font_size})
+	_apply_chrome_scale()
+
+
+func add_header_button(text: String, callback: Callable, at_start: bool = true) -> Button:
+	## A window-specific button in the header (the Image Viewer's Back). It's
+	## sized like the close button and grows with the window the same way.
+	var button := Button.new()
+	button.text = text
+	button.pressed.connect(callback)
+	_header.add_child(button)
+	if at_start:
+		_header.move_child(button, 0)
+	_register_chrome(button, Vector2(64, 64), 34)
+	return button
+
+
+func set_title(text: String) -> void:
+	if _title_label:
+		_title_label.text = text
+
+
+func chrome_scale() -> float:
+	## How much bigger than its opening size the window is (1 at opening,
+	## capped at 3): the header buttons scale by this, so a big window gets big
+	## close/back buttons instead of the same small ones.
+	return clampf(panel_size.x / _base_width, 1.0, 3.0)
+
+
+var _applied_chrome_scale := -1.0
+
+func _apply_chrome_scale() -> void:
+	var scale := chrome_scale()
+	if absf(scale - _applied_chrome_scale) < 0.02:
+		return # a drag resizes every frame: only touch the theme when the scale has actually moved
+	_applied_chrome_scale = scale
+	for entry in _chrome:
+		var button: Button = entry["button"]
+		if is_instance_valid(button):
+			button.custom_minimum_size = (entry["min_size"] as Vector2) * scale
+			button.add_theme_font_size_override("font_size", int(roundf(float(entry["font_size"]) * scale)))
+	if _title_label:
+		_title_label.add_theme_font_size_override("font_size", int(roundf(30.0 * sqrt(scale)))) # the title grows too, more gently
 
 
 func _build_root_ui() -> Control:
@@ -536,15 +628,21 @@ func _build_root_ui() -> Control:
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 8)
 	column.add_child(header)
+	_header = header
 	var title := Label.new()
 	title.text = panel_title
 	title.add_theme_font_size_override("font_size", 30)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.clip_text = true
 	header.add_child(title)
+	_title_label = title
+	# The close button is big to begin with and GROWS with the window (see
+	# _apply_chrome_scale()) so it stays easy to hit on a large window.
 	var close_button := Button.new()
 	close_button.text = "X"
 	close_button.pressed.connect(close)
 	header.add_child(close_button)
+	_register_chrome(close_button, Vector2(64, 64), 34)
 
 	_content_holder = VBoxContainer.new()
 	_content_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL

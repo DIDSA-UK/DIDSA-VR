@@ -215,7 +215,9 @@ func _build_content() -> Control:
 
 	var rows_scroll := ScrollContainer.new()
 	rows_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rows_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(rows_scroll)
+	scroll_target = rows_scroll # right thumbstick scrolls the rows while the laser is on the window
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 4)
 	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL

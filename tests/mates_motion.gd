@@ -17,6 +17,13 @@ func _part(name: String, owner_id: String, occ: String) -> Node3D:
 	return n
 
 
+func _dot6(a: Array, b: Array) -> float:
+	var d := 0.0
+	for i in 6:
+		d += a[i] * b[i]
+	return d
+
+
 func _initialize() -> void:
 	var tool := MatesTool.new()
 	root.add_child(tool)
@@ -82,5 +89,52 @@ func _initialize() -> void:
 	tool.notify_locked(plate)
 	tool.notify_locked(plate)
 	print("SMOKE the locked message shows once (not every physics frame): ", notices[0] == 1 and "grounded" in tool.status_text())
+
+	# --- local motion model: project a wanted motion onto the backend's free twists (no network)
+	# Face-to-face mate on a plane whose normal is +Y: free = slide in X, slide in Z, spin about Y.
+	var twists_json := [[1, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 1, 0]]
+	var free := MatesTool.weighted_basis(twists_json)
+	var ref := Transform3D(Basis.IDENTITY, Vector3(10, 20, 30))
+	print("SMOKE the weighted basis keeps all three independent twists, orthonormal: ", free.size() == 3 and absf(_dot6(free[0], free[1])) < 1e-9 and absf(_dot6(free[0], free[0]) - 1.0) < 1e-9)
+	var wish := Transform3D(Basis(Vector3.UP, 0.3) * Basis(Vector3.RIGHT, 0.2), ref.origin + Vector3(12, 55, -7))
+	var got := MatesTool.project_motion(ref, free, wish)
+	print("SMOKE sliding in the free plane is followed exactly (x +12, z -7): ", got.origin.is_equal_approx(ref.origin + Vector3(12, 0, -7)))
+	print("SMOKE ...lifting off the mate plane (y +55) is dropped: ", is_equal_approx(got.origin.y, ref.origin.y))
+	var spin := got.basis * ref.basis.inverse()
+	print("SMOKE ...spin about the free axis is kept (0.3 rad) and tipping (0.2 rad about X) is dropped: ", absf(spin.get_rotation_quaternion().get_angle() - 0.3) < 0.01 and absf(spin.get_rotation_quaternion().get_axis().dot(Vector3.UP)) > 0.99)
+	print("SMOKE a fully constrained part (no free twists) doesn't move: ", MatesTool.project_motion(ref, [], wish).is_equal_approx(ref))
+	print("SMOKE with all six directions free nothing is dropped: ", MatesTool.project_motion(ref, MatesTool.weighted_basis([[1,0,0,0,0,0],[0,1,0,0,0,0],[0,0,1,0,0,0],[0,0,0,1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1]]), wish).origin.is_equal_approx(wish.origin))
+	# a twist mixing translation and rotation (spin about an axis NOT through the part origin): a motion already on it is unchanged
+	var helix := MatesTool.weighted_basis([[0, 0, 5.0, 0, 0.05, 0]]) # 5 mm along Z per 0.05 rad about Y
+	var on_it := Transform3D(Basis(Vector3.UP, 0.2) * ref.basis, ref.origin + Vector3(0, 0, 20.0)) # 0.2 rad -> 20 mm: exactly along the twist
+	var projected := MatesTool.project_motion(ref, helix, on_it)
+	print("SMOKE a motion already inside a mixed translation+rotation twist is reproduced (idempotent): ", projected.origin.distance_to(on_it.origin) < 0.5 and projected.basis.is_equal_approx(on_it.basis))
+
+	# --- constrain_drag displays the projected motion EVERY call with no network in between
+	var parent := Node3D.new()
+	root.add_child(parent)
+	var mated := Node3D.new()
+	mated.name = "mated"
+	mated.set_meta("owner_part_id", "ROOT")
+	mated.set_meta("occurrence_id", "occ-peg")
+	parent.add_child(mated)
+	await process_frame
+	var requests_before: int = tool.stat_requests
+	tool._drag[mated] = {"start": ref, "desired": null, "sent": null, "solved": ref, "ref": ref, "basis": free, "model": true, "active": true, "running": true, "last_ok": true, "owner": "ROOT", "occ": "occ-peg", "last_error_ms": 0, "last_sync_ms": 0} # a drag whose first backend answer has already arrived ("running": true keeps the sync loop out of this pure test)
+	var shown_x := []
+	var y_ok := true
+	for i in 12:
+		var hand := Transform3D(Basis.IDENTITY, ref.origin + Vector3(5.0 * (i + 1), 40.0, 0))
+		var shown: Transform3D = tool.constrain_drag(mated, parent.global_transform * hand)
+		shown_x.append(shown.origin.x)
+		if not is_equal_approx(shown.origin.y, ref.origin.y):
+			y_ok = false
+	var strictly_increasing := true
+	for i in range(1, shown_x.size()):
+		if shown_x[i] <= shown_x[i - 1]:
+			strictly_increasing = false
+	print("SMOKE while dragging, the displayed pose advances on EVERY call (smooth: not tied to network replies): ", strictly_increasing and shown_x.size() == 12)
+	print("SMOKE ...and never leaves the mate plane in the constrained direction: ", y_ok)
+	print("SMOKE ...without making a single request: ", tool.stat_requests == requests_before)
 
 	quit()

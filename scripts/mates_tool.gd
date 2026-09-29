@@ -466,33 +466,59 @@ func _persist_loop(occ: String, entry: Dictionary) -> void:
 
 
 # --- live, constrained motion (enforced mates) ---
+##
+## HOW A MATED PART MOVES (revised 29 Sep 2026 after "jerky with the round
+## trips"): the first cut asked the backend for the part's pose every frame (a
+## PATCH + solve pair per round trip), so the part moved at network speed. Now
+## the backend says HOW the part may move — its remaining free motion, an
+## orthonormal set of "twists" (a few translations/rotations the mates allow),
+## from one `mate-motion` call — and the client applies the hand's motion
+## LOCALLY every frame by projecting it onto those twists: motion the mates
+## forbid is dropped, motion they allow is followed 1:1, with no network in the
+## loop. The projection is exact for the common mates (in-plane sliding and
+## spinning on a face, sliding/rotating along an axis) and first-order for
+## curved ones; every RESYNC_INTERVAL_MS a fresh `mate-motion` call (one
+## request, not two) re-anchors the reference pose and twists, which corrects
+## any curvature drift without a visible jump. A backend without `mate-motion`
+## falls back to the old per-round-trip PATCH+solve loop.
+
+const RESYNC_INTERVAL_MS := 150 ## min gap between re-anchoring requests during a drag (one in flight at a time)
+const CONSTRAINT_LENGTH_MM := 100.0 ## how many mm one radian of rotation "weighs" when projecting a wanted motion onto the free twists (a part-sized lever arm), so translation and rotation are comparable in one metric
+
+var stat_requests := 0 ## requests sent so far (diagnostics/tests: the point of the local model is that this stays low while dragging)
+var _motion_supported := true ## flips false if the backend has no mate-motion endpoint (404/405): fall back to PATCH+solve per round trip
 
 func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	## Called every physics frame by controller.gd for a part being moved that
 	## is_constrained(). `desired_global` is where the hand wants it; returns
-	## the global pose to DISPLAY: the latest one the backend's solver found
-	## for that wish (its nearest mate-satisfying placement, free directions
-	## left where you put them), or — before the first answer — the pose the
-	## drag started from, so nothing jumps. Requests run in a one-in-flight
-	## loop (PATCH the wish, then solve), so the rate adapts to the network.
+	## the global pose to DISPLAY: that wish projected onto the motion the mates
+	## allow (from the last `mate-motion` answer) — computed here, this frame,
+	## no network. Before the first answer arrives it's the pose the drag
+	## started from, so nothing jumps.
 	var parent := part.get_parent() as Node3D
 	var inv := parent.global_transform.affine_inverse()
 	var state: Dictionary = _drag.get(part, {})
 	if state.is_empty():
-		state = {"start": _local_pose(part), "desired": null, "sent": null, "solved": null, "active": true, "running": false, "last_ok": true, "owner": _current_owner_part_id, "occ": _occ_id(part), "last_error_ms": 0}
+		state = {"start": _local_pose(part), "desired": null, "sent": null, "solved": null, "ref": null, "basis": [], "model": false, "active": true, "running": false, "last_ok": true, "owner": _current_owner_part_id, "occ": _occ_id(part), "last_error_ms": 0, "last_sync_ms": -100000}
 		_drag[part] = state
 	state["active"] = true
 	state["desired"] = inv * desired_global
 	if not state["running"]:
 		_drag_loop(part, state)
-	var shown: Transform3D = state["solved"] if state["solved"] != null else state["start"]
+	var shown: Transform3D
+	if state["model"]:
+		shown = project_motion(state["ref"], state["basis"], state["desired"])
+	elif state["solved"] != null:
+		shown = state["solved"] # fallback (no mate-motion on the backend): the last round-trip answer
+	else:
+		shown = state["start"]
 	return parent.global_transform * shown
 
 
 func desired_global(part: Node3D) -> Transform3D:
 	## The accumulated wish for a drag in progress (controller.gd's laser
 	## rotate/nudge applies its per-frame increments on top of THIS, not the
-	## displayed pose, which lags one network round trip behind).
+	## displayed pose).
 	var state: Dictionary = _drag.get(part, {})
 	if state.is_empty() or state["desired"] == null:
 		return part.global_transform
@@ -510,6 +536,62 @@ func end_drag(part: Node3D) -> bool:
 	return true
 
 
+static func project_motion(ref: Transform3D, twists: Array, desired: Transform3D) -> Transform3D:
+	## The pose `desired` becomes when only the motion in `twists` (an
+	## orthonormal basis in the weighted metric, see weighted_basis()) is allowed,
+	## measured from `ref`: the translation and rotation-vector difference are
+	## projected onto the free subspace and everything else dropped. Empty
+	## `twists` = fully constrained: stays at `ref`.
+	var ref_basis := ref.basis.orthonormalized()
+	var q := (desired.basis.orthonormalized() * ref_basis.inverse()).get_rotation_quaternion()
+	if q.w < 0.0:
+		q = -q # shortest way round
+	var sine := sqrt(maxf(0.0, 1.0 - q.w * q.w))
+	var rotation_vector := Vector3.ZERO
+	if sine > 1e-9:
+		rotation_vector = Vector3(q.x, q.y, q.z) / sine * (2.0 * acos(clampf(q.w, -1.0, 1.0)))
+	var d := desired.origin - ref.origin
+	var wanted := [d.x, d.y, d.z, rotation_vector.x * CONSTRAINT_LENGTH_MM, rotation_vector.y * CONSTRAINT_LENGTH_MM, rotation_vector.z * CONSTRAINT_LENGTH_MM]
+	var allowed := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	for twist in twists:
+		var dot := 0.0
+		for i in 6:
+			dot += twist[i] * wanted[i]
+		for i in 6:
+			allowed[i] += dot * twist[i]
+	var rotation_allowed := Vector3(allowed[3], allowed[4], allowed[5]) / CONSTRAINT_LENGTH_MM
+	var rotation := Basis.IDENTITY
+	if rotation_allowed.length() > 1e-12:
+		rotation = Basis(rotation_allowed.normalized(), rotation_allowed.length())
+	return Transform3D(rotation * ref_basis, ref.origin + Vector3(allowed[0], allowed[1], allowed[2]))
+
+
+static func weighted_basis(free_twists: Array) -> Array:
+	## The backend's twists are orthonormal in plain (mm, rad) coordinates; the
+	## projection above works in the weighted metric (rotation scaled by
+	## CONSTRAINT_LENGTH_MM), where they aren't — so weight them and
+	## re-orthonormalise (Gram-Schmidt). Near-zero leftovers are dropped.
+	var out: Array = []
+	for twist in free_twists:
+		var v := [float(twist[0]), float(twist[1]), float(twist[2]), float(twist[3]) * CONSTRAINT_LENGTH_MM, float(twist[4]) * CONSTRAINT_LENGTH_MM, float(twist[5]) * CONSTRAINT_LENGTH_MM]
+		for u in out:
+			var dot := 0.0
+			for i in 6:
+				dot += v[i] * u[i]
+			for i in 6:
+				v[i] -= dot * u[i]
+		var length := 0.0
+		for i in 6:
+			length += v[i] * v[i]
+		length = sqrt(length)
+		if length < 1e-9:
+			continue
+		for i in 6:
+			v[i] /= length
+		out.append(v)
+	return out
+
+
 func _drag_loop(part: Node3D, state: Dictionary) -> void:
 	state["running"] = true
 	while is_instance_valid(part):
@@ -520,19 +602,23 @@ func _drag_loop(part: Node3D, state: Dictionary) -> void:
 				break # released and everything the hand asked for has been answered
 			await get_tree().process_frame
 			continue
+		# While the hand is moving, re-anchor at a modest rate: the display is
+		# driven locally, so this only has to keep the model honest. After the
+		# release the last answer is wanted straight away.
+		if state["active"] and state["model"] and Time.get_ticks_msec() - int(state["last_sync_ms"]) < RESYNC_INTERVAL_MS:
+			await get_tree().process_frame
+			continue
 		state["sent"] = desired
-		var path := "/parts/%s/occurrences/%s" % [state["owner"], state["occ"]]
-		var patched := await _api_request(HTTPClient.METHOD_PATCH, path, {"transform": pose_to_json(desired)})
-		var solved: Dictionary = {}
-		if patched["ok"]:
-			solved = await _api_request(HTTPClient.METHOD_POST, path + "/solve", null)
+		state["last_sync_ms"] = Time.get_ticks_msec()
+		var result: Dictionary
+		if _motion_supported:
+			result = await _sync_with_motion_model(part, state, desired)
+		else:
+			result = await _sync_with_solve(state, desired)
 		if not is_instance_valid(part):
 			break
-		var result: Dictionary = solved if patched["ok"] else patched
 		state["last_ok"] = result["ok"]
-		if result["ok"]:
-			state["solved"] = json_to_pose(result["json"].get("transform", {}))
-		elif Time.get_ticks_msec() - int(state["last_error_ms"]) > 1500:
+		if not result["ok"] and Time.get_ticks_msec() - int(state["last_error_ms"]) > 1500:
 			state["last_error_ms"] = Time.get_ticks_msec()
 			_report("Mate can't follow that move: %s" % _friendly_error(result))
 		if live_min_interval_ms > 0:
@@ -542,13 +628,51 @@ func _drag_loop(part: Node3D, state: Dictionary) -> void:
 		_finish_drag(part, state)
 
 
+func _sync_with_motion_model(part: Node3D, state: Dictionary, desired: Transform3D) -> Dictionary:
+	## ONE request: the nearest mate-satisfying pose to `desired` and the free
+	## motion there (nothing is stored on the backend).
+	var path := "/parts/%s/occurrences/%s/mate-motion" % [state["owner"], state["occ"]]
+	var response := await _api_request(HTTPClient.METHOD_POST, path, {"transform": pose_to_json(desired)})
+	var route_missing: bool = response["code"] == 405 or (response["code"] == 404 and response["json"] is Dictionary and response["json"].get("detail") == "Not Found")
+	if route_missing: # (an unknown occurrence is also a 404, but with a structured detail — that's not "no such endpoint")
+		_motion_supported = false # older backend: fall back to PATCH + solve
+		state["sent"] = null
+		return {"ok": true}
+	if not response["ok"]:
+		return response
+	var json = response["json"]
+	if not (json is Dictionary) or not bool(json.get("converged", false)):
+		return {"ok": false, "json": {"detail": {"type": "mate_solve_did_not_converge"}}, "error": "did not converge"}
+	state["ref"] = json_to_pose(json.get("transform", {}))
+	state["basis"] = weighted_basis(json.get("free_twists", []))
+	state["solved"] = state["ref"]
+	state["model"] = true
+	return {"ok": true}
+
+
+func _sync_with_solve(state: Dictionary, desired: Transform3D) -> Dictionary:
+	## The original per-round-trip loop, kept as the fallback: PATCH the wish,
+	## then solve (which stores its result).
+	var path := "/parts/%s/occurrences/%s" % [state["owner"], state["occ"]]
+	var patched := await _api_request(HTTPClient.METHOD_PATCH, path, {"transform": pose_to_json(desired)})
+	if not patched["ok"]:
+		return patched
+	var solved := await _api_request(HTTPClient.METHOD_POST, path + "/solve", null)
+	if solved["ok"]:
+		state["solved"] = json_to_pose(solved["json"].get("transform", {}))
+	return solved
+
+
 func _finish_drag(part: Node3D, state: Dictionary) -> void:
 	_drag.erase(part)
 	var start: Transform3D = state["start"]
 	var final: Transform3D = state["solved"] if state["solved"] != null else start
 	part.transform = final
-	if not bool(state["last_ok"]):
-		persist_pose(part) # the backend holds the raw wish from the last failed solve: put it back on the displayed pose
+	# The motion-model path stores nothing while dragging (and the fallback's
+	# last failed solve leaves the raw wish on the backend): save the pose the
+	# part actually ends on.
+	if state["model"] or not bool(state["last_ok"]):
+		persist_pose(part)
 	if command_stack and not start.is_equal_approx(final):
 		command_stack.push("move %s" % part.name,
 			func() -> void:
@@ -604,6 +728,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	## call (mirroring main.gd's _import_external_file's own await-per-step
 	## pattern) rather than one shared node, so overlapping calls (e.g. a
 	## list refresh while a solve is in flight) never collide.
+	stat_requests += 1
 	var req := HTTPRequest.new()
 	add_child(req)
 	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]

@@ -225,7 +225,12 @@ func _initialize() -> void:
 
 	# --- 5. a real grip-drag of the constrained part: hand pulls it up 50 and sideways 30
 	var start_pos := B.position
+	var requests_before: int = mt.stat_requests
 	await _grip_drag(B, Vector3(30, 50, 0), 60)
+	var drag_requests: int = mt.stat_requests - requests_before
+	print("calibration — requests used by the whole drag (incl. release + save): ", drag_requests)
+	print("SMOKE the drag used the one-request motion model (the backend has mate-motion): ", mt._motion_supported)
+	print("SMOKE ...and a whole 60-frame drag cost only a handful of requests (was 2 per round trip, continuously): ", drag_requests <= 12)
 	var ended := B.position
 	print("calibration — hand moved it by (30, 50, 0) from ", start_pos, "; it ended at ", ended)
 	print("SMOKE while dragging, the part follows the hand in the mate's FREE directions: ", absf(ended.x - (start_pos.x + 30.0)) < 1.0 and absf(ended.z - start_pos.z) < 1.0)
@@ -255,6 +260,14 @@ func _initialize() -> void:
 	print("SMOKE Fix grounds the selected part: ", mt.is_fixed(B))
 	await mt.toggle_fixed(B)
 	print("SMOKE Float frees it again: ", not mt.is_fixed(B))
+
+	# --- an older backend without mate-motion: falls back to the per-round-trip loop and still constrains
+	mt._motion_supported = false
+	var fb_start := B.position
+	await _grip_drag(B, Vector3(-20, 30, 0), 40)
+	var fb_measure := await _measure()
+	print("SMOKE fallback (no mate-motion): the part still follows the free directions and stays on the mate plane: ", absf(B.position.x - (fb_start.x - 20.0)) < 1.0 and absf(B.position.y - fb_start.y) < 0.5 and absf(float(fb_measure.get("normal_distance", 99.0))) < 0.01)
+	mt._motion_supported = true
 
 	# cleanup
 	for m in mt.mates.duplicate():

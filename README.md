@@ -212,8 +212,11 @@ live-synced.
     you place several mates before solving them all at once with **Enforce
     all**. **While mates are enforced** (the default), parts move as their
     mates demand: a mated part you grab, or nudge/rotate with the laser,
-    slides along whatever its mates allow (a live solve on the backend as
-    you move) instead of following your hand freely, and stays where you put
+    slides along whatever its mates allow instead of following your hand
+    freely — smoothly: the backend tells the app once how the part may move
+    (its free directions) and the app applies your hand's motion to those
+    directions locally every frame, re-checking with the backend only a few
+    times a second, and stays where you put
     it in every direction the mates leave free — nothing flies off. Every
     move of a placed part is saved to the backend, so mates always solve
     against what you see. A **grounded** (fixed) part that has mates can't be
@@ -274,8 +277,16 @@ live-synced.
     you're looking and closes with its own **X**. Each also has a small
     grab handle at the centre of its own lower edge — **grip** it with
     either hand to drag the whole panel somewhere else, release to drop it;
-    windows otherwise stay exactly where they first opened. They're also
-    **resizable**: four small brackets sit just outside the corners — aim
+    windows otherwise stay exactly where they first opened. While the
+    laser is on a window with a list in it (the Assembly Tree, the Image
+    Viewer's picker), the **right thumbstick scrolls it** (push down = down).
+    **Image Viewer and Browser can be open several at a time**: the tablet
+    button opens one, and another with every further press (each has its own
+    close; closing one leaves the rest). Every window's **close button (and
+    the Image Viewer's Back button) grows with the window**, so a big window
+    keeps big, easy targets. They're also
+    **resizable**: four bracket-shaped corner targets (a generous ~10 cm
+    each) sit just outside the corners — aim
     the right laser at one and it lights up cyan; hold the trigger and drag
     (the opposite corner stays put). It's a true resize, not a zoom: the
     window's content area grows at the same text size, so a bigger Browser
@@ -309,7 +320,9 @@ live-synced.
     - **Calculator** — a plain arithmetic keypad, no backend involved.
     - **Image Viewer** — picks an image (`.png`/`.jpg`/`.jpeg`/`.webp`/
       `.bmp`) from the same `models/`/`user://models` folder the Files tab
-      already reads and displays it full-size; no pan/zoom yet.
+      already reads. Pick one and it **fills the window** (aspect kept, the
+      file name as the title); the header's **< Back** returns to the
+      scrollable picker. No pan/zoom — resize the window instead.
 
     All three are built on a shared free-floating-panel mechanism
     (`scripts/diegetic_panel.gd`) that any future window can reuse. Several
