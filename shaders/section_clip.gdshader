@@ -48,9 +48,23 @@ global uniform vec3 section_plane_origin;
 global uniform vec3 section_plane_normal;
 global uniform bool section_enabled;
 
+// World position must be computed in vertex(): in Godot 4's fragment(),
+// VERTEX is VIEW-space, not model-space. The earlier version here did
+// MODEL_MATRIX * VERTEX inside fragment(), which mixes the two — with the
+// assembly root scaled 0.001 and placed at spawn_position, every fragment
+// landed at ~the model's origin, so the clip test became all-or-nothing for
+// the whole model and it "vanished" exactly when the plane crossed the
+// model's origin (real-headset report). tests/section_render.gd missed it
+// because it rendered an identity-transform mesh through a plain camera,
+// where view-space happens to be close to world-space.
+varying vec3 world_pos;
+
+void vertex() {
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
 void fragment() {
 	if (section_enabled) {
-		vec3 world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 		if (dot(world_pos - section_plane_origin, section_plane_normal) < 0.0) {
 			discard;
 		}

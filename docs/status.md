@@ -1869,3 +1869,99 @@ test-timing gap (the panel's own `_process()` demonstrably runs and
 computes the right transform; it just hadn't been called yet after a
 single awaited frame in this harness), not a product bug, and matches the
 extra-settle-time convention this same test file already uses elsewhere.
+
+## Headset bug round, 29 Sep 2026: section tool (real cause this time), tree, add-part errors, tablet, discs, nudge
+
+John's next real-headset list (ten items) on the builds above. All fixed and
+covered by tests; **none of it re-checked on a headset yet** — see the
+checklist at the end. Verified with Godot 4.7.2: full `tests/run_all.sh`
+(no new `false` lines vs a baseline run; the tablet's Settings-tab resolution/
+MSAA clicks that silently missed in the baseline layout now land), the real-
+render tests under Xvfb, and the `e2e_*` tests against a throwaway real backend.
+
+- **Section tool "disappears the model past its centre" — the real cause.**
+  `shaders/section_clip.gdshader` computed `MODEL_MATRIX * VERTEX` in
+  `fragment()`, but **`VERTEX` in a Godot 4 `fragment()` is VIEW-space**. With
+  the assembly root scaled 0.001 and offset to `spawn_position`, every
+  fragment landed at ~the model origin, so the clip became all-or-nothing and
+  flipped when the plane crossed the model's origin. The previous round's
+  fixes (`cull_disabled`, metallic 0) were real but never touched this;
+  `tests/section_render.gd` couldn't see it (identity-transform mesh, plain
+  camera — view ≈ world). Fixed: world position is a `varying` set in
+  `vertex()`. New `tests/section_render_transformed.gd` (scaled+offset parent,
+  moved camera, plane at 3 fractions): old shader 52/26/0 lit columns, fixed
+  39/26/13. **Gotcha for any future world-space shader maths: `VERTEX` in
+  `fragment()` is view-space — use a `varying` from `vertex()` or
+  `INV_VIEW_MATRIX`.**
+- **Add part → HTTP 422 / 500.** Reproduced against the real backend with the
+  tracked fixtures: the 422 is `{"detail":"Cannot insert a Part into itself"}`
+  — "Add" was offered on the file that *is* the loaded root (Open plate, then
+  Add plate). Now hidden for that file (`main.gd`'s
+  `native_file_root_part_id()`, cached per mtime) and every load error's text
+  carries the backend's `detail` (`_http_error_text()`), visible in the Files
+  status label. **The 500 did not reproduce** in any Open/Add ordering. Best
+  hypothesis: overlapping requests — the backend holds one global in-memory
+  Document, and Open/Add/STEP-import were un-serialised coroutines (a second
+  tap, or a tap during the startup import, interleaved with an in-flight mesh
+  fetch). Now one at a time (`_claim_load()`, also held across the startup
+  import chain: a second tap shows "Busy…"), and the mesh GET retries once on
+  5xx, logging the failing body. **If a 500 recurs, the status text now says
+  why — send me it plus the backend console output.**
+- **Tree never populated.** Confirmed by measurement: the row list's
+  `ScrollContainer` was **0.0 px tall** — `diegetic_panel.gd` added window
+  content with no expand flag, so an inner `SIZE_EXPAND_FILL` scroll area
+  collapsed (same BoxContainer trap the tablet had). Content now expands.
+  Also: the root Part is the tree's top row with its Occurrences as children,
+  and rows are labelled with the Part's real name (cached
+  `GET /parts/{id}`) rather than "Occurrence d3c102e0".
+- **Files "+5 more".** Cap removed; the tablet now scrolls.
+- **Right thumbstick left/right reversed.** `locomotion.gd` snap-turn sign was
+  inverted (positive rotation about +Y is a left turn). Fixed; tested.
+- **Grabbing a window also moved the world.** Same class as the section
+  gizmo: `diegetic_panel.gd` now sets a `window_held` meta on the grabbing
+  hand (cleared on release **and** on close-mid-grab), `two_hand_model.gd`'s
+  `_hand_free()` honours it, and `controller.gd`'s `_try_grab()` defers to any
+  panel whose handle is in reach (`handle_in_reach()`), so a grip aimed at a
+  window never also grabs a part or the section gizmo.
+- **Light scene grid.** Charcoal in Light, white elsewhere
+  (`environment_manager.gd` sets the grid material's `line_color`).
+- **Models invisible in Light/Dark.** Real backend glb parts import as a
+  pure-white albedo, metallic 0, roughness 1 (checked; my first theory —
+  glTF-default metallic=1 mirroring the background — was **wrong** for this
+  data and I removed the hack for it). The cause was the per-scene light
+  energies: Light blew a white part out to the pale background, Dark left
+  faces away from the sun near-black. Light/Dark/Mid now share the Mid
+  lighting rig and differ only in background and grid colour, so parts read the
+  same grey everywhere with an ambient floor on unlit faces. **Caveat:** the
+  project renders with `mobile`; the sandbox can only render through GL
+  compatibility, so `tests/look_render.gd` asserts the shared rig and grid
+  colour deterministically and its pixel checks are a smoke test only — judge
+  the actual grey in the headset (a dim fill light is the next step if faces
+  still read too dark).
+- **Tablet.** 900×720 px / 0.3375×0.27 m (was 640×600 / 0.24×0.225 — 20%
+  taller, wider so View/Assembly/Windows/Files/Settings/X share one row with
+  unclipped labels; same px/m so text is the same size). All pages sit in a
+  `ScrollContainer`; while the right laser is on the tablet the **right
+  thumbstick Y scrolls it** (down = down), and `locomotion.gd`/`controller.gd`
+  stand the stick down whenever the right hand's `ui_hover` is set, so it can't
+  also teleport, snap-turn or spin a selected part.
+- **A/X "towards me" felt inverted.** It moved the part by `-aim`, so tilting
+  up moved it down. Now `_nudge_towards_hand()`: the hand→part direction eases
+  toward the aim (`nudge_steer_rate`) while the distance closes (stops at
+  `nudge_min_distance` 0.15 m) — the same "bead on the laser" feel as B/Y,
+  which is unchanged.
+- **Controller discs.** Thumbstick / A-B / X-Y / Menu discs, the hamburger
+  glyph and the press flash are gone; only the ring remains, moved back by one
+  ring diameter (0.096 m). **Assumption:** "the controller discs … their own
+  diameter" was read as the remaining ring; the wrist-tablet icon position was
+  left alone.
+
+Tests added: `tests/bug_round.gd` (in `run_all.sh`), `tests/section_render_transformed.gd`
+and `tests/look_render.gd` (Xvfb, not in `run_all.sh`), new window-grab checks in
+`tests/windows_tab.gd`; `tests/e2e_assembly_tree.gd` updated for the root row.
+New fixture `tests/fixtures/real_assembly_mesh.glb` (a real backend glb).
+
+**Headset checklist (not yet done):** section plane crossing the model centre
+and beyond; snap-turn direction; A/X feel; grab a window (world must stay put);
+tablet stick-scroll feel and bottom clipping; Files list with many files; the
+Tree window with a real Open + Add; Light/Dark/Mid grey; the ring position.

@@ -301,6 +301,12 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 func _hand_free(hand: XRController3D) -> bool:
 	if not hand.is_button_pressed(grab_action):
 		return false
+	return _hand_free_ignoring_button(hand)
+
+
+func _hand_free_ignoring_button(hand: XRController3D) -> bool:
+	## The part of _hand_free() that doesn't read the live grip state (which
+	## needs a real XR runtime), so tests can check the arbitration metas.
 	# Real-headset feedback: grabbing the section-plane gizmo also dragged
 	# the whole model, because this check only ever knew about controller.gd's
 	# own held_node (a PART) — section_tool.gd's gizmo deliberately never
@@ -310,6 +316,10 @@ func _hand_free(hand: XRController3D) -> bool:
 	# this meta on the hand itself (same convention ui_hover/ui_hit_distance
 	# already use for controller.gd), so check it here too.
 	if hand.has_meta("section_gizmo_held") and hand.get_meta("section_gizmo_held"):
+		return false
+	# Same for a floating window grabbed by its handle (diegetic_panel.gd sets
+	# "window_held") — grabbing a window also moved the world otherwise.
+	if hand.has_meta("window_held") and hand.get_meta("window_held"):
 		return false
 	# controller.gd exposes held_node; a hand carrying a part isn't free.
 	return hand.get("held_node") == null

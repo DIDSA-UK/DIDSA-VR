@@ -53,7 +53,8 @@ live-synced.
    **right thumbstick** rotates it about the point the ray hit (or its
    centre), relative to how you're currently looking (left/right spins it,
    up/down tips it away/towards you, not around the part's own possibly-
-   tilted axes), and **A/X**/**B/Y** pull it nearer or push it farther — at a
+   tilted axes), and **A/X**/**B/Y** pull it nearer or push it farther (both follow where
+   you aim the controller — tilt it and the part swings with it) — at a
    speed proportional to how far the part is from your hand (0.18 m/s at
    30 cm, 0.6 m/s at 1 m, 3 m/s at 5 m), so far parts travel quickly and near
    ones can be placed finely. The **left** trigger/thumbstick don't do this —
@@ -66,17 +67,18 @@ live-synced.
    part, or the wrist tablet/popup keyboard) rather than always drawing at
    a fixed length; selected parts get a yellow highlight. Every part move
    (grip-drag or laser rotate/nudge) is undoable — see the wrist tablet's
-   Undo/Redo below. Each controller also carries a small floating reference
-   — a thin ring around a few white discs roughly where the physical
-   thumbstick, A/B (or X/Y on the left) and, left hand only, Menu button
-   sit — so you can find a button by feel without looking away from
-   whatever you're doing; a disc brightens while its real button is held
-   down.
+   Undo/Redo below. Each controller also carries a thin floating ring
+   (a stylised tracking halo), set back towards you from the hand. (The
+   thumbstick/button discs it used to carry were removed after headset
+   testing.)
 5. Walk with the **left thumbstick** (relative to where you're looking); the
-   **right thumbstick**'s X axis snap-turns, its Y axis aims and blinks a
+   **right thumbstick**'s X axis snap-turns (push right = turn right), its Y axis aims and blinks a
    teleport (push forward and point the right hand's laser at the floor — a
    cyan ring marks where it lands, within 5 m — release to jump there). Either stick backs off automatically while that hand has a
-   part selected, so rotating a part never also turns or teleports you.
+   part selected, so rotating a part never also turns or teleports you; the
+   right stick also backs off while its laser is on the wrist tablet or a
+   floating window, where it scrolls that panel instead (tablet: push down =
+   scroll down).
 6. Grip on **empty space** (not near a part) to grab the whole model. With
    **one hand** it follows that hand (moves only, so a wrist twitch never
    spins it). The one-hand drag scales with the model: 1:1 for anything up
@@ -220,11 +222,12 @@ live-synced.
     (if not perfectly stencil-capped) filled cross-section rather than a
     hollow shell — real-headset feedback found a solid part clipped past
     its own midpoint looked like it had simply vanished, not been cut open,
-    tracked to two things at once: the discarded half's own interior
-    surfaces were being culled away instead of shown, and the fully
-    metallic/fully rough material this pass wraps parts in rendered close
-    to black under this app's own directional light anyway (see
-    `shaders/section_clip.gdshader`'s own docstring for both fixes).
+    tracked to three things: the discarded half's own interior surfaces
+    were being culled away instead of shown, the fully metallic/fully rough
+    material rendered close to black, and — the one that made the whole
+    model vanish as the plane crossed its origin — the shader computed the
+    fragment's world position from a view-space `VERTEX` (see
+    `shaders/section_clip.gdshader`'s own docstring for all three fixes).
     Turning the tool off drops the gizmo and restores every part's real
     appearance. Undoable (one command per grab/drag), toggling the tool and
     Flip are not.
