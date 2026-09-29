@@ -1308,7 +1308,7 @@ func _on_custom_colour_pressed() -> void:
 			_apply_colour(hex)
 		else:
 			_show_colour_message("Not a valid hex colour (want #RRGGBB): %s" % text)
-	)
+	, {"mode": "full", "title": "Custom colour, e.g. #3a7bd5 (0-9, a-f)", "confirm_label": "Set"})
 
 
 func _show_colour_message(text: String, hold_seconds: float = 3.0) -> void:
@@ -1785,7 +1785,7 @@ func _on_set_project_folder_pressed() -> void:
 	_main.open_keyboard_for(_main.project_folder(), func(text: String) -> void:
 		_main.set_project_folder(text.strip_edges())
 		_refresh_project_folder_label()
-	)
+	, {"mode": "full", "title": "Project folder (absolute path)", "confirm_label": "Set"})
 
 
 func _on_clear_project_folder_pressed() -> void:

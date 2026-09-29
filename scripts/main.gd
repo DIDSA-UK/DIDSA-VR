@@ -207,6 +207,7 @@ func _add_popup_keyboard() -> void:
 	add_child(keyboard)
 	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
 	_keyboard = keyboard
+	_browser_window.set_keyboard(keyboard) # the Browser types web addresses / page text on the full keyboard
 
 
 func _on_right_stick_click(action_name: String) -> void:
@@ -224,13 +225,15 @@ func _on_scale_typed(text: String) -> void:
 		_two_hand.set_preset(value)
 
 
-func open_keyboard_for(initial_text: String, on_confirm: Callable) -> void:
+func open_keyboard_for(initial_text: String, on_confirm: Callable, options: Dictionary = {}) -> void:
 	## Lets the wrist tablet's Mates tab reuse the same popup keyboard the
 	## Scale tab's exact-value entry does (_on_right_stick_click above) —
-	## only one thing needs it open at a time anyway.
+	## only one thing needs it open at a time anyway. `options` picks the full
+	## keyboard ({"mode": "full", "title": ..., "confirm_label": ...}) for real
+	## text (hex colours, folder paths, web addresses); none = the numeric keypad.
 	if _keyboard.is_open():
 		_keyboard.close()
-	_keyboard.open_for(initial_text, on_confirm)
+	_keyboard.open_for(initial_text, on_confirm, options)
 
 
 func current_root_part_id() -> String:

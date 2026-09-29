@@ -2106,3 +2106,39 @@ how the live follow feels over your real network (the displayed pose lags one ro
 message reads clearly. Limits/notes: live following needs the backend reachable
 (a failed solve keeps the last good pose and reports on the Mates page); Distance/Angle
 mates work the same way but were only exercised through coincident faces here.
+
+## Full keyboard, 29 Sep 2026: typing web addresses (and page text) in the Browser
+
+John: "the floating keyboard only offers a numpad — I'll need a full keyboard to type
+webpages into the browser." `popup_keyboard.gd` now has two layouts. The numeric keypad is
+the unchanged default (scale multiple, mate value). `{"mode": "full"}` gives a wide QWERTY:
+digits row, letters, **Shift** (one-shot) + **Caps**, a **?123** symbols layer, URL keys
+(`/ : . -`, **.com**), Space, Clear, Cancel/OK (the OK key takes a `confirm_label`, e.g. "Go").
+It opens low (42 cm below eye level, 0.5 m out) and tilted back 30° like a keyboard on your
+lap, so it doesn't sit on top of the Browser window in front of you. Same laser/press
+mechanism as before; same pixels-per-metre as the keypad so keys are the same physical size.
+Two ways to use it: confirm mode (type, OK/Enter calls back once; the first keystroke — or
+Backspace — replaces/clears the pre-filled text, like a URL bar with its text selected) and
+**live mode** (`"live": true, "on_input": Callable`): every key is handed to the callback as
+`("text", "a")` / `("key", "Backspace"|"Enter"|"Tab")` and the keyboard stays open until Done.
+
+**Browser window:** the address bar is no longer a dead `LineEdit` (there is no physical
+keyboard to type into it) — poking it, or **Go**, opens the full keyboard on the current
+address; `BrowserWindow.normalize_url()` turns what you typed into a URL (a bare `host` /
+`host/path` / `localhost:port` gets `https://`, a full URL is used as typed, anything else —
+words, or anything with a space — becomes a DuckDuckGo search). A new **Aa** button types INTO
+THE PAGE: click a text box on the page, press Aa, and each key goes straight to the browser as
+CDP `Input.insertText` (any character) or `Input.dispatchKeyEvent` (Backspace/Enter/Tab; Enter
+carries its `\r` so forms submit). Also: the Colours tab's custom hex entry (needs a–f) and the
+Settings project-folder path (a path) were silently using the numpad and now open the full
+keyboard; `main.open_keyboard_for()` gained an `options` argument.
+
+**Tests:** `tests/full_keyboard.gd` (new, in `run_all.sh`, drives the keyboard with real laser
+clicks) and the pure address/CDP-event checks added to `tests/browser_window.gd`; every SMOKE line
+true, and the existing numeric-keypad test is unchanged. Rendered under Xvfb to check both
+layers' layout. **Not yet in a headset**, and **not exercised against a live browser-relay in
+this session**: the CDP `Input.insertText`/`dispatchKeyEvent` messages are unit-checked for shape
+and are the standard CDP forms, but whether they land in a focused page text box (and whether a
+given site accepts synthetic key events) needs a real relay + Chromium run. Known limits: no
+arrow keys / Escape / key-repeat-on-hold; Enter on a page is a form-submit key, not a newline
+in the address bar; the address bar shows a search for anything that isn't host-shaped.

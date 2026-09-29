@@ -173,7 +173,14 @@ live-synced.
    same scale-preset code as the Scale tab's buttons, so it's undoable the
    same way; **Cancel**, or clicking the right thumbstick again, backs out
    without applying anything. Aim and click its keys with the right hand's
-   laser and trigger, same as the wrist tablet.
+   laser and trigger, same as the wrist tablet. **Anything that needs real
+   text gets a FULL keyboard instead** — a wide QWERTY (digits, letters,
+   **Shift** for one capital, **Caps**, a **?123** symbols layer, and URL
+   keys: `/` `:` `.` `-` and a **.com** key) that opens low and leans back
+   like one on your lap, so it doesn't cover the window in front of you.
+   It's used for the Browser's web addresses and typing into pages (below),
+   the Colours tab's custom hex colour, and the Settings project-folder path;
+   the numeric keypad stays for numbers (scale, mate values).
 9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
    whole-model move (one/two-hand drag, and the Scale sub-tab's
    presets/Fit/Home), and Visibility hide/show action goes onto one shared
@@ -283,7 +290,11 @@ live-synced.
       than doing nothing. Pulling a tree row out into world space isn't
       built yet — see docs/status.md.
     - **Browser** — a live view of a real headless-Chromium tab (URL bar,
-      back/forward/refresh, click-to-interact), run by a separate
+      back/forward/refresh, click-to-interact; **poke the address bar or Go**
+      to type a web address on the full keyboard — a bare `example.com` gets
+      `https://`, plain words become a web search — and **Aa** to type into the
+      page: click a text box on the page, press Aa, and the keyboard stays open
+      sending each key straight to the page until **Done**), run by a separate
       server-side "browser relay" service (`browser-relay/` in the
       DIDSA-CAD repo) over a plain authenticated WebSocket carrying the
       Chrome DevTools Protocol (CDP) — see `scripts/browser_window.gd`'s
