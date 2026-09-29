@@ -6,7 +6,9 @@ extends XROrigin3D
 ## is_manipulating()), so manipulating a part never also spins or teleports you.
 
 @export var enabled := true ## mode switch on the wrist tablet ("User movement")
-@export var move_speed: float = 1.5 ## metres/second
+@export var move_speed: float = 1.5 ## metres/second — the CURRENT walk speed; the wrist tablet's Travel speed slider sets it between min_move_speed and max_move_speed
+@export var min_move_speed: float = 1.5 ## metres/second: the slider's bottom end AND the default (the original fixed walk speed)
+@export var max_move_speed: float = 30.0 ## metres/second at the top of the slider: crossing a house's grounds or a small village in a sensible time (~110 km/h — deliberately fast; the slider is exponential so the low end stays fine-grained)
 @export var snap_turn_degrees: float = 30.0
 @export var snap_turn_deadzone: float = 0.6 ## how far right stick must return before another snap can fire
 @export var stick_deadzone: float = 0.15
@@ -29,6 +31,19 @@ var _teleport_marker: MeshInstance3D
 
 func _ready() -> void:
 	_build_teleport_marker()
+
+
+func speed_fraction() -> float:
+	## Where move_speed sits on the slider, 0 (min_move_speed) .. 1 (max_move_speed).
+	## Exponential, so equal slider steps are equal speed RATIOS: the bottom of
+	## the range (walking) isn't crushed into a sliver by the top (driving).
+	if max_move_speed <= min_move_speed:
+		return 0.0
+	return clampf(log(move_speed / min_move_speed) / log(max_move_speed / min_move_speed), 0.0, 1.0)
+
+
+func set_speed_fraction(fraction: float) -> void:
+	move_speed = min_move_speed * pow(max_move_speed / min_move_speed, clampf(fraction, 0.0, 1.0))
 
 
 func _physics_process(delta: float) -> void:

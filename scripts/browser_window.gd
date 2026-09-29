@@ -45,6 +45,7 @@ var _view: TextureRect
 var _status_label: Label
 var _url_bar: LineEdit
 var _texture: ImageTexture
+var _keyboard: Node ## main.gd's popup keyboard (set_keyboard()); the full layout types web addresses and page text
 
 
 func setup_browser(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
@@ -54,6 +55,10 @@ func setup_browser(left: XRController3D, right: XRController3D, camera: XRCamera
 	open_distance = 0.65
 	open_lateral_offset = 0.15
 	super.setup(left, right, camera)
+
+
+func set_keyboard(keyboard: Node) -> void:
+	_keyboard = keyboard
 
 
 func configure_relay(relay_url: String, relay_api_key: String, start_url: String = "about:blank") -> void:
@@ -85,16 +90,30 @@ func _build_content() -> Control:
 	refresh.pressed.connect(func() -> void: _send_cdp("Page.reload", {}))
 	toolbar.add_child(refresh)
 
+	# The address bar shows where you are; poking it opens the full keyboard
+	# pre-filled with the address (typing replaces it, like a browser's URL bar).
+	# Not directly editable: there's no physical keyboard to type into a LineEdit.
 	_url_bar = LineEdit.new()
 	_url_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_url_bar.text = _start_url
+	_url_bar.editable = false
 	_url_bar.text_submitted.connect(_navigate)
+	_url_bar.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			edit_address()
+	)
 	toolbar.add_child(_url_bar)
 
 	var go := Button.new()
 	go.text = "Go"
-	go.pressed.connect(func() -> void: _navigate(_url_bar.text))
+	go.pressed.connect(edit_address)
 	toolbar.add_child(go)
+
+	var type_button := Button.new()
+	type_button.text = "Aa"
+	type_button.tooltip_text = "Type into the page: click a text box on the page first, then use this keyboard"
+	type_button.pressed.connect(type_into_page)
+	toolbar.add_child(type_button)
 
 	_view = TextureRect.new()
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -182,6 +201,41 @@ func _send_startup_sequence() -> void:
 	)
 
 
+func edit_address() -> void:
+	## Opens the full keyboard on the current address; Go navigates (a bare
+	## "example.com" gets https://, plain words become a web search — see
+	## normalize_url()).
+	if _keyboard == null:
+		return
+	if _keyboard.is_open():
+		_keyboard.close()
+	_keyboard.open_for(_url_bar.text if _url_bar.text != "about:blank" else "", func(text: String) -> void:
+		var url := normalize_url(text)
+		if url != "":
+			_url_bar.text = url
+			_navigate(url)
+	, {"mode": "full", "title": "Web address or search", "confirm_label": "Go"})
+
+
+func type_into_page() -> void:
+	## Live typing into whatever text box you've clicked on the page: every
+	## key goes straight to the browser (CDP Input.insertText / key events),
+	## and the keyboard stays open until Done.
+	if _keyboard == null:
+		return
+	if _keyboard.is_open():
+		_keyboard.close()
+	_keyboard.open_for("", Callable(), {"mode": "full", "live": true, "title": "Typing into the page — click a text box on the page first", "on_input": _on_typed})
+
+
+func _on_typed(kind: String, value: String) -> void:
+	if kind == "text":
+		_send_cdp("Input.insertText", build_insert_text_params(value))
+	else:
+		for event in key_events_for(value):
+			_send_cdp("Input.dispatchKeyEvent", event)
+
+
 func _navigate(url: String) -> void:
 	if url.is_empty():
 		return
@@ -255,6 +309,50 @@ static func build_mouse_event_params(event_type: String, device_pos: Vector2, bu
 	if event_type != "mouseMoved":
 		params["clickCount"] = 1
 	return params
+
+
+static func build_insert_text_params(text: String) -> Dictionary:
+	return {"text": text}
+
+
+static func key_events_for(key: String) -> Array:
+	## The CDP Input.dispatchKeyEvent params for a non-text key (Backspace,
+	## Enter, Tab), down then up. Text keys go through Input.insertText instead
+	## (works for any character, incl. ones with no physical key). Enter sends
+	## its "\r" text so a focused form actually submits.
+	match key:
+		"Backspace":
+			return [
+				{"type": "rawKeyDown", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8},
+				{"type": "keyUp", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8},
+			]
+		"Enter":
+			return [
+				{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": "\r"},
+				{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
+			]
+		"Tab":
+			return [
+				{"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9},
+				{"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9},
+			]
+	return []
+
+
+static func normalize_url(text: String) -> String:
+	## What typing into the address bar means: a full URL (has "://", or an
+	## about:/data:/file: one) is used as typed; something that looks like a
+	## host ("example.com", "localhost:8080", "10.0.0.5/page") gets https://;
+	## anything else — words, or anything with a space — is a web search.
+	var t := text.strip_edges()
+	if t.is_empty():
+		return ""
+	if "://" in t or t.begins_with("about:") or t.begins_with("data:") or t.begins_with("file:"):
+		return t
+	var host := t.split("/")[0].split("?")[0]
+	if not (" " in t) and ("." in host or host.begins_with("localhost")):
+		return "https://" + t
+	return "https://duckduckgo.com/?q=" + t.uri_encode()
 
 
 static func scale_to_device(local_pos: Vector2, rect_size: Vector2, device_size: Vector2i) -> Vector2:

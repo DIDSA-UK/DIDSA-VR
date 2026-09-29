@@ -20,16 +20,31 @@ extends Node
 ## _apply_solved_transform below).
 ##
 ## "Relax all mates" / "Enforce all mates" (vision brief's Assembly tools):
-## there is no bulk-solve endpoint server-side, and this client never
-## auto-solves during a drag (out of scope per the vision brief's own "Drag
-## latency" open decision). So: `relaxed` just suspends the one auto-solve
-## this tool WOULD otherwise do right after create_mate (mirroring the flat
-## app's own create_mate -> solve_for_occurrence pairing, see that
-## endpoint's docstring for why — "a freshly-authored Mate visibly snaps its
-## target into place immediately"), letting a user place several mates
-## before solving; "Enforce all" solves every occurrence any of this Part's
-## own Mates reference, looping solve_for_occurrence since there's no bulk
-## endpoint.
+## there is no bulk-solve endpoint server-side, so "Enforce all" loops
+## solve_for_occurrence over every occurrence any of this Part's Mates
+## reference. `relaxed` suspends enforcement: no auto-solve after create_mate,
+## and mated parts move freely.
+##
+## POSE SYNC + ENFORCED MOTION (29 Sep 2026, after real-headset testing of
+## mates — see docs/status.md). Root cause of "enforce moves one part but they
+## don't line up, and it flies off": grip-drags/nudges/rotates only ever moved
+## the Godot node, so the backend solved every mate against STALE poses (its
+## own copy of where each part was) — the moved peer looked misaligned, and
+## the solver's free directions snapped back to the backend's old position.
+## The flat app's flow is "PATCH the dragged pose, THEN solve" (the solve
+## treats that pose as its initial guess and lands on the NEAREST mate-
+## satisfying placement, leaving free directions where you put them). This tool
+## now does the same:
+##   * every move of a placed (top-level) part is saved to the backend
+##     (persist_pose(), a latest-wins write queue per occurrence);
+##   * while mates are enforced, dragging a mated, non-grounded part runs a
+##     live PATCH+solve loop (constrain_drag()/end_drag()) so it slides along
+##     what its mates allow instead of flying off;
+##   * a GROUNDED (fixed) part that has mates can't be moved while enforced
+##     (is_locked()); the tablet's Fix/Float toggle (toggle_fixed()) picks
+##     which part is the anchor;
+##   * solve failures and grounded-part refusals are reported on the tablet
+##     instead of being swallowed.
 
 signal picks_changed()
 signal mates_changed()
@@ -50,6 +65,13 @@ var mate_allow_rotation := true
 var relaxed := false
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
+var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
+var live_min_interval_ms := 0 ## floor between live-drag requests; 0 = as fast as each round trip completes (one in flight at a time)
+
+var _mated_ids: Dictionary = {} ## occurrence_id -> true, for every occurrence any Mate references
+var _drag: Dictionary = {} ## part -> live-drag state, see constrain_drag()
+var _last_locked_notice_ms := -10000
+var _persist: Dictionary = {} ## occurrence_id -> {"pose": Dictionary|null, "running": bool} — see persist_pose()
 
 var _picks: Array[Dictionary] = []
 var _status := ""
@@ -168,17 +190,18 @@ func create_mate() -> Dictionary:
 	if not can_create():
 		return {"ok": false, "error": "Pick two entities first."}
 	var owner_part_id: String = _picks[0]["owner_part_id"]
-	var driven_occurrence_id: String = _picks[1]["occurrence_id"]
+	var driven_occurrence_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
 	_busy = true
 	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/mates" % owner_part_id, build_create_payload())
 	_busy = false
 	if not result["ok"]:
 		return {"ok": false, "error": result["error"]}
 	clear_picks()
-	if relaxed:
-		await refresh_mates(owner_part_id)
-	else:
-		await solve_occurrence(owner_part_id, driven_occurrence_id)
+	await refresh_mates(owner_part_id)
+	if not relaxed:
+		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_occurrence_id)
+		if not solved["ok"]:
+			_report("Mate created, but couldn't be applied: %s" % solved["error"])
 	return {"ok": true, "error": ""}
 
 
@@ -187,6 +210,7 @@ func refresh_mates(owner_part_id: String) -> void:
 	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if result["ok"]:
 		mates = result["json"]
+		_rebuild_mated_ids()
 	mates_changed.emit()
 
 
@@ -200,17 +224,29 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 
 func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionary:
 	## Solves occurrence_id's Mates server-side and applies the result to
-	## whichever loaded Godot part carries that identity.
+	## whichever loaded Godot part carries that identity. The part's CURRENT
+	## pose is saved first (the flat app's "PATCH the dragged pose, then solve"
+	## order): the solver's initial guess is the pose stored on the backend, so
+	## without this it solved from wherever the part used to be, not where you
+	## left it. A grounded (fixed) occurrence can't be the driven side — say so
+	## rather than letting the backend's 422 vanish.
+	if bool(occurrences.get(occurrence_id, {}).get("fixed", false)):
+		return {"ok": false, "error": "that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	_busy = true
+	var part := _find_loaded_part(owner_part_id, occurrence_id)
+	if part != null:
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, occurrence_id], {"transform": pose_to_json(_local_pose(part))})
+		if not patched["ok"]:
+			_busy = false
+			return {"ok": false, "error": _friendly_error(patched)}
 	var result := await _api_request(
 		HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/solve" % [owner_part_id, occurrence_id], null
 	)
 	_busy = false
 	if not result["ok"]:
 		await refresh_mates(owner_part_id)
-		return {"ok": false, "error": result["error"]}
+		return {"ok": false, "error": _friendly_error(result)}
 	var transform_json: Dictionary = result["json"].get("transform", {})
-	var part := _find_loaded_part(owner_part_id, occurrence_id)
 	if part != null and not transform_json.is_empty():
 		_apply_solved_transform(part, transform_json)
 	await refresh_mates(owner_part_id)
@@ -218,18 +254,311 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 
 
 func enforce_all(owner_part_id: String) -> void:
-	## Solves every occurrence any of this Part's own Mates reference.
-	await refresh_mates(owner_part_id)
-	var occurrence_ids := {}
-	for mate in mates:
-		for ref in mate.get("references", []):
-			occurrence_ids[ref["occurrence_id"]] = true
-	for occ_id in occurrence_ids:
-		await solve_occurrence(owner_part_id, occ_id)
+	## Solves every non-grounded occurrence any of this Part's own Mates
+	## reference, and reports the outcome on the tablet.
+	await refresh_state(owner_part_id)
+	var solved := 0
+	var problems: Array[String] = []
+	for occ_id in _mated_ids:
+		if bool(occurrences.get(occ_id, {}).get("fixed", false)):
+			continue # grounded: it's the anchor the others are solved against
+		var result: Dictionary = await solve_occurrence(owner_part_id, occ_id)
+		if result["ok"]:
+			solved += 1
+		else:
+			problems.append(result["error"])
+	if problems.is_empty():
+		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
+	else:
+		_report("Couldn't satisfy every mate: %s" % "; ".join(problems))
 
 
 func set_relaxed(on: bool) -> void:
 	relaxed = on
+
+
+# --- state, locking, and grounding ---
+
+func refresh_state(owner_part_id: String) -> void:
+	## Re-reads this assembly's top-level occurrences (for their `fixed` flags)
+	## and Mates (for which parts are mated) — the two facts is_locked()/
+	## is_constrained() need. Called after every model load and by
+	## enforce_all(); mate create/delete/solve refresh the mate list themselves.
+	_current_owner_part_id = owner_part_id
+	occurrences.clear()
+	_mated_ids.clear()
+	if backend_url.is_empty() or api_key.is_empty() or owner_part_id.is_empty():
+		mates_changed.emit()
+		return
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner_part_id, null)
+	if result["ok"] and result["json"] is Array:
+		for occ in result["json"]:
+			occurrences[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+	await refresh_mates(owner_part_id)
+
+
+func _rebuild_mated_ids() -> void:
+	_mated_ids.clear()
+	for mate in mates:
+		for ref in mate.get("references", []):
+			_mated_ids[str(ref.get("occurrence_id", ""))] = true
+
+
+func is_managed(part: Node3D) -> bool:
+	## A placed TOP-LEVEL occurrence of the loaded root Part, with a backend to
+	## sync to — the only kind of part whose pose the backend can hold (a
+	## nested occurrence's node transform is flattened root-relative, not its
+	## owner-relative one, and root content has no occurrence at all).
+	if backend_url.is_empty() or api_key.is_empty() or _current_owner_part_id.is_empty():
+		return false
+	var ref := MeshIdentity.occurrence_ref_for(part)
+	return not ref.is_empty() and ref.get("occurrence_id", "") != "" and ref.get("owner_part_id", "") == _current_owner_part_id
+
+
+func _occ_id(part: Node3D) -> String:
+	return str(MeshIdentity.occurrence_ref_for(part).get("occurrence_id", ""))
+
+
+func is_fixed(part: Node3D) -> bool:
+	return is_managed(part) and bool(occurrences.get(_occ_id(part), {}).get("fixed", false))
+
+
+func is_mated(part: Node3D) -> bool:
+	return is_managed(part) and _mated_ids.has(_occ_id(part))
+
+
+func is_locked(part: Node3D) -> bool:
+	## Grounded + mated + enforced: it's the anchor its mates are solved
+	## against, so it can't be moved on its own.
+	return not relaxed and is_fixed(part) and is_mated(part)
+
+
+func is_constrained(part: Node3D) -> bool:
+	## Mated, free to move, and mates are enforced: its motion is steered by a
+	## live solve (constrain_drag()).
+	return not relaxed and is_managed(part) and is_mated(part) and not is_fixed(part)
+
+
+func has_drag(part: Node3D) -> bool:
+	return _drag.has(part)
+
+
+func notify_locked(part: Node3D) -> void:
+	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
+		return # a held button would otherwise re-announce every physics frame
+	_last_locked_notice_ms = Time.get_ticks_msec()
+	_report("%s is grounded by a mate — Float it (Assembly > Mates) or Relax all mates to move it." % str(part.name))
+
+
+func toggle_fixed(part: Node3D) -> void:
+	## Tablet's Fix/Float: flips the selected part's grounded flag on the
+	## backend (the same field the flat app's Fix/Float toggle writes).
+	if part == null or not is_managed(part):
+		_report("Select a placed part first (laser-select it).")
+		return
+	var occ := _occ_id(part)
+	var now_fixed := not bool(occurrences.get(occ, {}).get("fixed", false))
+	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [_current_owner_part_id, occ], {"fixed": now_fixed})
+	if not result["ok"]:
+		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", str(part.name), _friendly_error(result)])
+		return
+	occurrences[occ] = {"fixed": now_fixed}
+	_report("%s is now %s." % [str(part.name), "grounded (fixed)" if now_fixed else "floating (free to move)"])
+
+
+func _choose_driven(first_occ: String, second_occ: String) -> String:
+	## By convention the second pick is driven, unless it's grounded (a grounded
+	## occurrence can never be the driven side — the backend 422s it) and the
+	## first isn't.
+	if bool(occurrences.get(second_occ, {}).get("fixed", false)) and not bool(occurrences.get(first_occ, {}).get("fixed", false)):
+		return first_occ
+	return second_occ
+
+
+func _report(text: String) -> void:
+	_status = text
+	picks_changed.emit()
+
+
+func _friendly_error(result: Dictionary) -> String:
+	var json = result.get("json")
+	var detail = json.get("detail") if json is Dictionary else null
+	if detail is Dictionary:
+		match str(detail.get("type", "")):
+			"occurrence_is_fixed":
+				return "that part is grounded (fixed)"
+			"mate_solve_did_not_converge":
+				return "the mates can't all be satisfied from there (over-constrained or conflicting)"
+		return str(detail.get("type", detail))
+	if detail != null:
+		return str(detail)
+	return str(result.get("error", "unknown error"))
+
+
+# --- pose sync ---
+
+func _local_pose(part: Node3D) -> Transform3D:
+	## The part's pose in the frame the backend stores an Occurrence's transform
+	## in (its node's local transform: the glb flattens every instance onto its
+	## own node with no intermediate parenting; assembly_root's mm->m scale sits
+	## above it). Basis re-orthonormalised: it is rotation-only by construction,
+	## but a held part's is rebuilt each frame through float maths.
+	return Transform3D(part.transform.basis.orthonormalized(), part.transform.origin)
+
+
+static func pose_to_json(t: Transform3D) -> Dictionary:
+	var q := t.basis.orthonormalized().get_rotation_quaternion()
+	var axis := Vector3(0, 0, 1)
+	var angle := 0.0
+	if absf(q.w) < 0.9999999:
+		angle = q.get_angle()
+		axis = q.get_axis()
+		if axis.length() < 0.0001:
+			axis = Vector3(0, 0, 1)
+	return {
+		"translation": [t.origin.x, t.origin.y, t.origin.z],
+		"rotation_axis": [axis.x, axis.y, axis.z],
+		"rotation_angle_degrees": rad_to_deg(angle),
+	}
+
+
+static func json_to_pose(transform_json: Dictionary) -> Transform3D:
+	var t: Array = transform_json.get("translation", [0.0, 0.0, 0.0])
+	var axis: Array = transform_json.get("rotation_axis", [0.0, 0.0, 1.0])
+	var angle_degrees: float = transform_json.get("rotation_angle_degrees", 0.0)
+	var axis_vec := Vector3(axis[0], axis[1], axis[2])
+	if axis_vec.length() < 0.0001:
+		axis_vec = Vector3.UP
+	return Transform3D(Basis(axis_vec.normalized(), deg_to_rad(angle_degrees)), Vector3(t[0], t[1], t[2]))
+
+
+func persist_pose(part: Node3D) -> void:
+	## Saves this part's current pose to the backend (fire and forget). Every
+	## move of a placed part goes through here — grip-drag release, laser
+	## rotate/nudge, undo/redo — so the backend's copy always matches what you
+	## see, which every later mate solve depends on. Latest-wins per occurrence
+	## (a burst of moves collapses to one write; writes never overlap).
+	if not is_managed(part):
+		return
+	var occ := _occ_id(part)
+	var entry: Dictionary = _persist.get_or_add(occ, {"pose": null, "running": false})
+	entry["pose"] = pose_to_json(_local_pose(part))
+	if not entry["running"]:
+		_persist_loop(occ, entry)
+
+
+func _persist_loop(occ: String, entry: Dictionary) -> void:
+	entry["running"] = true
+	while entry["pose"] != null:
+		var pose: Dictionary = entry["pose"]
+		entry["pose"] = null
+		var path := "/parts/%s/occurrences/%s" % [_current_owner_part_id, occ]
+		var fixed := bool(occurrences.get(occ, {}).get("fixed", false))
+		# The backend locks a grounded occurrence's transform: float it in the
+		# same request as the move, then re-ground it.
+		var body := {"transform": pose, "fixed": false} if fixed else {"transform": pose}
+		var result := await _api_request(HTTPClient.METHOD_PATCH, path, body)
+		if fixed and result["ok"]:
+			await _api_request(HTTPClient.METHOD_PATCH, path, {"fixed": true})
+		if not result["ok"]:
+			_report("Couldn't save a move to the backend: %s" % _friendly_error(result))
+	entry["running"] = false
+
+
+# --- live, constrained motion (enforced mates) ---
+
+func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
+	## Called every physics frame by controller.gd for a part being moved that
+	## is_constrained(). `desired_global` is where the hand wants it; returns
+	## the global pose to DISPLAY: the latest one the backend's solver found
+	## for that wish (its nearest mate-satisfying placement, free directions
+	## left where you put them), or — before the first answer — the pose the
+	## drag started from, so nothing jumps. Requests run in a one-in-flight
+	## loop (PATCH the wish, then solve), so the rate adapts to the network.
+	var parent := part.get_parent() as Node3D
+	var inv := parent.global_transform.affine_inverse()
+	var state: Dictionary = _drag.get(part, {})
+	if state.is_empty():
+		state = {"start": _local_pose(part), "desired": null, "sent": null, "solved": null, "active": true, "running": false, "last_ok": true, "owner": _current_owner_part_id, "occ": _occ_id(part), "last_error_ms": 0}
+		_drag[part] = state
+	state["active"] = true
+	state["desired"] = inv * desired_global
+	if not state["running"]:
+		_drag_loop(part, state)
+	var shown: Transform3D = state["solved"] if state["solved"] != null else state["start"]
+	return parent.global_transform * shown
+
+
+func desired_global(part: Node3D) -> Transform3D:
+	## The accumulated wish for a drag in progress (controller.gd's laser
+	## rotate/nudge applies its per-frame increments on top of THIS, not the
+	## displayed pose, which lags one network round trip behind).
+	var state: Dictionary = _drag.get(part, {})
+	if state.is_empty() or state["desired"] == null:
+		return part.global_transform
+	return (part.get_parent() as Node3D).global_transform * state["desired"]
+
+
+func end_drag(part: Node3D) -> bool:
+	## Called on release/deselect. Returns true if this tool owned the drag (so
+	## controller.gd skips its own undo bookkeeping): the loop finishes its last
+	## solve, leaves the part on the final answer, and records the undo step.
+	var state: Dictionary = _drag.get(part, {})
+	if state.is_empty():
+		return false
+	state["active"] = false
+	return true
+
+
+func _drag_loop(part: Node3D, state: Dictionary) -> void:
+	state["running"] = true
+	while is_instance_valid(part):
+		var desired: Transform3D = state["desired"]
+		var idle: bool = desired == null or (state["sent"] != null and (state["sent"] as Transform3D).is_equal_approx(desired))
+		if idle:
+			if not state["active"]:
+				break # released and everything the hand asked for has been answered
+			await get_tree().process_frame
+			continue
+		state["sent"] = desired
+		var path := "/parts/%s/occurrences/%s" % [state["owner"], state["occ"]]
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, path, {"transform": pose_to_json(desired)})
+		var solved: Dictionary = {}
+		if patched["ok"]:
+			solved = await _api_request(HTTPClient.METHOD_POST, path + "/solve", null)
+		if not is_instance_valid(part):
+			break
+		var result: Dictionary = solved if patched["ok"] else patched
+		state["last_ok"] = result["ok"]
+		if result["ok"]:
+			state["solved"] = json_to_pose(result["json"].get("transform", {}))
+		elif Time.get_ticks_msec() - int(state["last_error_ms"]) > 1500:
+			state["last_error_ms"] = Time.get_ticks_msec()
+			_report("Mate can't follow that move: %s" % _friendly_error(result))
+		if live_min_interval_ms > 0:
+			await get_tree().create_timer(live_min_interval_ms / 1000.0).timeout
+	state["running"] = false
+	if is_instance_valid(part) and not state["active"]:
+		_finish_drag(part, state)
+
+
+func _finish_drag(part: Node3D, state: Dictionary) -> void:
+	_drag.erase(part)
+	var start: Transform3D = state["start"]
+	var final: Transform3D = state["solved"] if state["solved"] != null else start
+	part.transform = final
+	if not bool(state["last_ok"]):
+		persist_pose(part) # the backend holds the raw wish from the last failed solve: put it back on the displayed pose
+	if command_stack and not start.is_equal_approx(final):
+		command_stack.push("move %s" % part.name,
+			func() -> void:
+				if is_instance_valid(part):
+					part.transform = start
+					persist_pose(part),
+			func() -> void:
+				if is_instance_valid(part):
+					part.transform = final
+					persist_pose(part))
 
 
 func _find_loaded_part(owner_part_id: String, occurrence_id: String) -> Node3D:
@@ -252,22 +581,22 @@ func _apply_solved_transform(part: Node3D, transform_json: Dictionary) -> void:
 	## basis already carries the mm->m (and any current scale-view multiple)
 	## factor for its whole subtree, exactly like every other part's
 	## position already does (see main.gd's _show_model()); multiplying by
-	## spawn_scale here would double-apply it.
-	var before := part.global_transform
-	var t: Array = transform_json.get("translation", [0.0, 0.0, 0.0])
-	var axis: Array = transform_json.get("rotation_axis", [0.0, 0.0, 1.0])
-	var angle_degrees: float = transform_json.get("rotation_angle_degrees", 0.0)
-	var axis_vec := Vector3(axis[0], axis[1], axis[2])
-	if axis_vec.length() < 0.0001:
-		axis_vec = Vector3.UP
-	part.position = Vector3(t[0], t[1], t[2])
-	part.basis = Basis(axis_vec.normalized(), deg_to_rad(angle_degrees))
-	if command_stack:
-		var after := part.global_transform
-		if not before.is_equal_approx(after):
-			command_stack.push("solve %s" % part.name,
-				func() -> void: part.global_transform = before,
-				func() -> void: part.global_transform = after)
+	## spawn_scale here would double-apply it. (Verified against a real
+	## backend: the applied pose equals the pose a fresh assembly-mesh.glb
+	## fetch bakes in.)
+	var before := _local_pose(part)
+	var after := json_to_pose(transform_json)
+	part.transform = after
+	if command_stack and not before.is_equal_approx(after):
+		command_stack.push("solve %s" % part.name,
+			func() -> void:
+				if is_instance_valid(part):
+					part.transform = before
+					persist_pose(part),
+			func() -> void:
+				if is_instance_valid(part):
+					part.transform = after
+					persist_pose(part))
 
 
 func _api_request(method: int, path: String, body_dict) -> Dictionary:

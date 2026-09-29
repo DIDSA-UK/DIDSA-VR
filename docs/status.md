@@ -1997,3 +1997,148 @@ Tree window with a real Open + Add; Light/Dark/Mid grey; the ring position.
   **If this doesn't fix it**, the next thing needed is the Godot console output
   from a run where it fails (a script error inside the tablet's `_process`
   would produce exactly this), and which page/button you were aiming at.
+
+## Features round, 29 Sep 2026: travel-speed slider, grabbable single-mesh files, resizable windows
+
+John's report on the previous round: the tablet-selection problem "came and went
+and then stayed OK" (left unchanged; the earlier hardening stays), and three new
+asks. All headless-tested (`tests/features_round.gd`, in `run_all.sh`) and
+rendered under Xvfb for a visual check; not yet in a headset.
+
+- **Travel speed slider** (View > Navigate). `locomotion.gd`: `min_move_speed`
+  1.5 m/s (the old fixed pace — the slider's bottom and the default),
+  `max_move_speed` 30 m/s, exponential (`set_speed_fraction()`/
+  `speed_fraction()`), applied to the left-stick walk only. **Teleport reach
+  (5 m) is unchanged** — say if you want it to scale with the slider. Not
+  persisted across restarts (the default is always walking pace). The tablet
+  had no slider before, and its pointer is deliberately *frozen* during a press
+  (to keep buttons from cancelling), which makes a drag impossible — so a press
+  that *starts on a slider* now keeps tracking the laser and releases where the
+  laser is (`_drag_slider`, `_slider_at()` in `wrist_tablet.gd`); every other
+  press keeps the frozen behaviour. Big knob/track styling for arm's length.
+- **OBJ/STL/glTF not grabbable — a real bug, reproduced.** A glTF whose only
+  scene node is the mesh (what most single-object exports from other tools look
+  like) is generated with that `MeshInstance3D` *as the scene root*, and
+  `main.gd`'s `_show_model()` only walked the root's *descendants* — so it loaded
+  as "0 part mesh(es)" with no `grabbable_parts` group and no collider: neither
+  grip nor laser could touch it. Now the root is included. Also, local files
+  (`load_glb_file()`) get a **double-sided** pick collider
+  (`backface_collision`): third-party meshes often have flipped winding or open
+  surfaces and a trimesh collider is one-sided, so the laser passed through them;
+  backend-tessellated parts keep the proven one-sided behaviour. **Caveat:** an
+  OBJ/STL/glTF that came through the backend wrapper (`_import_external_file()`)
+  *did* already load as a grabbable part when I tried a generated cube, so if a
+  specific real file still can't be gripped after this, the likeliest remaining
+  cause is scale (grip needs your hand within 5 cm of the part's bounding box;
+  STL/OBJ go through the backend as millimetres → ×0.001, a local glTF is read as
+  metres) — tell me the file's units and what you see.
+- **Resizable floating windows** (`diegetic_panel.gd`, so Tree, Calculator,
+  Image Viewer and Browser all get it). Four L-shaped brackets sit just outside
+  the corners; aiming the right laser at one (a zone reaching 5 cm outward,
+  4 mm back inside the edge so it never steals a content control such as the
+  close button) highlights it cyan and enlarges it, and the laser stops on it
+  like on the panel. Hold the trigger and drag: the opposite corner stays fixed,
+  size clamps to 0.16–1.6 × 0.16–1.3 m. It is a **true resize**: the SubViewport
+  grows with the panel at the same pixels-per-metre (re-allocated only every
+  ~4 px of change, exact on release), so a bigger window shows more content and
+  text stays the same physical size. Not persisted.
+
+## Mates round, 29 Sep 2026: enforced mates now move parts as the mates demand
+
+John's repro: added a mate between the two test-assembly parts; they didn't align;
+Enforce mates moved one part but not into alignment; parts still grabbed and moved
+individually. Wanted: with mates present and enforced, parts move as their mates
+demand, and a remaining degree of freedom must not "fly off into space".
+Decisions taken with John: follow the mates **live while dragging**; a grounded
+(fixed) mated part is **locked, with a Fix/Float toggle**; **all placed parts'** VR
+moves are saved to the backend.
+
+**Root cause (verified against a real backend, not assumed).** VR moves (grip-drag,
+laser nudge/rotate) only ever moved the Godot node; the backend was never told, so
+every mate solve ran against STALE poses: the moved peer looked misaligned, and the
+solver's free directions snapped back to the backend's old position. The flat app's
+flow is "PATCH the dragged pose, then solve" (the solve's initial guess is the stored
+pose, so it lands on the nearest mate-satisfying placement and leaves free directions
+alone) — the VR client had only the second half. Reproduced: with the grounded plate
+lifted 25 mm in VR, the old build mated the peg to the plate's OLD plane (a 25 mm
+gap); a solve is ~3.6 ms server-side, so doing it live is cheap. Also found: the
+solve of a grounded occurrence 422s and the client swallowed it (create_mate with the
+grounded part as 2nd pick, and Enforce all, silently skipped it); no solve error was
+ever shown. **Not a solver bug** — my first probe looked like one but misread face
+normals from triangle winding (unreliable on reversed faces); ruled out.
+
+**Client (`scripts/mates_tool.gd` is now the assembly-constraints hub):**
+- `persist_pose()` — latest-wins write queue per occurrence; called on grip release,
+  laser deselect and undo/redo (`controller.gd`'s `_push_move_command`/`_sync_pose`),
+  and by every solve. A grounded part's move is written by floating it in the same
+  PATCH (`{transform, fixed:false}`) then re-grounding it.
+- `constrain_drag()` / `desired_global()` / `end_drag()` — while mates are enforced,
+  a mated, floating part is moved by a one-in-flight PATCH+solve loop; the displayed
+  pose is the solver's latest answer (before the first, the pose the drag started
+  from, so nothing jumps). Laser rotate/nudge apply their per-frame increments to the
+  drag's accumulated wish, not the lagging displayed pose. On release the loop finishes
+  its last solve, records the undo step, and re-saves if the last solve failed.
+- `is_locked()` (grounded + mated + enforced) makes `controller.gd` refuse a grip /
+  laser move with a haptic buzz and a tablet message; **Fix / Float selected part** on
+  the Mates page (`toggle_fixed()`) chooses the anchor. Relax all frees everything.
+  A grounded part with NO mates is still free to move (and is saved).
+- `create_mate` drives whichever picked part isn't grounded (`_choose_driven()`);
+  `solve_occurrence` saves the current pose first; `enforce_all` reports what it did or
+  why it couldn't (`_friendly_error()` turns the backend's 422s into sentences).
+- Scope: top-level occurrences of the loaded root only (same as before — the backend
+  only mates those, and only those have an owner-relative pose the glb bakes 1:1).
+
+**Backend (DIDSA-CAD `assembly_solver.py`, own commit in that repo):** a face-to-face
+mate leaves rotation about the shared normal free, but the solve's warm-start seed was
+built from the LOCAL normal alone and discarded the occurrence's current rotation, so
+every solve reset any spin about the mate axis (confirmed: a 30°/90° spin came back as
+0°). The seed is now the minimal rotation taking the driven normal's CURRENT world
+direction onto the target, composed onto the current rotation. New tests (spin kept;
+wrong-way-facing pose still flips back); all 157 mate/assembly/occurrence backend tests
+pass. **VR needs that backend change deployed** for spin to survive live dragging; without
+it everything else still works but a mated part can't be turned about its mating axis.
+
+**Tests:** `tests/mates_motion.gd` (pure logic, in `run_all.sh`) and
+`tests/e2e_mates_motion.gd` (real backend, measures the mate with the backend's own
+`measure`, uses REAL controller grip paths): all SMOKE true. **Not yet headset-verified:**
+how the live follow feels over your real network (the displayed pose lags one round trip
+— ~10–20 ms on a LAN, more over Wi-Fi/WAN), and whether the grounded-part buzz + tablet
+message reads clearly. Limits/notes: live following needs the backend reachable
+(a failed solve keeps the last good pose and reports on the Mates page); Distance/Angle
+mates work the same way but were only exercised through coincident faces here.
+
+## Full keyboard, 29 Sep 2026: typing web addresses (and page text) in the Browser
+
+John: "the floating keyboard only offers a numpad — I'll need a full keyboard to type
+webpages into the browser." `popup_keyboard.gd` now has two layouts. The numeric keypad is
+the unchanged default (scale multiple, mate value). `{"mode": "full"}` gives a wide QWERTY:
+digits row, letters, **Shift** (one-shot) + **Caps**, a **?123** symbols layer, URL keys
+(`/ : . -`, **.com**), Space, Clear, Cancel/OK (the OK key takes a `confirm_label`, e.g. "Go").
+It opens low (42 cm below eye level, 0.5 m out) and tilted back 30° like a keyboard on your
+lap, so it doesn't sit on top of the Browser window in front of you. Same laser/press
+mechanism as before; same pixels-per-metre as the keypad so keys are the same physical size.
+Two ways to use it: confirm mode (type, OK/Enter calls back once; the first keystroke — or
+Backspace — replaces/clears the pre-filled text, like a URL bar with its text selected) and
+**live mode** (`"live": true, "on_input": Callable`): every key is handed to the callback as
+`("text", "a")` / `("key", "Backspace"|"Enter"|"Tab")` and the keyboard stays open until Done.
+
+**Browser window:** the address bar is no longer a dead `LineEdit` (there is no physical
+keyboard to type into it) — poking it, or **Go**, opens the full keyboard on the current
+address; `BrowserWindow.normalize_url()` turns what you typed into a URL (a bare `host` /
+`host/path` / `localhost:port` gets `https://`, a full URL is used as typed, anything else —
+words, or anything with a space — becomes a DuckDuckGo search). A new **Aa** button types INTO
+THE PAGE: click a text box on the page, press Aa, and each key goes straight to the browser as
+CDP `Input.insertText` (any character) or `Input.dispatchKeyEvent` (Backspace/Enter/Tab; Enter
+carries its `\r` so forms submit). Also: the Colours tab's custom hex entry (needs a–f) and the
+Settings project-folder path (a path) were silently using the numpad and now open the full
+keyboard; `main.open_keyboard_for()` gained an `options` argument.
+
+**Tests:** `tests/full_keyboard.gd` (new, in `run_all.sh`, drives the keyboard with real laser
+clicks) and the pure address/CDP-event checks added to `tests/browser_window.gd`; every SMOKE line
+true, and the existing numeric-keypad test is unchanged. Rendered under Xvfb to check both
+layers' layout. **Not yet in a headset**, and **not exercised against a live browser-relay in
+this session**: the CDP `Input.insertText`/`dispatchKeyEvent` messages are unit-checked for shape
+and are the standard CDP forms, but whether they land in a focused page text box (and whether a
+given site accepts synthetic key events) needs a real relay + Chromium run. Known limits: no
+arrow keys / Escape / key-repeat-on-hold; Enter on a page is a form-submit key, not a newline
+in the address bar; the address bar shows a search for anything that isn't host-shaped.

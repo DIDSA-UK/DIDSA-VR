@@ -17,6 +17,14 @@ extends Node3D
 ## grip_click, not routed through controller.gd's own part-grab search),
 ## since a window handle floats well clear of the assembly in normal use.
 ##
+## Resizing (real-headset request): four corner brackets sit just outside the
+## panel's corners. Aim the right laser at one and it highlights (and the laser
+## stops on it, like on the panel itself); hold the trigger and drag to resize
+## - the OPPOSITE corner stays put. It's a true resize, not a zoom: the
+## SubViewport grows with the panel at the same pixels-per-metre, so a bigger
+## window shows more content (the Browser gets a bigger page area, the tree
+## more rows) and text stays the same physical size.
+##
 ## Subclasses override _build_content() to supply their own UI (a header
 ## with the panel's title and a close button are added automatically around
 ## whatever that returns), call setup() last from their own setup_xyz()
@@ -61,6 +69,9 @@ extends Node3D
 @export var click_action: String = "trigger_click"
 @export var panel_title: String = "Window"
 @export var grab_action: String = "grip_click"
+@export var min_panel_size := Vector2(0.16, 0.16) ## metres; resize limits
+@export var max_panel_size := Vector2(1.6, 1.3)
+@export var corner_hit_reach: float = 0.05 ## metres outward from a corner (along both edges) that counts as aiming at it; generous, since a laser at arm's length is shaky
 @export var handle_grab_reach: float = 0.03 ## metres beyond the handle's own radius - it's small, so a bit of slack makes it easier to catch, same reasoning as controller.gd's own grab_reach
 
 var _left: XRController3D
@@ -70,6 +81,18 @@ var _handle: MeshInstance3D
 var _handle_material: StandardMaterial3D
 var _held_by: XRController3D = null ## whichever hand grabbed the handle, or null - see _try_grab_handle()/_release_handle()
 var _grab_offset: Transform3D = Transform3D.IDENTITY ## this panel's pose in the holding hand's local frame, captured at grab time
+
+const _CORNER_DIRS: Array[Vector2] = [Vector2(-1, 1), Vector2(1, 1), Vector2(-1, -1), Vector2(1, -1)] ## top-left, top-right, bottom-left, bottom-right (x, y signs in the panel's local frame)
+const _CORNER_INSET := 0.004 ## metres the hit zone reaches back INSIDE the panel edge — just enough to catch an aim on the edge itself without stealing the content's own corner controls (e.g. the close button)
+const _CORNER_IDLE := Color(0.82, 0.85, 0.9, 0.55)
+const _CORNER_HOT := Color(0.35, 0.85, 1.0, 1.0)
+
+var _corners: Array[Node3D] = []
+var _corner_materials: Array[StandardMaterial3D] = []
+var _hover_corner := -1 ## corner the right laser is on (claims ui_hover like the panel does), or -1
+var _resize_corner := -1 ## corner being dragged, or -1
+var _pixels_per_metre := 1000.0 ## captured at setup() from the subclass's own panel_size/viewport_size, kept fixed through every resize
+var _ui_root: Control
 
 var _viewport: SubViewport
 var _quad: MeshInstance3D
@@ -88,9 +111,11 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	_left = left
 	_right = right
 	_camera = camera
+	_pixels_per_metre = float(viewport_size.x) / panel_size.x
 	_build_viewport()
 	_build_quad()
 	_build_handle()
+	_build_corners()
 	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
 	_right.button_pressed.connect(_on_right_pressed)
 	_right.button_released.connect(_on_right_released)
@@ -118,6 +143,8 @@ func close() -> void:
 	visible = false
 	_hovering = false
 	_clear_held()
+	_resize_corner = -1
+	_set_hover_corner(-1)
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if _right:
 		_right.set_meta("ui_hover", false)
@@ -167,6 +194,9 @@ func _process(_delta: float) -> void:
 		# steadiness filtering, it's not a precision placement task.
 		global_transform = _held_by.global_transform * _grab_offset
 		return # being dragged by its handle - not also hoverable/clickable at the same time
+	if _resize_corner >= 0:
+		_update_resize()
+		return # being resized - not also hoverable/clickable at the same time
 	_update_pointer()
 
 
@@ -179,6 +209,8 @@ func _update_pointer() -> void:
 	var geometrically_hit := false
 	var hit_distance := -1.0
 	var local_hit_px := Vector2.ZERO
+	var corner := -1
+	var corner_distance := -1.0
 
 	var hit = Plane(normal, global_position).intersects_ray(origin, dir)
 	if hit != null and origin.distance_to(hit) <= max_point_distance:
@@ -187,9 +219,21 @@ func _update_pointer() -> void:
 			geometrically_hit = true
 			hit_distance = origin.distance_to(hit)
 			local_hit_px = Vector2(
-				(local.x / panel_size.x + 0.5) * viewport_size.x,
-				(0.5 - local.y / panel_size.y) * viewport_size.y
+				(local.x / panel_size.x + 0.5) * _viewport.size.x,
+				(0.5 - local.y / panel_size.y) * _viewport.size.y
 			)
+		elif not _pressed:
+			corner = _corner_at(Vector2(local.x, local.y))
+			corner_distance = origin.distance_to(hit)
+
+	# A corner is hovered only when nothing else has claimed the laser this frame.
+	var claimed: bool = _right.get_meta("ui_hover", false)
+	if corner >= 0 and not claimed:
+		_right.set_meta("ui_hover", true)
+		_right.set_meta("ui_hit_distance", corner_distance)
+	else:
+		corner = -1
+	_set_hover_corner(corner)
 
 	# Claim only if nothing has already claimed the shared meta THIS frame -
 	# see this class's own top docstring for why this is first-claim, not
@@ -216,6 +260,10 @@ func _update_pointer() -> void:
 
 
 func _on_right_pressed(action_name: String) -> void:
+	if action_name == click_action and _hover_corner >= 0 and not _hovering and _open and _held_by == null:
+		_resize_corner = _hover_corner
+		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
+		return
 	if action_name == click_action and _hovering:
 		_press_px = _pointer_px
 		_send_click(true)
@@ -223,6 +271,9 @@ func _on_right_pressed(action_name: String) -> void:
 
 
 func _on_right_released(action_name: String) -> void:
+	if action_name == click_action and _resize_corner >= 0:
+		_end_resize()
+		return
 	if action_name == click_action and _pressed:
 		_send_click(false)
 
@@ -290,7 +341,8 @@ func _build_viewport() -> void:
 	_viewport.transparent_bg = false
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED # only drawn while open
 	add_child(_viewport)
-	_viewport.add_child(_build_root_ui())
+	_ui_root = _build_root_ui()
+	_viewport.add_child(_ui_root)
 
 
 func _build_quad() -> void:
@@ -328,8 +380,127 @@ func _build_handle() -> void:
 	# Capsule's long axis is local Y by default; rotate 90 about Z so it lies
 	# horizontal, spanning the panel's own lower edge left-to-right.
 	_handle.rotation_degrees.z = 90.0
-	_handle.position = Vector3(0.0, -panel_size.y * 0.5 - 0.02, 0.01)
 	add_child(_handle)
+	_layout_handle()
+
+
+func _layout_handle() -> void:
+	if _handle:
+		_handle.position = Vector3(0.0, -panel_size.y * 0.5 - 0.02, 0.01)
+
+
+## Four L-shaped brackets just OUTSIDE the panel's corners (so they never sit
+## on top of the content's own controls): dim at rest, bright cyan and a
+## little larger while the laser is on one or it's being dragged.
+func _build_corners() -> void:
+	var length := 0.035
+	var thickness := 0.006
+	for i in _CORNER_DIRS.size():
+		var dir := _CORNER_DIRS[i]
+		var holder := Node3D.new()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = _CORNER_IDLE
+		mat.no_depth_test = false
+		var arms := [
+			{"size": Vector3(length, thickness, 0.004), "pos": Vector3(-dir.x * (length * 0.5 - thickness * 0.5), 0.0, 0.0)},
+			{"size": Vector3(thickness, length, 0.004), "pos": Vector3(0.0, -dir.y * (length * 0.5 - thickness * 0.5), 0.0)},
+		]
+		for arm in arms:
+			var box := BoxMesh.new()
+			box.size = arm["size"]
+			box.material = mat
+			var instance := MeshInstance3D.new()
+			instance.mesh = box
+			instance.position = arm["pos"]
+			holder.add_child(instance)
+		add_child(holder)
+		_corners.append(holder)
+		_corner_materials.append(mat)
+	_layout_corners()
+
+
+func _layout_corners() -> void:
+	for i in _corners.size():
+		var dir := _CORNER_DIRS[i]
+		_corners[i].position = Vector3(dir.x * (panel_size.x * 0.5 + 0.003), dir.y * (panel_size.y * 0.5 + 0.003), 0.006)
+
+
+func _corner_at(p: Vector2) -> int:
+	## Which corner's outward hit zone (a corner_hit_reach square reaching
+	## _CORNER_INSET back inside the edge) `p` (panel-local metres) is in;
+	## -1 if none. Nearest wins if zones overlap on a tiny panel.
+	var best := -1
+	var best_distance := INF
+	for i in _CORNER_DIRS.size():
+		var dir := _CORNER_DIRS[i]
+		var corner := Vector2(dir.x * panel_size.x * 0.5, dir.y * panel_size.y * 0.5)
+		var rel := (p - corner) * dir # outward-positive along both axes
+		if rel.x >= -_CORNER_INSET and rel.x <= corner_hit_reach and rel.y >= -_CORNER_INSET and rel.y <= corner_hit_reach:
+			var d := rel.length()
+			if d < best_distance:
+				best_distance = d
+				best = i
+	return best
+
+
+func _set_hover_corner(index: int) -> void:
+	if index == _hover_corner:
+		return
+	_hover_corner = index
+	_refresh_corner_look()
+
+
+func _refresh_corner_look() -> void:
+	for i in _corners.size():
+		var hot := i == _hover_corner or i == _resize_corner
+		_corner_materials[i].albedo_color = _CORNER_HOT if hot else _CORNER_IDLE
+		_corners[i].scale = Vector3.ONE * (1.4 if hot else 1.0)
+
+
+func _update_resize() -> void:
+	## Drags the grabbed corner to wherever the laser meets the panel's plane,
+	## the opposite corner held fixed: the new size is the distance from that
+	## fixed corner (clamped to min/max), and the panel's centre — its origin —
+	## moves to the middle of the new rectangle. Everything is recomputed from
+	## the CURRENT pose each frame, so it self-corrects however the aim jitters.
+	var normal := global_transform.basis.z.normalized()
+	var hit = Plane(normal, global_position).intersects_ray(_right.global_position, -_right.global_transform.basis.z.normalized())
+	_right.set_meta("ui_hover", true) # the trigger and stick belong to this drag until it ends
+	_right.set_meta("ui_hit_distance", _right.global_position.distance_to(hit) if hit != null else -1.0)
+	if hit == null:
+		return
+	var local: Vector3 = global_transform.affine_inverse() * hit
+	var dir := _CORNER_DIRS[_resize_corner]
+	var fixed := Vector2(-dir.x * panel_size.x * 0.5, -dir.y * panel_size.y * 0.5)
+	var wanted := Vector2((local.x - fixed.x) * dir.x, (local.y - fixed.y) * dir.y)
+	var new_size := wanted.clamp(min_panel_size, max_panel_size)
+	var dragged := fixed + Vector2(dir.x * new_size.x, dir.y * new_size.y)
+	var centre := (fixed + dragged) * 0.5
+	global_position += global_transform.basis * Vector3(centre.x, centre.y, 0.0)
+	_apply_panel_size(new_size, false)
+
+
+func _end_resize() -> void:
+	_resize_corner = -1
+	_apply_panel_size(panel_size, true) # settle the SubViewport on the exact final pixel size
+	_refresh_corner_look()
+
+
+func _apply_panel_size(new_size: Vector2, force_viewport: bool) -> void:
+	## Keeps pixels-per-metre fixed: the SubViewport (and so the UI layout) grows
+	## with the panel. The render target is only re-allocated once the size has
+	## moved a few pixels (or on release), not every frame of a drag.
+	panel_size = new_size
+	var wanted_px := Vector2i((new_size * _pixels_per_metre).round())
+	if force_viewport or absi(wanted_px.x - _viewport.size.x) >= 4 or absi(wanted_px.y - _viewport.size.y) >= 4:
+		viewport_size = wanted_px
+		_viewport.size = wanted_px
+		_ui_root.size = Vector2(wanted_px)
+	(_quad.mesh as QuadMesh).size = new_size
+	_layout_handle()
+	_layout_corners()
 
 
 func _build_root_ui() -> Control:

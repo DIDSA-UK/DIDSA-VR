@@ -111,7 +111,12 @@ live-synced.
    for set-and-forget stuff (day-to-day tools don't belong beside it):
    - **View** — how you move around and look at the model.
      - **Navigate** — switch model movement, user movement and part
-       manipulation on or off independently.
+       manipulation on or off independently; **Travel speed** slider —
+       how fast the left thumbstick walks you, from your normal walking
+       pace (1.5 m/s, the bottom of the slider and the default) up to 30 m/s
+       for crossing a large open space such as a house's grounds or a small
+       village (exponential, so the low end stays fine-grained). Press the
+       trigger on the slider and sweep the laser to drag it.
      - **Scale** — jump to 1:10, 1:5, 1:2, 1:1 (real life), 2:1, 5:1 or 10:1
        about the model's centre; lock the scale (also stops the two-hand
        spread/close and Fit from resizing); **Fit to view** brings the whole
@@ -168,7 +173,14 @@ live-synced.
    same scale-preset code as the Scale tab's buttons, so it's undoable the
    same way; **Cancel**, or clicking the right thumbstick again, backs out
    without applying anything. Aim and click its keys with the right hand's
-   laser and trigger, same as the wrist tablet.
+   laser and trigger, same as the wrist tablet. **Anything that needs real
+   text gets a FULL keyboard instead** — a wide QWERTY (digits, letters,
+   **Shift** for one capital, **Caps**, a **?123** symbols layer, and URL
+   keys: `/` `:` `.` `-` and a **.com** key) that opens low and leans back
+   like one on your lap, so it doesn't cover the window in front of you.
+   It's used for the Browser's web addresses and typing into pages (below),
+   the Colours tab's custom hex colour, and the Settings project-folder path;
+   the numeric keypad stays for numbers (scale, mate values).
 9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
    whole-model move (one/two-hand drag, and the Scale sub-tab's
    presets/Fit/Home), and Visibility hide/show action goes onto one shared
@@ -198,7 +210,18 @@ live-synced.
     app uses, so a mate created here is readable and editable there too) and
     solves it into place immediately, unless **Relax all** is on, letting
     you place several mates before solving them all at once with **Enforce
-    all**. Existing mates are listed below with a **Delete** button each,
+    all**. **While mates are enforced** (the default), parts move as their
+    mates demand: a mated part you grab, or nudge/rotate with the laser,
+    slides along whatever its mates allow (a live solve on the backend as
+    you move) instead of following your hand freely, and stays where you put
+    it in every direction the mates leave free — nothing flies off. Every
+    move of a placed part is saved to the backend, so mates always solve
+    against what you see. A **grounded** (fixed) part that has mates can't be
+    moved while they're enforced — gripping it buzzes and the Mates page says
+    why; **Fix / Float selected part** on that page picks which part is the
+    anchor, and **Relax all** frees everything. Solve problems (a grounded
+    part, mates that conflict) are reported on the Mates page instead of
+    failing silently. Existing mates are listed below with a **Delete** button each,
     refreshed whenever the tab opens or a mate changes. Face-only for now —
     edge picking isn't wired up yet (see `docs/status.md`).
 12. **Assembly > Colours** (milestone 4). Laser-select a part as usual (no separate
@@ -251,7 +274,12 @@ live-synced.
     you're looking and closes with its own **X**. Each also has a small
     grab handle at the centre of its own lower edge — **grip** it with
     either hand to drag the whole panel somewhere else, release to drop it;
-    windows otherwise stay exactly where they first opened:
+    windows otherwise stay exactly where they first opened. They're also
+    **resizable**: four small brackets sit just outside the corners — aim
+    the right laser at one and it lights up cyan; hold the trigger and drag
+    (the opposite corner stays put). It's a true resize, not a zoom: the
+    window's content area grows at the same text size, so a bigger Browser
+    shows more page and a bigger Tree more rows:
     - **Assembly Tree** — browses the loaded assembly's Occurrence
       hierarchy (a real client to `GET /parts/{id}/occurrences`, recursed
       lazily as you expand a row — the same endpoint the Colours tab's
@@ -262,7 +290,11 @@ live-synced.
       than doing nothing. Pulling a tree row out into world space isn't
       built yet — see docs/status.md.
     - **Browser** — a live view of a real headless-Chromium tab (URL bar,
-      back/forward/refresh, click-to-interact), run by a separate
+      back/forward/refresh, click-to-interact; **poke the address bar or Go**
+      to type a web address on the full keyboard — a bare `example.com` gets
+      `https://`, plain words become a web search — and **Aa** to type into the
+      page: click a text box on the page, press Aa, and the keyboard stays open
+      sending each key straight to the page until **Done**), run by a separate
       server-side "browser relay" service (`browser-relay/` in the
       DIDSA-CAD repo) over a plain authenticated WebSocket carrying the
       Chrome DevTools Protocol (CDP) — see `scripts/browser_window.gd`'s

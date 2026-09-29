@@ -73,4 +73,21 @@ func _initialize() -> void:
 	print("SMOKE malformed JSON doesn't crash parse_incoming: ",
 		BrowserWindow.parse_incoming("not json{{{").get("kind") == "other")
 
+	# --- typing: address normalisation and the CDP key/text events the full keyboard drives
+	print("SMOKE a bare host gets https://: ", BrowserWindow.normalize_url("example.com") == "https://example.com")
+	print("SMOKE a host with a path/query gets https://: ", BrowserWindow.normalize_url("news.bbc.co.uk/sport?x=1") == "https://news.bbc.co.uk/sport?x=1")
+	print("SMOKE a full URL is left exactly as typed: ", BrowserWindow.normalize_url("http://10.0.0.5:8000/a") == "http://10.0.0.5:8000/a")
+	print("SMOKE localhost:port is a host, not a search: ", BrowserWindow.normalize_url("localhost:8080") == "https://localhost:8080")
+	print("SMOKE about:/file: addresses pass through: ", BrowserWindow.normalize_url("about:blank") == "about:blank" and BrowserWindow.normalize_url("file:///tmp/a.pdf") == "file:///tmp/a.pdf")
+	print("SMOKE words become a web search: ", BrowserWindow.normalize_url("spur gear module") == "https://duckduckgo.com/?q=spur%20gear%20module")
+	print("SMOKE a single word with no dot is a search too: ", BrowserWindow.normalize_url("gears").begins_with("https://duckduckgo.com/?q="))
+	print("SMOKE surrounding spaces are trimmed and empty stays empty: ", BrowserWindow.normalize_url("  example.com  ") == "https://example.com" and BrowserWindow.normalize_url("   ") == "")
+	print("SMOKE Input.insertText params carry the text: ", BrowserWindow.build_insert_text_params("h€llo") == {"text": "h€llo"})
+	var enter := BrowserWindow.key_events_for("Enter")
+	print("SMOKE Enter is keyDown (with its \\r text, so forms submit) then keyUp: ", enter.size() == 2 and enter[0]["type"] == "keyDown" and enter[0]["text"] == "\r" and enter[1]["type"] == "keyUp" and enter[0]["windowsVirtualKeyCode"] == 13)
+	var back := BrowserWindow.key_events_for("Backspace")
+	print("SMOKE Backspace is rawKeyDown then keyUp, vk 8: ", back.size() == 2 and back[0]["type"] == "rawKeyDown" and back[0]["windowsVirtualKeyCode"] == 8)
+	print("SMOKE Tab is vk 9: ", BrowserWindow.key_events_for("Tab")[0]["windowsVirtualKeyCode"] == 9)
+	print("SMOKE an unknown key sends nothing: ", BrowserWindow.key_events_for("F13").is_empty())
+
 	quit()
