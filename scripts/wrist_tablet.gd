@@ -31,7 +31,8 @@ extends Node3D
 @export var panel_size := Vector2(0.3375, 0.27) ## metres — real-headset feedback: wider so the four categories + Settings/Close fit on ONE row with their labels unclipped (they need ~900 px: 4x160 + 150 + close + gaps + margins), and 20% taller (0.225 -> 0.27). Same 2667 px/m as the old 0.24 m / 640 px, so text stays the same physical size.
 @export var viewport_size := Vector2i(900, 720) ## pixels the UI is laid out in (was 640x600)
 @export var scroll_speed_px: float = 900.0 ## pixels/second the right thumbstick scrolls the tablet at full deflection while the right laser is on it
-@export var scroll_deadzone: float = 0.2
+@export var scroll_deadzone: float = 0.5 ## a deliberate push, not a resting thumb: 0.2 (the first cut) is well inside the drift/contact a thumb makes on the stick while the index finger pulls the trigger, and scrolling during a click slid the buttons out from under it
+@export var scroll_click_lockout_ms: int = 400 ## no stick-scrolling while a click is held, or this long after one is released
 @export var mount_position := Vector3(0.0, 0.06, 0.07) ## relative to the left controller: above and a little behind it
 @export var mount_tilt_degrees: float = 0.0 ## extra tilt about X; tweak if it sits awkwardly on your wrist
 @export var target_position := Vector3(0.0, 0.05, 0.122) ## the wrist bullseye/tablet icon, relative to the left controller — was too far forward (0.06); nudged back by its own ring's 0.062m outer diameter, same fix as the controller button discs (controller.gd's _add_button_discs())
@@ -124,6 +125,7 @@ var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger we
 var _last_sent_px := Vector2(-1, -1)
 var _refresh_left := 0.0
 var _pages_scroll: ScrollContainer ## wraps every page — content taller than the panel used to be clipped with no way to reach it
+var _last_click_ms := -100000 ## when the last click (press OR release) was sent — see _scroll_with_stick()
 var _scroll_f := 0.0 ## sub-pixel accumulator for the thumbstick scroll (ScrollContainer.scroll_vertical is an int)
 
 
@@ -219,6 +221,9 @@ func _scroll_with_stick(delta: float) -> void:
 	## teleport or spin a selected part.
 	if _pages_scroll == null:
 		return
+	if _pressed or Time.get_ticks_msec() - _last_click_ms < scroll_click_lockout_ms:
+		_scroll_f = float(_pages_scroll.scroll_vertical)
+		return # mid-click: the page must not move under the frozen press point (see _send_click())
 	_scroll_by_stick(_right.get_vector2("primary").y, delta)
 
 
@@ -259,7 +264,12 @@ func _update_pointer(normal: Vector3) -> void:
 		var hit = Plane(normal, global_position).intersects_ray(origin, dir)
 		if hit != null and origin.distance_to(hit) <= max_point_distance:
 			var local: Vector3 = global_transform.affine_inverse() * hit
-			if absf(local.x) <= panel_size.x * 0.5 and absf(local.y) <= panel_size.y * 0.5:
+			# While a click is held, the panel's edge is forgiving (a trigger
+			# squeeze tilts the controller by a few degrees): losing hover
+			# mid-press let go of the button and made the laser run through
+			# the panel (see the `elif was_hovering and _pressed` below).
+			var slack := 0.03 if _pressed else 0.0
+			if absf(local.x) <= panel_size.x * 0.5 + slack and absf(local.y) <= panel_size.y * 0.5 + slack:
 				_hovering = true
 				hit_distance = origin.distance_to(hit)
 				# While a click is being held, freeze the pointer at the press
@@ -331,6 +341,7 @@ func _send_click(down: bool) -> void:
 	## (button_pressed.emit()/button_released.emit() there always fire with
 	## the simulated controller in the same, unmoving position).
 	_pressed = down
+	_last_click_ms = Time.get_ticks_msec()
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = down

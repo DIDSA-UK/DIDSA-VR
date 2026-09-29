@@ -102,6 +102,28 @@ func _initialize() -> void:
 	holder.remove_child(tall)
 	tall.free()
 
+	# --- a held click is forgiving at the panel's edge (a trigger squeeze tilts
+	# the controller: losing hover mid-press dropped the click and the laser
+	# ran through the panel).
+	l.position = Vector3(0, 1.0, 0)
+	for i in 3:
+		await process_frame
+	var edge_local := Vector3(tab.panel_size.x * 0.5 + 0.015, 0.0, 0.0) # 1.5 cm past the right edge
+	var edge_world: Vector3 = tab.global_transform * edge_local
+	r.global_position = edge_world + tab.global_transform.basis.z * 0.3
+	r.look_at(edge_world, Vector3.UP)
+	for i in 3:
+		await process_frame
+	print("SMOKE just past the panel edge, with no click held: not hovering: ", not tab._hovering)
+	tab._pressed = true
+	for i in 3:
+		await process_frame
+	print("SMOKE ...but hover is kept while a click is held (edge slack): ", tab._hovering)
+	tab._pressed = false
+	r.global_position = Vector3(0, 3, 0)
+	for i in 3:
+		await process_frame
+
 	# --- locomotion backs off while the right laser is on a panel.
 	r.set_meta("ui_hover", true)
 	print("SMOKE the right stick belongs to the UI while a panel is hovered: ", origin._right_stick_owned_by_ui())
@@ -157,15 +179,29 @@ func _initialize() -> void:
 	var aim_up := Vector3(0, 0.5, -1.0).normalized() # controller tilted UP
 	var start_dist := (part.global_position - r.global_position).length()
 	for i in 30:
-		r._nudge_towards_hand(part, aim_up, 1.0, 1.0 / 60.0)
+		r._nudge_along_aim(part, aim_up, -1.0, 1.0, 1.0 / 60.0)
 	var rel: Vector3 = part.global_position - r.global_position
 	print("SMOKE A/X pulls the part closer: ", rel.length() < start_dist - 0.3)
 	print("SMOKE A/X with the controller tilted UP moves the part UP (was inverted): ", rel.y > 0.05)
 	r.global_position = Vector3(0, 1.5, 0)
 	part.global_position = Vector3(0, 1.5, -0.2)
 	for i in 120:
-		r._nudge_towards_hand(part, Vector3(0, 0, -1), 5.0, 1.0 / 60.0)
+		r._nudge_along_aim(part, Vector3(0, 0, -1), -1.0, 5.0, 1.0 / 60.0)
 	print("SMOKE A/X stops short of the hand (nudge_min_distance): ", (part.global_position - r.global_position).length() >= r.nudge_min_distance - 0.001)
+
+	# B/Y and A/X share one routine, so sweeping the aim swings the part at the
+	# SAME rate either way (was: A 6/s, B ~0).
+	var swing := {}
+	for dirn in [-1.0, 1.0]:
+		r.global_position = Vector3(0, 1.5, 0)
+		part.global_position = Vector3(0, 1.5, -2.0)
+		for i in 30: # half a second of holding the button with the aim swung 45 degrees up
+			r._nudge_along_aim(part, Vector3(0, 1, -1).normalized(), dirn, 0.0, 1.0 / 60.0) # speed 0: isolate the steering
+		var rel2: Vector3 = part.global_position - r.global_position
+		swing[dirn] = rad_to_deg((Vector3(0, 0, -1)).angle_to(rel2))
+	print("calibration — steering swing after 0.5 s (deg) A: ", snappedf(swing[-1.0], 0.1), " B: ", snappedf(swing[1.0], 0.1))
+	print("SMOKE A/X and B/Y steer towards the aim at the same rate: ", absf(swing[-1.0] - swing[1.0]) < 0.5)
+	print("SMOKE ...and at a mid-point rate (not the old 6/s snap: well under a full swing in 0.5 s): ", swing[1.0] > 10.0 and swing[1.0] < 40.0)
 	part.free()
 
 	quit()

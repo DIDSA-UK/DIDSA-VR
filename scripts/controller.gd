@@ -47,7 +47,7 @@ const OneEuro := preload("res://scripts/one_euro.gd")
 @export var nudge_min_speed: float = 0.03 ## metres/second floor, so a part right by your hand can still be pushed out
 @export var nudge_max_speed: float = 8.0 ## metres/second ceiling
 @export var nudge_min_distance: float = 0.15 ## metres: A/X stops pulling a part this close to your hand, so it can't pass through it
-@export var nudge_steer_rate: float = 6.0 ## per second: how quickly A/X's pull swings the part's direction from your hand round to where you're aiming
+@export var nudge_steer_rate: float = 3.0 ## per second: how quickly A/X and B/Y swing the part's direction from your hand round to where you're aiming (both use it — 6 was too snappy for A, and B originally had none)
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
@@ -188,29 +188,35 @@ func _physics_process(delta: float) -> void:
 	var forward := -global_transform.basis.z.normalized()
 	var speed := nudge_speed_for(selected_node)
 	if is_button_pressed("ax_button"):
-		_nudge_towards_hand(selected_node, forward, speed, delta)
+		_nudge_along_aim(selected_node, forward, -1.0, speed, delta)
 	if is_button_pressed("by_button"):
-		selected_node.global_position += forward * speed * delta
+		_nudge_along_aim(selected_node, forward, 1.0, speed, delta)
 
 
-func _nudge_towards_hand(part: Node3D, aim: Vector3, speed: float, delta: float) -> void:
-	## A/X: pull the part towards your hand, steered by where you're aiming —
-	## the same "bead on the laser" feel B/Y has when pushing away. Simply
-	## moving by -aim (the old behaviour) inverted the steering: tilt the
-	## controller up and the part went DOWN, swing it right and the part went
-	## left (real-headset report). Here the hand-to-part direction eases
-	## towards the aim direction (nudge_steer_rate) while the distance closes,
-	## so sweeping the controller sweeps the part the same way it does when
-	## pushing away, with no jump on the first frame.
+func _nudge_along_aim(part: Node3D, aim: Vector3, direction: float, speed: float, delta: float) -> void:
+	## A/X (direction -1) pulls the part towards your hand, B/Y (+1) pushes it
+	## away — both the same "bead on the laser" motion: the hand-to-part
+	## direction eases towards where you're aiming (nudge_steer_rate) while the
+	## distance changes at `speed`. Real-headset feedback on the first cut:
+	## A (steering at 6/s) tracked the laser too fast while B (a plain
+	## move-by-aim, no steering at all) hardly tracked it, and they should feel
+	## the same — so they now share this one routine at the mid-point rate.
+	## (Moving by -aim, the very first A, inverted the steering: tilt up and the
+	## part went down.) A stops nudge_min_distance short of the hand so it can't
+	## pass through it.
 	var centre := part_centre(part)
 	var offset := centre - global_position
 	var dist := offset.length()
-	if dist <= nudge_min_distance:
+	if dist < 0.0001:
 		return
 	var dir := offset / dist
-	if dir.dot(aim) > -0.99: # part directly behind the hand: no meaningful steering, just come in
+	if dir.dot(aim) > -0.99: # part directly behind the hand: no meaningful steering
 		dir = dir.slerp(aim, clampf(nudge_steer_rate * delta, 0.0, 1.0))
-	var new_dist := maxf(dist - speed * delta, nudge_min_distance)
+	var new_dist := dist + direction * speed * delta
+	if direction < 0.0:
+		if dist <= nudge_min_distance:
+			return
+		new_dist = maxf(new_dist, nudge_min_distance)
 	part.global_position += (global_position + dir * new_dist) - centre
 
 
