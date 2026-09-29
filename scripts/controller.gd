@@ -169,7 +169,18 @@ func _physics_process(delta: float) -> void:
 	var stick: Vector2 = get_vector2("primary")
 	# The laser on the wrist tablet / a floating window means the stick scrolls
 	# that panel (wrist_tablet.gd) — it must not also spin the selected part.
-	if stick.length() >= stick_deadzone and not bool(get_meta("ui_hover", false)):
+	var stick_active := stick.length() >= stick_deadzone and not bool(get_meta("ui_hover", false))
+	var pushing := stick_active or is_button_pressed("ax_button") or is_button_pressed("by_button")
+	if pushing and mates_tool and mates_tool.is_locked(selected_node):
+		mates_tool.notify_locked(selected_node) # grounded by an enforced mate: not movable (throttled message)
+		return
+	# Enforced mates: the increments below are applied to the drag's ACCUMULATED
+	# wish (the displayed pose lags a network round trip behind), then handed to
+	# the live solver, whose answer is what's shown — see mates_tool.gd.
+	var constrained: bool = mates_tool != null and mates_tool.is_constrained(selected_node) and (pushing or mates_tool.has_drag(selected_node))
+	if constrained:
+		selected_node.global_transform = mates_tool.desired_global(selected_node)
+	if stick_active:
 		var pitch_axis := Vector3.RIGHT
 		if _camera:
 			var camera_right := _camera.global_transform.basis.x
@@ -191,6 +202,8 @@ func _physics_process(delta: float) -> void:
 		_nudge_along_aim(selected_node, forward, -1.0, speed, delta)
 	if is_button_pressed("by_button"):
 		_nudge_along_aim(selected_node, forward, 1.0, speed, delta)
+	if constrained:
+		selected_node.global_transform = mates_tool.constrain_drag(selected_node, selected_node.global_transform)
 
 
 func _nudge_along_aim(part: Node3D, aim: Vector3, direction: float, speed: float, delta: float) -> void:
@@ -295,6 +308,12 @@ func _try_grab() -> void:
 
 	# Deliberately ignores selected_node so grip never feels tied to the laser-select state.
 	var target := _find_grab_target()
+	if target and mates_tool and mates_tool.is_locked(target):
+		# Grounded by an enforced mate: it's the anchor the mated parts are solved
+		# against. Say so instead of silently doing nothing.
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		mates_tool.notify_locked(target)
+		return
 	if target:
 		_set_grab_hover(null)
 		target.set_meta("held", true)
@@ -370,6 +389,8 @@ func _try_release() -> void:
 	var part := held_node
 	part.set_meta("held", false)
 	held_node = null
+	if mates_tool and mates_tool.end_drag(part):
+		return # constrained part: mates_tool.gd finishes the last solve and records the undo step
 	_push_move_command(part, _held_start_transform)
 
 
@@ -378,7 +399,13 @@ func _update_held_part(delta: float) -> void:
 	## comment) before applying the grab offset, so a held hand's few-mm
 	## tremor doesn't reach the part while a deliberate move still does.
 	var filtered_pos := global_position if steadiness == 0 else _grab_filter.filter(global_position, delta)
-	held_node.global_transform = Transform3D(global_transform.basis, filtered_pos) * _grab_offset
+	var desired := Transform3D(global_transform.basis, filtered_pos) * _grab_offset
+	if mates_tool and mates_tool.is_constrained(held_node):
+		# Enforced mates: the part slides along what they allow (a live solve on
+		# the backend, mates_tool.gd) instead of following the hand freely.
+		held_node.global_transform = mates_tool.constrain_drag(held_node, desired)
+	else:
+		held_node.global_transform = desired
 
 
 func _push_move_command(part: Node3D, before: Transform3D) -> void:
@@ -388,8 +415,18 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 	if before.is_equal_approx(after):
 		return # no net move: nothing worth undoing
 	command_stack.push("move %s" % part.name,
-		func() -> void: part.global_transform = before,
-		func() -> void: part.global_transform = after)
+		func() -> void:
+			part.global_transform = before
+			_sync_pose(part),
+		func() -> void:
+			part.global_transform = after
+			_sync_pose(part))
+	_sync_pose(part) # the move itself: the backend's copy must match what you see, or every later mate solves against a stale pose
+
+
+func _sync_pose(part: Node3D) -> void:
+	if mates_tool and is_instance_valid(part):
+		mates_tool.persist_pose(part)
 
 
 func _try_shoot_hide() -> void:
@@ -545,6 +582,8 @@ func _clear_selection() -> void:
 		part.set_meta("selected", false)
 		part.material_overlay = null
 		selected_node = null
+		if mates_tool and mates_tool.end_drag(part):
+			return # constrained part: mates_tool.gd finishes the last solve and records the undo step
 		_push_move_command(part, _selected_start_transform)
 
 

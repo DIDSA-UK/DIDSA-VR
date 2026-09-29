@@ -970,6 +970,9 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 			if pick_from_inside:
 				_make_picks_double_sided(node)
 			_part_count += 1
+	# Which of these are grounded / mated (for is_locked()/constrained motion).
+	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
+	_mates_tool.refresh_state(_resolved_part_id)
 	return true
 
 

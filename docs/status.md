@@ -2042,3 +2042,67 @@ rendered under Xvfb for a visual check; not yet in a headset.
   grows with the panel at the same pixels-per-metre (re-allocated only every
   ~4 px of change, exact on release), so a bigger window shows more content and
   text stays the same physical size. Not persisted.
+
+## Mates round, 29 Sep 2026: enforced mates now move parts as the mates demand
+
+John's repro: added a mate between the two test-assembly parts; they didn't align;
+Enforce mates moved one part but not into alignment; parts still grabbed and moved
+individually. Wanted: with mates present and enforced, parts move as their mates
+demand, and a remaining degree of freedom must not "fly off into space".
+Decisions taken with John: follow the mates **live while dragging**; a grounded
+(fixed) mated part is **locked, with a Fix/Float toggle**; **all placed parts'** VR
+moves are saved to the backend.
+
+**Root cause (verified against a real backend, not assumed).** VR moves (grip-drag,
+laser nudge/rotate) only ever moved the Godot node; the backend was never told, so
+every mate solve ran against STALE poses: the moved peer looked misaligned, and the
+solver's free directions snapped back to the backend's old position. The flat app's
+flow is "PATCH the dragged pose, then solve" (the solve's initial guess is the stored
+pose, so it lands on the nearest mate-satisfying placement and leaves free directions
+alone) — the VR client had only the second half. Reproduced: with the grounded plate
+lifted 25 mm in VR, the old build mated the peg to the plate's OLD plane (a 25 mm
+gap); a solve is ~3.6 ms server-side, so doing it live is cheap. Also found: the
+solve of a grounded occurrence 422s and the client swallowed it (create_mate with the
+grounded part as 2nd pick, and Enforce all, silently skipped it); no solve error was
+ever shown. **Not a solver bug** — my first probe looked like one but misread face
+normals from triangle winding (unreliable on reversed faces); ruled out.
+
+**Client (`scripts/mates_tool.gd` is now the assembly-constraints hub):**
+- `persist_pose()` — latest-wins write queue per occurrence; called on grip release,
+  laser deselect and undo/redo (`controller.gd`'s `_push_move_command`/`_sync_pose`),
+  and by every solve. A grounded part's move is written by floating it in the same
+  PATCH (`{transform, fixed:false}`) then re-grounding it.
+- `constrain_drag()` / `desired_global()` / `end_drag()` — while mates are enforced,
+  a mated, floating part is moved by a one-in-flight PATCH+solve loop; the displayed
+  pose is the solver's latest answer (before the first, the pose the drag started
+  from, so nothing jumps). Laser rotate/nudge apply their per-frame increments to the
+  drag's accumulated wish, not the lagging displayed pose. On release the loop finishes
+  its last solve, records the undo step, and re-saves if the last solve failed.
+- `is_locked()` (grounded + mated + enforced) makes `controller.gd` refuse a grip /
+  laser move with a haptic buzz and a tablet message; **Fix / Float selected part** on
+  the Mates page (`toggle_fixed()`) chooses the anchor. Relax all frees everything.
+  A grounded part with NO mates is still free to move (and is saved).
+- `create_mate` drives whichever picked part isn't grounded (`_choose_driven()`);
+  `solve_occurrence` saves the current pose first; `enforce_all` reports what it did or
+  why it couldn't (`_friendly_error()` turns the backend's 422s into sentences).
+- Scope: top-level occurrences of the loaded root only (same as before — the backend
+  only mates those, and only those have an owner-relative pose the glb bakes 1:1).
+
+**Backend (DIDSA-CAD `assembly_solver.py`, own commit in that repo):** a face-to-face
+mate leaves rotation about the shared normal free, but the solve's warm-start seed was
+built from the LOCAL normal alone and discarded the occurrence's current rotation, so
+every solve reset any spin about the mate axis (confirmed: a 30°/90° spin came back as
+0°). The seed is now the minimal rotation taking the driven normal's CURRENT world
+direction onto the target, composed onto the current rotation. New tests (spin kept;
+wrong-way-facing pose still flips back); all 157 mate/assembly/occurrence backend tests
+pass. **VR needs that backend change deployed** for spin to survive live dragging; without
+it everything else still works but a mated part can't be turned about its mating axis.
+
+**Tests:** `tests/mates_motion.gd` (pure logic, in `run_all.sh`) and
+`tests/e2e_mates_motion.gd` (real backend, measures the mate with the backend's own
+`measure`, uses REAL controller grip paths): all SMOKE true. **Not yet headset-verified:**
+how the live follow feels over your real network (the displayed pose lags one round trip
+— ~10–20 ms on a LAN, more over Wi-Fi/WAN), and whether the grounded-part buzz + tablet
+message reads clearly. Limits/notes: live following needs the backend reachable
+(a failed solve keeps the last good pose and reports on the Mates page); Distance/Angle
+mates work the same way but were only exercised through coincident faces here.

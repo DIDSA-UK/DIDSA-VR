@@ -203,7 +203,18 @@ live-synced.
     app uses, so a mate created here is readable and editable there too) and
     solves it into place immediately, unless **Relax all** is on, letting
     you place several mates before solving them all at once with **Enforce
-    all**. Existing mates are listed below with a **Delete** button each,
+    all**. **While mates are enforced** (the default), parts move as their
+    mates demand: a mated part you grab, or nudge/rotate with the laser,
+    slides along whatever its mates allow (a live solve on the backend as
+    you move) instead of following your hand freely, and stays where you put
+    it in every direction the mates leave free — nothing flies off. Every
+    move of a placed part is saved to the backend, so mates always solve
+    against what you see. A **grounded** (fixed) part that has mates can't be
+    moved while they're enforced — gripping it buzzes and the Mates page says
+    why; **Fix / Float selected part** on that page picks which part is the
+    anchor, and **Relax all** frees everything. Solve problems (a grounded
+    part, mates that conflict) are reported on the Mates page instead of
+    failing silently. Existing mates are listed below with a **Delete** button each,
     refreshed whenever the tab opens or a mate changes. Face-only for now —
     edge picking isn't wired up yet (see `docs/status.md`).
 12. **Assembly > Colours** (milestone 4). Laser-select a part as usual (no separate

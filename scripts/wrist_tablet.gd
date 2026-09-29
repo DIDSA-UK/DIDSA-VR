@@ -1150,6 +1150,18 @@ func _build_mates_page() -> Control:
 	)
 	bulk_row.add_child(enforce)
 
+	# Grounding: a grounded (fixed) part that has mates can't be moved while
+	# mates are enforced — it's the anchor the others are solved against. This
+	# flips the laser-selected part between grounded and floating (the same
+	# Fix/Float the flat app has), so YOU choose which part is the anchor.
+	var fix_button := Button.new()
+	fix_button.text = "Fix / Float selected part"
+	fix_button.pressed.connect(func() -> void:
+		if _mates_tool:
+			_mates_tool.toggle_fixed(_main.current_selected_part())
+	)
+	page.add_child(fix_button)
+
 	var list_label := Label.new()
 	list_label.text = "Existing mates:"
 	list_label.add_theme_font_size_override("font_size", 18)
