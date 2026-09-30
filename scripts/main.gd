@@ -191,6 +191,66 @@ func _add_browser_window() -> void:
 	_browser_window = window
 
 
+## Browser and Image Viewer windows can be open several at a time (real-
+## headset request). The tablet's button calls open_window(): it opens the
+## primary window if that's closed, otherwise spawns another (each with its own
+## close, its own picture/page, staggered so they don't stack exactly).
+## Extras delete themselves when closed. The browser relay caps concurrent
+## sessions server-side (BROWSER_RELAY_MAX_SESSIONS) — beyond that an extra
+## Browser's status line says it couldn't connect.
+var _extra_windows: Array = []
+
+func open_window(kind: String) -> Node:
+	var primary: Node = _browser_window if kind == "browser" else _image_viewer_window
+	if not primary.is_open():
+		primary.open()
+		return primary
+	return spawn_window(kind)
+
+
+func spawn_window(kind: String) -> Node:
+	var left := $XROrigin3D/LeftController
+	var right := $XROrigin3D/RightController
+	var camera := $XROrigin3D/XRCamera3D
+	var window: Node
+	var siblings := 1 # the primary
+	for w in _extra_windows:
+		if is_instance_valid(w) and w.get_meta("window_kind", "") == kind:
+			siblings += 1
+	if kind == "browser":
+		window = preload("res://scripts/browser_window.gd").new()
+		window.name = "BrowserWindowExtra%d" % siblings
+		add_child(window)
+		window.setup_browser(left, right, camera)
+		window.configure_relay(relay_url, relay_api_key)
+		window.set_keyboard(_keyboard)
+	else:
+		window = preload("res://scripts/image_viewer_window.gd").new()
+		window.name = "ImageViewerWindowExtra%d" % siblings
+		add_child(window)
+		window.setup_image_viewer(left, right, camera)
+	window.set_meta("window_kind", kind)
+	# Stagger each new window sideways and back a little, so they fan out
+	# instead of stacking exactly on top of one another.
+	window.open_lateral_offset += 0.12 * siblings * (1.0 if siblings % 2 == 1 else -1.0)
+	window.open_distance += 0.03 * siblings
+	window.free_on_close = true
+	_extra_windows.append(window)
+	window.tree_exited.connect(func() -> void: _extra_windows.erase(window))
+	window.open()
+	return window
+
+
+func open_window_count(kind: String) -> int:
+	## How many windows of this kind are open right now (primary + extras).
+	var primary: Node = _browser_window if kind == "browser" else _image_viewer_window
+	var n := 1 if primary.is_open() else 0
+	for w in _extra_windows:
+		if is_instance_valid(w) and w.get_meta("window_kind", "") == kind and w.is_open():
+			n += 1
+	return n
+
+
 func _add_wrist_tablet() -> void:
 	var tablet := preload("res://scripts/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"

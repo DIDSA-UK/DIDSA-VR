@@ -2142,3 +2142,60 @@ and are the standard CDP forms, but whether they land in a focused page text box
 given site accepts synthetic key events) needs a real relay + Chromium run. Known limits: no
 arrow keys / Escape / key-repeat-on-hold; Enter on a page is a form-submit key, not a newline
 in the address bar; the address bar shows a search for anything that isn't host-shaped.
+
+## Round: smooth mated drag, Image Viewer flow, multiple windows, bigger window controls — 29 Sep 2026
+
+**1. Jerky mated dragging — the client now learns "how the part may move" once and applies
+it locally (yes, that works; more round trips would not).** The first mates cut asked the
+backend for the part's pose every frame (PATCH + solve per round trip), so the part moved at
+network speed. Now:
+- **Backend (DIDSA-CAD, own commit):** `POST /parts/{id}/occurrences/{oid}/mate-motion`
+  `{transform?}` solves the occurrence's mates from the wanted pose WITHOUT storing anything and
+  returns the nearest mate-satisfying pose, the DOF count and `free_twists` — an orthonormal
+  basis of the remaining free motion at that pose (`[dx,dy,dz,rx,ry,rz]`: a translation added to
+  the occurrence's translation and a rotation vector composed on its rotation about its own
+  origin — the nullspace of the same Jacobian the DOF count already used). One request, no
+  PATCH. 5 new backend tests (3 free directions for a face-to-face mate; every returned twist
+  really keeps the mate satisfied and lifting/tipping is provably outside the subspace; the
+  wanted pose's free directions/spin are kept; nothing stored; no-mates = all six free; grounded
+  = 422); all 117 related backend tests pass.
+- **VR (`mates_tool.gd`):** during an enforced-mate drag the wanted pose (hand, or laser
+  rotate/nudge) is projected onto those twists **every frame, locally** (`project_motion()`;
+  motion the mates forbid is dropped, motion they allow is followed 1:1, no network in the
+  loop). Exact for the common mates (sliding/spinning on a face, sliding/rotating along an axis);
+  first-order for curved ones — a fresh `mate-motion` call every ~150 ms (`RESYNC_INTERVAL_MS`,
+  one in flight) re-anchors the reference pose and twists, which corrects any curvature drift
+  without a visible jump. On release it does one last call and saves the final pose once. A
+  real 60-frame grip-drag against a real backend used **7 requests total** (it used 2 per round
+  trip, continuously). A backend without `mate-motion` (404 "Not Found"/405) falls back to the old
+  loop automatically — tested. **The backend change must be deployed** to get the smooth path.
+  Limits: projection uses a 100 mm lever arm to trade rotation against translation
+  (`CONSTRAINT_LENGTH_MM`); the displayed pose is a first-order approximation between re-anchors
+  for curved mates (angle mates, rotating about a moving axis), so a very fast large move on one
+  can show a small correction at each re-anchor.
+- Tests: `tests/mates_motion.gd` (projection maths — slide followed, lift dropped, spin kept, tip
+  dropped, fully constrained, mixed twist idempotent — and that `constrain_drag` advances every
+  call with zero requests), `tests/e2e_mates_motion.gd` (real backend: request count, the fallback).
+
+**2. Image Viewer:** picking an image now **fills the window** (aspect kept, file name as the
+title); a **< Back** button in the header returns to the picker; the picker is a real
+`ScrollContainer` and the **right thumbstick scrolls it** while the laser is on the window
+(new for every window via `diegetic_panel.gd`'s `scroll_target`; the Assembly Tree's rows use it
+too — same 0.5 deadzone / click lockout as the tablet). Reopening starts at the picker.
+
+**3. Several Browser / Image windows:** the tablet's Windows-page buttons now call
+`main.open_window(kind)`: first press opens the primary window, each further press spawns
+another (`spawn_window()`: staggered sideways and back so they fan out, its own state, its own
+keyboard hookup); extras delete themselves on close, the primary hides. **The browser relay caps
+concurrent sessions** (`BROWSER_RELAY_MAX_SESSIONS`, sized for a Pi): past it an extra Browser's
+status line shows it couldn't connect.
+
+**4. Window controls scale:** the header close button (and the Image Viewer's Back) start at
+64 px / 34 pt (was ~44 px) and grow with the window (`chrome_scale()` = width / opening width,
+capped at 3x; title grows by its square root).
+
+**5. Resize corners:** hit zone doubled to 0.10 m (was 0.05), brackets drawn twice the size (0.07 m
+arms), inside-edge reach 8 mm. (Tested: 8 cm out from a corner hovers it now, 13 cm doesn't.)
+
+Tests: `tests/windows_round.gd` (new, in `run_all.sh`); pure projection tests + real-backend
+checks above. Rendered under Xvfb: picker and image views. **Not yet in a headset.**

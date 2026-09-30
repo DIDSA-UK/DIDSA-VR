@@ -1555,13 +1555,22 @@ func _build_windows_page() -> Control:
 		page.add_child(_window_toggle_button("Assembly Tree", _assembly_tree_window))
 	if _calculator_window:
 		page.add_child(_window_toggle_button("Calculator", _calculator_window))
+	# Image Viewer and Browser: several can be open at once — the button opens
+	# one (the first press) and another with every further press. Each has its
+	# own close (X); closing one leaves the rest.
 	if _image_viewer_window:
-		page.add_child(_window_toggle_button("Image Viewer", _image_viewer_window))
+		var image_button := Button.new()
+		image_button.text = "Image Viewer"
+		image_button.pressed.connect(func() -> void: _main.open_window("image"))
+		page.add_child(image_button)
 	if _browser_window:
-		page.add_child(_window_toggle_button("Browser", _browser_window))
+		var browser_button := Button.new()
+		browser_button.text = "Browser"
+		browser_button.pressed.connect(func() -> void: _main.open_window("browser"))
+		page.add_child(browser_button)
 
 	var hint := Label.new()
-	hint.text = "Each window opens in front of you and has its own close (X)."
+	hint.text = "Each window opens in front of you and has its own close (X). Image Viewer and Browser: press again for another window."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_font_size_override("font_size", 18)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
