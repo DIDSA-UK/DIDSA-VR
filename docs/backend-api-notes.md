@@ -180,9 +180,10 @@ POST   /document/parts/{part_id}/mates
 PATCH  /document/parts/{part_id}/mates/{mate_id}
 DELETE /document/parts/{part_id}/mates/{mate_id}
 POST   /document/parts/{part_id}/occurrences/{occurrence_id}/solve
+POST   /document/parts/{part_id}/occurrences/{occurrence_id}/mate-motion
 ```
 (`backend/app/document/router.py`, `create_mate`/`list_mates`/`update_mate`/
-`delete_mate`/`solve_for_occurrence`; schemas in `schemas.py`:
+`delete_mate`/`solve_for_occurrence`/`mate_motion`; schemas in `schemas.py`:
 `MateCreate`/`MateResponse`/`MateUpdate`.)
 
 `part_id` here is the **owning** Part — whichever Part's own `.occurrences`
@@ -232,6 +233,73 @@ not just writing the raw transform onto that instance's own flattened node.
 No bulk-solve endpoint exists — "solve every Mate on this assembly" means
 looping `solve_for_occurrence` over every distinct Occurrence any Mate
 references (`mates_tool.gd`'s `enforce_all`).
+
+**`/solve` now solves the whole mate-graph component (CAD constrained-drag S3).**
+It is no longer "this occurrence against frozen peers": the occurrence AND every
+occurrence mated to it (only as far as the mates *require* — a follower moves
+just enough to keep its mates satisfied) are moved to the nearest satisfying
+configuration and **all are stored**. The response is still only the driven
+`OccurrenceResponse`; the followers' new poses are visible on the next
+`GET .../occurrences`. This client therefore re-reads the occurrence list after
+every `/solve` and moves every loaded node whose stored pose differs
+(`mates_tool.gd`'s `_adopt_backend_poses`, one undo entry for all of them). A
+non-converging component is still a 422 `mate_solve_did_not_converge`
+(nothing stored) and a `fixed` occurrence a 422 `occurrence_is_fixed`.
+
+### `mate-motion` — the live-drag contract (CAD constrained-drag S3, plan §3)
+
+`occurrence_id` in the path is the **grabbed** occurrence. Request:
+```json
+{ "transform": { "translation": [..], "rotation_axis": [..], "rotation_angle_degrees": 0.0 },
+  "lever_arm": 41.2,
+  "commit": false }
+```
+`transform` = the wanted pose of the grabbed occurrence (`null` = its stored
+pose; this client sends `null` for the grab-time anchor and the hand's wish for
+every later one). `lever_arm` (mm, optional, > 0): this client sends half the
+diagonal of the grabbed part's mesh AABB in the part's own frame; afterwards
+it always uses the response's `chart.lever_arm`. `commit: true` also stores the
+solved group atomically — this client sets it **only on release**, with the
+release-time wish, exactly once. Response:
+```json
+{ "converged": true, "dof": 5, "grounded": true,
+  "members": [ {"occurrence_id": "occ-B", "transform": {..}, "mobility": 3}, ... ],
+  "basis": [ [ /* 6*k floats */ ], ... ],
+  "chart": {"kind": "se3_owner_frame", "lever_arm": 41.2},
+  "quality": {"residual_inf": 3e-10, "sigma_min": 0.31, "sigma_gap": 40.0, "max_step": 12.0, "jump": 0.7},
+  "diagnostics": {"solve_ms": 3.4}, "committed": false }
+```
+* `dof` is the **group** dof (rank-based), `members[0]` is the grabbed occurrence,
+  and the order of `members` is the column order of every `basis` row.
+* `basis` rows are twists `[vx vy vz wx wy wz]` per member (`v` = displacement of
+  the occurrence origin, `w` = rotation vector, rad) and are orthonormal in the
+  *equal-weight* metric — the client re-orthonormalises them in the
+  follower-weighted metric once per accepted answer (`FOLLOWER_WEIGHT` 1e-4 is a
+  contract constant, not on the wire).
+* **`quality.max_step`** (weighted mm) is how far the client's own screw
+  prediction may travel before it leaves the mate manifold by more than a fixed
+  tolerance; **`null` means "time cap only"** (flat mates and every screw orbit),
+  never "unlimited". `sigma_min`/`sigma_gap` are `null` at rank 0. `quality.jump`
+  is telemetry only — acceptance uses the client-measured jump.
+* **`converged: false` carries no basis / dof / members / chart** — only
+  `quality.residual_inf` and diagnostics. It is a normal 200, not an error. The
+  client must **hold** the last pose and never read the missing basis as "all
+  free". A `commit: true` with `converged: false` stores nothing (`committed`
+  stays `false`); a `fixed` grabbed occurrence is a 422.
+* The response still echoes the v0 aliases `transform` and `free_twists` until
+  CAD S9 deletes them. **This client does not read them.** (`/solve`'s own
+  `transform` is the occurrence's stored pose and is unaffected.)
+
+What the client does with it (DIDSA-CAD `docs/motion/projector-spec.md` is
+normative; `scripts/motion/*.gd` implement it and `tests/motion_vectors.gd` pins
+them to its golden vectors): project the hand's wish onto the basis every frame
+with no network, integrate as a screw, blend across re-anchors, apply the result
+to **every member** (followers move on screen), re-anchor with one request in
+flight every 150 ms (75 ms near a rank change, or when travel reaches
+`max_step`), accept an answer only if it converged, `residual_inf <= 1e-6` and its
+client-measured jump is at most one lever arm, and hold on a miss. Measured on a
+60-frame drag against a real backend: 1 grab anchor + 4 re-anchors + 1 commit =
+**6 requests** in ~0.7 s.
 
 ## Measure — read-only, stateless, no create/persist step
 

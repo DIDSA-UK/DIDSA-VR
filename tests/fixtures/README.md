@@ -26,3 +26,22 @@ use one from inside VR, copy (not move — keep this copy for next time) it
 into `models/` next to `project.godot` (or `user://models` on-device, e.g.
 via `adb push`), then it'll show up in the wrist tablet's Files tab like
 any other local model.
+
+## `motion_vectors.json` — golden vectors for the free-motion projector
+
+A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (76 cases, tolerance 1e-9),
+the normative test data for `scripts/motion/*.gd` (and for the Dart port in
+DIDSA-CAD `client/lib/motion/`). `tests/motion_vectors.gd` runs every kind in it.
+Do not edit it here: regenerate it in DIDSA-CAD (`python tools/motion_vectors/generate.py`)
+and copy it over.
+
+- Copied from DIDSA-CAD branch `ccr-de7668e3-4japt0` (constrained-drag S6), generator
+  fixed so the swing sequence's nearest anchors are stored data (`nearest_anchor_theta_deg`)
+  the constants block keeps `gram_schmidt_drop_absolute` = 1e-12, and the wish is the exact `screw_log` (new `screw_log` kind + six on-manifold `project` cases); that change is
+  not in CAD `main` until S6's PR merges. Before it, an older file (same 61 case ids)
+  is on CAD `main` at `1fca1db` (61 cases) and its swing case cannot be reproduced to 1e-9 by any
+  independent port.
+- sha256 `88f51929d65364d470f2504272e7bd70db4c1d7ae6dd0e4b87494e1f3e0531bb`.
+- `tests/motion_vectors.gd` FAILS if a DIDSA-CAD checkout is reachable (`DIDSA_CAD_DIR`,
+  else `../DIDSA-CAD`) and its `docs/motion/vectors.json` differs from this copy, so a
+  regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.

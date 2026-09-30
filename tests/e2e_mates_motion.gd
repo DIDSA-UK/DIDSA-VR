@@ -14,6 +14,13 @@ extends SceneTree
 ## mated part is locked while enforced and unlocks on Relax/Float; a live
 ## constrained drag keeps the mate satisfied while following the hand in the
 ## free directions; undo puts the part back AND on the backend; Fix/Float.
+## Constrained-drag S5 additions (DIDSA-CAD docs/constrained-drag-implementation-plan.md):
+## the drag runs on the group contract (members/basis/chart/quality, no v0
+## alias fields, no PATCH+solve fallback); GROUP FOLLOW — float the plate and
+## dragging the peg moves the plate on screen, both stored by ONE commit:true
+## request and ONE undo entry; a conflicting mate makes the backend answer
+## converged:false, which stores nothing (commit atomicity) and makes a real
+## grip-drag hold and restore the pre-grab pose; requests per 60-frame drag.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_mates_motion.gd
 ## Requires secrets.cfg -> a running backend, and assembly.didsa (tracked).
 
@@ -83,7 +90,7 @@ func _backend_translation(part: MeshInstance3D) -> Vector3:
 	return Vector3(INF, INF, INF)
 
 
-func _grip_drag(part: MeshInstance3D, delta_local_mm: Vector3, frames: int = 40) -> void:
+func _grip_drag(part: MeshInstance3D, delta_local_mm: Vector3, frames: int = 40, probe: Callable = Callable(), wait_model: bool = true) -> void:
 	## A REAL grip-drag through controller.gd (grab, per-physics-frame follow,
 	## release) — not a direct node move — so the wiring under test is the one a
 	## hand uses: it must save the pose (unmated), or steer it through the live
@@ -102,8 +109,10 @@ func _grip_drag(part: MeshInstance3D, delta_local_mm: Vector3, frames: int = 40)
 		await physics_frame
 	# constrained parts need their round trips to answer before release
 	var deadline := Time.get_ticks_msec() + 4000
-	while mt.has_drag(part) and mt._drag[part]["solved"] == null and Time.get_ticks_msec() < deadline:
+	while wait_model and mt.has_drag(part) and not mt.drag_model_ready(part) and Time.get_ticks_msec() < deadline:
 		await physics_frame
+	if probe.is_valid():
+		probe.call()
 	hand._try_release()
 	var end := Time.get_ticks_msec() + 6000
 	while mt.has_drag(part) and Time.get_ticks_msec() < end:
@@ -226,11 +235,16 @@ func _initialize() -> void:
 	# --- 5. a real grip-drag of the constrained part: hand pulls it up 50 and sideways 30
 	var start_pos := B.position
 	var requests_before: int = mt.stat_requests
+	mt.reset_motion_stats()
+	var drag_started := Time.get_ticks_msec()
 	await _grip_drag(B, Vector3(30, 50, 0), 60)
 	var drag_requests: int = mt.stat_requests - requests_before
-	print("calibration — requests used by the whole drag (incl. release + save): ", drag_requests)
-	print("SMOKE the drag used the one-request motion model (the backend has mate-motion): ", mt._motion_supported)
-	print("SMOKE ...and a whole 60-frame drag cost only a handful of requests (was 2 per round trip, continuously): ", drag_requests <= 12)
+	print("calibration — requests used by the whole 60-frame drag (grab anchor + re-anchors + 1 commit): ", drag_requests, " in ", Time.get_ticks_msec() - drag_started, " ms; motion stats ", mt.stat_motion)
+	print("SMOKE the drag ran on the group contract: one grab anchor, re-anchors on the 150 ms cadence, exactly ONE commit:true request on release: ", int(mt.stat_motion["anchor_requests"]) >= 1 and int(mt.stat_motion["commit_requests"]) == 1 and int(mt.stat_motion["anchors_accepted"]) >= 1)
+	print("SMOKE ...and the whole drag cost only a handful of requests (was 2 per round trip, continuously; no separate save): ", drag_requests <= 12, " (", drag_requests, ")")
+	print("SMOKE ...per-frame projection is timed and stayed cheap (mean < 2 ms): ", int(mt.stat_motion["frames"]) > 0 and float(mt.stat_motion["projection_us_total"]) / float(mt.stat_motion["frames"]) < 2000.0)
+	var mt_src := FileAccess.get_file_as_string("res://scripts/mates_tool.gd")
+	print("SMOKE the legacy paths are gone and the v0 alias fields are never read (no free_twists, no top-level transform from mate-motion, no PATCH+solve fallback): ", not (".get(\"free_twists\"" in mt_src) and not ('json.get("transform"' in mt_src) and not ("func _sync_with_solve" in mt_src) and not ("var _motion_supported" in mt_src))
 	var ended := B.position
 	print("calibration — hand moved it by (30, 50, 0) from ", start_pos, "; it ended at ", ended)
 	print("SMOKE while dragging, the part follows the hand in the mate's FREE directions: ", absf(ended.x - (start_pos.x + 30.0)) < 1.0 and absf(ended.z - start_pos.z) < 1.0)
@@ -261,13 +275,58 @@ func _initialize() -> void:
 	await mt.toggle_fixed(B)
 	print("SMOKE Float frees it again: ", not mt.is_fixed(B))
 
-	# --- an older backend without mate-motion: falls back to the per-round-trip loop and still constrains
-	mt._motion_supported = false
-	var fb_start := B.position
-	await _grip_drag(B, Vector3(-20, 30, 0), 40)
-	var fb_measure := await _measure()
-	print("SMOKE fallback (no mate-motion): the part still follows the free directions and stays on the mate plane: ", absf(B.position.x - (fb_start.x - 20.0)) < 1.0 and absf(B.position.y - fb_start.y) < 0.5 and absf(float(fb_measure.get("normal_distance", 99.0))) < 0.01)
-	mt._motion_supported = true
+	# --- group follow (S5): float the plate; A and B are now one free group. Dragging B moves A ON SCREEN, both stored by ONE commit, ONE undo entry
+	await mt.toggle_fixed(A)
+	print("SMOKE the plate is floating now (so the pair is an ungrounded group): ", not mt.is_fixed(A) and mt.is_constrained(A) and mt.is_constrained(B))
+	var a0 := A.position
+	var b0 := B.position
+	var commits_before := int(mt.stat_motion["commit_requests"])
+	var probe_a := [Vector3(INF, INF, INF)]
+	await _grip_drag(B, Vector3(30, 50, 0), 60, func() -> void: probe_a[0] = A.position)
+	print("calibration — group drag: A ", a0, " -> (mid-drag ", probe_a[0], ") -> ", A.position, "; B ", b0, " -> ", B.position)
+	# The plate follows only as the mate REQUIRES: the hand's +50 off the mate plane (Y) drags it along (B cannot leave the plate's face), the in-plane +30 (X) is a free slide of B over the plate and leaves the plate where it is.
+	print("SMOKE while dragging B the FOLLOWER (plate) moved on screen with it (+50 along the mate normal, before release), but not in the free in-plane direction: ", (probe_a[0] - (a0 + Vector3(0, 50, 0))).length() < 3.0)
+	print("SMOKE after release B followed the hand (30, 50, 0) and its follower A moved only by what the mate required, (0, 50, 0): ", (B.position - (b0 + Vector3(30, 50, 0))).length() < 1.0 and (A.position - (a0 + Vector3(0, 50, 0))).length() < 1.0)
+	print("SMOKE ...stored by exactly ONE commit:true request: ", int(mt.stat_motion["commit_requests"]) - commits_before == 1)
+	await _settle_writes()
+	var m4 := await _measure()
+	print("SMOKE ...the mate is still satisfied on the backend after the group commit: ", absf(float(m4.get("normal_distance", 99.0))) < 0.01 and bool(m4.get("faces_parallel", false)))
+	var a_backend := await _backend_translation(A)
+	var b_backend := await _backend_translation(B)
+	print("SMOKE ...and VR and backend agree on BOTH poses: ", a_backend.is_equal_approx(A.position) and b_backend.is_equal_approx(B.position))
+	main.command_stack.undo()
+	await _settle_writes()
+	print("SMOKE ONE undo puts BOTH members back (VR): ", A.position.distance_to(a0) < 0.01 and B.position.distance_to(b0) < 0.01)
+	a_backend = await _backend_translation(A)
+	b_backend = await _backend_translation(B)
+	print("SMOKE ...and on the backend too: ", a_backend.is_equal_approx(A.position) and b_backend.is_equal_approx(B.position))
+	await mt.toggle_fixed(A) # ground the plate again
+	print("SMOKE the plate is grounded again: ", mt.is_fixed(A))
+
+	# --- commit atomicity + converged:false hold: a conflicting second mate (distance 25 on the same faces) cannot be satisfied
+	mt.set_active(true)
+	mt.try_pick(A, _tri_of_face(A, fa))
+	mt.try_pick(B, _tri_of_face(B, fb))
+	mt.mate_type = "distance"
+	mt.mate_value = 25.0
+	var conflict: Dictionary = await mt.create_mate()
+	print("calibration — conflicting mate created: ", conflict, " / tablet says: ", mt.status_text())
+	await _settle_writes()
+	var a_before := await _backend_translation(A)
+	var b_before2 := await _backend_translation(B)
+	var b_occ: String = mt.MeshIdentity.occurrence_ref_for(B)["occurrence_id"]
+	var direct: Dictionary = await mt._api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/mate-motion" % [owner_id, b_occ], {"transform": null, "commit": true})
+	var dj = direct["json"]
+	print("SMOKE the backend answers converged:false for the unsatisfiable mates, with NO basis, dof or members (clients must hold, not read it as free): ", direct["ok"] and dj is Dictionary and not bool(dj.get("converged", true)) and dj.get("basis") == null and (dj.get("members") as Array).is_empty())
+	print("SMOKE ...and a commit:true with converged:false stores NOTHING (atomic, all-or-nothing): ", not bool(dj.get("committed", true)) and (await _backend_translation(A)).is_equal_approx(a_before) and (await _backend_translation(B)).is_equal_approx(b_before2))
+	var undo_label_before: String = main.command_stack.undo_label()
+	var pre_grab := B.position
+	await _grip_drag(B, Vector3(25, 40, 0), 40, Callable(), false)
+	await _settle_writes()
+	print("SMOKE a real grip-drag under unsatisfiable mates HOLDS at the pre-grab pose (no anchor is ever accepted), and release restores it: ", B.position.distance_to(pre_grab) < 0.01 and A.position.distance_to(a_before) < 0.01)
+	print("SMOKE ...nothing was stored on the backend and no undo entry was recorded: ", (await _backend_translation(B)).is_equal_approx(b_before2) and main.command_stack.undo_label() == undo_label_before)
+	print("SMOKE ...and the tablet says nothing was changed: ", "nothing was changed" in mt.status_text())
+	print("calibration — motion stats after the held drag: ", mt.stat_motion)
 
 	# cleanup
 	for m in mt.mates.duplicate():

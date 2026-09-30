@@ -16,6 +16,12 @@ VR `main` 8933f53 has the smooth-drag round (`scripts/mates_tool.gd`: `constrain
 (`transform`, `dof`, `free_twists`). Known problems (measured, see the investigation): frozen-peer solve under-reports DOF (a part can read 0 while its group is free)
 and blocks chains; additive first-order integration + fixed 100 mm lever arm leave up to ~5 mm violation / 2 mm pops on curved mates under large wishes.
 
+## Status (2026-09-30): S5 done on this side
+
+`scripts/motion/*.gd` (projector v2) + the rewritten live-drag in `scripts/mates_tool.gd`; the legacy `_sync_with_solve` /
+`_motion_supported` paths, `project_motion` / `weighted_basis` and the constant 100 mm lever arm are deleted and the v0 alias
+fields are no longer read — CAD S9 may now delete `transform` / `free_twists` from the `mate-motion` response. See `docs/status.md`.
+
 ## Which sessions touch this repo
 
 | Session | Repo | What |
