@@ -2199,3 +2199,7 @@ arms), inside-edge reach 8 mm. (Tested: 8 cm out from a corner hovers it now, 13
 
 Tests: `tests/windows_round.gd` (new, in `run_all.sh`); pure projection tests + real-backend
 checks above. Rendered under Xvfb: picker and image views. **Not yet in a headset.**
+
+## 2026-09-30 — Constrained-drag rollout: plan lives in DIDSA-CAD, VR session S5 is queued (docs only)
+
+No code changed. `docs/constrained-drag-rollout.md` orients VR sessions: the smooth-drag round (Sep 29) is the baseline; a CAD-side investigation found the frozen-peer solve under-reports DOF and that the projector should use screw integration and a bounding-radius lever arm. VR's part is session S5 of `DIDSA-CAD/docs/constrained-drag-implementation-plan.md`, after CAD S3/S4 land.
