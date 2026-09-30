@@ -107,7 +107,10 @@ func _initialize() -> void:
 	var all6 = Projector.from_anchor([ref], [[1,0,0,0,0,0],[0,1,0,0,0,0],[0,0,1,0,0,0],[0,0,0,1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1]], lever)
 	print("SMOKE with all six directions free a pure slide or a pure spin is reproduced exactly: ", Se3.weighted_dist(all6.project(slide)[0], slide, lever) < 1e-9 and Se3.weighted_dist(all6.project(tip_and_spin)[0], tip_and_spin, lever) < 1e-9)
 	var both := Se3.make_pose([160.0, 20.0, 30.0], Se3.rot_from_rotvec([0.0, 0.0, 0.3]))
-	print("calibration — SPEC FINDING: with all six free, a wish that slides 150 mm AND spins 0.3 rad is shown ", snappedf(Se3.norm3([all6.project(both)[0]["t"][0] - 160.0, all6.project(both)[0]["t"][1] - 20.0, all6.project(both)[0]["t"][2] - 30.0]), 0.1), " mm away from the wish (screw vs the wish's own chart; the additive integrator reproduced it exactly) — see docs/status.md")
+	print("SMOKE ...and so is a wish that slides 150 mm AND spins 0.3 rad (screw-log wish: the projection reproduces a wish on the manifold exactly; the v0 chart was 22.4 mm off): ", Se3.weighted_dist(all6.project(both)[0], both, lever) < 1e-9)
+	var face = Projector.from_anchor([Se3.make_pose([10.0, 20.0, 5.0], Se3.identity())], [[1, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 1, 0]], lever)
+	var face_wish := Se3.make_pose([160.0, 20.0, 45.0], Se3.rot_from_rotvec([0.0, 1.5, 0.0]))
+	print("SMOKE ...including the ordinary face-mate case, a fast in-plane slide with a 1.5 rad spin (was tens of mm off): ", Se3.weighted_dist(face.project(face_wish)[0], face_wish, lever) < 1e-9)
 	# a screw freedom (spin about an axis NOT through the part origin): a wish already on it stays on the manifold (the old additive integrator left it)
 	var pin := Se3.make_pose([-15.0, 0.0, 0.0], Se3.identity())
 	var pin_model = Projector.from_anchor([pin], [[-pin["t"][1], pin["t"][0], 0.0, 0.0, 0.0, 1.0]], lever) # rotate about the world Z axis: origin velocity w x t

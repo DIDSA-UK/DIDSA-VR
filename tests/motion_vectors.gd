@@ -176,7 +176,7 @@ func _initialize() -> void:
 		failures += 1
 	print("SMOKE vectors: ", (doc["cases"] as Array).size(), " cases, tolerance ", tol)
 
-	var handled := ["gram_schmidt", "project", "hysteresis", "blend", "blend_anchor", "scheduler", "accept_anchor", "swing_sequence"]
+	var handled := ["gram_schmidt", "project", "screw_log", "hysteresis", "blend", "blend_anchor", "scheduler", "accept_anchor", "swing_sequence"]
 	var kinds := {}
 	for c in doc["cases"]:
 		kinds[c["kind"]] = true
@@ -226,6 +226,23 @@ func _initialize() -> void:
 			_pose(got[m], e["members"][m], "%s member %d" % [c["id"], m])
 			_pose(add[m], e["additive_members"][m], "%s additive member %d" % [c["id"], m])
 	per_kind["project"] = failures - before
+	before = failures
+
+	# --- screw_log: the twist, and screw_exp(base, twist) lands on the target
+	for c in _cases_of(doc, "screw_log"):
+		var i: Dictionary = c["input"]
+		var base := Se3.pose_from_json(i["base"])
+		var target := Se3.pose_from_json(i["target"])
+		var d := Se3.screw_log(base, target)
+		for k in 6:
+			_num(d[k], c["expected"]["twist"][k], "%s twist[%d]" % [c["id"], k])
+		var back := Se3.screw_exp(base, d)
+		_pose(back, c["expected"]["roundtrip"], "%s roundtrip" % c["id"])
+		for k in 3:
+			checks += 1
+			if absf(back["t"][k] - target["t"][k]) >= 1e-8:
+				_fail("%s lands on target" % c["id"], "t[%d] %s vs %s" % [k, str(back["t"][k]), str(target["t"][k])])
+	per_kind["screw_log"] = failures - before
 	before = failures
 
 	# --- hysteresis

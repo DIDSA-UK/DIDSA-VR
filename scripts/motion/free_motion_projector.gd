@@ -113,24 +113,26 @@ static func project_onto_rows(orthonormal_rows: Array, s: Array, want: Array) ->
 	return a
 
 
-## The wish vector: log(ref_0, wanted) in the grabbed block, zero elsewhere (followers have no wish).
-func wish_vector(wanted: Dictionary) -> Array:
+## The wish vector: the grabbed block is screw_log(ref_0, wanted) (spec §4: the exact inverse of the screw integrator, so a wish
+## that lies on the free manifold is reproduced exactly); zero elsewhere (followers have no wish). Integrator.ADDITIVE pairs
+## with the v0 chart pose_delta (informational only).
+func wish_vector(wanted: Dictionary, integrator: int = Integrator.SCREW) -> Array:
 	var want: Array = []
 	want.resize(6 * members())
 	want.fill(0.0)
-	var d := Se3.pose_delta(wanted, refs[0])
+	var d := Se3.screw_log(refs[0], wanted) if integrator == Integrator.SCREW else Se3.pose_delta(wanted, refs[0])
 	for i in 6:
 		want[i] = d[i]
 	return want
 
 
-func project_twist(wanted: Dictionary) -> Array:
-	return project_onto_rows(rows, scale, wish_vector(wanted))
+func project_twist(wanted: Dictionary, integrator: int = Integrator.SCREW) -> Array:
+	return project_onto_rows(rows, scale, wish_vector(wanted, integrator))
 
 
 ## Poses for every member at the wished grabbed pose. dim() == 0 returns the refs (the group cannot move).
 func project(wanted: Dictionary, integrator: int = Integrator.SCREW) -> Array:
-	return integrate(project_twist(wanted), integrator)
+	return integrate(project_twist(wanted, integrator), integrator)
 
 
 func integrate(d: Array, integrator: int = Integrator.SCREW) -> Array:

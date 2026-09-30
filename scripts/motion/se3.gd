@@ -13,6 +13,7 @@ extends RefCounted
 ## (rad) composed on the LEFT, R' = exp(w)·R.
 
 const SERIES_SWITCH := 1e-4 ## below this angle the Rodrigues / screw coefficients use their Taylor series
+const LOG_SERIES_SWITCH := 1e-2 ## below this angle screw_log's V⁻¹ coefficient uses its Taylor series
 const NEAR_PI := 1e-3 ## within this of pi the rotation-vector axis comes from (R + I)/2
 
 
@@ -195,6 +196,29 @@ static func screw_exp(base: Dictionary, d: Array, offset: int = 0) -> Dictionary
 	var et := mat_vec(e, base["t"])
 	var vt := mat_vec(vm, [v[0] - wxt[0], v[1] - wxt[1], v[2] - wxt[2]])
 	return make_pose([et[0] + vt[0], et[1] + vt[1], et[2] + vt[2]], mat_mul(e, base["r"]))
+
+
+## V(w)⁻¹ = I − K/2 + c·K², c = (1 − θ sinθ / (2(1 − cosθ))) / θ² (series below θ < LOG_SERIES_SWITCH, where the closed form cancels).
+static func _v_inverse(w: Array) -> Array:
+	var th := norm3(w)
+	var k := skew(w)
+	var c: float
+	if th < LOG_SERIES_SWITCH:
+		c = 1.0 / 12.0 + th * th / 720.0 + th * th * th * th / 30240.0
+	else:
+		c = (1.0 - th * sin(th) / (2.0 * (1.0 - cos(th)))) / (th * th)
+	return _lin(1.0, -0.5, k, c, mat_mul(k, k))
+
+
+## The twist d = [v, w] with screw_exp(base, d) == target: the exact inverse of screw_exp (spec §4).
+## w = rotvec(R_T·R_Bᵀ); u = V(w)⁻¹ (t_T − exp(w)·t_B); v = u + w × t_B.
+static func screw_log(base: Dictionary, target: Dictionary) -> Array:
+	var w := rotvec_from_rot(mat_mul(target["r"], mat_transpose(base["r"])))
+	var e := rot_from_rotvec(w)
+	var et := mat_vec(e, base["t"])
+	var u := mat_vec(_v_inverse(w), [target["t"][0] - et[0], target["t"][1] - et[1], target["t"][2] - et[2]])
+	var wxt := cross(w, base["t"])
+	return [u[0] + wxt[0], u[1] + wxt[1], u[2] + wxt[2], w[0], w[1], w[2]]
 
 
 ## ‖[1,1,1,L,L,L] ∘ log(a, b)‖ — the weighted distance between two poses (spec §7, and §6's `travel`).
