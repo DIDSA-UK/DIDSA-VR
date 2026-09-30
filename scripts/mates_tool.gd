@@ -37,9 +37,10 @@ extends Node
 ## now does the same:
 ##   * every move of a placed (top-level) part is saved to the backend
 ##     (persist_pose(), a latest-wins write queue per occurrence);
-##   * while mates are enforced, dragging a mated, non-grounded part runs a
-##     live PATCH+solve loop (constrain_drag()/end_drag()) so it slides along
-##     what its mates allow instead of flying off;
+##   * while mates are enforced, dragging a mated, non-grounded part runs the
+##     group-aware live projector (constrain_drag()/end_drag(), see "HOW A MATED
+##     PART MOVES" below) so it slides along what its mates allow instead of
+##     flying off, and the parts mated to it follow as the mates require;
 ##   * a GROUNDED (fixed) part that has mates can't be moved while enforced
 ##     (is_locked()); the tablet's Fix/Float toggle (toggle_fixed()) picks
 ##     which part is the anchor;
@@ -51,6 +52,11 @@ signal mates_changed()
 
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
+const Se3 := preload("res://scripts/motion/se3.gd")
+const Projector := preload("res://scripts/motion/free_motion_projector.gd")
+const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
+const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
+const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
 const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle"]
 
 var active := false ## wrist tablet's "Mates tool" toggle
@@ -66,7 +72,6 @@ var relaxed := false
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
 var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
-var live_min_interval_ms := 0 ## floor between live-drag requests; 0 = as fast as each round trip completes (one in flight at a time)
 
 var _mated_ids: Dictionary = {} ## occurrence_id -> true, for every occurrence any Mate references
 var _drag: Dictionary = {} ## part -> live-drag state, see constrain_drag()
@@ -246,9 +251,13 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	if not result["ok"]:
 		await refresh_mates(owner_part_id)
 		return {"ok": false, "error": _friendly_error(result)}
-	var transform_json: Dictionary = result["json"].get("transform", {})
-	if part != null and not transform_json.is_empty():
-		_apply_solved_transform(part, transform_json)
+	# /solve now moves the WHOLE mate-graph component (followers included) and stores it: adopt every
+	# moved occurrence's stored pose, one undo entry for the lot.
+	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (str(part.name) if part != null else occurrence_id))
+	if not adopted:
+		var transform_json: Dictionary = result["json"].get("transform", {})
+		if part != null and not transform_json.is_empty():
+			_apply_solved_transform(part, transform_json)
 	await refresh_mates(owner_part_id)
 	return {"ok": true, "error": ""}
 
@@ -467,52 +476,88 @@ func _persist_loop(occ: String, entry: Dictionary) -> void:
 
 # --- live, constrained motion (enforced mates) ---
 ##
-## HOW A MATED PART MOVES (revised 29 Sep 2026 after "jerky with the round
-## trips"): the first cut asked the backend for the part's pose every frame (a
-## PATCH + solve pair per round trip), so the part moved at network speed. Now
-## the backend says HOW the part may move — its remaining free motion, an
-## orthonormal set of "twists" (a few translations/rotations the mates allow),
-## from one `mate-motion` call — and the client applies the hand's motion
-## LOCALLY every frame by projecting it onto those twists: motion the mates
-## forbid is dropped, motion they allow is followed 1:1, with no network in the
-## loop. The projection is exact for the common mates (in-plane sliding and
-## spinning on a face, sliding/rotating along an axis) and first-order for
-## curved ones; every RESYNC_INTERVAL_MS a fresh `mate-motion` call (one
-## request, not two) re-anchors the reference pose and twists, which corrects
-## any curvature drift without a visible jump. A backend without `mate-motion`
-## falls back to the old per-round-trip PATCH+solve loop.
-
-const RESYNC_INTERVAL_MS := 150 ## min gap between re-anchoring requests during a drag (one in flight at a time)
-const CONSTRAINT_LENGTH_MM := 100.0 ## how many mm one radian of rotation "weighs" when projecting a wanted motion onto the free twists (a part-sized lever arm), so translation and rotation are comparable in one metric
+## HOW A MATED PART MOVES (constrained-drag S5, DIDSA-CAD
+## docs/constrained-drag-implementation-plan.md §3 and docs/motion/projector-spec.md
+## — the spec is normative, scripts/motion/*.gd implement it and are pinned to
+## DIDSA-CAD's golden vectors by tests/motion_vectors.gd). The backend says HOW the
+## grabbed part and every part mated to it may move — one `mate-motion` answer
+## carries the group's nearest satisfying poses (`members`, grabbed first) and an
+## orthonormal free-motion `basis` — and the client applies the hand's motion
+## LOCALLY every frame: the wish is projected onto that basis (followers in the
+## metric), integrated as a screw, blended across re-anchors, and applied to ALL
+## members, so followers move on screen. No network in the frame loop.
+## Re-anchoring: one request in flight; every 150 ms (75 ms near a rank change) or
+## when the client-side travel reaches the answer's `max_step`; every answer goes
+## through the acceptance test (converged, residual, client-measured jump) before
+## it replaces the model; a rejected / non-converged / failed answer HOLDS the
+## last shown pose (never read as "all free"). Nothing is stored while dragging:
+## the release sends ONE `commit:true` request with the release-time wish, and on
+## success all members take the stored poses under a single undo entry; on
+## converged:false or an error every member goes back to its pre-grab pose.
 
 var stat_requests := 0 ## requests sent so far (diagnostics/tests: the point of the local model is that this stays low while dragging)
-var _motion_supported := true ## flips false if the backend has no mate-motion endpoint (404/405): fall back to PATCH+solve per round trip
+var stat_motion := {} ## instrumentation hooks (investigation §H), see reset_motion_stats()
+
+
+func reset_motion_stats() -> void:
+	stat_motion = {
+		"anchor_requests": 0, "commit_requests": 0, "responses": 0, "transport_errors": 0,
+		"anchors_accepted": 0, "anchors_rejected": {}, "holds": 0,
+		"frames": 0, "projection_us_total": 0, "projection_us_max": 0,
+	}
+
+
+func _stat_add(key: String, amount: int = 1) -> void:
+	if stat_motion.is_empty():
+		reset_motion_stats()
+	stat_motion[key] = int(stat_motion[key]) + amount
+
+
+func _stat_reject(reason: String) -> void:
+	if stat_motion.is_empty():
+		reset_motion_stats()
+	stat_motion["anchors_rejected"][reason] = int(stat_motion["anchors_rejected"].get(reason, 0)) + 1
+
+
+func _now_ms() -> float:
+	return float(Time.get_ticks_msec())
+
 
 func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	## Called every physics frame by controller.gd for a part being moved that
 	## is_constrained(). `desired_global` is where the hand wants it; returns
 	## the global pose to DISPLAY: that wish projected onto the motion the mates
-	## allow (from the last `mate-motion` answer) — computed here, this frame,
-	## no network. Before the first answer arrives it's the pose the drag
-	## started from, so nothing jumps.
+	## allow (from the last accepted `mate-motion` anchor) — computed here, this
+	## frame, no network — and the same frame the mated FOLLOWERS are moved to
+	## their projected poses. Before the first anchor arrives it's the pose the
+	## drag started from, so nothing jumps.
 	var parent := part.get_parent() as Node3D
 	var inv := parent.global_transform.affine_inverse()
 	var state: Dictionary = _drag.get(part, {})
 	if state.is_empty():
-		state = {"start": _local_pose(part), "desired": null, "sent": null, "solved": null, "ref": null, "basis": [], "model": false, "active": true, "running": false, "last_ok": true, "owner": _current_owner_part_id, "occ": _occ_id(part), "last_error_ms": 0, "last_sync_ms": -100000}
+		state = _new_drag_state(part)
 		_drag[part] = state
+	if bool(state["finishing"]):
+		return parent.global_transform * state["shown_grabbed"] # released: the commit round trip is in flight, nothing follows the hand any more
 	state["active"] = true
 	state["desired"] = inv * desired_global
+	state["wish"] = Se3.from_transform3d(state["desired"])
 	if not state["running"]:
 		_drag_loop(part, state)
-	var shown: Transform3D
-	if state["model"]:
-		shown = project_motion(state["ref"], state["basis"], state["desired"])
-	elif state["solved"] != null:
-		shown = state["solved"] # fallback (no mate-motion on the backend): the last round-trip answer
-	else:
-		shown = state["start"]
-	return parent.global_transform * shown
+	var hyst = state["hyst"]
+	if hyst.active == null:
+		return parent.global_transform * state["start"]
+	var started := Time.get_ticks_usec()
+	var poses := _frame_poses(state)
+	var grabbed_pose: Transform3D = Se3.to_transform3d(poses[0])
+	state["shown_grabbed"] = grabbed_pose
+	state["shown_pose"] = poses[0]
+	_apply_followers(state, poses)
+	var elapsed := Time.get_ticks_usec() - started
+	_stat_add("frames")
+	_stat_add("projection_us_total", elapsed)
+	stat_motion["projection_us_max"] = maxi(int(stat_motion["projection_us_max"]), elapsed)
+	return parent.global_transform * grabbed_pose
 
 
 func desired_global(part: Node3D) -> Transform3D:
@@ -527,8 +572,8 @@ func desired_global(part: Node3D) -> Transform3D:
 
 func end_drag(part: Node3D) -> bool:
 	## Called on release/deselect. Returns true if this tool owned the drag (so
-	## controller.gd skips its own undo bookkeeping): the loop finishes its last
-	## solve, leaves the part on the final answer, and records the undo step.
+	## controller.gd skips its own undo bookkeeping): the loop stops, ONE
+	## commit:true request stores the group, and the undo step is recorded.
 	var state: Dictionary = _drag.get(part, {})
 	if state.is_empty():
 		return false
@@ -536,153 +581,310 @@ func end_drag(part: Node3D) -> bool:
 	return true
 
 
-static func project_motion(ref: Transform3D, twists: Array, desired: Transform3D) -> Transform3D:
-	## The pose `desired` becomes when only the motion in `twists` (an
-	## orthonormal basis in the weighted metric, see weighted_basis()) is allowed,
-	## measured from `ref`: the translation and rotation-vector difference are
-	## projected onto the free subspace and everything else dropped. Empty
-	## `twists` = fully constrained: stays at `ref`.
-	var ref_basis := ref.basis.orthonormalized()
-	var q := (desired.basis.orthonormalized() * ref_basis.inverse()).get_rotation_quaternion()
-	if q.w < 0.0:
-		q = -q # shortest way round
-	var sine := sqrt(maxf(0.0, 1.0 - q.w * q.w))
-	var rotation_vector := Vector3.ZERO
-	if sine > 1e-9:
-		rotation_vector = Vector3(q.x, q.y, q.z) / sine * (2.0 * acos(clampf(q.w, -1.0, 1.0)))
-	var d := desired.origin - ref.origin
-	var wanted := [d.x, d.y, d.z, rotation_vector.x * CONSTRAINT_LENGTH_MM, rotation_vector.y * CONSTRAINT_LENGTH_MM, rotation_vector.z * CONSTRAINT_LENGTH_MM]
-	var allowed := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-	for twist in twists:
-		var dot := 0.0
-		for i in 6:
-			dot += twist[i] * wanted[i]
-		for i in 6:
-			allowed[i] += dot * twist[i]
-	var rotation_allowed := Vector3(allowed[3], allowed[4], allowed[5]) / CONSTRAINT_LENGTH_MM
-	var rotation := Basis.IDENTITY
-	if rotation_allowed.length() > 1e-12:
-		rotation = Basis(rotation_allowed.normalized(), rotation_allowed.length())
-	return Transform3D(rotation * ref_basis, ref.origin + Vector3(allowed[0], allowed[1], allowed[2]))
+func drag_model_ready(part: Node3D) -> bool:
+	## True once an anchor has been accepted for this part's drag (tests wait on it).
+	var state: Dictionary = _drag.get(part, {})
+	return not state.is_empty() and state["hyst"].active != null
 
 
-static func weighted_basis(free_twists: Array) -> Array:
-	## The backend's twists are orthonormal in plain (mm, rad) coordinates; the
-	## projection above works in the weighted metric (rotation scaled by
-	## CONSTRAINT_LENGTH_MM), where they aren't — so weight them and
-	## re-orthonormalise (Gram-Schmidt). Near-zero leftovers are dropped.
-	var out: Array = []
-	for twist in free_twists:
-		var v := [float(twist[0]), float(twist[1]), float(twist[2]), float(twist[3]) * CONSTRAINT_LENGTH_MM, float(twist[4]) * CONSTRAINT_LENGTH_MM, float(twist[5]) * CONSTRAINT_LENGTH_MM]
-		for u in out:
-			var dot := 0.0
-			for i in 6:
-				dot += v[i] * u[i]
-			for i in 6:
-				v[i] -= dot * u[i]
-		var length := 0.0
-		for i in 6:
-			length += v[i] * v[i]
-		length = sqrt(length)
-		if length < 1e-9:
-			continue
-		for i in 6:
-			v[i] /= length
-		out.append(v)
-	return out
+func _new_drag_state(part: Node3D) -> Dictionary:
+	var lever := _lever_arm_for(part)
+	return {
+		"start": _local_pose(part), "desired": null, "wish": null,
+		"active": true, "running": false, "finishing": false,
+		"owner": _current_owner_part_id, "occ": _occ_id(part),
+		"lever_arm": lever, # sent until the first accepted answer; afterwards chart.lever_arm
+		"hyst": DofHysteresis.new(), "blender": MotionBlender.new(1),
+		"sched": ReanchorScheduler.new(_now_ms), "last_sent_ms": -100000.0,
+		"members": [] as Array, "nodes": {}, "starts": {}, # occurrence id -> Node3D / pre-grab Transform3D
+		"hold": false, "held": [], "shown": [], "shown_grabbed": _local_pose(part), "shown_pose": Se3.from_transform3d(_local_pose(part)),
+		"last_error_ms": -100000.0,
+	}
+
+
+func _lever_arm_for(part: Node3D) -> float:
+	## Half the diagonal of the grabbed occurrence's bounding box in its OWN frame
+	## (spec §6): the mesh AABB, in mm — the node's local frame is the backend's
+	## occurrence frame. 0 = unknown (the request then omits lever_arm and the
+	## backend uses its own bounding radius).
+	var boxes: Array[AABB] = []
+	_collect_aabbs(part, Transform3D.IDENTITY, boxes)
+	if boxes.is_empty():
+		return 0.0
+	var box := boxes[0]
+	for i in range(1, boxes.size()):
+		box = box.merge(boxes[i])
+	return box.size.length() / 2.0
+
+
+func _collect_aabbs(node: Node3D, to_root: Transform3D, out: Array[AABB]) -> void:
+	if node is VisualInstance3D:
+		out.append(to_root * (node as VisualInstance3D).get_aabb())
+	for child in node.get_children():
+		if child is Node3D:
+			_collect_aabbs(child, to_root * (child as Node3D).transform, out)
+
+
+func _frame_poses(state: Dictionary) -> Array:
+	## One frame's member poses (Se3 poses, grabbed first): the hysteresis' active
+	## model projects the wish, the blender hides anchor steps; while holding, the
+	## last shown poses are kept.
+	if bool(state["hold"]):
+		return state["held"]
+	var hyst = state["hyst"]
+	var blender = state["blender"]
+	var frame: Dictionary = hyst.frame(state["wish"])
+	if frame["event"] == "adopted":
+		blender.on_anchor(frame["prev_poses"], frame["poses"])
+	var poses: Array = blender.shown(frame["poses"])
+	state["shown"] = poses
+	return poses
+
+
+func _apply_followers(state: Dictionary, poses: Array) -> void:
+	var members: Array = state["members"]
+	for m in range(1, mini(members.size(), poses.size())):
+		var node: Node3D = state["nodes"].get(members[m])
+		if node != null and is_instance_valid(node):
+			node.transform = Se3.to_transform3d(poses[m])
 
 
 func _drag_loop(part: Node3D, state: Dictionary) -> void:
+	## Anchor scheduling only (the per-frame display is constrain_drag()): at most
+	## ONE request in flight; the first goes out at grab with `transform: null`.
 	state["running"] = true
-	while is_instance_valid(part):
-		var desired: Transform3D = state["desired"]
-		var idle: bool = desired == null or (state["sent"] != null and (state["sent"] as Transform3D).is_equal_approx(desired))
-		if idle:
-			if not state["active"]:
-				break # released and everything the hand asked for has been answered
-			await get_tree().process_frame
-			continue
-		# While the hand is moving, re-anchor at a modest rate: the display is
-		# driven locally, so this only has to keep the model honest. After the
-		# release the last answer is wanted straight away.
-		if state["active"] and state["model"] and Time.get_ticks_msec() - int(state["last_sync_ms"]) < RESYNC_INTERVAL_MS:
-			await get_tree().process_frame
-			continue
-		state["sent"] = desired
-		state["last_sync_ms"] = Time.get_ticks_msec()
-		var result: Dictionary
-		if _motion_supported:
-			result = await _sync_with_motion_model(part, state, desired)
+	var sched = state["sched"]
+	while is_instance_valid(part) and bool(state["active"]):
+		var hyst = state["hyst"]
+		var due := false
+		if hyst.active == null:
+			due = true # no model yet: ask (the first anchor goes out at grab)
+		elif bool(state["hold"]):
+			due = bool(sched.check(0.0)["reanchor"]) # holding: the time cap only
 		else:
-			result = await _sync_with_solve(state, desired)
-		if not is_instance_valid(part):
-			break
-		state["last_ok"] = result["ok"]
-		if not result["ok"] and Time.get_ticks_msec() - int(state["last_error_ms"]) > 1500:
-			state["last_error_ms"] = Time.get_ticks_msec()
-			_report("Mate can't follow that move: %s" % _friendly_error(result))
-		if live_min_interval_ms > 0:
-			await get_tree().create_timer(live_min_interval_ms / 1000.0).timeout
+			due = bool(sched.check(hyst.active.travel(state["shown_pose"]))["reanchor"])
+		# after a miss keep the normal cadence: never re-ask faster than the time cap
+		if due and sched.consecutive_misses > 0 and _now_ms() - float(state["last_sent_ms"]) < ReanchorScheduler.REANCHOR_MS:
+			due = false
+		if due:
+			await _request_anchor(part, state)
+		else:
+			await get_tree().process_frame
 	state["running"] = false
-	if is_instance_valid(part) and not state["active"]:
+	if not is_instance_valid(part):
+		_drag.erase(part)
+	elif not bool(state["active"]) and not bool(state["finishing"]):
 		_finish_drag(part, state)
 
 
-func _sync_with_motion_model(part: Node3D, state: Dictionary, desired: Transform3D) -> Dictionary:
-	## ONE request: the nearest mate-satisfying pose to `desired` and the free
-	## motion there (nothing is stored on the backend).
+func _anchor_body(state: Dictionary, wish, commit: bool) -> Dictionary:
+	var body := {"transform": null if wish == null else Se3.pose_to_json(wish), "commit": commit}
+	if float(state["lever_arm"]) > 0.0:
+		body["lever_arm"] = float(state["lever_arm"])
+	return body
+
+
+func _request_anchor(part: Node3D, state: Dictionary) -> void:
+	## ONE `mate-motion` request and the acceptance test on its answer (spec §7).
+	var sched = state["sched"]
+	var hyst = state["hyst"]
+	var first: bool = hyst.active == null
+	var wish_sent = null if first else state["wish"]
 	var path := "/parts/%s/occurrences/%s/mate-motion" % [state["owner"], state["occ"]]
-	var response := await _api_request(HTTPClient.METHOD_POST, path, {"transform": pose_to_json(desired)})
-	var route_missing: bool = response["code"] == 405 or (response["code"] == 404 and response["json"] is Dictionary and response["json"].get("detail") == "Not Found")
-	if route_missing: # (an unknown occurrence is also a 404, but with a structured detail — that's not "no such endpoint")
-		_motion_supported = false # older backend: fall back to PATCH + solve
-		state["sent"] = null
-		return {"ok": true}
-	if not response["ok"]:
-		return response
+	sched.on_request_sent()
+	state["last_sent_ms"] = _now_ms()
+	_stat_add("anchor_requests")
+	var response := await _api_request(HTTPClient.METHOD_POST, path, _anchor_body(state, wish_sent, false))
+	_stat_add("responses")
+	if not is_instance_valid(part):
+		return
+	if not bool(state["active"]):
+		sched.invalidate() # released while in flight: the answer is ignored, the commit follows
+		return
+	handle_anchor_response(state, response, wish_sent)
+
+
+func handle_anchor_response(state: Dictionary, response: Dictionary, wish_sent) -> void:
+	## An anchor answer -> accept (new model, blend) or miss (hold). Only the
+	## contract fields are read: members / basis / chart / quality / converged —
+	## NOT the v0 aliases `transform` / `free_twists` (CAD S9 deletes them).
+	## Public so tests can feed it synthetic answers without a network.
+	var hyst = state["hyst"]
 	var json = response["json"]
-	if not (json is Dictionary) or not bool(json.get("converged", false)):
-		return {"ok": false, "json": {"detail": {"type": "mate_solve_did_not_converge"}}, "error": "did not converge"}
-	state["ref"] = json_to_pose(json.get("transform", {}))
-	state["basis"] = weighted_basis(json.get("free_twists", []))
-	state["solved"] = state["ref"]
-	state["model"] = true
-	return {"ok": true}
+	var converged: bool = response["ok"] and json is Dictionary and bool(json.get("converged", false))
+	var members: Array = []
+	var quality: Dictionary = {}
+	var lever := float(state["lever_arm"])
+	var refs: Array = []
+	var basis: Array = []
+	if converged:
+		members = json.get("members", [])
+		quality = json.get("quality", {}) if json.get("quality") is Dictionary else {}
+		var chart = json.get("chart")
+		if chart is Dictionary and chart.get("lever_arm") != null:
+			lever = float(chart["lever_arm"]) # ALWAYS the echoed value
+		var raw_basis = json.get("basis")
+		if members.is_empty() or not (raw_basis is Array) or lever <= 0.0:
+			converged = false # no usable model: same as converged:false, never "all free"
+		else:
+			for mem in members:
+				refs.append(Se3.pose_from_json(mem["transform"]))
+			basis = raw_basis
+			for row in basis:
+				if not (row is Array) or (row as Array).size() != 6 * members.size():
+					converged = false
+	var own = null
+	if hyst.active != null and converged and wish_sent != null:
+		own = hyst.peek(wish_sent)[0] # the grabbed pose the CURRENT model projects the SAME wish to
+	var decision := ReanchorScheduler.accept_anchor(converged, quality.get("residual_inf"), refs[0] if converged else null, own, lever)
+	if not bool(decision["accept"]):
+		_anchor_missed(state, "transport" if not response["ok"] and int(response.get("code", 0)) == 0 else str(decision["reason"]), response)
+		return
+	_accept_anchor(state, members, refs, basis, lever, quality)
 
 
-func _sync_with_solve(state: Dictionary, desired: Transform3D) -> Dictionary:
-	## The original per-round-trip loop, kept as the fallback: PATCH the wish,
-	## then solve (which stores its result).
-	var path := "/parts/%s/occurrences/%s" % [state["owner"], state["occ"]]
-	var patched := await _api_request(HTTPClient.METHOD_PATCH, path, {"transform": pose_to_json(desired)})
-	if not patched["ok"]:
-		return patched
-	var solved := await _api_request(HTTPClient.METHOD_POST, path + "/solve", null)
-	if solved["ok"]:
-		state["solved"] = json_to_pose(solved["json"].get("transform", {}))
-	return solved
+func _anchor_missed(state: Dictionary, reason: String, response: Dictionary) -> void:
+	var sched = state["sched"]
+	sched.on_miss()
+	_stat_reject(reason)
+	if reason == "transport":
+		_stat_add("transport_errors")
+	if not bool(state["hold"]) and state["hyst"].active != null:
+		state["hold"] = true # HOLD the last shown pose; never read a failed answer as "all free"
+		state["held"] = state["shown"] if not (state["shown"] as Array).is_empty() else state["hyst"].peek(state["wish"])
+		_stat_add("holds")
+	if sched.take_cue() and Time.get_ticks_msec() - int(state["last_error_ms"]) > 1000:
+		state["last_error_ms"] = Time.get_ticks_msec()
+		_report("Mate can't follow that move: %s" % _friendly_error(response if not response["ok"] else {"json": {"detail": {"type": "mate_solve_did_not_converge"}}}))
+
+
+func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array, lever: float, quality: Dictionary) -> void:
+	var hyst = state["hyst"]
+	var blender = state["blender"]
+	var ids: Array = []
+	for mem in members:
+		ids.append(str(mem["occurrence_id"]))
+	var model = Projector.from_anchor(refs, basis, lever)
+	var wish = state["wish"]
+	if ids != state["members"]:
+		# first anchor, or the group changed under the drag: a fresh model and blender
+		state["members"] = ids
+		hyst.reset()
+		blender = MotionBlender.new(ids.size())
+		state["blender"] = blender
+		for occ in ids:
+			if not state["nodes"].has(occ):
+				var node := _find_loaded_part(state["owner"], occ)
+				if node != null:
+					state["nodes"][occ] = node
+					if not state["starts"].has(occ):
+						state["starts"][occ] = _local_pose(node) # followers have not moved yet: this is their pre-grab pose
+		hyst.on_anchor(model)
+		state["hold"] = false
+	else:
+		var holding: bool = bool(state["hold"])
+		var old_projected: Array = state["held"] if holding else hyst.peek(wish)
+		if holding:
+			blender.reset(ids.size()) # resume from the held pose with a normal blend
+		hyst.on_anchor(model)
+		blender.on_anchor(old_projected, hyst.peek(wish))
+		state["hold"] = false
+	state["lever_arm"] = lever
+	state["sched"].on_accepted(quality.get("max_step"), quality.get("sigma_gap"))
+	_stat_add("anchors_accepted")
 
 
 func _finish_drag(part: Node3D, state: Dictionary) -> void:
+	## Release: stop the loop (done), then ONE `commit:true` request with the
+	## release-time WISH (not the shown pose). Success -> every member takes the
+	## stored pose, one undo entry for all. converged:false / error -> nothing was
+	## stored, every member goes back to its pre-grab pose (spec §12).
+	state["finishing"] = true
+	state["sched"].invalidate()
+	var path := "/parts/%s/occurrences/%s/mate-motion" % [state["owner"], state["occ"]]
+	var wish = state["wish"]
+	if wish == null:
+		wish = Se3.from_transform3d(_local_pose(part))
+	var result: Dictionary = {}
+	for attempt in 2:
+		_stat_add("commit_requests")
+		result = await _api_request(HTTPClient.METHOD_POST, path, _anchor_body(state, wish, true))
+		if result["ok"] or int(result["code"]) != 0:
+			break # only a transport error (no HTTP answer at all) is retried, once
+		_stat_add("transport_errors")
+	if not is_instance_valid(part):
+		_drag.erase(part)
+		return
+	var json = result["json"]
+	var committed: bool = result["ok"] and json is Dictionary and bool(json.get("converged", false)) and bool(json.get("committed", false))
+	var starts: Dictionary = state["starts"]
+	starts[state["occ"]] = state["start"]
+	var changes: Array = [] # {node, before, after}
+	if committed:
+		for mem in json.get("members", []):
+			var occ := str(mem["occurrence_id"])
+			var node: Node3D = part if occ == state["occ"] else state["nodes"].get(occ)
+			if node == null or not is_instance_valid(node):
+				node = _find_loaded_part(state["owner"], occ)
+			if node == null:
+				continue
+			var before: Transform3D = starts.get(occ, _local_pose(node))
+			var after := json_to_pose(mem["transform"])
+			node.transform = after
+			if not before.is_equal_approx(after):
+				changes.append({"node": node, "before": before, "after": after})
+		_push_group_move("move %s" % part.name, changes)
+	else:
+		# nothing is stored: put every member back where the grab found it
+		for occ in starts:
+			var node: Node3D = part if occ == state["occ"] else state["nodes"].get(occ)
+			if node != null and is_instance_valid(node):
+				node.transform = starts[occ]
+		_report("Couldn't keep that move (nothing was changed): %s" % _friendly_error(result if not result["ok"] else {"json": {"detail": {"type": "mate_solve_did_not_converge"}}}))
 	_drag.erase(part)
-	var start: Transform3D = state["start"]
-	var final: Transform3D = state["solved"] if state["solved"] != null else start
-	part.transform = final
-	# The motion-model path stores nothing while dragging (and the fallback's
-	# last failed solve leaves the raw wish on the backend): save the pose the
-	# part actually ends on.
-	if state["model"] or not bool(state["last_ok"]):
-		persist_pose(part)
-	if command_stack and not start.is_equal_approx(final):
-		command_stack.push("move %s" % part.name,
-			func() -> void:
-				if is_instance_valid(part):
-					part.transform = start
-					persist_pose(part),
-			func() -> void:
-				if is_instance_valid(part):
-					part.transform = final
-					persist_pose(part))
+
+
+func _push_group_move(label: String, changes: Array) -> void:
+	## ONE undo entry covering every member that moved.
+	if command_stack == null or changes.is_empty():
+		return
+	command_stack.push(label,
+		func() -> void:
+			for c in changes:
+				if is_instance_valid(c["node"]):
+					c["node"].transform = c["before"]
+					persist_pose(c["node"]),
+		func() -> void:
+			for c in changes:
+				if is_instance_valid(c["node"]):
+					c["node"].transform = c["after"]
+					persist_pose(c["node"]))
+
+
+func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
+	## Reads the stored occurrence poses and moves every LOADED node that differs
+	## (what /solve just did to the driven part AND its followers) — one undo entry.
+	## Nodes with a pose write still in flight are left alone (their write wins).
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner_part_id, null)
+	if not result["ok"] or not (result["json"] is Array):
+		return false
+	var changes: Array = []
+	for occ in result["json"]:
+		var occ_id := str(occ.get("id", ""))
+		var entry: Dictionary = _persist.get(occ_id, {})
+		if not entry.is_empty() and (bool(entry["running"]) or entry["pose"] != null):
+			continue
+		var node := _find_loaded_part(owner_part_id, occ_id)
+		if node == null or not (occ.get("transform") is Dictionary):
+			continue
+		var before := _local_pose(node)
+		var after := json_to_pose(occ["transform"])
+		if before.is_equal_approx(after):
+			continue
+		node.transform = after
+		changes.append({"node": node, "before": before, "after": after})
+	_push_group_move(label, changes)
+	return true
 
 
 func _find_loaded_part(owner_part_id: String, occurrence_id: String) -> Node3D:
