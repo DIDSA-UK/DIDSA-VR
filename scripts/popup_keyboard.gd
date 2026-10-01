@@ -107,6 +107,7 @@ func setup(right: XRController3D, camera: XRCamera3D, left: XRController3D = nul
 	surface.cursor = _cursor
 	handle = PanelHandle.new()
 	handle.setup(self, left if left != null else right, right, func() -> bool: return _open, tokens)
+	handle.camera = _camera
 	handle.build(panel_size)
 	handle.dropped.connect(_on_handle_dropped)
 	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
@@ -218,7 +219,7 @@ func _process(delta: float) -> void:
 		apply_theme()
 	if not _open or _camera == null:
 		return
-	if handle.follow():
+	if handle.follow(delta):
 		surface.release_all() # being carried by its handle: not also hoverable/clickable (and no stale hover left to click a key with)
 		return
 	surface.panel_size = panel_size

@@ -153,6 +153,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	handle.setup(self, _left, _right, func() -> bool: return _open, tokens)
 	handle.grab_action = grab_action
 	handle.reach_slack = handle_grab_reach
+	handle.camera = _camera
 	handle.build(panel_size)
 	_build_corners()
 	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
@@ -247,7 +248,7 @@ func _process(delta: float) -> void:
 	_last_delta = delta
 	if not _open or _camera == null or _right == null:
 		return
-	if handle.follow():
+	if handle.follow(delta):
 		surface.release_all() # being dragged by its handle - not also hoverable/clickable (and no stale hover left over to click with)
 		return
 	if _resize_corner >= 0:

@@ -46,10 +46,10 @@ func _initialize() -> void:
 
 	# --- hover highlight + name, before pulling the trigger
 	print("SMOKE hover highlights the part the ray would hit: ", near.material_overlay != null)
-	print("SMOKE hover shows the part's name: ", l._aim_label.visible and l._aim_label.text == near.name)
+	print("SMOKE hovering a part highlights it but shows NO name label (the 'MESH 2' text was removed): ", near.material_overlay != null and l.get("_aim_label") == null)
 	l.position += Vector3(5, 0, 0) # aim away from everything
 	await physics_frame; await physics_frame
-	print("SMOKE hover clears when aiming at nothing: ", near.material_overlay == null and not l._aim_label.visible)
+	print("SMOKE hover clears when aiming at nothing: ", near.material_overlay == null)
 	l.position = Vector3(0, 1, 0)
 	near.queue_free(); far.queue_free()
 

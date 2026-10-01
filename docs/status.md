@@ -1460,6 +1460,22 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   real headset (this sandbox has none), so whether your PCVR runtime offers alpha-blend over the link is unknown until
   the next test. Standalone Quest builds additionally need the OpenXR Vendors plugin + the export's Passthrough option
   (the project deliberately has no addons yet), which is NOT done.
+- **Distance grab of floating windows and the keyboard (so an awkwardly placed one can be fetched).** Point either
+  hand's LASER at a floating window or the popup keyboard (up to 6 m): it **glows** (a soft cyan halo, `shaders/ui_halo.gdshader`)
+  and the laser stops on it; **grip** carries it from where it is (brighter glow); it follows the hand's position
+  (smoothed) but always **turns to face you, upright** (the full keyboard keeps its lean); **A/X pulls it towards you,
+  B/Y pushes it away**, at a speed proportional to its distance (same constants as nudging a part), never closer than
+  0.25 m to the hand nor beyond 12 m; release drops it. Priorities: a part your hand is touching, the section gizmo and a
+  panel's own near handle all win over a distance grab; a part in front of the window blocks the hover; whole-model grab
+  stays out via the existing `window_held` meta. Implemented in `controller.gd` (`_update_panel_hover`,
+  `_try_grab_panel_at_distance`, `_nudge_carried_panel`) and `scripts/ui/panel_handle.gd` (halo, `start_laser_grab`,
+  `nudge`, facing-follow). Applies to every `diegetic_panels` member (all floating windows + the popup keyboard); NOT the
+  wrist tablet. The old near-handle grab is unchanged. Test: `tests/panel_distance_grab.gd` (+ halo renders in
+  `tests/windows_render.gd`). **Not verified**: the feel in a headset (smoothing rate, push/pull speed, whether hovering a
+  window you are clicking in should glow that strongly), and a real A/B press (only `nudge_carried_panel()` is tested).
+- **Removed the hovered-part name label** (e.g. "MESH 2") that floated beside the laser's hit point: the part still
+  highlights pale yellow; `controller.gd`'s `_aim_label` is gone, README wording updated, `tests/precise_picking.gd` now
+  checks there is none.
 - **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
   comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
   `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;

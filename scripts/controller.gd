@@ -34,6 +34,7 @@ extends XRController3D
 
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, so the level numbers and cutoffs stay in one place
 const OneEuro := preload("res://scripts/one_euro.gd")
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -71,7 +72,8 @@ var _hover_material: StandardMaterial3D
 var _hover_node: Node3D = null ## the part a grip would grab right now, lightly highlighted
 var _aim_hover_material: StandardMaterial3D
 var _aim_hover_node: Node3D = null ## the part the laser would select right now, lightly highlighted
-var _aim_label: Label3D ## floats near the hit point, showing the hovered part's name
+var _hover_panel: Node3D = null ## the floating window / keyboard this hand's laser is on (it glows, and a grip would carry it)
+var _hover_panel_distance := -1.0
 var _pivot_local: Vector3 = Vector3.ZERO ## selected_node's local-space point the thumbstick rotates about
 var _held_start_transform: Transform3D ## held_node's world transform when this grip grabbed it
 var _selected_start_transform: Transform3D ## selected_node's world transform when the laser selected it
@@ -121,7 +123,6 @@ func _ready() -> void:
 	_aim_hover_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_aim_hover_material.albedo_color = Color(1.0, 1.0, 0.6, 0.3)
 	_aim_hover_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_add_aim_label()
 
 	var parent := get_parent()
 	if parent:
@@ -158,11 +159,14 @@ func _process(_delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	_update_grab_hover()
 	_update_aim_hover()
+	_update_panel_hover()
 	_update_laser_visual()
 	if section_tool:
 		section_tool.update_held(self, delta, steadiness > 0)
 	if held_node != null:
 		_update_held_part(delta)
+	if _nudge_carried_panel(delta):
+		return # A/B belong to the floating window this hand is carrying, not to a selected part
 	if selected_node == null:
 		return
 
@@ -272,6 +276,8 @@ func reset_interaction() -> void:
 
 func _on_button_pressed(action_name: String) -> void:
 	if action_name == grab_action:
+		if _try_grab_panel_at_distance():
+			return
 		# The section-plane gizmo is independent of "Individual part
 		# manipulation" mode (like mates_tool_active/hide_tool_active are for
 		# the trigger below) — parts_enabled only gates the ordinary part-grab
@@ -326,6 +332,78 @@ func _try_grab() -> void:
 		_grab_offset = global_transform.affine_inverse() * target.global_transform
 		_grab_filter.reset(global_position)
 		held_node = target
+
+
+func _update_panel_hover() -> void:
+	## Which floating window / keyboard this hand's laser is on (the nearest, unless a part is in front
+	## of it): it glows, so you can see it's grabbable, and a grip will carry it. A hand that is already
+	## carrying a part or a panel doesn't pick anything else.
+	var panels := get_tree().get_nodes_in_group("diegetic_panels")
+	var best: Node3D = null
+	var best_d := INF
+	var busy := held_node != null
+	for panel in panels:
+		if panel.get("handle") != null and panel.handle.held_by == self:
+			busy = true
+	if not busy:
+		var origin := global_position
+		var dir := -global_transform.basis.z.normalized()
+		for panel in panels:
+			if panel.get("handle") == null:
+				continue
+			var d: float = panel.handle.laser_hit_distance(origin, dir)
+			if d >= 0.0 and d < best_d:
+				best = panel
+				best_d = d
+		if best != null and _part_hit_distance >= 0.0 and _part_hit_distance < best_d - 0.02:
+			best = null # a part is in front of the window: the laser is on the part
+	for panel in panels:
+		if panel.get("handle") != null:
+			panel.handle.set_hover(self, panel == best)
+	if best != null and best != _hover_panel:
+		UiFeedback.haptic(self, "hover") # a light tick as the laser lands on a window
+	_hover_panel = best
+	_hover_panel_distance = best_d if best != null else -1.0
+
+
+func _try_grab_panel_at_distance() -> bool:
+	## Grip with the laser on a floating window / keyboard carries it from where it is. Anything the
+	## hand is actually touching wins (a part in reach, the section gizmo, a panel's own near handle),
+	## and so does the whole-model grab otherwise, so this only claims a grip aimed at a window.
+	if _hover_panel == null or not is_instance_valid(_hover_panel) or held_node != null:
+		return false
+	if _hover_panel.handle_in_reach(self):
+		return false # the near handle grab (panel_handle.gd) is for this grip
+	if parts_enabled and _find_grab_target() != null:
+		return false
+	if section_tool and section_tool.active and section_tool.gizmo() != null and global_position.distance_to(section_tool.gizmo().global_position) < 0.2:
+		return false
+	return _hover_panel.handle.start_laser_grab(self)
+
+
+func _nudge_carried_panel(delta: float) -> bool:
+	## A/X pulls the window this hand is carrying towards you, B/Y pushes it away: the same
+	## distance-proportional speed as nudging a part (far windows travel fast, near ones finely).
+	## True while this hand carries a panel.
+	for panel in get_tree().get_nodes_in_group("diegetic_panels"):
+		if panel.get("handle") != null and panel.handle.held_by == self:
+			var direction := 0.0
+			if is_button_pressed("ax_button"):
+				direction -= 1.0
+			if is_button_pressed("by_button"):
+				direction += 1.0
+			if direction != 0.0:
+				nudge_carried_panel(direction, delta)
+			return true
+	return false
+
+
+func nudge_carried_panel(direction: float, delta: float) -> void:
+	## Split out so tests can drive it without a real XR runtime (direction -1 pulls, +1 pushes).
+	for panel in get_tree().get_nodes_in_group("diegetic_panels"):
+		if panel.get("handle") != null and panel.handle.held_by == self:
+			var speed := clampf(nudge_rate * panel.handle.carry_distance(), nudge_min_speed, nudge_max_speed)
+			panel.handle.nudge(direction * speed * delta)
 
 
 func _find_grab_target() -> Node3D:
@@ -542,21 +620,16 @@ func _update_aim_hover() -> void:
 	_part_hit_distance = global_position.distance_to(hit["point"]) if hit.has("point") else -1.0
 
 
-func _set_aim_hover(target: Node3D, point: Vector3) -> void:
+func _set_aim_hover(target: Node3D, _point: Vector3) -> void:
+	## Highlight only: the part's name used to float beside the hit point too, which read as
+	## clutter ("MESH 2") rather than information, so it was removed.
 	if target == _aim_hover_node and is_instance_valid(target):
-		_aim_label.global_position = point + Vector3(0, 0.05, 0)
 		return
 	if is_instance_valid(_aim_hover_node) and _aim_hover_node != selected_node and _aim_hover_node.material_overlay == _aim_hover_material:
 		_aim_hover_node.material_overlay = null
 	_aim_hover_node = target
-	if is_instance_valid(_aim_hover_node):
-		if _aim_hover_node != selected_node:
-			_aim_hover_node.material_overlay = _aim_hover_material
-		_aim_label.text = _aim_hover_node.name
-		_aim_label.global_position = point + Vector3(0, 0.05, 0)
-		_aim_label.visible = true
-	else:
-		_aim_label.visible = false
+	if is_instance_valid(_aim_hover_node) and _aim_hover_node != selected_node:
+		_aim_hover_node.material_overlay = _aim_hover_material
 
 
 func _rotate_about_pivot(node: Node3D, axis: Vector3, angle: float) -> void:
@@ -668,18 +741,14 @@ func _update_laser_visual() -> void:
 	## hit, which takes priority over the default full length.
 	var distance := laser_length
 	var ui_distance: float = get_meta("ui_hit_distance", -1.0)
+	var longest := laser_length
 	if ui_distance >= 0.0:
 		distance = ui_distance
+	elif _hover_panel_distance >= 0.0:
+		distance = _hover_panel_distance # stops on a window it's aimed at, even a far one
+		longest = maxf(laser_length, _hover_panel_distance)
 	elif _part_hit_distance >= 0.0:
 		distance = _part_hit_distance
-	_set_laser_length(clampf(distance, 0.02, laser_length))
+	_set_laser_length(clampf(distance, 0.02, longest))
 
 
-func _add_aim_label() -> void:
-	_aim_label = Label3D.new()
-	_aim_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_aim_label.no_depth_test = true
-	_aim_label.font_size = 32
-	_aim_label.outline_size = 10
-	_aim_label.visible = false
-	add_child(_aim_label)

@@ -39,4 +39,29 @@ func _initialize() -> void:
 			if img.get_pixel(x, y).get_luminance() > 0.04:
 				lit += 1
 	print("SMOKE the window and the keyboard draw into the 3D view: ", lit > 300)
+	# The distance-grab glow, on the keyboard (fully in view): a laser on it (hover), then carried (brighter).
+	var hand: XRController3D = origin.get_node("RightController")
+	var kbh = main._keyboard.handle
+	var fake_laser := Node.new() # a stand-in laser: the real right controller would (rightly) clear the hover every frame, it isn't aimed here
+	kbh.set_hover(fake_laser, true)
+	for i in 4:
+		await process_frame
+	if dir != "":
+		root.get_texture().get_image().save_png(dir.path_join("windows_scene_glow_hover.png"))
+	var hover_img := root.get_texture().get_image()
+	kbh.set_hover(fake_laser, false)
+	kbh.start_laser_grab(hand) # carried: the hand stays put, so the keyboard stays where it is
+	for i in 4:
+		await process_frame
+	if dir != "":
+		root.get_texture().get_image().save_png(dir.path_join("windows_scene_glow_held.png"))
+	var held_img := root.get_texture().get_image()
+	kbh.clear()
+	var sum_plain := 0.0; var sum_hover := 0.0; var sum_held := 0.0
+	for y in range(0, img.get_height(), 4):
+		for x in range(0, img.get_width(), 4):
+			sum_plain += img.get_pixel(x, y).get_luminance()
+			sum_hover += hover_img.get_pixel(x, y).get_luminance()
+			sum_held += held_img.get_pixel(x, y).get_luminance()
+	print("SMOKE the halo shader draws: the scene is brighter hovered than plain, and brighter again when carried: ", sum_hover > sum_plain and sum_held > sum_hover)
 	quit()

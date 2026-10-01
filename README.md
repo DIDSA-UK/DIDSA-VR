@@ -222,7 +222,7 @@ live-synced.
    history is cleared whenever the model is replaced (loading a different
    file), since it can't point at parts that no longer exist.
 10. **View > Visibility.** **Shoot to hide** — toggle it on, then point the
-    right hand's laser at a part (same hover+name as normal selection) and
+    right hand's laser at a part (same hover highlight as normal selection) and
     pull the trigger to hide it. **Hide all** / **Show all** toggle every
     part at once. **Reverse visibility** flips every part's hidden/shown
     state. **Isolate selected** hides everything except whichever part is
@@ -231,7 +231,7 @@ live-synced.
     and grip — it's out of the way, not just invisible.
 11. **Assembly > Mates** (milestone 4). Toggle **Mates tool** on, then point the
     right hand's laser at a face and pull the trigger to pick it (same
-    hover+name as normal selection) — pick a face on a second, different
+    hover highlight as normal selection) — pick a face on a second, different
     part to complete a pair; a status line explains why a pick didn't count
     (picking the assembly's own unplaced content, the same part twice, or a
     part from a different assembly all reject with their own message).
