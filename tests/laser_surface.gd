@@ -122,7 +122,7 @@ func _initialize() -> void:
 	print("SMOKE first-claim: a surface does not take a claim someone already holds: ", not surf.hovering and absf(float(r.get_meta("ui_hit_distance")) - 5.0) < 0.001)
 	surf.claim_first = false
 	await frames()
-	print("SMOKE claim_first=false (old tablet behaviour) overwrites it: ", surf.hovering and absf(float(r.get_meta("ui_hit_distance")) - 1.0) < 0.01)
+	print("SMOKE claim_first=false (the keyboard's mode) overrides it: ", surf.hovering and absf(float(r.get_meta("ui_hit_distance")) - 1.0) < 0.01)
 	surf.claim_first = true
 
 	# --- release_all drops the claim

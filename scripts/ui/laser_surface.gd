@@ -28,11 +28,12 @@ extends RefCounted
 ##  * CLAIM PROTOCOL. The right controller's "ui_hover" / "ui_hit_distance" meta tell
 ##    controller.gd not to laser-select a part, locomotion.gd not to teleport, and the
 ##    laser how far to draw. controller.gd resets them at the start of every frame
-##    (process_priority -1000). With claim_first = true (what new panels should use)
-##    a surface only claims if nothing already has this frame and never writes
-##    "false" — the same first-claim arbitration diegetic_panel.gd documents.
-##    claim_first = false is the old wrist tablet / keyboard behaviour, which
-##    overwrites unconditionally.
+##    (process_priority -1000). A surface NEVER writes "false" (that would wipe a
+##    claim another panel made earlier this frame). With claim_first = true (floating
+##    windows, the tablet) it only claims if nothing already has this frame — the
+##    first-claim arbitration diegetic_panel.gd documents. With claim_first = false
+##    (the popup keyboard, which should win over a window it overlaps) it claims
+##    whenever it is hit, overriding an earlier claim.
 ##  * STICK SCROLL. While the laser is on the surface the right thumbstick scrolls
 ##    scroll_target (push down = scroll down), with a deadzone and a lockout while a
 ##    click is held or just released, so a resting thumb can't slide rows away.
@@ -132,9 +133,6 @@ func process(delta: float, active: bool = true) -> void:
 			right.set_meta("ui_hit_distance", hit_distance)
 	if not hovering:
 		hit_distance = -1.0
-		if not claim_first and right != null:
-			right.set_meta("ui_hover", false)
-			right.set_meta("ui_hit_distance", -1.0)
 
 	if hovering and (not pressed or _drag_slider):
 		pointer_px = local_px

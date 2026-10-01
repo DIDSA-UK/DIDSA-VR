@@ -187,7 +187,11 @@ live-synced.
    like one on your lap, so it doesn't cover the window in front of you.
    It's used for the Browser's web addresses and typing into pages (below),
    the Colours tab's custom hex colour, and the Settings project-folder path;
-   the numeric keypad stays for numbers (scale, mate values).
+   the numeric keypad stays for numbers (scale, mate values). Like the floating
+   windows, the keyboard has a **grab handle** at the centre of its lower edge:
+   **grip** it with either hand to carry the keyboard somewhere more comfortable,
+   release to drop it. It reopens where you left it (one spot for the keypad, one
+   for the full keyboard) until you walk more than 3 m away.
 9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
    whole-model move (one/two-hand drag, and the Scale sub-tab's
    presets/Fit/Home), and Visibility hide/show action goes onto one shared

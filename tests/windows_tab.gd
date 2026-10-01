@@ -185,6 +185,7 @@ func _initialize() -> void:
 		await process_frame
 	var moved: Vector3 = calc.global_position - before
 	print("SMOKE dragging the handle moves the panel 1:1 with the hand: ", moved.is_equal_approx(Vector3(0.3, 0.1, -0.2)))
+	print("SMOKE a window being carried by its handle isn't hoverable (no stale hover to click through): ", not calc._hovering)
 	l.button_released.emit("grip_click")
 	for i in 3:
 		await process_frame

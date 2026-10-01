@@ -72,7 +72,7 @@ features are NOT in scope), and the existing code (`wrist_tablet.gd`,
 * Old/new tablet switch (single export on Main).
 * Tests: new `tablet2_*` tests; old tablet tests untouched.
 
-### Phase 3 — Windows and keyboard
+### Phase 3 — Windows and keyboard — DONE (headless/software-render verified; see docs/status.md)
 * Restyle `DiegeticPanel` (border, header, handle, resize brackets) and
   `PopupKeyboard` (keys, display, border) from the same tokens.
 * Keyboard handle: factor the handle grab/release/reach logic out of

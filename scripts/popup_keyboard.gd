@@ -29,12 +29,28 @@ extends Node3D
 ## mouse events pushed into the SubViewport. It isn't wrist-mounted — it pops
 ## up in front of wherever you're looking, since the brief says "everywhere",
 ## not tied to one tool or tab.
+##
+## Phase 3 of the UI redesign (docs/wrist-tablet-redesign-plan.md): the laser
+## handling is the shared scripts/ui/laser_surface.gd (every real-headset fix
+## that used to be copied in here is in force there, unchanged); the look comes
+## from the UI theme resource (ui/didsa_ui_theme.tres); and, like the floating
+## windows, it has a GRAB HANDLE at the centre of its lower edge
+## (scripts/ui/panel_handle.gd): grip it with either hand to carry the keyboard
+## somewhere more comfortable, release to drop it. It reopens where you left it
+## (one remembered spot per layout, numeric / full) until you walk more than
+## moved_pose_reach from it, when it comes back in front of you.
 
 @export var panel_size := Vector2(0.22, 0.26) ## metres
 @export var viewport_size := Vector2i(420, 520) ## pixels the UI is laid out in
 @export var open_distance: float = 0.6 ## metres in front of the camera when opened
 @export var max_point_distance: float = 2.0 ## metres; laser reach for pressing keys
 @export var click_action: String = "trigger_click"
+@export var moved_pose_reach: float = 3.0 ## metres: a moved keyboard is only reopened in place while it's within this of you
+
+const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
+const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
+const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const THEME_PATH := "res://ui/didsa_ui_theme.tres"
 
 var _right: XRController3D
 var _camera: XRCamera3D
@@ -58,20 +74,37 @@ var _open := false
 var _text := ""
 var _pristine := false ## true until the first keystroke: that keystroke clears the pre-filled value instead of appending to it
 var _on_confirm: Callable = Callable()
-var _hovering := false
-var _pointer_px := Vector2.ZERO
-var _press_px := Vector2.ZERO ## _pointer_px frozen at the moment the trigger went down — see _send_click()'s own docstring
-var _last_sent_px := Vector2(-1, -1)
-var _pressed := false
+var tokens: Resource ## ui/didsa_ui_theme.tres
+var surface ## LaserSurface: hover, claim, frozen press
+var handle ## PanelHandle: the grab pill at the lower edge
+var _moved_poses := {} ## layout ("numeric" / "full") -> the Transform3D the user last dropped the keyboard at
+var _hovering: bool:
+	get: return surface != null and surface.hovering
+var _pressed: bool:
+	get: return surface != null and surface.pressed
+var _pointer_px: Vector2:
+	get: return surface.pointer_px if surface else Vector2.ZERO
 
 
-func setup(right: XRController3D, camera: XRCamera3D) -> void:
+func setup(right: XRController3D, camera: XRCamera3D, left: XRController3D = null) -> void:
 	_right = right
 	_camera = camera
+	if left == null:
+		left = right.get_parent().get_node_or_null("LeftController") as XRController3D # callers that predate the handle pass only the right hand
+	tokens = load(THEME_PATH)
 	_build_viewport()
 	_build_quad()
-	_right.button_pressed.connect(_on_right_pressed)
-	_right.button_released.connect(_on_right_released)
+	surface = LaserSurface.new()
+	surface.setup(self, _viewport, _right, panel_size)
+	surface.claim_first = false # a popup keyboard wins over a window it overlaps
+	surface.max_point_distance = max_point_distance
+	surface.click_action = click_action
+	surface.cursor = _cursor
+	handle = PanelHandle.new()
+	handle.setup(self, left if left != null else right, right, func() -> bool: return _open, tokens)
+	handle.build(panel_size)
+	handle.dropped.connect(_on_handle_dropped)
+	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
 	visible = false
 
 
@@ -110,14 +143,34 @@ func current_mode() -> String:
 func close() -> void:
 	_open = false
 	visible = false
+	if surface:
+		surface.release_all()
+	if handle:
+		handle.clear()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_right.set_meta("ui_hover", false)
-	_right.set_meta("ui_hit_distance", -1.0) # _update_pointer() only runs while open, so this has to be reset explicitly here too — otherwise the laser could stay shortened to a stale distance after closing
+	_right.set_meta("ui_hit_distance", -1.0) # the surface only runs while open, so this has to be reset explicitly here too — otherwise the laser could stay shortened to a stale distance after closing
+
+
+func handle_in_reach(hand: Node3D) -> bool:
+	## True if this open keyboard's drag handle is within the hand's grab reach —
+	## controller.gd defers to it, so a grip at the handle never also grabs a part.
+	return handle != null and handle.in_reach(hand)
+
+
+func _on_handle_dropped(_hand: XRController3D) -> void:
+	_moved_poses[_mode] = global_transform
 
 
 func _place_in_front_of_camera() -> void:
 	if _camera == null:
 		return
+	if _moved_poses.has(_mode):
+		var kept: Transform3D = _moved_poses[_mode]
+		if kept.origin.distance_to(_camera.global_position) <= moved_pose_reach:
+			global_transform = kept # where you left it
+			return
+		_moved_poses.erase(_mode) # you've walked away from it: start fresh in front of you
 	var forward := -_camera.global_transform.basis.z
 	forward.y = 0.0
 	forward = Vector3.FORWARD if forward.length() < 0.001 else forward.normalized()
@@ -146,74 +199,14 @@ func _place_in_front_of_camera() -> void:
 	global_transform = Transform3D(basis, target_position)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not _open or _camera == null:
 		return
-	_update_pointer()
-
-
-func _update_pointer() -> void:
-	var was_hovering := _hovering
-	_hovering = false
-	var normal := global_transform.basis.z.normalized()
-	var origin := _right.global_position
-	var dir := -_right.global_transform.basis.z.normalized()
-	var hit_distance := -1.0 ## see wrist_tablet.gd's own _update_pointer() for what controller.gd does with this
-	var hit = Plane(normal, global_position).intersects_ray(origin, dir)
-	if hit != null and origin.distance_to(hit) <= max_point_distance:
-		var local: Vector3 = global_transform.affine_inverse() * hit
-		if absf(local.x) <= panel_size.x * 0.5 and absf(local.y) <= panel_size.y * 0.5:
-			_hovering = true
-			hit_distance = origin.distance_to(hit)
-			if not _pressed: # frozen while a click is held — see _send_click()'s own docstring (Godot's BaseButton cancels a press on any motion event outside its rect, regardless of the eventual release event's own position)
-				_pointer_px = Vector2(
-					(local.x / panel_size.x + 0.5) * viewport_size.x,
-					(0.5 - local.y / panel_size.y) * viewport_size.y
-				)
-
-	_right.set_meta("ui_hover", _hovering)
-	_right.set_meta("ui_hit_distance", hit_distance)
-	_cursor.visible = _hovering
-	if _hovering:
-		_cursor.position = _pointer_px - _cursor.size * 0.5
-		if not _pressed and _pointer_px != _last_sent_px:
-			var motion := InputEventMouseMotion.new()
-			motion.position = _pointer_px
-			motion.global_position = _pointer_px
-			motion.relative = _pointer_px - (_last_sent_px if was_hovering else _pointer_px)
-			_viewport.push_input(motion)
-			_last_sent_px = _pointer_px
-	elif was_hovering and _pressed:
-		_send_click(false) # laser slid off mid-press: let go so nothing stays stuck down
-
-
-func _on_right_pressed(action_name: String) -> void:
-	if action_name == click_action and _hovering:
-		_press_px = _pointer_px
-		_send_click(true)
-		_right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
-
-
-func _on_right_released(action_name: String) -> void:
-	if action_name == click_action and _pressed:
-		_send_click(false)
-
-
-func _send_click(down: bool) -> void:
-	## Uses _press_px (frozen at press time), not the live _pointer_px, for
-	## both down and up — see wrist_tablet.gd's own _send_click() for the
-	## full real-headset bug this fixes (hover worked, activating never did:
-	## a real trigger squeeze takes real time, during which _pointer_px kept
-	## tracking the laser, so the "up" event landed wherever the aim had
-	## drifted to by release rather than where it was at press).
-	_pressed = down
-	var click := InputEventMouseButton.new()
-	click.button_index = MOUSE_BUTTON_LEFT
-	click.pressed = down
-	click.position = _press_px
-	click.global_position = _press_px
-	click.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
-	_viewport.push_input(click)
+	if handle.follow():
+		surface.release_all() # being carried by its handle: not also hoverable/clickable (and no stale hover left to click a key with)
+		return
+	surface.panel_size = panel_size
+	surface.process(delta, true)
 
 
 func _key_pressed(key: String) -> void:
@@ -380,6 +373,10 @@ func _apply_layout() -> void:
 		viewport_size = Vector2i(420, 520)
 	_viewport.size = viewport_size
 	(_quad.mesh as QuadMesh).size = panel_size
+	if surface:
+		surface.panel_size = panel_size
+	if handle:
+		handle.layout(panel_size)
 	if _ui_root:
 		_viewport.remove_child(_ui_root)
 		_ui_root.queue_free()
@@ -408,9 +405,13 @@ func _key_button(label: String, key: String, stretch: float = 1.0, toggled: bool
 	button.disabled = disabled
 	if _mode == "full":
 		button.custom_minimum_size = Vector2(0, 72)
+	else:
+		button.custom_minimum_size = Vector2(0, 64)
 	if toggled:
 		button.toggle_mode = true
 		button.set_pressed_no_signal(true)
+	if key == "OK" or key == "Done" or (key == "Enter" and not _live.is_valid()):
+		button.theme_type_variation = &"ButtonAccent" # the key that finishes the entry
 	button.pressed.connect(_key_pressed.bind(key))
 	return button
 
@@ -418,7 +419,7 @@ func _key_button(label: String, key: String, stretch: float = 1.0, toggled: bool
 func _add_row(specs: Array) -> void:
 	## specs: [[label, key, stretch?, toggled?, disabled?], ...]
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", tokens.gap)
 	_keys_box.add_child(row)
 	for spec in specs:
 		row.add_child(_key_button(spec[0], spec[1], spec[2] if spec.size() > 2 else 1.0, spec[3] if spec.size() > 3 else false, spec[4] if spec.size() > 4 else false))
@@ -465,65 +466,45 @@ func _build_full_keys() -> void:
 
 
 func _build_ui() -> Control:
-	var theme := Theme.new()
-	theme.default_font_size = 30
-	# Toggle keys (Shift/Caps) need a visible "on" state, same fix and colour as
-	# the wrist tablet's and windows' themes (Godot's default reads too faintly
-	# on an unshaded quad at arm's length).
-	var pressed_style := StyleBoxFlat.new()
-	pressed_style.bg_color = Color(0.15, 0.55, 0.68)
-	pressed_style.set_corner_radius_all(4)
-	pressed_style.set_content_margin_all(6)
-	theme.set_stylebox("pressed", "Button", pressed_style)
-	theme.set_stylebox("hover_pressed", "Button", pressed_style)
-
 	var root := Control.new()
-	root.theme = theme
+	root.theme = tokens.build_theme() # the same theme the tablet and windows use: panel chrome, keys, toggled-key highlight
+	root.theme.default_font_size = 30 # keys have always been larger than the tablet's body text
 	root.size = Vector2(viewport_size)
 
-	var panel := PanelContainer.new()
+	var panel := PanelContainer.new() # the theme's panel chrome (rounded, outlined)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.08, 0.1, 0.13)
-	bg.set_content_margin_all(16)
-	panel.add_theme_stylebox_override("panel", bg)
 	root.add_child(panel)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
+	column.add_theme_constant_override("separation", tokens.gap + 2)
 	panel.add_child(column)
 
 	_hint = null
 	if _mode == "full":
 		_hint = Label.new()
-		_hint.add_theme_font_size_override("font_size", 22)
-		_hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+		_hint.theme_type_variation = &"LabelDim"
 		column.add_child(_hint)
 
+	# The typed text sits in an inset field, like a text box.
+	var field := PanelContainer.new()
+	field.theme_type_variation = &"PanelRaised"
+	column.add_child(field)
 	_display = Label.new()
 	_display.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if _mode == "full" else HORIZONTAL_ALIGNMENT_RIGHT
 	_display.clip_text = true
 	_display.add_theme_font_size_override("font_size", 40 if _mode == "full" else 44)
-	column.add_child(_display)
+	field.add_child(_display)
 
 	_keys_box = VBoxContainer.new()
-	_keys_box.add_theme_constant_override("separation", 8)
+	_keys_box.add_theme_constant_override("separation", tokens.gap)
 	column.add_child(_keys_box)
 	_rebuild_keys()
 	_update_display()
 
-	# A soft glow where the laser terminates, same as wrist_tablet.gd's own
-	# cursor and for the same real-headset reason — see that one's docstring.
-	_cursor = Control.new()
-	_cursor.size = Vector2(28, 28)
-	_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_cursor.visible = false
-	_cursor.draw.connect(func() -> void:
-		var centre: Vector2 = _cursor.size * 0.5
-		for i in range(6, 0, -1):
-			_cursor.draw_circle(centre, float(i) * 2.0, Color(1.0, 0.85, 0.1, 0.06))
-		_cursor.draw_circle(centre, 5.0, Color(1.0, 0.95, 0.7, 0.9))
-	)
+	# A soft glow where the laser terminates (see laser_surface.gd's make_cursor()).
+	_cursor = LaserSurface.make_cursor()
 	root.add_child(_cursor)
+	if surface:
+		surface.cursor = _cursor # a layout switch rebuilds this tree and so the cursor
 
 	return root

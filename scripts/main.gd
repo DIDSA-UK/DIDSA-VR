@@ -268,7 +268,7 @@ func _add_popup_keyboard() -> void:
 	var keyboard := preload("res://scripts/popup_keyboard.gd").new()
 	keyboard.name = "PopupKeyboard"
 	add_child(keyboard)
-	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, $XROrigin3D/LeftController)
 	_keyboard = keyboard
 	_browser_window.set_keyboard(keyboard) # the Browser types web addresses / page text on the full keyboard
 

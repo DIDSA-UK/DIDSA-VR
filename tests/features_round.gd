@@ -137,8 +137,8 @@ func _initialize() -> void:
 	for i in 3:
 		await process_frame
 	print("SMOKE aiming just outside a corner hovers that corner (top-right): ", calc._hover_corner == 1)
-	print("SMOKE ...its bracket highlights (bright, enlarged): ", calc._corner_materials[1].albedo_color == calc._CORNER_HOT and calc._corners[1].scale.x > 1.2)
-	print("SMOKE ...the others stay dim: ", calc._corner_materials[0].albedo_color == calc._CORNER_IDLE and calc._corner_materials[3].albedo_color == calc._CORNER_IDLE)
+	print("SMOKE ...its bracket highlights (bright, enlarged): ", calc._corner_materials[1].albedo_color == calc._corner_hot and calc._corners[1].scale.x > 1.2)
+	print("SMOKE ...the others stay dim: ", calc._corner_materials[0].albedo_color == calc._corner_idle and calc._corner_materials[3].albedo_color == calc._corner_idle)
 	print("SMOKE ...and the laser claims the panel (ui_hover), so the trigger isn't a part-select: ", r.get_meta("ui_hover") == true)
 	var bottom_left_before: Vector3 = calc.global_transform * Vector3(-size0.x * 0.5, -size0.y * 0.5, 0.0)
 	r.button_pressed.emit("trigger_click")
@@ -181,7 +181,7 @@ func _initialize() -> void:
 	r.look_at(Vector3(3, 3, 2), Vector3.UP)
 	for i in 3:
 		await process_frame
-	print("SMOKE aiming away un-highlights every corner: ", calc._hover_corner == -1 and calc._corner_materials[1].albedo_color == calc._CORNER_IDLE)
+	print("SMOKE aiming away un-highlights every corner: ", calc._hover_corner == -1 and calc._corner_materials[1].albedo_color == calc._corner_idle)
 	calc.close()
 
 	quit()

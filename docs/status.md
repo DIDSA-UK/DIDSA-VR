@@ -1374,6 +1374,31 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
 - **Not yet verified, needs the headset**: how the angled side panel sits, text size at 0.40 m
   wide, whether the wrist icon and a 40 cm panel are comfortable, hand-badge size and position.
 
+**Phase 3 — windows and keyboard: restyled and moved onto the shared pieces; headless- and software-render-verified, not yet seen in a headset.**
+- `diegetic_panel.gd` (every floating window) and `popup_keyboard.gd` no longer carry private copies of
+  the laser -> SubViewport code: both use `scripts/ui/laser_surface.gd` (windows `claim_first = true`;
+  the keyboard `claim_first = false` so it still wins over a window it overlaps). The headset-learned
+  behaviours (frozen press, let-go-on-leave, claim protocol, stick scroll) are unchanged. One
+  difference: the 3 cm "edge slack while a click is held" the tablet always had now applies to windows too.
+  The old tablet (`wrist_tablet.gd`) keeps its own copy until it's deleted.
+- The grab handle is `scripts/ui/panel_handle.gd`, shared. **The popup keyboard now has the same
+  bottom handle as the windows**: grip it with either hand to carry it (the full keyboard keeps its
+  lean), release to drop. It **reopens where you left it**, one remembered spot per layout (numeric /
+  full), unless you've moved more than `moved_pose_reach` (3 m) from it, when it comes back in front
+  of you. `popup_keyboard.setup()` takes the left hand as an optional third argument (main.gd passes it).
+- Look: both are built from `ui/didsa_ui_theme.tres` like the new tablet: the theme's rounded, outlined
+  panel; a close button with the close icon (still growing with the window); title in the title style;
+  the keyboard's typed text in an inset field; the confirming key (OK / Done / Enter-as-confirm) in the
+  accent style; handle pill and resize brackets coloured from the theme. Subclass content (calculator,
+  tree, viewer, browser) is restyled for free through the theme.
+- **Bug found by the new test and fixed in both**: while a window or the keyboard was being carried by its
+  handle its hover flag went stale, so a trigger pull could still click through it. Carrying now drops hover.
+- Tests: `tests/keyboard_handle.gd` (in `run_all.sh`), `tests/windows_render.gd` (Xvfb), a carry check added to
+  `tests/windows_tab.gd`; `tests/features_round.gd` now reads the resize bracket colours as `_corner_hot` /
+  `_corner_idle` (they come from the theme now, no longer constants). All other existing tests unchanged and green.
+- **Not yet verified, needs the headset**: that the restyled windows/keyboard read well at arm's length, the
+  handle's size on the keyboard, and whether "reopens where you left it" feels right.
+
 ## Untested paths
 
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
