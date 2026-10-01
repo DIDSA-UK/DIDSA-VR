@@ -32,7 +32,7 @@ func click_now() -> void:
 	r.button_released.emit("trigger_click")
 	await process_frame
 
-func aim_and_click(b: Button) -> void:
+func aim_only(b: Button) -> void:
 	var c: Vector2 = b.global_position + b.size * 0.5
 	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
 	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
@@ -40,6 +40,9 @@ func aim_and_click(b: Button) -> void:
 	r.rotation_degrees = Vector3(-90, 0, 0)
 	for i in 3:
 		await process_frame
+
+func aim_and_click(b: Button) -> void:
+	await aim_only(b)
 	await click_now()
 
 func aim_side_and_click(b: Button) -> void:
@@ -142,7 +145,10 @@ func _initialize() -> void:
 	# --- close with a tool active: the tool and its badge survive
 	var close_btn: Button = find_button(func(b): return b.theme_type_variation == &"ButtonDanger" and b.icon != null)
 	await aim_and_click(close_btn)
-	print("SMOKE the X closes (stows) the tablet: ", not tab._open and not tab.visible and tab._target.visible)
+	print("SMOKE the X closes the tablet at once (logically): nothing hovered or rendered, the wrist icon is back: ", not tab._open and tab._target.visible and tab._viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED and not tab.surface.hovering)
+	print("SMOKE ...with motion on the panel is still shrinking away a moment later: ", tab.visible)
+	await create_timer(0.4).timeout
+	print("SMOKE ...and then hidden (the stow animation finished): ", not tab.visible and tab.scale.is_equal_approx(Vector3.ONE))
 	print("SMOKE closing drops the laser claim (a closed tablet can't hold the trigger): ", r.get_meta("ui_hover") == false)
 	print("SMOKE closing does NOT turn the active tool off, and the badge stays: ", tab.manager.active_id == "sections" and main._section_tool.active and tab.badge.visible)
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
@@ -212,6 +218,33 @@ func _initialize() -> void:
 	print("SMOKE Settings > Resolution 65% applies: ", is_equal_approx(main.get_viewport().scaling_3d_scale, 0.65))
 	await aim_and_click(ui._settings_button)
 	print("SMOKE the Settings button again returns to the tools: ", not ui.settings_open and ui._rail_scroll.visible)
+
+	# --- idle render gating: only re-render every frame while something is happening
+	r.position = Vector3(2.0, 1.5, 2.0)
+	await create_timer(1.5).timeout
+	print("SMOKE an idle open tablet is not re-rendered every frame: ", tab._viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS)
+	await aim_only(find_button(func(b): return b.text == "View"))
+	print("SMOKE aiming the laser at it renders every frame again: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
+	r.position = Vector3(2.0, 1.5, 2.0)
+	await create_timer(1.5).timeout
+	print("SMOKE ...and it settles back to idle afterwards: ", tab._viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS)
+
+	# --- toast: haptic cue + status pulse
+	var cues := []
+	ui.feedback.connect(func(e: String) -> void: cues.append(e))
+	ui.toast("Couldn't do the thing", "error")
+	print("SMOKE an error toast shows in the status bar, pulses it, and asks for an error haptic: ", ui.status_text() != "" and ui._status_panel.self_modulate != Color.WHITE and cues == ["error"])
+	ui.tick(0.016)
+	print("SMOKE ...the status bar says what went wrong: ", ui.status_text().contains("Couldn't do the thing"))
+
+	# --- Reduce motion: instant open and stow
+	var UiFeedback = load("res://scripts/ui/ui_feedback.gd")
+	UiFeedback.reduce_motion = true
+	tab.close_tablet()
+	print("SMOKE with Reduce motion the tablet is hidden the instant it closes: ", not tab.visible)
+	tab.open_tablet()
+	print("SMOKE ...and opens at full size at once (no scale-in): ", tab.visible and tab.scale.is_equal_approx(Vector3.ONE) and tab._quad_material.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED)
+	UiFeedback.reduce_motion = false
 
 	# --- stow: no stuck claim, panel no longer rendered
 	tab.close_tablet()

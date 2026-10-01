@@ -35,8 +35,7 @@ func _initialize() -> void:
 	tab.open_tablet()
 	tab.ui.select_category("assembly")
 	tab.ui.select_tool("mates", true)
-	for i in 8:
-		await process_frame
+	await create_timer(0.8).timeout # let the open / unfold / fade-in animations finish
 	var dir := OS.get_environment("TABLET_RENDER_DIR")
 	var img := root.get_texture().get_image()
 	if dir != "":

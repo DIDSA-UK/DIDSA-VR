@@ -38,6 +38,8 @@ extends RefCounted
 ##    scroll_target (push down = scroll down), with a deadzone and a lockout while a
 ##    click is held or just released, so a resting thumb can't slide rows away.
 
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+
 signal pressed_changed(down: bool)
 
 var host: Node3D ## whose +Z-facing plane is the surface (quad faces +Z)
@@ -68,6 +70,7 @@ var _armed_at_ms := -100000
 var _drag_slider := false
 var _sliders: Array = []
 var _scroll_f := 0.0
+var _last_hovered: Control = null
 
 
 func setup(p_host: Node3D, p_viewport: SubViewport, p_right: XRController3D, p_panel_size: Vector2) -> void:
@@ -151,8 +154,11 @@ func process(delta: float, active: bool = true) -> void:
 			viewport.push_input(motion)
 			_last_sent_px = pointer_px
 		_scroll_with_stick(delta)
-	elif was_hovering and pressed:
-		_send_click(false)
+		_hover_tick()
+	else:
+		_last_hovered = null
+		if was_hovering and pressed:
+			_send_click(false)
 
 
 func release_all() -> void:
@@ -176,7 +182,19 @@ func _on_right_pressed(action_name: String) -> void:
 	_drag_slider = _slider_at(_press_px)
 	_send_click(true)
 	if haptics:
-		right.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
+		UiFeedback.haptic(right, "press")
+
+
+func _hover_tick() -> void:
+	## A very light haptic tick as the laser crosses onto an enabled button.
+	if pressed or not haptics:
+		return
+	var control := viewport.gui_get_hovered_control()
+	if control == _last_hovered:
+		return
+	_last_hovered = control
+	if control is BaseButton and not (control as BaseButton).disabled:
+		UiFeedback.haptic(right, "hover")
 
 
 func _on_right_released(action_name: String) -> void:

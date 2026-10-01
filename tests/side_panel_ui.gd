@@ -45,6 +45,19 @@ func _initialize() -> void:
 	print("SMOKE a confirm action's first press only asks 'Sure?' (nothing deleted): ", del.text == "Sure?" and hits[0] == 0)
 	del.pressed.emit()
 	print("SMOKE the second press runs it once and the label resets: ", hits[0] == 1 and del.text == "Delete")
+	var UiFeedback = load("res://scripts/ui/ui_feedback.gd")
+	panel.play_intro()
+	print("SMOKE the rows start transparent when the panel's intro plays (staggered fade-in): ", (panel._rows.get_child(0) as Control).modulate.a == 0.0)
+	await create_timer(0.7).timeout
+	print("SMOKE ...and every row has faded in well inside a second: ", (panel._rows.get_child(0) as Control).modulate.a > 0.99)
+	UiFeedback.reduce_motion = true
+	panel.set_list("Mates", [{"id": "z", "title": "Z"}], "")
+	await process_frame
+	panel.play_intro()
+	print("SMOKE with Reduce motion the intro is skipped (rows stay opaque): ", (panel._rows.get_child(0) as Control).modulate.a == 1.0)
+	UiFeedback.reduce_motion = false
+	panel.set_list("Mates", rows, "No mates yet.")
+	await process_frame
 	var warn_label: Label = null
 	for n in panel.find_children("*", "Label", true, false):
 		if (n as Label).text == "Plate":

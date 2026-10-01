@@ -70,6 +70,21 @@ func set_list(title: String, rows: Array, empty_text: String = "Nothing here yet
 		_rows.add_child(_build_row(row))
 
 
+func play_intro() -> void:
+	## Rows fade in one after another (25 ms apart, capped so the whole thing stays under
+	## ~300 ms) when the panel opens. Instant with Reduce motion.
+	var d: float = tokens.duration(0.12)
+	if d <= 0.0:
+		return
+	var i := 0
+	for card in _rows.get_children():
+		card.modulate.a = 0.0
+		var t := create_tween()
+		t.tween_interval(minf(float(i) * 0.025, 0.18))
+		t.tween_property(card, "modulate:a", 1.0, d)
+		i += 1
+
+
 func row_count() -> int:
 	return _rows.get_child_count()
 

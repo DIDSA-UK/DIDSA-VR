@@ -22,6 +22,8 @@ extends Control
 
 signal close_requested
 signal selection_changed ## category/tool/settings/history changed: re-read list_source()
+signal feedback(event: String) ## "error" / "confirm": the host turns it into a haptic pulse and/or a sound
+signal activity ## anything on screen changed that the host's render gate should know about (a toast, a page switch)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const LONG_PRESS_MS := 600
@@ -60,6 +62,7 @@ var _switch_button: Button
 var _help_card: PanelContainer
 var _help_label: Label
 var _status_label: Label
+var _status_panel: PanelContainer
 var _undo_button: Button
 var _redo_button: Button
 var _settings_button: Button
@@ -192,6 +195,7 @@ func _build_shell() -> void:
 	# Status bar
 	var status := PanelContainer.new()
 	status.theme_type_variation = &"PanelRaised"
+	_status_panel = status
 	_status_label = Label.new()
 	_status_label.theme_type_variation = &"LabelDim"
 	_status_label.clip_text = true
@@ -358,6 +362,7 @@ func _show_tool(tool_id: String) -> void:
 	if _settings_page:
 		_settings_page.visible = false
 	pages_scroll.scroll_vertical = 0
+	_fade_in(_pages.get(tool_id))
 	var def = registry.tool_def(tool_id)
 	if def != null and def.on_select.is_valid():
 		def.on_select.call()
@@ -377,6 +382,7 @@ func set_settings_open(on: bool) -> void:
 		_settings_page.visible = on
 	_settings_button.set_pressed_no_signal(on)
 	pages_scroll.scroll_vertical = 0
+	_fade_in(_settings_page if on else _pages.get(selected_tool_id))
 	_rail_scroll.visible = not on
 	_refresh_rail_visuals()
 	selection_changed.emit()
@@ -447,6 +453,27 @@ func toast(text: String, kind: String = "info", seconds: float = TOAST_SECONDS) 
 	_toast_text = text
 	_toast_kind = kind
 	_toast_until_ms = Time.get_ticks_msec() + int(seconds * 1000.0)
+	# A brief pulse on the status bar (brightening, tinted red for an error: a cue that isn't
+	# colour alone, the text itself says what went wrong), then a haptic via the host.
+	var d: float = tokens.duration(0.3)
+	if d > 0.0 and _status_panel:
+		_status_panel.self_modulate = Color(1.9, 0.85, 0.85) if kind == "error" else (Color(0.9, 1.6, 1.1) if kind == "ok" else Color(1.7, 1.7, 1.7))
+		create_tween().tween_property(_status_panel, "self_modulate", Color.WHITE, d).set_ease(Tween.EASE_OUT)
+	if kind == "error":
+		feedback.emit("error")
+	elif kind == "ok":
+		feedback.emit("confirm")
+	activity.emit()
+
+
+func _fade_in(page: Control) -> void:
+	## The controls pane fades in when its content switches (150 ms; instant with Reduce motion).
+	activity.emit()
+	var d: float = tokens.duration(tokens.anim_medium * 0.85)
+	if page == null or d <= 0.0:
+		return
+	page.modulate.a = 0.0
+	create_tween().tween_property(page, "modulate:a", 1.0, d).set_ease(Tween.EASE_OUT)
 
 
 func tick(_delta: float) -> void:

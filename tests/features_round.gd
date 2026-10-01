@@ -36,6 +36,7 @@ func _aim_at_tablet_px(px: Vector2) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
+	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(main)
 	await process_frame

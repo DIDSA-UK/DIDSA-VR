@@ -16,6 +16,8 @@ extends Resource
 ## give the few roles that recur: LabelDim, LabelSmall, LabelTitle, ButtonAccent,
 ## ButtonDanger, ButtonRail, PanelRaised.
 
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+
 # --- Colour -----------------------------------------------------------------
 @export_group("Colour")
 @export var bg_panel := Color(0.050, 0.075, 0.120) ## main panel fill
@@ -59,8 +61,9 @@ extends Resource
 
 
 func duration(seconds: float) -> float:
-	## Every animation asks here, so Reduce motion is honoured in one place.
-	return 0.0 if reduce_motion else seconds
+	## Every animation asks here, so Reduce motion is honoured in one place: this resource's
+	## own flag (editable in the Inspector) or the runtime setting from the tablet's Settings page.
+	return 0.0 if (reduce_motion or UiFeedback.reduce_motion) else seconds
 
 
 # --- Styleboxes -------------------------------------------------------------

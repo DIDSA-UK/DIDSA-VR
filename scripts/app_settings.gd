@@ -13,6 +13,8 @@ const PATH := "user://settings.cfg"
 
 var project_folder: String = ""
 var last_scene: String = "Mid"
+var reduce_motion: bool = false
+var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 
 
 func load_from_disk() -> void:
@@ -21,12 +23,16 @@ func load_from_disk() -> void:
 		return # no settings saved yet, or unreadable — defaults stand
 	project_folder = config.get_value("files", "project_folder", project_folder)
 	last_scene = config.get_value("environment", "last_scene", last_scene)
+	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
+	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
 
 
 func save_to_disk() -> void:
 	var config := ConfigFile.new()
 	config.set_value("files", "project_folder", project_folder)
 	config.set_value("environment", "last_scene", last_scene)
+	config.set_value("comfort", "reduce_motion", reduce_motion)
+	config.set_value("comfort", "haptics_level", haptics_level)
 	var err := config.save(PATH)
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [PATH, err])
@@ -34,6 +40,16 @@ func save_to_disk() -> void:
 
 func set_project_folder(path: String) -> void:
 	project_folder = path
+	save_to_disk()
+
+
+func set_reduce_motion(on: bool) -> void:
+	reduce_motion = on
+	save_to_disk()
+
+
+func set_haptics_level(level: int) -> void:
+	haptics_level = level
 	save_to_disk()
 
 

@@ -19,6 +19,7 @@ extends RefCounted
 signal toast(text: String, kind: String)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
@@ -787,6 +788,12 @@ func settings_page() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
+	page.add_child(_hint("Comfort"))
+	page.add_child(_mode_toggle("Reduce motion", func(on: bool) -> void: _main.set_reduce_motion(on), _main.reduce_motion()))
+	page.add_child(_choice_row("Haptics", ["Off", "Low", "Normal", "High"], _main.haptics_level(), func(i: int) -> void:
+		_main.set_haptics_level(i)
+		UiFeedback.haptic(_right, "confirm") # a sample of the new level
+	))
 	page.add_child(_hint("Project folder"))
 	_project_folder_label = Label.new()
 	_project_folder_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

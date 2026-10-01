@@ -1399,8 +1399,40 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
 - **Not yet verified, needs the headset**: that the restyled windows/keyboard read well at arm's length, the
   handle's size on the keyboard, and whether "reopens where you left it" feels right.
 
+**Phase 4 — polish and hand-off: built, headless- and software-render-verified; the single PCVR test is the next step.**
+- **The new tablet is now the DEFAULT** (`Main > Wrist tablet > use_new_tablet = true`). Untick it to get
+  the old tablet back for comparison. The 10 tests that drive `wrist_tablet.gd`'s internals (`tablet_scene`,
+  `tools_tab`, `section_tab`, `bug_round`, `features_round`, `laser_and_left_hand`, `windows_tab`,
+  `full_keyboard`, `popup_keyboard`, `e2e_mates_motion`) pin `main.use_new_tablet = false`; when the old tablet
+  is deleted they need porting to the new one or retiring.
+- Animations (all via `Tween`, all instant under **Reduce motion**; durations are theme tokens):
+  tablet scales in with a slight overshoot and fades in on open, shrinks and fades on stow; the controls pane
+  fades in when the tool / category changes; the side panel unfolds from its hinge and its rows fade in
+  staggered (25 ms apart, capped); the status bar pulses on a toast (brighter, tinted red for an error). The
+  quad is only transparent while fading. Not done (no sensible 3D equivalent inside a SubViewport): the
+  button "Z-depress", the sliding category pill.
+- `scripts/ui/ui_feedback.gd` (static, no autoload): haptics (hover tick as the laser crosses an enabled button,
+  press, grab, open, close, confirm, error) at Off / Low / Normal / High, plus a sound hook that plays a stream
+  registered with `set_sound(event, stream)`. **No sounds ship**: audio is part of the optional look-dev stage.
+  **Settings page > Comfort** has Reduce motion and Haptics; both persist in `user://settings.cfg`
+  (`app_settings.gd`) and are applied at startup.
+- **Idle render gating** in `wrist_tablet_v2.gd`: the tablet and side panel render every frame only while the laser is
+  on them or something changed in the last second, otherwise 4 times a second. Worst case a live label is 250 ms
+  stale; never frozen. (The old tablet re-renders every frame while open.)
+- Tests: `tests/ui_feedback.gd` (in `run_all.sh`); `tests/tablet_v2.gd` extended (stow timing, idle gating, toast cue,
+  Reduce motion); `tests/side_panel_ui.gd` extended (staggered intro).
+- **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
+  comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
+  `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;
+  (5) one tool at a time + badge with the tablet closed; (6) Undo long-press -> History; (7) keyboard handle and
+  "reopens where you left it"; (8) window / keyboard look at arm's length; (9) haptic strengths; (10) animations
+  feel (or turn Reduce motion on); (11) laser clicks near the panel edges and on the angled side panel.
+
 ## Untested paths
 
+- **Wrist tablet / window / keyboard redesign (Phases 1-4, see the section above and
+  `docs/wrist-tablet-redesign-plan.md`)**: all headless- and software-render-verified, nothing seen in a
+  headset. The checklist is at the end of "Phase 4" above.
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
   `diegetic_panel.gd` framework they're built on) — now headless-confirmed
   (Godot 4.7.2, `tests/run_all.sh` clean), not yet real-backend- or

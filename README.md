@@ -103,7 +103,9 @@ live-synced.
    point that tracks it). Every turn builds on the model's current
    orientation, so you can rotate about one axis and then another naturally.
    Switching between one and two hands never makes the model jump.
-7. **Wrist tablet.** A small thin-white-line icon — a ring with a landscape
+7. **Wrist tablet.** **(The redesigned tablet is now the default — see "The redesigned
+   tablet" below; untick `Main > Wrist tablet > Use New Tablet` for the old one described
+   here.)** A small thin-white-line icon — a ring with a landscape
    rectangle inside it, like a tablet — floats above your left wrist (it
    swells slightly and tints pale blue on hover). Point the right hand's
    laser at it and pull the trigger to open the tablet; press the **X** on
@@ -171,6 +173,23 @@ live-synced.
      open.
 
    With no `secrets.cfg` the app now starts anyway, ready for a local file.
+   **The redesigned tablet** (default; `scripts/ui/wrist_tablet_v2.gd`, plan in
+   `docs/wrist-tablet-redesign-plan.md`). Same wrist icon, same "shoot it to open, never
+   opens by itself", right-hand laser only. A 0.40 x 0.26 m panel laid out like the sketch:
+   a **category grid** top-left (View, Assembly, Windows, Files; up to 8 in 4 x 2, a second
+   row appears from the 5th), **Undo / Redo / Settings / Close** top-right, a **tool rail**
+   down the left, the tool's controls in the middle under a header (name, **Tool: ON/off**
+   switch for tools that change what the laser does, **?** help card) and a one-line
+   **status bar** at the bottom. A **side panel** angled beside it lists what the tool has
+   a list of: existing mates (Delete asks "Sure?" first), measurement results, model files
+   (Open / Add) or, after a **long press on Undo**, the undo history. **One tool at a time**:
+   Mates, Measure, Sections and Shoot hide (View > Shoot hide) are mode tools; tapping one
+   turns it on and any other off; browsing never changes it; closing the tablet doesn't
+   either — a **badge** above your right hand's ring shows which is active. Settings (the
+   sliders button) has Steadiness, display, **Comfort** (Reduce motion, Haptics Off / Low /
+   Normal / High) and the project folder. Look and sizes: `ui/didsa_ui_theme.tres`; try it
+   without a headset in `lab/ui_lab.tscn` (F6 in the editor).
+
 8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
    numeric keypad floating in front of you, pre-filled with the model's
    current scale multiple — its first real use, per the vision brief's "for

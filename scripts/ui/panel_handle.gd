@@ -17,6 +17,8 @@ extends RefCounted
 ## grabbing a window moved the world too. clear() undoes it, and the host must call
 ## clear() when it closes mid-grab or the hand's meta stays true and blocks model drags.
 
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+
 signal grabbed(hand: XRController3D)
 signal dropped(hand: XRController3D)
 
@@ -107,7 +109,7 @@ func _on_pressed(action_name: String, hand: XRController3D) -> void:
 		_grab_offset = hand.global_transform.affine_inverse() * _host.global_transform
 		_material.albedo_color = held_colour
 		_material.emission = held_colour
-		hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
+		UiFeedback.haptic(hand, "grab")
 		grabbed.emit(hand)
 
 

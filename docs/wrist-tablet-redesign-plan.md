@@ -82,7 +82,7 @@ features are NOT in scope), and the existing code (`wrist_tablet.gd`,
   keyboard is preserved. Default: it reopens where you left it, per layout
   (numeric / full), within the session.
 
-### Phase 4 — Polish and handoff
+### Phase 4 — Polish and handoff — BUILT (the PCVR pass and the old-tablet removal remain; see docs/status.md)
 * Tween animations (open/stow, category switch, hover/press, list slide) with
   a Reduce-motion setting; haptic and sound hooks through one `UIFeedback`
   script (assets can be dropped in later).
@@ -124,6 +124,11 @@ them himself. See "Shaders and library art" below.
 * Vector icons were pulled forward from Phase 4 into Phase 2 (needed for the rail, grid and badge).
 * The hand badge sits on the right hand's tracking ring: the button discs no longer exist.
 * The new tablet stays behind `Main > Wrist tablet > use_new_tablet` (default off) until Phase 4's PCVR pass.
+
+## Still to do after John's PCVR pass
+* Fix list from the headset test (tablet size, side-panel angle, badge, haptics, timings).
+* Delete `wrist_tablet.gd` once signed off, and port or retire the 10 tests pinned to it.
+* Optional look-dev stage (shaders, library art, sounds): `UiFeedback.set_sound()` and the theme tokens are the hooks.
 
 ## Not in this plan (parked)
 Hand-tracking/poke · Peek palm-up state · pinned world-locked tablet ·

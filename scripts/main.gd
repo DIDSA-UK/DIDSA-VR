@@ -28,7 +28,7 @@ extends Node3D
 @export var tier: String = "" ## "" for full quality, or "coarse".
 
 @export_group("Wrist tablet")
-@export var use_new_tablet: bool = false ## the redesigned tablet (scripts/ui/wrist_tablet_v2.gd, docs/wrist-tablet-redesign-plan.md) instead of scripts/wrist_tablet.gd. Same job and public API; flip it to compare in the headset.
+@export var use_new_tablet: bool = true ## the redesigned tablet (scripts/ui/wrist_tablet_v2.gd, docs/wrist-tablet-redesign-plan.md) instead of scripts/wrist_tablet.gd. Same job and public API; flip it to compare in the headset.
 
 @export_group("Placement")
 @export var spawn_position: Vector3 = Vector3(0, 1.0, -1.0)
@@ -79,6 +79,8 @@ const API_PREFIX := "/document"
 
 func _ready() -> void:
 	_settings.load_from_disk()
+	UiFeedback.reduce_motion = _settings.reduce_motion
+	UiFeedback.set_haptics_level(_settings.haptics_level)
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_mates_tool()
@@ -445,6 +447,29 @@ func set_scene(scene_name: String) -> void:
 
 func is_passthrough_supported() -> bool:
 	return _world_environment.is_passthrough_supported()
+
+
+# --- Comfort settings (the redesigned tablet's Settings page): Reduce motion and haptics
+# intensity, persisted via app_settings.gd and applied through ui_feedback.gd's statics.
+
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+
+func reduce_motion() -> bool:
+	return _settings.reduce_motion
+
+
+func set_reduce_motion(on: bool) -> void:
+	_settings.set_reduce_motion(on)
+	UiFeedback.reduce_motion = on
+
+
+func haptics_level() -> int:
+	return _settings.haptics_level
+
+
+func set_haptics_level(level: int) -> void:
+	_settings.set_haptics_level(level)
+	UiFeedback.set_haptics_level(level)
 
 
 # --- Settings page: the project folder the Files tab scans, on top of the

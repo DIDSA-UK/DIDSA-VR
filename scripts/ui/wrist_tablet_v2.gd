@@ -26,7 +26,10 @@ const TabletUI := preload("res://scripts/ui/tablet_ui.gd")
 const SidePanelUI := preload("res://scripts/ui/side_panel_ui.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const ToolBadge := preload("res://scripts/ui/tool_badge.gd")
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
+const ACTIVE_LINGER_MS := 1000 ## keep rendering every frame this long after the last activity
+const IDLE_REFRESH_SECONDS := 0.25 ## an idle open tablet re-renders this often (live labels never go more than this stale)
 
 @export var panel_size := Vector2(0.40, 0.26) ## metres. 2667 px/m, the same physical text size as the old 0.3375 m tablet.
 @export var pixels_per_metre: float = 2667.0
@@ -69,6 +72,10 @@ var _target_hover := false
 var _last_target_hover := false
 var _open := false
 var _refresh_left := 0.0
+var _quad_material: StandardMaterial3D
+var _anim: Tween
+var _activity_until_ms := 0
+var _idle_left := 0.0
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null) -> void:
@@ -103,6 +110,9 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	pages.toast.connect(ui.toast)
 	ui.close_requested.connect(close_tablet)
 	ui.selection_changed.connect(_refresh_side)
+	ui.feedback.connect(func(event: String) -> void: UiFeedback.haptic(_right, event))
+	ui.activity.connect(poke_render)
+	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 	badge = ToolBadge.new()
 	_right.add_child(badge)
 	badge.setup(manager, registry, tokens)
@@ -117,20 +127,72 @@ func open_tablet() -> void:
 	_open = true
 	visible = true
 	surface.arm()
+	poke_render()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_main.set_measuring(true)
 	pages.refresh()
 	_refresh_side()
+	_play_open()
 
 
 func close_tablet() -> void:
+	## Logically closed at once (no hover, no claim, nothing rendering); with motion on, the
+	## panel itself shrinks away over ~150 ms before it is hidden.
 	_open = false
-	visible = false
 	surface.release_all()
 	side_surface.release_all()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_set_side_open(false)
 	_main.set_measuring(false)
+	_play_stow()
+
+
+func poke_render() -> void:
+	## Something on screen is about to change: render every frame for a moment.
+	_activity_until_ms = Time.get_ticks_msec() + ACTIVE_LINGER_MS
+
+
+# --- Open / stow animation ----------------------------------------------------------
+
+func _play_open() -> void:
+	if _anim and _anim.is_valid():
+		_anim.kill()
+	var d: float = tokens.duration(tokens.anim_slow * 0.9)
+	if d <= 0.0:
+		scale = Vector3.ONE
+		_set_alpha(1.0)
+		return
+	scale = Vector3.ONE * 0.9
+	_set_alpha(0.0)
+	_anim = create_tween().set_parallel(true)
+	_anim.tween_property(self, "scale", Vector3.ONE, d).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT) # a slight overshoot
+	_anim.tween_method(_set_alpha, 0.0, 1.0, d)
+
+
+func _play_stow() -> void:
+	if _anim and _anim.is_valid():
+		_anim.kill()
+	var d: float = tokens.duration(tokens.anim_medium * 0.8)
+	if d <= 0.0:
+		visible = false
+		scale = Vector3.ONE
+		_set_alpha(1.0)
+		return
+	_anim = create_tween().set_parallel(true)
+	_anim.tween_property(self, "scale", Vector3.ONE * 0.92, d).set_ease(Tween.EASE_IN)
+	_anim.tween_method(_set_alpha, 1.0, 0.0, d)
+	_anim.chain().tween_callback(func() -> void:
+		if not _open:
+			visible = false
+			scale = Vector3.ONE
+			_set_alpha(1.0)
+	)
+
+
+func _set_alpha(a: float) -> void:
+	## The quad is opaque (cheap) except while it fades.
+	_quad_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if a < 0.999 else BaseMaterial3D.TRANSPARENCY_DISABLED
+	_quad_material.albedo_color = Color(1, 1, 1, a)
 
 
 func set_info(text: String) -> void:
@@ -153,6 +215,7 @@ func _build_main_panel(command_stack) -> void:
 	var cursor := LaserSurface.make_cursor()
 	ui.add_child(cursor)
 	_quad = _make_quad(_viewport, panel_size)
+	_quad_material = (_quad.mesh as QuadMesh).material
 	add_child(_quad)
 
 	surface = LaserSurface.new()
@@ -265,6 +328,34 @@ func _process(delta: float) -> void:
 		_refresh_left = 0.25
 		pages.refresh()
 		_refresh_side()
+	_gate_rendering(delta)
+
+
+func _gate_rendering(delta: float) -> void:
+	## Re-render the UI every frame only while something is happening (the laser is on it, or
+	## it changed within the last second); idle, only a few times a second. The worst case is a
+	## live label 250 ms stale, never a frozen panel: a tablet left open costs almost nothing.
+	var now := Time.get_ticks_msec()
+	if surface.hovering or surface.pressed:
+		_activity_until_ms = now + ACTIVE_LINGER_MS
+	if _side_open and (side_surface.hovering or side_surface.pressed):
+		_activity_until_ms = now + ACTIVE_LINGER_MS
+	_idle_left -= delta
+	var tick := _idle_left <= 0.0
+	if tick:
+		_idle_left = IDLE_REFRESH_SECONDS
+	_set_update(_viewport, now < _activity_until_ms, tick)
+	if _side_open:
+		_set_update(_side_viewport, now < _activity_until_ms, tick)
+
+
+func _set_update(vp: SubViewport, busy: bool, tick: bool) -> void:
+	if busy:
+		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	elif tick:
+		vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	elif vp.render_target_update_mode == SubViewport.UPDATE_ALWAYS:
+		vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
 func _update_target_hover() -> void:
@@ -289,7 +380,8 @@ func _update_target_hover() -> void:
 func _on_right_pressed(action_name: String) -> void:
 	if action_name == click_action and _target_hover and not _open:
 		open_tablet()
-		_right.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.08, 0.0)
+		UiFeedback.haptic(_right, "open")
+		UiFeedback.play("open", self)
 
 
 func _refresh_side() -> void:
@@ -307,5 +399,14 @@ func _set_side_open(on: bool) -> void:
 	_side_open = on
 	_side_pivot.visible = on
 	_side_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
+	poke_render()
 	if not on:
 		side_surface.release_all()
+		_side_pivot.scale = Vector3.ONE
+		return
+	# Unfolds from its hinge on the tablet's right edge with a little spring (instant with Reduce motion).
+	side_ui.play_intro()
+	var d: float = tokens.duration(tokens.anim_slow)
+	if d > 0.0:
+		_side_pivot.scale = Vector3(0.05, 1.0, 1.0)
+		create_tween().tween_property(_side_pivot, "scale", Vector3.ONE, d).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
