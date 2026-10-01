@@ -122,6 +122,8 @@ func build_theme() -> Theme:
 	_button_states(t, "ButtonDanger", surface, danger.darkened(0.2), danger, danger)
 	_variation(t, &"ButtonRail", &"Button")
 	_button_states(t, "ButtonRail", bg_raised, border.darkened(0.35), accent)
+	_variation(t, &"ButtonRailLive", &"Button") ## a mode tool that is switched on, not currently being viewed
+	_button_states(t, "ButtonRailLive", bg_raised, accent, accent)
 	t.set_constant("h_separation", "Button", gap)
 
 	# Containers and chrome

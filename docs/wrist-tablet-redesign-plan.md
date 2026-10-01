@@ -57,7 +57,7 @@ features are NOT in scope), and the existing code (`wrist_tablet.gd`,
   look reachable), so the existing suite and new tests run here.
 * Done when: existing `tests/run_all.sh` is clean, the old tablet still works.
 
-### Phase 2 — The new tablet
+### Phase 2 — The new tablet — DONE (headless/software-render verified; see docs/status.md)
 * Shell per the sketch: category grid (4×2), utility cluster, tool rail
   (scrolls, label on hover), tool header (name, on/off switch, "?" help),
   controls pane, status/hint line.
@@ -118,6 +118,12 @@ them himself. See "Shaders and library art" below.
   live in a normal window — change a value in the Inspector, see it.
 * **Performance caveat**: you test on PCVR, which hides Quest 3 standalone
   cost. Anything translucent or shader-heavy should have a quality lever.
+
+## Deviations from the plan while building (Phase 2)
+* Shoot-to-hide became its own rail entry (View > Shoot hide) because it is a mode tool.
+* Vector icons were pulled forward from Phase 4 into Phase 2 (needed for the rail, grid and badge).
+* The hand badge sits on the right hand's tracking ring: the button discs no longer exist.
+* The new tablet stays behind `Main > Wrist tablet > use_new_tablet` (default off) until Phase 4's PCVR pass.
 
 ## Not in this plan (parked)
 Hand-tracking/poke · Peek palm-up state · pinned world-locked tablet ·

@@ -88,6 +88,11 @@ func arm() -> void:
 	_armed_at_ms = Time.get_ticks_msec()
 
 
+func dragging_slider() -> bool:
+	## True while a press that began on a slider is held (hosts skip refreshing that slider's value then).
+	return pressed and _drag_slider
+
+
 func viewport_px_per_metre() -> Vector2:
 	return Vector2(viewport.size) / panel_size
 

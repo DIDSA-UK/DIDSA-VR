@@ -1339,6 +1339,41 @@ one-active-tool rules are in the plan; this section tracks state.
   (GitHub releases are reachable) and `tests/run_all.sh` runs there.
 - Full `tests/run_all.sh` before and after: SMOKE output identical for every existing test.
 
+**Phase 2 — the new tablet: built, headless- and software-render-verified; not yet seen in a headset.**
+Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of the old one.
+- `scripts/ui/wrist_tablet_v2.gd`: the 3D half. Same public API as `wrist_tablet.gd`. Floats over
+  the left wrist at 0.40 x 0.26 m (same text size as before), closed by default, opened only by
+  shooting the wrist icon, closed by the top-right X. Right-hand laser only (via `laser_surface.gd`,
+  `claim_first = true`). A second quad, the **contextual side panel** (0.17 m wide), is hinged on
+  the tablet's right edge and angled up toward you (`side_yaw_degrees` -10, `side_pitch_degrees`
+  8: Inspector exports on the node, headset feel unknown, tune there).
+- `scripts/ui/tablet_ui.gd`: the 2D shell from the sketch (category grid 4 cols x up to 2 rows,
+  Undo / Redo / Settings / Close cluster, tool rail, tool header with on/off switch and ? help,
+  controls pane, status bar). `scripts/ui/side_panel_ui.gd`: the list panel (row cards, two-tap
+  confirm on destructive actions). Both are plain Controls and run in the UI Lab.
+- `scripts/ui/tablet_pages.gd`: every page ported from `wrist_tablet.gd` with the same calls into
+  `main.gd` and the tools, restyled via the theme. **Deliberate differences**: a mode tool's on/off
+  switch is in the tool header, not on its page; status text is in the status bar; lists are in the
+  side panel (Mates -> existing mates with a two-tap Delete, Measure -> results, Files -> models
+  with Open / Add); Windows and Files are each one tool today; **Shoot to hide is its own rail
+  entry** (View > Shoot hide), because under one-tool-at-a-time it is a mode tool, not a toggle on
+  the Visibility page; Settings is the utility-cluster button, not a category.
+- **One active tool**: `scripts/ui/tool_manager.gd` (Mates, Measure, Sections, Shoot hide).
+  Switching category never switches a tool on; tapping a mode tool in the rail does, and turns
+  any other off; tapping the active one again (or the header switch) turns it off; closing the
+  tablet leaves it on. `scripts/ui/tool_badge.gd` puts a badge (icon + name) above the right
+  hand's tracking ring while one is active, visible with the tablet closed. (The controller button
+  discs were removed in the 29 Sep round, so the badge sits on the ring, not on a disc.)
+- Undo history: `command_stack.gd` gained `history_labels()` / `redo_labels()`; a long press
+  (0.6 s) on Undo opens History in the side panel and doesn't also undo.
+- Icons (`scripts/ui/ui_icons.gd`) were pulled forward from Phase 4: 26 SVG-string icons on one
+  48 grid, rasterised at runtime with `Image.load_svg_from_string()` (no editor import step,
+  export-safe), tinted by theme. The old tablet keeps its pixel-stamped icons.
+- Tests: `tests/tool_manager.gd`, `tests/tablet_v2.gd` (both in `run_all.sh`), `tests/tablet_v2_render.gd`
+  (Xvfb). The old tablet's tests are untouched and still run against the old tablet.
+- **Not yet verified, needs the headset**: how the angled side panel sits, text size at 0.40 m
+  wide, whether the wrist icon and a 40 cm panel are comfortable, hand-badge size and position.
+
 ## Untested paths
 
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the

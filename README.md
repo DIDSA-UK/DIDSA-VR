@@ -17,7 +17,9 @@ item 15 below (a separate server-side relay, not a Godot dependency).
 **Redesign in progress:** the wrist tablet, floating-window chrome and popup keyboard
 are being redesigned — plan in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
 Try the new look without a headset: open `lab/ui_lab.tscn` in the Godot editor and press F6;
-tune it in `ui/didsa_ui_theme.tres`.
+tune it in `ui/didsa_ui_theme.tres`. To see the new tablet in the headset, tick **Use New Tablet**
+on the Main node's Inspector (group *Wrist tablet*); it is off by default while the old tablet below
+is still the reference.
 
 **Picking this up fresh (including a new Claude Code session)?** Read
 [`docs/status.md`](docs/status.md) first — what's built, what's open,

@@ -20,6 +20,7 @@ extends RefCounted
 ##           on_deactivate. The registry only stores the callables.
 ##
 ## ToolDef.build:  Callable() -> Control, the tool's controls pane.
+## ToolDef.status_provider / hint / on_select / help: see the fields; all optional.
 ## ToolDef.list_provider (optional): Callable() -> Array of row Dictionaries for the
 ##           contextual side panel, each {id, title, subtitle, state, actions}
 ##           where state is "normal" | "ok" | "warn" | "error" and actions is an
@@ -42,6 +43,10 @@ class ToolDef extends RefCounted:
 	var on_activate: Callable = Callable()
 	var on_deactivate: Callable = Callable()
 	var help: String = "" ## text of the tool header's "?" card
+	var hint: String = "" ## one-line instruction for the status line when no status_provider text is available
+	var status_provider: Callable = Callable() ## () -> String, live text for the status line
+	var on_select: Callable = Callable() ## runs whenever the tool becomes the one being viewed (refresh data)
+	var list_empty: String = "Nothing here yet." ## side-panel text when list_provider returns no rows
 
 	func has_list() -> bool:
 		return list_provider.is_valid()
@@ -98,6 +103,10 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	def.on_activate = options.get("on_activate", Callable())
 	def.on_deactivate = options.get("on_deactivate", Callable())
 	def.help = str(options.get("help", ""))
+	def.hint = str(options.get("hint", ""))
+	def.status_provider = options.get("status", Callable())
+	def.on_select = options.get("on_select", Callable())
+	def.list_empty = str(options.get("list_empty", "Nothing here yet."))
 	cat.tools.append(def)
 	_tools[id] = def
 	changed.emit()

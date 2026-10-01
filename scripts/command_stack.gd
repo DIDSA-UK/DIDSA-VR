@@ -39,6 +39,23 @@ func redo_label() -> String:
 	return _redo_stack.back()["label"] if can_redo() else ""
 
 
+func history_labels() -> Array:
+	## Newest first, for the tablet's history list: what Undo would reverse next,
+	## then the one before that, and so on.
+	var out := []
+	for i in range(_undo_stack.size() - 1, -1, -1):
+		out.append(_undo_stack[i]["label"])
+	return out
+
+
+func redo_labels() -> Array:
+	## Next redo first.
+	var out := []
+	for i in range(_redo_stack.size() - 1, -1, -1):
+		out.append(_redo_stack[i]["label"])
+	return out
+
+
 func undo() -> void:
 	if _undo_stack.is_empty():
 		return

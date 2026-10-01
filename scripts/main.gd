@@ -27,6 +27,9 @@ extends Node3D
 @export var include_hidden: bool = false
 @export var tier: String = "" ## "" for full quality, or "coarse".
 
+@export_group("Wrist tablet")
+@export var use_new_tablet: bool = false ## the redesigned tablet (scripts/ui/wrist_tablet_v2.gd, docs/wrist-tablet-redesign-plan.md) instead of scripts/wrist_tablet.gd. Same job and public API; flip it to compare in the headset.
+
 @export_group("Placement")
 @export var spawn_position: Vector3 = Vector3(0, 1.0, -1.0)
 @export var local_glb_scale: float = 1.0 ## Scale for a .glb loaded from disk with the tablet's Files tab.
@@ -252,7 +255,7 @@ func open_window_count(kind: String) -> int:
 
 
 func _add_wrist_tablet() -> void:
-	var tablet := preload("res://scripts/wrist_tablet.gd").new()
+	var tablet: Node = (preload("res://scripts/ui/wrist_tablet_v2.gd") if use_new_tablet else preload("res://scripts/wrist_tablet.gd")).new()
 	tablet.name = "WristTablet"
 	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window)
 	_tablet = tablet

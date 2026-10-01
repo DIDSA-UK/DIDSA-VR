@@ -24,10 +24,12 @@ func _initialize() -> void:
 	print("SMOKE a tool defaults to kind 'page' with no list: ", scale_tool.kind == "page" and not scale_tool.has_list() and not scale_tool.is_mode())
 	print("SMOKE a mode tool keeps its kind, list provider and callbacks: ", mates_tool.is_mode() and mates_tool.has_list() and mates_tool.on_activate.is_valid() and mates_tool.on_deactivate.is_valid() and mates_tool.help == "Pick two faces.")
 	print("SMOKE the list provider is callable and returns its rows: ", mates_tool.list_provider.call().size() == 1)
-	print("SMOKE tools land in their own category, in order: ", view.tools == [scale_tool] and asm.tools == [mates_tool])
+	var rich = reg.add_tool("view", "rich", "Rich", "view", builder, {"hint": "h", "status": func() -> String: return "live", "on_select": func() -> void: fired[0] += 100, "list_empty": "none yet"})
+	print("SMOKE hint, status provider, on_select and list_empty options are kept: ", rich.hint == "h" and rich.status_provider.call() == "live" and rich.on_select.is_valid() and rich.list_empty == "none yet" and scale_tool.list_empty == "Nothing here yet.")
+	print("SMOKE tools land in their own category, in order: ", view.tools == [scale_tool, rich] and asm.tools == [mates_tool])
 	print("SMOKE tool lookup and category_of: ", reg.tool_def("mates") == mates_tool and reg.category_of("mates") == asm and reg.tool_def("zzz") == null and reg.category_of("zzz") == null)
 	print("SMOKE mode_tools() lists only the mode tools: ", reg.mode_tools() == [mates_tool])
-	print("SMOKE every registration emitted 'changed': ", fired[0] == 4)
+	print("SMOKE every registration emitted 'changed' (2 categories + 3 tools): ", fired[0] == 5)
 
 	# Rejections are push_error()s — expected output for those lines, not failures.
 	print("SMOKE a duplicate category id is refused: ", reg.add_category("view", "Again", "x", Color.RED) == null and reg.categories().size() == 2)
