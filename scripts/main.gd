@@ -27,6 +27,9 @@ extends Node3D
 @export var include_hidden: bool = false
 @export var tier: String = "" ## "" for full quality, or "coarse".
 
+@export_group("Wrist tablet")
+@export var use_new_tablet: bool = true ## the redesigned tablet (scripts/ui/wrist_tablet_v2.gd, docs/wrist-tablet-redesign-plan.md) instead of scripts/wrist_tablet.gd. Same job and public API; flip it to compare in the headset.
+
 @export_group("Placement")
 @export var spawn_position: Vector3 = Vector3(0, 1.0, -1.0)
 @export var local_glb_scale: float = 1.0 ## Scale for a .glb loaded from disk with the tablet's Files tab.
@@ -76,6 +79,11 @@ const API_PREFIX := "/document"
 
 func _ready() -> void:
 	_settings.load_from_disk()
+	UiFeedback.reduce_motion = _settings.reduce_motion
+	UiFeedback.set_haptics_level(_settings.haptics_level)
+	UiFeedback.set_sound_enabled(_settings.sound_enabled)
+	UiFeedback.set_volume(_settings.sound_volume)
+	preload("res://scripts/ui/ui_sounds.gd").register_all() # the UI's synthesised sounds
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_mates_tool()
@@ -252,7 +260,7 @@ func open_window_count(kind: String) -> int:
 
 
 func _add_wrist_tablet() -> void:
-	var tablet := preload("res://scripts/wrist_tablet.gd").new()
+	var tablet: Node = (preload("res://scripts/ui/wrist_tablet_v2.gd") if use_new_tablet else preload("res://scripts/wrist_tablet.gd")).new()
 	tablet.name = "WristTablet"
 	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window)
 	_tablet = tablet
@@ -265,7 +273,7 @@ func _add_popup_keyboard() -> void:
 	var keyboard := preload("res://scripts/popup_keyboard.gd").new()
 	keyboard.name = "PopupKeyboard"
 	add_child(keyboard)
-	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+	keyboard.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, $XROrigin3D/LeftController)
 	_keyboard = keyboard
 	_browser_window.set_keyboard(keyboard) # the Browser types web addresses / page text on the full keyboard
 
@@ -442,6 +450,47 @@ func set_scene(scene_name: String) -> void:
 
 func is_passthrough_supported() -> bool:
 	return _world_environment.is_passthrough_supported()
+
+
+# --- Comfort settings (the redesigned tablet's Settings page): Reduce motion and haptics
+# intensity, persisted via app_settings.gd and applied through ui_feedback.gd's statics.
+
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+
+func reduce_motion() -> bool:
+	return _settings.reduce_motion
+
+
+func set_reduce_motion(on: bool) -> void:
+	_settings.set_reduce_motion(on)
+	UiFeedback.reduce_motion = on
+
+
+func sound_enabled() -> bool:
+	return _settings.sound_enabled
+
+
+func set_sound_enabled(on: bool) -> void:
+	_settings.set_sound_enabled(on)
+	UiFeedback.set_sound_enabled(on)
+
+
+func sound_volume() -> float:
+	return _settings.sound_volume
+
+
+func set_sound_volume(v: float) -> void:
+	_settings.set_sound_volume(v)
+	UiFeedback.set_volume(v)
+
+
+func haptics_level() -> int:
+	return _settings.haptics_level
+
+
+func set_haptics_level(level: int) -> void:
+	_settings.set_haptics_level(level)
+	UiFeedback.set_haptics_level(level)
 
 
 # --- Settings page: the project folder the Files tab scans, on top of the

@@ -139,6 +139,7 @@ func _initialize() -> void:
 		quit()
 		return
 	main = load("res://scenes/main.tscn").instantiate()
+	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://secrets.cfg"
 	root.add_child(main)
 	var started := Time.get_ticks_msec()

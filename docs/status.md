@@ -1308,8 +1308,141 @@ real yet — and, as with every other window in this project, a real
 headset. `browser-relay/README.md` carries this same detail on the
 DIDSA-CAD side.
 
+## Wrist tablet / windows / keyboard redesign: in progress (plan: `docs/wrist-tablet-redesign-plan.md`)
+
+John's sketch + concept renders, redesigned as a new tablet built **beside** the
+old one (old `wrist_tablet.gd` untouched until the new one is signed off), then
+windows and the popup keyboard restyled to match. Decisions, phases and the
+one-active-tool rules are in the plan; this section tracks state.
+
+**Phase 1 — foundation: done (headless-verified; nothing here is visible in the headset yet).**
+- `scripts/ui/didsa_ui_theme.gd` + `ui/didsa_ui_theme.tres`: one Resource holding the
+  colour / radius / spacing / type / motion tokens, with `build_theme()` (Button,
+  Label, PanelContainer, HSlider, scroll bars, and type variations `LabelDim`,
+  `LabelSmall`, `LabelTitle`, `ButtonAccent`, `ButtonDanger`, `ButtonRail`,
+  `PanelRaised`) and shared styleboxes (`panel_box()` is the chrome every tablet /
+  window / keyboard will use). Edit the .tres in the Godot Inspector to tune the look.
+- `scripts/ui/laser_surface.gd`: the tablet's real-headset-hardened laser → SubViewport
+  logic (frozen press, edge slack, let-go-on-leave, settle window, claim protocol,
+  slider drag, stick scroll) as one component with no layout. `claim_first = true`
+  is the arbitration windows use. **Adoption**: the new tablet (Phase 2) uses it;
+  `diegetic_panel.gd` and `popup_keyboard.gd` switch to it in Phase 3 together with
+  their restyle (deliberately not touched in Phase 1; the old tablet keeps its own copy).
+- `scripts/ui/tablet_registry.gd`: categories and tools as data (4 × 2 grid = 8
+  categories; a second grid row only from the 5th), `kind` = `page` or `mode`, optional
+  list provider for the side panel.
+- **UI Lab**: `lab/ui_lab.tscn` — open in the Godot editor, F6; a desktop window showing a
+  style sheet laid out like the new tablet, built from the theme resource.
+  `tests/ui_lab_render.gd` renders it under Xvfb to a PNG.
+- Tests: `tests/laser_surface.gd`, `tests/tablet_registry.gd` (both in `run_all.sh`),
+  `tests/ui_lab_render.gd` (Xvfb). Godot 4.7 can be downloaded into the cloud sandbox
+  (GitHub releases are reachable) and `tests/run_all.sh` runs there.
+- Full `tests/run_all.sh` before and after: SMOKE output identical for every existing test.
+
+**Phase 2 — the new tablet: built, headless- and software-render-verified; not yet seen in a headset.**
+Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of the old one.
+- `scripts/ui/wrist_tablet_v2.gd`: the 3D half. Same public API as `wrist_tablet.gd`. Floats over
+  the left wrist at 0.40 x 0.26 m (same text size as before), closed by default, opened only by
+  shooting the wrist icon, closed by the top-right X. Right-hand laser only (via `laser_surface.gd`,
+  `claim_first = true`). A second quad, the **contextual side panel** (0.17 m wide), is hinged on
+  the tablet's right edge and angled up toward you (`side_yaw_degrees` -10, `side_pitch_degrees`
+  8: Inspector exports on the node, headset feel unknown, tune there).
+- `scripts/ui/tablet_ui.gd`: the 2D shell from the sketch (category grid 4 cols x up to 2 rows,
+  Undo / Redo / Settings / Close cluster, tool rail, tool header with on/off switch and ? help,
+  controls pane, status bar). `scripts/ui/side_panel_ui.gd`: the list panel (row cards, two-tap
+  confirm on destructive actions). Both are plain Controls and run in the UI Lab.
+- `scripts/ui/tablet_pages.gd`: every page ported from `wrist_tablet.gd` with the same calls into
+  `main.gd` and the tools, restyled via the theme. **Deliberate differences**: a mode tool's on/off
+  switch is in the tool header, not on its page; status text is in the status bar; lists are in the
+  side panel (Mates -> existing mates with a two-tap Delete, Measure -> results, Files -> models
+  with Open / Add); Windows and Files are each one tool today; **Shoot to hide is its own rail
+  entry** (View > Shoot hide), because under one-tool-at-a-time it is a mode tool, not a toggle on
+  the Visibility page; Settings is the utility-cluster button, not a category.
+- **One active tool**: `scripts/ui/tool_manager.gd` (Mates, Measure, Sections, Shoot hide).
+  Switching category never switches a tool on; tapping a mode tool in the rail does, and turns
+  any other off; tapping the active one again (or the header switch) turns it off; closing the
+  tablet leaves it on. `scripts/ui/tool_badge.gd` puts a badge (icon + name) above the right
+  hand's tracking ring while one is active, visible with the tablet closed. (The controller button
+  discs were removed in the 29 Sep round, so the badge sits on the ring, not on a disc.)
+- Undo history: `command_stack.gd` gained `history_labels()` / `redo_labels()`; a long press
+  (0.6 s) on Undo opens History in the side panel and doesn't also undo.
+- Icons (`scripts/ui/ui_icons.gd`) were pulled forward from Phase 4: 26 SVG-string icons on one
+  48 grid, rasterised at runtime with `Image.load_svg_from_string()` (no editor import step,
+  export-safe), tinted by theme. The old tablet keeps its pixel-stamped icons.
+- Tests: `tests/tool_manager.gd`, `tests/tablet_v2.gd` (both in `run_all.sh`), `tests/tablet_v2_render.gd`
+  (Xvfb). The old tablet's tests are untouched and still run against the old tablet.
+- **Not yet verified, needs the headset**: how the angled side panel sits, text size at 0.40 m
+  wide, whether the wrist icon and a 40 cm panel are comfortable, hand-badge size and position.
+
+**Phase 3 — windows and keyboard: restyled and moved onto the shared pieces; headless- and software-render-verified, not yet seen in a headset.**
+- `diegetic_panel.gd` (every floating window) and `popup_keyboard.gd` no longer carry private copies of
+  the laser -> SubViewport code: both use `scripts/ui/laser_surface.gd` (windows `claim_first = true`;
+  the keyboard `claim_first = false` so it still wins over a window it overlaps). The headset-learned
+  behaviours (frozen press, let-go-on-leave, claim protocol, stick scroll) are unchanged. One
+  difference: the 3 cm "edge slack while a click is held" the tablet always had now applies to windows too.
+  The old tablet (`wrist_tablet.gd`) keeps its own copy until it's deleted.
+- The grab handle is `scripts/ui/panel_handle.gd`, shared. **The popup keyboard now has the same
+  bottom handle as the windows**: grip it with either hand to carry it (the full keyboard keeps its
+  lean), release to drop. It **reopens where you left it**, one remembered spot per layout (numeric /
+  full), unless you've moved more than `moved_pose_reach` (3 m) from it, when it comes back in front
+  of you. `popup_keyboard.setup()` takes the left hand as an optional third argument (main.gd passes it).
+- Look: both are built from `ui/didsa_ui_theme.tres` like the new tablet: the theme's rounded, outlined
+  panel; a close button with the close icon (still growing with the window); title in the title style;
+  the keyboard's typed text in an inset field; the confirming key (OK / Done / Enter-as-confirm) in the
+  accent style; handle pill and resize brackets coloured from the theme. Subclass content (calculator,
+  tree, viewer, browser) is restyled for free through the theme.
+- **Bug found by the new test and fixed in both**: while a window or the keyboard was being carried by its
+  handle its hover flag went stale, so a trigger pull could still click through it. Carrying now drops hover.
+- Tests: `tests/keyboard_handle.gd` (in `run_all.sh`), `tests/windows_render.gd` (Xvfb), a carry check added to
+  `tests/windows_tab.gd`; `tests/features_round.gd` now reads the resize bracket colours as `_corner_hot` /
+  `_corner_idle` (they come from the theme now, no longer constants). All other existing tests unchanged and green.
+- **Not yet verified, needs the headset**: that the restyled windows/keyboard read well at arm's length, the
+  handle's size on the keyboard, and whether "reopens where you left it" feels right.
+
+**Phase 4 — polish and hand-off: built, headless- and software-render-verified; the single PCVR test is the next step.**
+- **The new tablet is now the DEFAULT** (`Main > Wrist tablet > use_new_tablet = true`). Untick it to get
+  the old tablet back for comparison. The 10 tests that drive `wrist_tablet.gd`'s internals (`tablet_scene`,
+  `tools_tab`, `section_tab`, `bug_round`, `features_round`, `laser_and_left_hand`, `windows_tab`,
+  `full_keyboard`, `popup_keyboard`, `e2e_mates_motion`) pin `main.use_new_tablet = false`; when the old tablet
+  is deleted they need porting to the new one or retiring.
+- Animations (all via `Tween`, all instant under **Reduce motion**; durations are theme tokens):
+  tablet scales in with a slight overshoot and fades in on open, shrinks and fades on stow; the controls pane
+  fades in when the tool / category changes; the side panel unfolds from its hinge and its rows fade in
+  staggered (25 ms apart, capped); the status bar pulses on a toast (brighter, tinted red for an error). The
+  quad is only transparent while fading. Not done (no sensible 3D equivalent inside a SubViewport): the
+  button "Z-depress", the sliding category pill.
+- `scripts/ui/ui_feedback.gd` (static, no autoload): haptics (hover tick as the laser crosses an enabled button,
+  press, grab, open, close, confirm, error) at Off / Low / Normal / High, plus a sound hook that plays a stream
+  registered with `set_sound(event, stream)`. **Settings page > Comfort** has Reduce motion, **Sound on/off**,
+  **Volume** (slider, plays a confirm blip as you drag) and Haptics; all persist in `user://settings.cfg`
+  (`app_settings.gd`) and are applied at startup.
+- **Idle render gating** in `wrist_tablet_v2.gd`: the tablet and side panel render every frame only while the laser is
+  on them or something changed in the last second, otherwise 4 times a second. Worst case a live label is 250 ms
+  stale; never frozen. (The old tablet re-renders every frame while open.)
+- **Sounds (added after the first Phase 4 commit)**: `scripts/ui/ui_sounds.gd` synthesises seven short soft sounds
+  in code (hover tick, press click, grab thunk, open / close sweeps, confirm, error) into 16-bit mono
+  `AudioStreamWAV`s at startup, so there are no audio files, no licences and no import step. Played as spatial
+  `AudioStreamPlayer3D`s at the node that caused them (`ui_feedback.gd`): same event can't retrigger within 35 ms,
+  at most 8 voices. Wired to: laser press and hover tick (every panel), handle grab, tablet open/close, window
+  open/close, confirm/error toasts. To change a sound edit its recipe in `_build()`; to use a recorded file for one
+  event, `UiFeedback.set_sound("press", load(...))` after `register_all()`. **Not heard by me**: only the samples
+  (peak, length, silent ends, determinism) and the playback rules are tested; judge the sounds by ear.
+- **Bug found by the new Settings test and fixed**: the Settings page's live performance readout changed height,
+  shifting every button below it while you were aiming at one. It now has a fixed height.
+- Tests: `tests/ui_feedback.gd` (in `run_all.sh`); `tests/tablet_v2.gd` extended (stow timing, idle gating, toast cue,
+  Reduce motion); `tests/side_panel_ui.gd` extended (staggered intro).
+- **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
+  comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
+  `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;
+  (5) one tool at a time + badge with the tablet closed; (6) Undo long-press -> History; (7) keyboard handle and
+  "reopens where you left it"; (8) window / keyboard look at arm's length; (9) haptic strengths; (10) animations
+  feel (or turn Reduce motion on); (11) laser clicks near the panel edges and on the angled side panel.
+
 ## Untested paths
 
+- **Wrist tablet / window / keyboard redesign (Phases 1-4, see the section above and
+  `docs/wrist-tablet-redesign-plan.md`)**: all headless- and software-render-verified, nothing seen in a
+  headset. The checklist is at the end of "Phase 4" above.
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
   `diegetic_panel.gd` framework they're built on) — now headless-confirmed
   (Godot 4.7.2, `tests/run_all.sh` clean), not yet real-backend- or

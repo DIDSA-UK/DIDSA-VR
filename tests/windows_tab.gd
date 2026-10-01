@@ -83,6 +83,7 @@ func aim_and_click_tablet(button: Button) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
+	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -185,6 +186,7 @@ func _initialize() -> void:
 		await process_frame
 	var moved: Vector3 = calc.global_position - before
 	print("SMOKE dragging the handle moves the panel 1:1 with the hand: ", moved.is_equal_approx(Vector3(0.3, 0.1, -0.2)))
+	print("SMOKE a window being carried by its handle isn't hoverable (no stale hover to click through): ", not calc._hovering)
 	l.button_released.emit("grip_click")
 	for i in 3:
 		await process_frame

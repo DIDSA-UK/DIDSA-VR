@@ -14,6 +14,13 @@ hasn't been started. Still plain Godot 4 core (no `godot-xr-tools`, no
 addons) — the Browser window's one exception to that is documented in
 item 15 below (a separate server-side relay, not a Godot dependency).
 
+**Redesign in progress:** the wrist tablet, floating-window chrome and popup keyboard
+are being redesigned — plan in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
+Try the new look without a headset: open `lab/ui_lab.tscn` in the Godot editor and press F6;
+tune it in `ui/didsa_ui_theme.tres`. To see the new tablet in the headset, tick **Use New Tablet**
+on the Main node's Inspector (group *Wrist tablet*); it is off by default while the old tablet below
+is still the reference.
+
 **Picking this up fresh (including a new Claude Code session)?** Read
 [`docs/status.md`](docs/status.md) first — what's built, what's open,
 untested paths. [`docs/backend-api-notes.md`](docs/backend-api-notes.md)
@@ -96,7 +103,9 @@ live-synced.
    point that tracks it). Every turn builds on the model's current
    orientation, so you can rotate about one axis and then another naturally.
    Switching between one and two hands never makes the model jump.
-7. **Wrist tablet.** A small thin-white-line icon — a ring with a landscape
+7. **Wrist tablet.** **(The redesigned tablet is now the default — see "The redesigned
+   tablet" below; untick `Main > Wrist tablet > Use New Tablet` for the old one described
+   here.)** A small thin-white-line icon — a ring with a landscape
    rectangle inside it, like a tablet — floats above your left wrist (it
    swells slightly and tints pale blue on hover). Point the right hand's
    laser at it and pull the trigger to open the tablet; press the **X** on
@@ -164,6 +173,23 @@ live-synced.
      open.
 
    With no `secrets.cfg` the app now starts anyway, ready for a local file.
+   **The redesigned tablet** (default; `scripts/ui/wrist_tablet_v2.gd`, plan in
+   `docs/wrist-tablet-redesign-plan.md`). Same wrist icon, same "shoot it to open, never
+   opens by itself", right-hand laser only. A 0.40 x 0.26 m panel laid out like the sketch:
+   a **category grid** top-left (View, Assembly, Windows, Files; up to 8 in 4 x 2, a second
+   row appears from the 5th), **Undo / Redo / Settings / Close** top-right, a **tool rail**
+   down the left, the tool's controls in the middle under a header (name, **Tool: ON/off**
+   switch for tools that change what the laser does, **?** help card) and a one-line
+   **status bar** at the bottom. A **side panel** angled beside it lists what the tool has
+   a list of: existing mates (Delete asks "Sure?" first), measurement results, model files
+   (Open / Add) or, after a **long press on Undo**, the undo history. **One tool at a time**:
+   Mates, Measure, Sections and Shoot hide (View > Shoot hide) are mode tools; tapping one
+   turns it on and any other off; browsing never changes it; closing the tablet doesn't
+   either — a **badge** above your right hand's ring shows which is active. Settings (the
+   sliders button) has Steadiness, display, **Comfort** (Reduce motion, Haptics Off / Low /
+   Normal / High), **Sound on/off and Volume** (the UI's sounds are synthesised in code) and the project folder. Look and sizes: `ui/didsa_ui_theme.tres`; try it
+   without a headset in `lab/ui_lab.tscn` (F6 in the editor).
+
 8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
    numeric keypad floating in front of you, pre-filled with the model's
    current scale multiple — its first real use, per the vision brief's "for
@@ -180,7 +206,11 @@ live-synced.
    like one on your lap, so it doesn't cover the window in front of you.
    It's used for the Browser's web addresses and typing into pages (below),
    the Colours tab's custom hex colour, and the Settings project-folder path;
-   the numeric keypad stays for numbers (scale, mate values).
+   the numeric keypad stays for numbers (scale, mate values). Like the floating
+   windows, the keyboard has a **grab handle** at the centre of its lower edge:
+   **grip** it with either hand to carry the keyboard somewhere more comfortable,
+   release to drop it. It reopens where you left it (one spot for the keypad, one
+   for the full keyboard) until you walk more than 3 m away.
 9. **Undo/redo.** Every part move (grip-drag, or laser-select rotate/nudge),
    whole-model move (one/two-hand drag, and the Scale sub-tab's
    presets/Fit/Home), and Visibility hide/show action goes onto one shared
