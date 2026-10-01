@@ -176,7 +176,7 @@ func _initialize() -> void:
 		failures += 1
 	print("SMOKE vectors: ", (doc["cases"] as Array).size(), " cases, tolerance ", tol)
 
-	var handled := ["gram_schmidt", "project", "screw_log", "hysteresis", "blend", "blend_anchor", "scheduler", "accept_anchor", "swing_sequence"]
+	var handled := ["gram_schmidt", "project", "screw_log", "hysteresis", "blend", "blend_anchor", "scheduler", "accept_anchor", "swing_sequence", "local_retract"] ## local_retract: tests/local_retraction.gd (F1b port)
 	var kinds := {}
 	for c in doc["cases"]:
 		kinds[c["kind"]] = true
