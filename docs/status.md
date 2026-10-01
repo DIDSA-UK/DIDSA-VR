@@ -1431,6 +1431,22 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   shifting every button below it while you were aiming at one. It now has a fixed height.
 - Tests: `tests/ui_feedback.gd` (in `run_all.sh`); `tests/tablet_v2.gd` extended (stow timing, idle gating, toast cue,
   Reduce motion); `tests/side_panel_ui.gd` extended (staggered intro).
+- **Themes and shader effects (added after the first Phase 4 commit).** Three themes, switched in
+  **Settings > Appearance** (or the UI Lab's buttons): **Navy** (the original), **Simple** (flat slate grey,
+  thin outlines, small radii, low glow), **Dark** (near-black neutral greys, softer text). They are presets,
+  `ui/themes/{navy,simple,dark}.tres`, ordinary theme resources you can edit in the Inspector;
+  `ui/didsa_ui_theme.tres` is now the LIVE shared instance the presets are copied into in place
+  (`scripts/ui/ui_themes.gd`), so everything already holding it sees the change. Every UI (tablet, side
+  panel, windows, keyboard, hand badge) watches `UiThemes.revision` and re-themes **in place the next frame**:
+  nothing is rebuilt, so the selected tool, scroll position and toggles are kept. Contrast is tested per theme
+  (WCAG ratios). The choice persists (`user://settings.cfg`, applied before anything is built).
+  **Shader effects** (one switch, default ON): `shaders/ui_glass.gdshader` via `scripts/ui/fx_overlay.gd`, an
+  additive overlay over each panel (inner edge glow + faint top sheen, **static** so the idle render gating
+  still works), plus a soft glow on hovered / selected buttons (a stylebox shadow, no shader). Each theme sets
+  its strength with `fx_*` tokens; OFF hides the overlays and removes the glows, so it costs nothing.
+  Tests: `tests/ui_themes.gd`, theme/effects switching in `tests/tablet_v2.gd`, per-theme x effects renders in
+  `tests/ui_lab_render.gd` (shows the shader draws in every theme). Not verified: how the glow looks on a
+  Quest lens / at arm's length, and the Quest-standalone cost of the overlay (one extra fragment pass per render).
 - **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
   comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
   `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;

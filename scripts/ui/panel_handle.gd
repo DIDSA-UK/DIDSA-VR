@@ -66,6 +66,15 @@ func build(panel_size: Vector2) -> MeshInstance3D:
 	return node
 
 
+func set_colours(idle: Color, held: Color) -> void:
+	idle_colour = idle
+	held_colour = held
+	if _material:
+		var c := held_colour if held_by != null else idle_colour
+		_material.albedo_color = c
+		_material.emission = c
+
+
 func layout(panel_size: Vector2) -> void:
 	if node:
 		node.position = Vector3(0.0, -panel_size.y * 0.5 - drop_distance, 0.01)

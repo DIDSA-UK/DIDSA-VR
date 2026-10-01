@@ -17,7 +17,7 @@ item 15 below (a separate server-side relay, not a Godot dependency).
 **Redesign in progress:** the wrist tablet, floating-window chrome and popup keyboard
 are being redesigned — plan in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
 Try the new look without a headset: open `lab/ui_lab.tscn` in the Godot editor and press F6;
-tune it in `ui/didsa_ui_theme.tres`. To see the new tablet in the headset, tick **Use New Tablet**
+tune it by editing a preset in `ui/themes/` (Navy / Simple / Dark; the Lab has buttons for them and for the effects). To see the new tablet in the headset, tick **Use New Tablet**
 on the Main node's Inspector (group *Wrist tablet*); it is off by default while the old tablet below
 is still the reference.
 
@@ -187,8 +187,11 @@ live-synced.
    turns it on and any other off; browsing never changes it; closing the tablet doesn't
    either — a **badge** above your right hand's ring shows which is active. Settings (the
    sliders button) has Steadiness, display, **Comfort** (Reduce motion, Haptics Off / Low /
-   Normal / High), **Sound on/off and Volume** (the UI's sounds are synthesised in code) and the project folder. Look and sizes: `ui/didsa_ui_theme.tres`; try it
-   without a headset in `lab/ui_lab.tscn` (F6 in the editor).
+   Normal / High), **Sound on/off and Volume** (the UI's sounds are synthesised in code) and the project folder. Look and sizes: the presets in `ui/themes/` (Navy,
+   Simple, Dark); try them without a headset in `lab/ui_lab.tscn` (F6 in the editor).
+   **Settings > Appearance** switches theme and turns the **shader effects** (a glass
+   edge-glow and soft highlight over every panel, and a glow on hovered / selected buttons)
+   on or off; every tablet, window and keyboard re-themes live.
 
 8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a
    numeric keypad floating in front of you, pre-filled with the model's

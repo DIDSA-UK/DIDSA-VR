@@ -44,6 +44,12 @@ func setup(manager, registry, p_tokens: Resource) -> void:
 	_manager.active_changed.connect(_on_active_changed)
 
 
+func refresh() -> void:
+	## After a theme change: redraw the badge for the active tool in the new colours.
+	if visible:
+		_on_active_changed(_manager.active_id)
+
+
 func shown_tool_id() -> String:
 	return _manager.active_id if visible else ""
 
@@ -64,7 +70,7 @@ func _on_active_changed(tool_id: String) -> void:
 
 
 func _texture_for(icon_name: String, accent: Color) -> ImageTexture:
-	var key := "%s|%s" % [icon_name, accent.to_html()]
+	var key := "%s|%s|%s" % [icon_name, accent.to_html(), tokens.bg_panel.to_html()]
 	if _cache.has(key):
 		return _cache[key]
 	var img := Image.create(DISC_PX, DISC_PX, false, Image.FORMAT_RGBA8)

@@ -1,0 +1,30 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/didsa_ui_theme.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "Simple"
+bg_panel = Color(0.13, 0.14, 0.16, 1)
+bg_raised = Color(0.17, 0.18, 0.21, 1)
+surface = Color(0.21, 0.22, 0.26, 1)
+surface_hover = Color(0.27, 0.28, 0.33, 1)
+border = Color(0.3, 0.32, 0.38, 1)
+accent = Color(0.45, 0.72, 1, 1)
+accent_deep = Color(0.16, 0.3, 0.52, 1)
+text = Color(0.95, 0.96, 0.98, 1)
+text_dim = Color(0.74, 0.77, 0.82, 1)
+text_disabled = Color(0.46, 0.48, 0.54, 1)
+warn = Color(0.98, 0.74, 0.32, 1)
+danger = Color(1, 0.5, 0.5, 1)
+ok = Color(0.45, 0.88, 0.6, 1)
+radius_panel = 10
+radius_control = 7
+radius_small = 5
+border_width = 1
+pad_panel = 16
+fx_glow_colour = Color(0.45, 0.72, 1, 1)
+fx_glow_strength = 0.12
+fx_glow_width = 14.0
+fx_sheen_strength = 0.03
+fx_button_glow = 0.2

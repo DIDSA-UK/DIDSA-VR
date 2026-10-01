@@ -50,6 +50,8 @@ extends Node3D
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
 
 var _right: XRController3D
@@ -75,6 +77,8 @@ var _text := ""
 var _pristine := false ## true until the first keystroke: that keystroke clears the pre-filled value instead of appending to it
 var _on_confirm: Callable = Callable()
 var tokens: Resource ## ui/didsa_ui_theme.tres
+var _fx: ColorRect ## the glass overlay (fx_overlay.gd)
+var _seen_revision := -1
 var surface ## LaserSurface: hover, claim, frozen press
 var handle ## PanelHandle: the grab pill at the lower edge
 var _moved_poses := {} ## layout ("numeric" / "full") -> the Transform3D the user last dropped the keyboard at
@@ -92,6 +96,7 @@ func setup(right: XRController3D, camera: XRCamera3D, left: XRController3D = nul
 	if left == null:
 		left = right.get_parent().get_node_or_null("LeftController") as XRController3D # callers that predate the handle pass only the right hand
 	tokens = load(THEME_PATH)
+	_seen_revision = UiThemes.revision
 	_build_viewport()
 	_build_quad()
 	surface = LaserSurface.new()
@@ -199,7 +204,18 @@ func _place_in_front_of_camera() -> void:
 	global_transform = Transform3D(basis, target_position)
 
 
+func apply_theme() -> void:
+	## Re-themes in place when ui_themes.gd changed the shared theme or the effects switch.
+	_seen_revision = UiThemes.revision
+	_ui_root.theme = tokens.build_theme()
+	_ui_root.theme.default_font_size = 30
+	handle.set_colours(tokens.text_dim, tokens.accent)
+	_fx.refresh(tokens)
+
+
 func _process(delta: float) -> void:
+	if _seen_revision != UiThemes.revision and _ui_root != null:
+		apply_theme()
 	if not _open or _camera == null:
 		return
 	if handle.follow():
@@ -500,6 +516,10 @@ func _build_ui() -> Control:
 	column.add_child(_keys_box)
 	_rebuild_keys()
 	_update_display()
+
+	_fx = FxOverlay.new() # the glass over the whole keyboard, under the laser cursor
+	root.add_child(_fx)
+	_fx.setup(tokens)
 
 	# A soft glow where the laser terminates (see laser_surface.gd's make_cursor()).
 	_cursor = LaserSurface.make_cursor()

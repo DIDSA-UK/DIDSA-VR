@@ -247,6 +247,46 @@ func _initialize() -> void:
 	print("SMOKE moving it sets the volume (and the label follows): ", is_equal_approx(Fb.volume, 0.3) and is_equal_approx(main.sound_volume(), 0.3) and find_button(func(b): return true) != null and tab.pages._volume_label.text == "Volume: 30%")
 	vol_slider.value = 0.7
 	main.set_sound_enabled(sound_was)
+
+	# --- Settings > Appearance: themes and shader effects, re-themed live and in place
+	var Themes = load("res://scripts/ui/ui_themes.gd")
+	var navy_bg: Color = Themes.preset("Navy").bg_panel
+	var dark_bg: Color = Themes.preset("Dark").bg_panel
+	print("SMOKE Settings > Appearance has a Theme choice (Navy / Simple / Dark) and a Shader effects toggle: ", find_button(func(b): return b.text == "Simple") != null and find_button(func(b): return b.text == "Dark") != null and find_button(func(b): return b.text.begins_with("Shader effects")) != null)
+	var pane_before: float = tab.ui.pages_scroll.scroll_vertical
+	var tool_before: String = tab.ui.selected_tool_id
+	var kb_node = main._keyboard
+	var calc = main._calculator_window
+	await click_text(func(b): return b.text == "Dark")
+	await process_frame
+	await process_frame
+	print("SMOKE picking Dark applies it everywhere (shared theme, saved choice): ", Themes.current == "Dark" and main.ui_theme() == "Dark" and Themes.live().bg_panel == dark_bg)
+	print("SMOKE the open tablet re-themed itself in place (its panel is now the Dark colour): ", (tab.ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
+	print("SMOKE ...and the side panel too: ", (tab.side_ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
+	print("SMOKE ...without rebuilding anything: same tool, still on Settings, same scroll position: ", tab.ui.selected_tool_id == tool_before and tab.ui.settings_open and absf(tab.ui.pages_scroll.scroll_vertical - pane_before) < 2.0)
+	print("SMOKE a floating window and the keyboard that were closed pick up the theme too: ", (calc._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg and (kb_node._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
+	print("SMOKE the window's resize brackets and handle follow the theme's accent: ", calc._corner_hot == Themes.live().accent)
+	await click_text(func(b): return b.text == "Simple")
+	await process_frame
+	await process_frame
+	print("SMOKE Simple applies the same way (flat: thin outline): ", Themes.current == "Simple" and (tab.ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).border_width_left == 1)
+	print("SMOKE the shader effects overlays are showing on the tablet, side panel, window and keyboard: ", tab.ui._fx.visible and tab.side_ui._fx.visible and calc._fx.visible and kb_node._fx.visible)
+	await click_text(func(b): return b.text.begins_with("Shader effects"))
+	await process_frame
+	await process_frame
+	print("SMOKE switching Shader effects off hides every overlay at once: ", Themes.fx_enabled == false and main.fx_enabled() == false and not tab.ui._fx.visible and not tab.side_ui._fx.visible and not calc._fx.visible and not kb_node._fx.visible)
+	print("SMOKE ...and the buttons lose their glow: ", (tab.ui.theme.get_stylebox("hover", "Button") as StyleBoxFlat).shadow_size == 0)
+	await click_text(func(b): return b.text.begins_with("Shader effects"))
+	await process_frame
+	await process_frame
+	print("SMOKE ...and on again brings them all back: ", Themes.fx_enabled and tab.ui._fx.visible and calc._fx.visible and (tab.ui.theme.get_stylebox("hover", "Button") as StyleBoxFlat).shadow_size > 0)
+	await click_text(func(b): return b.text == "Navy")
+	await process_frame
+	await process_frame
+	print("SMOKE back to Navy restores the original panel colour: ", (tab.ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == navy_bg)
+	print("SMOKE the renderer is told to redraw after a theme change (not left showing the old look): ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS or tab._activity_until_ms > Time.get_ticks_msec() - 2000)
+	main.set_ui_theme("Navy")
+	main.set_fx_enabled(true) # leave the saved settings as we found them
 	await aim_and_click(ui._settings_button)
 	print("SMOKE the Settings button again returns to the tools: ", not ui.settings_open and ui._rail_scroll.visible)
 

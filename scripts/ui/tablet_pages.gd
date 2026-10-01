@@ -20,6 +20,7 @@ signal toast(text: String, kind: String)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
@@ -792,6 +793,9 @@ func settings_page() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
+	page.add_child(_hint("Appearance"))
+	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
+	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
 	page.add_child(_hint("Comfort"))
 	page.add_child(_mode_toggle("Reduce motion", func(on: bool) -> void: _main.set_reduce_motion(on), _main.reduce_motion()))
 	page.add_child(_mode_toggle("Sound", func(on: bool) -> void: _main.set_sound_enabled(on), _main.sound_enabled()))
