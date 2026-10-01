@@ -14,6 +14,8 @@ const PATH := "user://settings.cfg"
 var project_folder: String = ""
 var last_scene: String = "Mid"
 var reduce_motion: bool = false
+var sound_enabled: bool = true
+var sound_volume: float = 0.7
 var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 
 
@@ -25,6 +27,8 @@ func load_from_disk() -> void:
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
+	sound_enabled = bool(config.get_value("comfort", "sound_enabled", sound_enabled))
+	sound_volume = clampf(float(config.get_value("comfort", "sound_volume", sound_volume)), 0.0, 1.0)
 
 
 func save_to_disk() -> void:
@@ -33,6 +37,8 @@ func save_to_disk() -> void:
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
+	config.set_value("comfort", "sound_enabled", sound_enabled)
+	config.set_value("comfort", "sound_volume", sound_volume)
 	var err := config.save(PATH)
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [PATH, err])
@@ -45,6 +51,16 @@ func set_project_folder(path: String) -> void:
 
 func set_reduce_motion(on: bool) -> void:
 	reduce_motion = on
+	save_to_disk()
+
+
+func set_sound_enabled(on: bool) -> void:
+	sound_enabled = on
+	save_to_disk()
+
+
+func set_sound_volume(v: float) -> void:
+	sound_volume = clampf(v, 0.0, 1.0)
 	save_to_disk()
 
 

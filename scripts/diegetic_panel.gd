@@ -81,6 +81,7 @@ extends Node3D
 @export var handle_grab_reach: float = 0.03 ## metres beyond the handle's own radius - it's small, so a bit of slack makes it easier to catch, same reasoning as controller.gd's own grab_reach
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
@@ -165,6 +166,7 @@ func open() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_place_in_front_of_camera()
 	_on_opened()
+	UiFeedback.play("open", self)
 
 
 func close() -> void:
@@ -183,6 +185,7 @@ func close() -> void:
 		_right.set_meta("ui_hover", false)
 		_right.set_meta("ui_hit_distance", -1.0) # _process() only runs while open - see popup_keyboard.gd's close() for why this needs doing explicitly too, not just left to next frame's reset
 	_on_closed()
+	UiFeedback.play("close", self)
 
 
 func toggle() -> void:

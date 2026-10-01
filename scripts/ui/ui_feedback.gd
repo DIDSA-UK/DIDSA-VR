@@ -7,10 +7,13 @@ extends RefCounted
 ##   UiFeedback.haptic(right_hand, "press")
 ##   UiFeedback.play("press", some_node3d)      # silent until a stream is registered
 ##
+## Sounds are synthesised in code by ui_sounds.gd and registered at startup (main.gd);
+## Settings > Comfort has Sound on/off and Volume.
+##
 ## Events: hover (a very light tick as the laser crosses a button), press, grab (a panel
 ## handle), open, close, confirm, error. Sounds are deliberately NOT shipped yet: the plan keeps
 ## third-party and generated audio for the look-dev stage, where it can be tried by ear in the
-## UI Lab first. Register one with set_sound("press", load("res://.../click.ogg")) and every
+## UI Lab first. Replace one with set_sound("press", load("res://.../click.ogg")) and every
 ## call site already plays it.
 
 const _HAPTIC := { ## event -> [amplitude 0..1, seconds] at the Normal level
@@ -27,8 +30,13 @@ const _HAPTIC_SCALE := [0.0, 0.5, 1.0, 1.5]
 
 static var haptics_level := 2 ## index into HAPTIC_LEVELS
 static var reduce_motion := false ## honoured by DidsaUITheme.duration() and every animation
-static var volume_db := 0.0
+static var sound_enabled := true
+static var volume := 0.7 ## linear 0..1 (Settings > Volume)
+const MIN_INTERVAL_MS := 35 ## the same event can't retrigger faster than this (a laser sweeping a button row)
+const MAX_VOICES := 8
 static var _streams := {}
+static var _last_ms := {}
+static var _voices := 0
 
 
 static func set_haptics_level(level: int) -> void:
@@ -61,12 +69,33 @@ static func has_sound(event: String) -> bool:
 
 
 static func play(event: String, at: Node3D) -> void:
-	## Plays the registered stream for `event` at `at`; does nothing if there isn't one.
-	if not _streams.has(event) or at == null or not at.is_inside_tree():
+	## Plays the registered stream for `event` at `at`'s position; does nothing if sound is off,
+	## the volume is 0, there's no stream, or the event just played / too many are sounding.
+	if not sound_enabled or volume <= 0.001 or not _streams.has(event) or at == null or not is_instance_valid(at) or not at.is_inside_tree():
 		return
+	var now := Time.get_ticks_msec()
+	if now - int(_last_ms.get(event, -100000)) < MIN_INTERVAL_MS or _voices >= MAX_VOICES:
+		return
+	_last_ms[event] = now
 	var player := AudioStreamPlayer3D.new()
 	player.stream = _streams[event]
-	player.volume_db = volume_db
-	player.finished.connect(player.queue_free)
-	at.add_child(player)
+	player.volume_db = linear_to_db(volume)
+	player.max_distance = 0.0
+	player.finished.connect(func() -> void:
+		_voices -= 1
+		player.queue_free()
+	)
+	# Parented to the scene root (not `at`) so a window that closes — and frees itself — doesn't cut its own close sound.
+	var tree := at.get_tree()
+	tree.root.add_child(player)
+	player.global_position = at.global_position
+	_voices += 1
 	player.play()
+
+
+static func set_sound_enabled(on: bool) -> void:
+	sound_enabled = on
+
+
+static func set_volume(linear: float) -> void:
+	volume = clampf(linear, 0.0, 1.0)

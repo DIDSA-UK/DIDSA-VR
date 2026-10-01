@@ -187,7 +187,7 @@ live-synced.
    turns it on and any other off; browsing never changes it; closing the tablet doesn't
    either — a **badge** above your right hand's ring shows which is active. Settings (the
    sliders button) has Steadiness, display, **Comfort** (Reduce motion, Haptics Off / Low /
-   Normal / High) and the project folder. Look and sizes: `ui/didsa_ui_theme.tres`; try it
+   Normal / High), **Sound on/off and Volume** (the UI's sounds are synthesised in code) and the project folder. Look and sizes: `ui/didsa_ui_theme.tres`; try it
    without a headset in `lab/ui_lab.tscn` (F6 in the editor).
 
 8. **Popup keyboard.** Click the **right thumbstick**, anywhere, to open a

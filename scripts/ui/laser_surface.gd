@@ -183,6 +183,7 @@ func _on_right_pressed(action_name: String) -> void:
 	_send_click(true)
 	if haptics:
 		UiFeedback.haptic(right, "press")
+		UiFeedback.play("press", host)
 
 
 func _hover_tick() -> void:
@@ -195,6 +196,7 @@ func _hover_tick() -> void:
 	_last_hovered = control
 	if control is BaseButton and not (control as BaseButton).disabled:
 		UiFeedback.haptic(right, "hover")
+		UiFeedback.play("hover", host)
 
 
 func _on_right_released(action_name: String) -> void:

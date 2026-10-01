@@ -81,6 +81,9 @@ func _ready() -> void:
 	_settings.load_from_disk()
 	UiFeedback.reduce_motion = _settings.reduce_motion
 	UiFeedback.set_haptics_level(_settings.haptics_level)
+	UiFeedback.set_sound_enabled(_settings.sound_enabled)
+	UiFeedback.set_volume(_settings.sound_volume)
+	preload("res://scripts/ui/ui_sounds.gd").register_all() # the UI's synthesised sounds
 	assembly_root.add_to_group("assembly_root")
 	_add_two_hand_model()
 	_add_mates_tool()
@@ -461,6 +464,24 @@ func reduce_motion() -> bool:
 func set_reduce_motion(on: bool) -> void:
 	_settings.set_reduce_motion(on)
 	UiFeedback.reduce_motion = on
+
+
+func sound_enabled() -> bool:
+	return _settings.sound_enabled
+
+
+func set_sound_enabled(on: bool) -> void:
+	_settings.set_sound_enabled(on)
+	UiFeedback.set_sound_enabled(on)
+
+
+func sound_volume() -> float:
+	return _settings.sound_volume
+
+
+func set_sound_volume(v: float) -> void:
+	_settings.set_sound_volume(v)
+	UiFeedback.set_volume(v)
 
 
 func haptics_level() -> int:

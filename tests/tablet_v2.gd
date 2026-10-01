@@ -41,6 +41,18 @@ func aim_only(b: Button) -> void:
 	for i in 3:
 		await process_frame
 
+func click_text(pred: Callable) -> void:
+	# Re-finds the button after the aim settles: a page can reflow under the laser (the Settings
+	# page's live readout changes height), so aim until the pointer really is on the button.
+	for i in 4:
+		var b := find_button(pred)
+		tab.ui.pages_scroll.ensure_control_visible(b) # as the right thumbstick would scroll it into view
+		await process_frame
+		await aim_only(b)
+		if b.get_global_rect().has_point(tab.surface.pointer_px):
+			break
+	await click_now()
+
 func aim_and_click(b: Button) -> void:
 	await aim_only(b)
 	await click_now()
@@ -212,10 +224,29 @@ func _initialize() -> void:
 	# --- Settings
 	await aim_and_click(ui._settings_button)
 	print("SMOKE Settings opens in the pane, rail hidden, no side panel: ", ui.settings_open and not ui._rail_scroll.visible and not tab._side_open)
-	await aim_and_click(find_button(func(b): return b.text == "Strong"))
+	await click_text(func(b): return b.text == "Strong")
 	print("SMOKE Settings > Steadiness Strong applies (whole-model and both hands): ", th.steadiness == 3)
-	await aim_and_click(find_button(func(b): return b.text == "65%"))
+	await click_text(func(b): return b.text == "65%")
 	print("SMOKE Settings > Resolution 65% applies: ", is_equal_approx(main.get_viewport().scaling_3d_scale, 0.65))
+	var Fb = load("res://scripts/ui/ui_feedback.gd")
+	var sound_was: bool = main.sound_enabled()
+	print("SMOKE Settings > Comfort has a Sound toggle (default ON): ", find_button(func(b): return b.text == "Sound: ON") != null)
+	ui.pages_scroll.ensure_control_visible(find_button(func(b): return b.text.begins_with("Sound:"))) # the Comfort section sits below the fold: scroll to it, as the right thumbstick would
+	await process_frame
+	await click_text(func(b): return b.text.begins_with("Sound:"))
+	print("SMOKE tapping it turns sound off everywhere: ", main.sound_enabled() == false and Fb.sound_enabled == false and find_button(func(b): return b.text == "Sound: off") != null)
+	await click_text(func(b): return b.text.begins_with("Sound:"))
+	print("SMOKE the Settings readout has a fixed height, so the page doesn't reflow under the laser: ", tab.pages._info_label.custom_minimum_size.y >= 150.0 and tab.pages._info_label.clip_text)
+	print("SMOKE ...and on again: ", main.sound_enabled() == true and Fb.sound_enabled == true)
+	var vol_slider: HSlider = null
+	for sl in ui.sliders:
+		if sl.is_visible_in_tree() and absf(sl.value - main.sound_volume()) < 0.001 and sl.max_value == 1.0 and sl.step == 0.05:
+			vol_slider = sl
+	print("SMOKE Settings > Comfort has a Volume slider showing the current level: ", vol_slider != null)
+	vol_slider.value = 0.3
+	print("SMOKE moving it sets the volume (and the label follows): ", is_equal_approx(Fb.volume, 0.3) and is_equal_approx(main.sound_volume(), 0.3) and find_button(func(b): return true) != null and tab.pages._volume_label.text == "Volume: 30%")
+	vol_slider.value = 0.7
+	main.set_sound_enabled(sound_was)
 	await aim_and_click(ui._settings_button)
 	print("SMOKE the Settings button again returns to the tools: ", not ui.settings_open and ui._rail_scroll.visible)
 

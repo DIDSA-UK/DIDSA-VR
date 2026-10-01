@@ -110,7 +110,10 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	pages.toast.connect(ui.toast)
 	ui.close_requested.connect(close_tablet)
 	ui.selection_changed.connect(_refresh_side)
-	ui.feedback.connect(func(event: String) -> void: UiFeedback.haptic(_right, event))
+	ui.feedback.connect(func(event: String) -> void:
+		UiFeedback.haptic(_right, event)
+		UiFeedback.play(event, self)
+	)
 	ui.activity.connect(poke_render)
 	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 	badge = ToolBadge.new()
@@ -144,6 +147,7 @@ func close_tablet() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_set_side_open(false)
 	_main.set_measuring(false)
+	UiFeedback.play("close", self)
 	_play_stow()
 
 

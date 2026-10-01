@@ -45,6 +45,22 @@ func _initialize() -> void:
 		for x in range(0, img.get_width(), 8):
 			if img.get_pixel(x, y).get_luminance() > 0.05:
 				lit += 1
+	var side_ok: bool = tab._side_open and tab.badge.visible # captured now: opening Settings below closes the side panel
+	# Second shot: the Settings page scrolled to Comfort (Reduce motion, Sound, Volume, Haptics).
+	tab.ui.set_settings_open(true)
+	await create_timer(0.5).timeout
+	var sound_btn: Button = null
+	for b in tab.ui.find_children("*", "Button", true, false):
+		if b.text.begins_with("Sound:"):
+			sound_btn = b
+	tab.ui.pages_scroll.ensure_control_visible(sound_btn)
+	tab.ui.pages_scroll.scroll_vertical += 120
+	eye.global_position = Vector3(0.0, 1.45, 0.05)
+	eye.look_at(Vector3(0.0, 1.0, -0.33))
+	await create_timer(0.5).timeout
+	if dir != "":
+		root.get_texture().get_image().save_png(dir.path_join("tablet_v2_settings.png"))
+	print("SMOKE the Settings page has Sound and Volume controls in Comfort: ", sound_btn != null)
 	print("SMOKE the tablet draws something into the 3D view: ", lit > 200)
-	print("SMOKE the side panel is up while Mates is shown, the badge is on the right hand: ", tab._side_open and tab.badge.visible)
+	print("SMOKE the side panel is up while Mates is shown, the badge is on the right hand: ", side_ok)
 	quit()

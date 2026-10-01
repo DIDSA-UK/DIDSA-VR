@@ -1413,12 +1413,22 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   button "Z-depress", the sliding category pill.
 - `scripts/ui/ui_feedback.gd` (static, no autoload): haptics (hover tick as the laser crosses an enabled button,
   press, grab, open, close, confirm, error) at Off / Low / Normal / High, plus a sound hook that plays a stream
-  registered with `set_sound(event, stream)`. **No sounds ship**: audio is part of the optional look-dev stage.
-  **Settings page > Comfort** has Reduce motion and Haptics; both persist in `user://settings.cfg`
+  registered with `set_sound(event, stream)`. **Settings page > Comfort** has Reduce motion, **Sound on/off**,
+  **Volume** (slider, plays a confirm blip as you drag) and Haptics; all persist in `user://settings.cfg`
   (`app_settings.gd`) and are applied at startup.
 - **Idle render gating** in `wrist_tablet_v2.gd`: the tablet and side panel render every frame only while the laser is
   on them or something changed in the last second, otherwise 4 times a second. Worst case a live label is 250 ms
   stale; never frozen. (The old tablet re-renders every frame while open.)
+- **Sounds (added after the first Phase 4 commit)**: `scripts/ui/ui_sounds.gd` synthesises seven short soft sounds
+  in code (hover tick, press click, grab thunk, open / close sweeps, confirm, error) into 16-bit mono
+  `AudioStreamWAV`s at startup, so there are no audio files, no licences and no import step. Played as spatial
+  `AudioStreamPlayer3D`s at the node that caused them (`ui_feedback.gd`): same event can't retrigger within 35 ms,
+  at most 8 voices. Wired to: laser press and hover tick (every panel), handle grab, tablet open/close, window
+  open/close, confirm/error toasts. To change a sound edit its recipe in `_build()`; to use a recorded file for one
+  event, `UiFeedback.set_sound("press", load(...))` after `register_all()`. **Not heard by me**: only the samples
+  (peak, length, silent ends, determinism) and the playback rules are tested; judge the sounds by ear.
+- **Bug found by the new Settings test and fixed**: the Settings page's live performance readout changed height,
+  shifting every button below it while you were aiming at one. It now has a fixed height.
 - Tests: `tests/ui_feedback.gd` (in `run_all.sh`); `tests/tablet_v2.gd` extended (stow timing, idle gating, toast cue,
   Reduce motion); `tests/side_panel_ui.gd` extended (staggered intro).
 - **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and

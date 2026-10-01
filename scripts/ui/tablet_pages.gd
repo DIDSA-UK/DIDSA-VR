@@ -784,12 +784,18 @@ func settings_page() -> Control:
 	page.add_child(_hint("Display"))
 	_info_label = _hint("")
 	_info_label.add_theme_color_override("font_color", Color(0.6, 0.95, 1.0))
+	# A FIXED height: the readout gains and loses lines (parts loaded, load summary, wrapping) and
+	# a label that resized with it shifted every button below it while you were aiming at one.
+	_info_label.clip_text = true
+	_info_label.custom_minimum_size = Vector2(0, 176)
 	page.add_child(_info_label)
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
 	page.add_child(_hint("Comfort"))
 	page.add_child(_mode_toggle("Reduce motion", func(on: bool) -> void: _main.set_reduce_motion(on), _main.reduce_motion()))
+	page.add_child(_mode_toggle("Sound", func(on: bool) -> void: _main.set_sound_enabled(on), _main.sound_enabled()))
+	page.add_child(_build_volume_row())
 	page.add_child(_choice_row("Haptics", ["Off", "Low", "Normal", "High"], _main.haptics_level(), func(i: int) -> void:
 		_main.set_haptics_level(i)
 		UiFeedback.haptic(_right, "confirm") # a sample of the new level
@@ -807,6 +813,34 @@ func settings_page() -> Control:
 		_refresh_project_folder_label()
 	))
 	return page
+
+
+var _volume_label: Label
+var _last_volume_preview_ms := 0
+
+func _build_volume_row() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_volume_label = _hint("")
+	box.add_child(_volume_label)
+	var slider := _make_slider(0.0, 1.0, 0.05)
+	slider.value = _main.sound_volume()
+	slider.value_changed.connect(func(v: float) -> void:
+		_main.set_sound_volume(v)
+		_refresh_volume_label()
+		var now := Time.get_ticks_msec() # a click to hear the new level, but not on every tick of a drag
+		if now - _last_volume_preview_ms > 250:
+			_last_volume_preview_ms = now
+			UiFeedback.play("confirm", _right)
+	)
+	box.add_child(slider)
+	_refresh_volume_label()
+	return box
+
+
+func _refresh_volume_label() -> void:
+	if _volume_label:
+		_volume_label.text = "Volume: %d%%" % int(round(_main.sound_volume() * 100.0))
 
 
 func _on_set_project_folder_pressed() -> void:

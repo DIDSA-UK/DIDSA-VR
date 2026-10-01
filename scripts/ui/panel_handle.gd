@@ -110,6 +110,7 @@ func _on_pressed(action_name: String, hand: XRController3D) -> void:
 		_material.albedo_color = held_colour
 		_material.emission = held_colour
 		UiFeedback.haptic(hand, "grab")
+		UiFeedback.play("grab", _host)
 		grabbed.emit(hand)
 
 
