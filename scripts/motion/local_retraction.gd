@@ -34,6 +34,7 @@ var member_ids: Array = []
 var rows := 0
 var n := 0 ## 6 * members
 var _mates: Array = []
+var _jac := true ## false = residual-only evaluation (no derivative arithmetic)
 
 
 ## Parses an anchor's `constraint_model`. Returns null (= keep projecting) for no model, another version, an unknown mate type,
@@ -104,10 +105,12 @@ static func _floats(a) -> Array:
 # --- world vectors with their derivative (3 x n, row-major) w.r.t. the 6k twist coordinates ---
 
 func _world(side: Dictionary, poses: Array, name: String) -> Array:
+	## [value, derivative]; the derivative is EMPTY when `_jac` is false (residual-only evaluation).
 	var local: Array = side["geo"][name]
 	var point := name == "point" or name == "axis_origin" or name == "porigin"
 	var d := PackedFloat64Array()
-	d.resize(3 * n)
+	if _jac:
+		d.resize(3 * n)
 	var m: int = side["member"]
 	var rm: Array
 	var t: Array
@@ -121,7 +124,7 @@ func _world(side: Dictionary, poses: Array, name: String) -> Array:
 		t = poses[m]["t"]
 	var w := Se3.mat_vec(rm, local)
 	var v: Array = [w[0] + t[0], w[1] + t[1], w[2] + t[2]] if point else w
-	if m >= 0:
+	if m >= 0 and _jac:
 		var c0 := 6 * m
 		if point:
 			d[0 * n + c0] = 1.0
@@ -146,18 +149,23 @@ func _geo(side: Dictionary, poses: Array) -> Dictionary:
 
 func _sub(a: Array, b: Array) -> Array:
 	var d := PackedFloat64Array()
-	d.resize(3 * n)
-	for i in 3 * n:
-		d[i] = a[1][i] - b[1][i]
+	if _jac:
+		d.resize(3 * n)
+		var ad: PackedFloat64Array = a[1]
+		var bd: PackedFloat64Array = b[1]
+		for i in 3 * n:
+			d[i] = ad[i] - bd[i]
 	return [[a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2]], d]
 
 
 ## Scalar a·b with its derivative (n).
 func _dot(a: Array, b: Array) -> Array:
 	var d := PackedFloat64Array()
-	d.resize(n)
 	var av: Array = a[0]
 	var bv: Array = b[0]
+	if not _jac:
+		return [av[0] * bv[0] + av[1] * bv[1] + av[2] * bv[2], d]
+	d.resize(n)
 	var ad: PackedFloat64Array = a[1]
 	var bd: PackedFloat64Array = b[1]
 	for c in n:
@@ -168,15 +176,17 @@ func _dot(a: Array, b: Array) -> Array:
 func _cross(a: Array, b: Array) -> Array:
 	var av: Array = a[0]
 	var bv: Array = b[0]
+	var d := PackedFloat64Array()
+	if not _jac:
+		return [Se3.cross(av, bv), d]
 	var ad: PackedFloat64Array = a[1]
 	var bd: PackedFloat64Array = b[1]
-	var d := PackedFloat64Array()
 	d.resize(3 * n)
 	for c in n:
 		# Da x b + a x Db
-		var d0 := (ad[n + c] * bv[2] - ad[2 * n + c] * bv[1]) + (av[1] * bd[2 * n + c] - av[2] * bd[n + c])
-		var d1 := (ad[2 * n + c] * bv[0] - ad[c] * bv[2]) + (av[2] * bd[c] - av[0] * bd[2 * n + c])
-		var d2 := (ad[c] * bv[1] - ad[n + c] * bv[0]) + (av[0] * bd[n + c] - av[1] * bd[c])
+		var d0: float = (ad[n + c] * bv[2] - ad[2 * n + c] * bv[1]) + (av[1] * bd[2 * n + c] - av[2] * bd[n + c])
+		var d1: float = (ad[2 * n + c] * bv[0] - ad[c] * bv[2]) + (av[2] * bd[c] - av[0] * bd[2 * n + c])
+		var d2: float = (ad[c] * bv[1] - ad[n + c] * bv[0]) + (av[0] * bd[n + c] - av[1] * bd[c])
 		d[c] = d0
 		d[n + c] = d1
 		d[2 * n + c] = d2
@@ -187,8 +197,10 @@ func _unit(a: Array) -> Array:
 	var av: Array = a[0]
 	var nn := Se3.norm3(av)
 	var u := [av[0] / nn, av[1] / nn, av[2] / nn]
-	var ad: PackedFloat64Array = a[1]
 	var d := PackedFloat64Array()
+	if not _jac:
+		return [u, d]
+	var ad: PackedFloat64Array = a[1]
 	d.resize(3 * n)
 	for c in n:
 		var p: float = u[0] * ad[c] + u[1] * ad[n + c] + u[2] * ad[2 * n + c]
@@ -240,7 +252,8 @@ func _evaluate(poses: Array):
 			target = minf(target, 360.0 - target)
 			var dd := _dot(_unit(d["direction"]), _unit(f["direction"]))
 			res.append(dd[0] - cos(deg_to_rad(target)))
-			jac.append(dd[1])
+			if _jac:
+				jac.append(dd[1])
 		elif type == "distance":
 			if mate["value"] == null:
 				return null
@@ -256,41 +269,51 @@ func _evaluate(poses: Array):
 				var p := _cross(_sub(d["axis_origin"], f["axis_origin"]), f["direction"])
 				var pp := _dot(p, p)
 				res.append(pp[0] - tsq)
-				jac.append(pp[1])
+				if _jac:
+					jac.append(pp[1])
 				_add_v(res, jac, _cross(d["direction"], f["direction"]))
 			else:
 				var off := _sub(d["point"], f["point"])
 				var oo := _dot(off, off)
 				res.append(oo[0] - tsq)
-				jac.append(oo[1])
+				if _jac:
+					jac.append(oo[1])
 	return [res, jac]
 
 
 func _add_s(res: PackedFloat64Array, jac: Array, s: Array) -> void:
 	res.append(s[0])
-	jac.append(s[1])
+	if _jac:
+		jac.append(s[1])
 
 
 func _add_sq(res: PackedFloat64Array, jac: Array, s: Array, tsq: float) -> void:
+	res.append(s[0] * s[0] - tsq)
+	if not _jac:
+		return
 	var d: PackedFloat64Array = s[1]
 	var out := PackedFloat64Array()
 	out.resize(n)
 	for c in n:
 		out[c] = 2.0 * s[0] * d[c]
-	res.append(s[0] * s[0] - tsq)
 	jac.append(out)
 
 
 func _add_v(res: PackedFloat64Array, jac: Array, v: Array) -> void:
-	var d: PackedFloat64Array = v[1]
 	for i in 3:
 		res.append(v[0][i])
-		jac.append(d.slice(i * n, (i + 1) * n))
+	if _jac:
+		var d: PackedFloat64Array = v[1]
+		for i in 3:
+			jac.append(d.slice(i * n, (i + 1) * n))
 
 
 ## Stacked mate residual at `poses`.
 func residual(poses: Array) -> PackedFloat64Array:
-	return _evaluate(poses)[0]
+	_jac = false
+	var r = _evaluate(poses)[0]
+	_jac = true
+	return r
 
 
 func residual_inf(poses: Array) -> float:
