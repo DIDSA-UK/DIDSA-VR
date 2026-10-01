@@ -1713,8 +1713,8 @@ func _on_scene_toggled(on: bool, scene_name: String) -> void:
 func _refresh_environment_status() -> void:
 	if not _environment_status_label:
 		return
-	if _main.current_scene() == "Passthrough" and not _main.is_passthrough_supported():
-		_environment_status_label.text = "Passthrough isn't supported on this headset/runtime — showing black instead of a camera feed."
+	if _main.current_scene() == "Passthrough":
+		_environment_status_label.text = _main.passthrough_status() # says whether it's on and, if not, what the runtime offers
 	else:
 		_environment_status_label.text = "Scene: %s" % _main.current_scene()
 

@@ -371,7 +371,9 @@ live-synced.
     (`scripts/environment_manager.gd`, a `WorldEnvironment` node driving
     background colour, ambient light and the one `DirectionalLight3D`), plus
     **Passthrough** — real OpenXR mixed reality (the headset's own camera
-    feed) on a Quest or another passthrough-capable runtime; on desktop or
+    feed) on a Quest or another passthrough-capable runtime (via the OpenXR environment blend
+    mode; the Environment page's status line says whether it's on and, if not, what the runtime
+    offers — a standalone Quest build also needs the OpenXR Vendors plugin, not included); on desktop or
     an unsupported runtime it falls back to a plain black background and
     says so. The last-picked scene is remembered across restarts
     (`user://settings.cfg`, via the Settings cogwheel's own project-folder

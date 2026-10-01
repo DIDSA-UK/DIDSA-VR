@@ -1447,6 +1447,19 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   Tests: `tests/ui_themes.gd`, theme/effects switching in `tests/tablet_v2.gd`, per-theme x effects renders in
   `tests/ui_lab_render.gd` (shows the shader draws in every theme). Not verified: how the glow looks on a
   Quest lens / at arm's length, and the Quest-standalone cost of the overlay (one extra fragment pass per render).
+- **Passthrough fix (real-headset report: choosing the Passthrough environment did nothing).** Root cause found by
+  reading Godot's own AR/passthrough docs against `environment_manager.gd`: it only ever called the **legacy**
+  `OpenXRInterface.start_passthrough()` (kept "for backwards compatibility") and **never set the environment blend
+  mode**, which is how Godot 4.3+ turns passthrough on (alpha blend "will also perform these extra steps"). So on any
+  runtime that exposes passthrough through blend modes, nothing happened. Now: ask the runtime
+  (`get_supported_environment_blend_modes()`); ALPHA_BLEND if offered (+ transparent viewport), else ADDITIVE (+ black
+  background), else the legacy layer; OPAQUE again when you leave; retried on `session_focussed` if the session wasn't
+  ready at startup (the saved scene is applied very early). **If it still fails, it now says why**: the Environment page's
+  status line (and the console) report what was used or what the runtime actually offers. `tests/passthrough.gd` covers
+  all of this against a fake runtime (alpha / additive / legacy / nothing / late session / desktop). **Not verified**: a
+  real headset (this sandbox has none), so whether your PCVR runtime offers alpha-blend over the link is unknown until
+  the next test. Standalone Quest builds additionally need the OpenXR Vendors plugin + the export's Passthrough option
+  (the project deliberately has no addons yet), which is NOT done.
 - **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
   comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
   `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;

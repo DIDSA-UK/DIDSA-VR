@@ -455,6 +455,12 @@ func is_passthrough_supported() -> bool:
 	return _world_environment.is_passthrough_supported()
 
 
+func passthrough_status() -> String:
+	## What Passthrough is doing and, if it can't, why (what the runtime offers): shown on the
+	## tablet's Environment page. "" unless the Passthrough scene is selected.
+	return _world_environment.passthrough_status()
+
+
 # --- Comfort settings (the redesigned tablet's Settings page): Reduce motion and haptics
 # intensity, persisted via app_settings.gd and applied through ui_feedback.gd's statics.
 

@@ -147,6 +147,7 @@ func refresh() -> void:
 		var labels: Array = _mates_tool.picked_labels()
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
+	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
 	if _measure_picks_label and _measure_tool:
 		var m: Array = _measure_tool.picked_labels()
 		_measure_picks_label.text = "Picked: %s" % (", ".join(m) if not m.is_empty() else "none")
@@ -399,8 +400,8 @@ func _build_environment_page() -> Control:
 func _refresh_environment_status() -> void:
 	if _environment_status_label == null or _main == null:
 		return
-	if _main.current_scene() == "Passthrough" and not _main.is_passthrough_supported():
-		_environment_status_label.text = "Passthrough isn't supported on this headset/runtime — showing black instead of a camera feed."
+	if _main.current_scene() == "Passthrough":
+		_environment_status_label.text = _main.passthrough_status() # says whether it's on and, if not, what the runtime offers
 	else:
 		_environment_status_label.text = "Scene: %s" % _main.current_scene()
 
