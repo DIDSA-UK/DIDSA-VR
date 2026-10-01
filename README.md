@@ -14,6 +14,11 @@ hasn't been started. Still plain Godot 4 core (no `godot-xr-tools`, no
 addons) — the Browser window's one exception to that is documented in
 item 15 below (a separate server-side relay, not a Godot dependency).
 
+**Redesign in progress:** the wrist tablet, floating-window chrome and popup keyboard
+are being redesigned — plan in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
+Try the new look without a headset: open `lab/ui_lab.tscn` in the Godot editor and press F6;
+tune it in `ui/didsa_ui_theme.tres`.
+
 **Picking this up fresh (including a new Claude Code session)?** Read
 [`docs/status.md`](docs/status.md) first — what's built, what's open,
 untested paths. [`docs/backend-api-notes.md`](docs/backend-api-notes.md)

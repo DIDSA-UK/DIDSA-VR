@@ -38,10 +38,12 @@ features are NOT in scope), and the existing code (`wrist_tablet.gd`,
 
 ## Phases
 
-### Phase 1 — Foundation (almost no visible change)
-* Extract the laser → SubViewport pointer plumbing from `wrist_tablet.gd`,
-  `popup_keyboard.gd`, `diegetic_panel.gd` into one shared component. Move the
-  headset-hardened logic verbatim: pointer frozen during a press, slider
+### Phase 1 — Foundation (almost no visible change) — DONE
+* Extract the laser → SubViewport pointer plumbing from `wrist_tablet.gd` into one
+  shared component (`scripts/ui/laser_surface.gd`). The new tablet uses it in
+  Phase 2; `diegetic_panel.gd` and `popup_keyboard.gd` adopt it in Phase 3 with
+  their restyle, so Phase 1 touches none of the working windows or keyboard.
+  Move the headset-hardened logic verbatim: pointer frozen during a press, slider
   drag, stick scroll, click lockout after open, `ui_hover` / `ui_hit_distance`
   claim protocol.
 * One `Theme` resource holding the colour / radius / spacing / font tokens, and

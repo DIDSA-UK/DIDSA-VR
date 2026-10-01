@@ -1308,6 +1308,37 @@ real yet — and, as with every other window in this project, a real
 headset. `browser-relay/README.md` carries this same detail on the
 DIDSA-CAD side.
 
+## Wrist tablet / windows / keyboard redesign: in progress (plan: `docs/wrist-tablet-redesign-plan.md`)
+
+John's sketch + concept renders, redesigned as a new tablet built **beside** the
+old one (old `wrist_tablet.gd` untouched until the new one is signed off), then
+windows and the popup keyboard restyled to match. Decisions, phases and the
+one-active-tool rules are in the plan; this section tracks state.
+
+**Phase 1 — foundation: done (headless-verified; nothing here is visible in the headset yet).**
+- `scripts/ui/didsa_ui_theme.gd` + `ui/didsa_ui_theme.tres`: one Resource holding the
+  colour / radius / spacing / type / motion tokens, with `build_theme()` (Button,
+  Label, PanelContainer, HSlider, scroll bars, and type variations `LabelDim`,
+  `LabelSmall`, `LabelTitle`, `ButtonAccent`, `ButtonDanger`, `ButtonRail`,
+  `PanelRaised`) and shared styleboxes (`panel_box()` is the chrome every tablet /
+  window / keyboard will use). Edit the .tres in the Godot Inspector to tune the look.
+- `scripts/ui/laser_surface.gd`: the tablet's real-headset-hardened laser → SubViewport
+  logic (frozen press, edge slack, let-go-on-leave, settle window, claim protocol,
+  slider drag, stick scroll) as one component with no layout. `claim_first = true`
+  is the arbitration windows use. **Adoption**: the new tablet (Phase 2) uses it;
+  `diegetic_panel.gd` and `popup_keyboard.gd` switch to it in Phase 3 together with
+  their restyle (deliberately not touched in Phase 1; the old tablet keeps its own copy).
+- `scripts/ui/tablet_registry.gd`: categories and tools as data (4 × 2 grid = 8
+  categories; a second grid row only from the 5th), `kind` = `page` or `mode`, optional
+  list provider for the side panel.
+- **UI Lab**: `lab/ui_lab.tscn` — open in the Godot editor, F6; a desktop window showing a
+  style sheet laid out like the new tablet, built from the theme resource.
+  `tests/ui_lab_render.gd` renders it under Xvfb to a PNG.
+- Tests: `tests/laser_surface.gd`, `tests/tablet_registry.gd` (both in `run_all.sh`),
+  `tests/ui_lab_render.gd` (Xvfb). Godot 4.7 can be downloaded into the cloud sandbox
+  (GitHub releases are reachable) and `tests/run_all.sh` runs there.
+- Full `tests/run_all.sh` before and after: SMOKE output identical for every existing test.
+
 ## Untested paths
 
 - **Milestone 3 (Assembly Tree, Calculator, Image Viewer windows, and the
