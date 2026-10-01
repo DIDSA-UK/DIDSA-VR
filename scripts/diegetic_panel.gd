@@ -82,6 +82,8 @@ extends Node3D
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
@@ -126,6 +128,8 @@ var _cursor: Control
 var _content_holder: Control
 
 var _open := false
+var _fx: ColorRect ## the glass overlay (fx_overlay.gd)
+var _seen_revision := -1
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
@@ -133,6 +137,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	_right = right
 	_camera = camera
 	tokens = load(THEME_PATH)
+	_seen_revision = UiThemes.revision
 	_corner_idle = tokens.border.lightened(0.3)
 	_corner_idle.a = 0.55
 	_corner_hot = tokens.accent
@@ -148,6 +153,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D) -> v
 	handle.setup(self, _left, _right, func() -> bool: return _open, tokens)
 	handle.grab_action = grab_action
 	handle.reach_slack = handle_grab_reach
+	handle.camera = _camera
 	handle.build(panel_size)
 	_build_corners()
 	add_to_group("diegetic_panels") # controller.gd asks every panel via handle_in_reach() before running its own part-grab
@@ -221,11 +227,28 @@ func _place_in_front_of_camera() -> void:
 	global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), target_position)
 
 
+func apply_theme() -> void:
+	## Re-themes in place when ui_themes.gd changed the shared theme or the effects switch.
+	_seen_revision = UiThemes.revision
+	_ui_root.theme = tokens.build_theme()
+	_ui_root.theme.default_font_size = 26
+	_applied_chrome_scale = -1.0 # forces the title / header sizes to be re-applied
+	_apply_chrome_scale()
+	_corner_idle = tokens.border.lightened(0.3)
+	_corner_idle.a = 0.55
+	_corner_hot = tokens.accent
+	_refresh_corner_look()
+	handle.set_colours(tokens.text_dim, tokens.accent)
+	_fx.refresh(tokens)
+
+
 func _process(delta: float) -> void:
+	if _seen_revision != UiThemes.revision:
+		apply_theme()
 	_last_delta = delta
 	if not _open or _camera == null or _right == null:
 		return
-	if handle.follow():
+	if handle.follow(delta):
 		surface.release_all() # being dragged by its handle - not also hoverable/clickable (and no stale hover left over to click with)
 		return
 	if _resize_corner >= 0:
@@ -534,6 +557,10 @@ func _build_root_ui() -> Control:
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_content_holder.add_child(content)
+
+	_fx = FxOverlay.new() # the glass over the whole window, under the laser cursor
+	root.add_child(_fx)
+	_fx.setup(tokens)
 
 	# A soft glow where the laser terminates (see laser_surface.gd's make_cursor()).
 	_cursor = LaserSurface.make_cursor()

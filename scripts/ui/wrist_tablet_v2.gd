@@ -27,6 +27,7 @@ const SidePanelUI := preload("res://scripts/ui/side_panel_ui.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const ToolBadge := preload("res://scripts/ui/tool_badge.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
 const ACTIVE_LINGER_MS := 1000 ## keep rendering every frame this long after the last activity
 const IDLE_REFRESH_SECONDS := 0.25 ## an idle open tablet re-renders this often (live labels never go more than this stale)
@@ -76,6 +77,7 @@ var _quad_material: StandardMaterial3D
 var _anim: Tween
 var _activity_until_ms := 0
 var _idle_left := 0.0
+var _seen_revision := 0
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null) -> void:
@@ -84,6 +86,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	_camera = camera
 	_main = main
 	tokens = load(THEME_PATH)
+	_seen_revision = UiThemes.revision
 	viewport_size = Vector2i((panel_size * pixels_per_metre).round())
 
 	registry = TabletRegistry.new()
@@ -320,6 +323,10 @@ func _add_target_mesh(mesh: Mesh) -> MeshInstance3D:
 func _process(delta: float) -> void:
 	if _camera == null:
 		return
+	if _seen_revision != UiThemes.revision:
+		_seen_revision = UiThemes.revision # the UIs re-theme themselves; this node redraws the badge and the panels
+		badge.refresh()
+		poke_render()
 	_target.visible = not _open
 	_update_target_hover()
 	surface.process(delta, _open)

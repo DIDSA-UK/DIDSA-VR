@@ -1431,6 +1431,51 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   shifting every button below it while you were aiming at one. It now has a fixed height.
 - Tests: `tests/ui_feedback.gd` (in `run_all.sh`); `tests/tablet_v2.gd` extended (stow timing, idle gating, toast cue,
   Reduce motion); `tests/side_panel_ui.gd` extended (staggered intro).
+- **Themes and shader effects (added after the first Phase 4 commit).** Three themes, switched in
+  **Settings > Appearance** (or the UI Lab's buttons): **Navy** (the original), **Simple** (flat slate grey,
+  thin outlines, small radii, low glow), **Dark** (near-black neutral greys, softer text). They are presets,
+  `ui/themes/{navy,simple,dark}.tres`, ordinary theme resources you can edit in the Inspector;
+  `ui/didsa_ui_theme.tres` is now the LIVE shared instance the presets are copied into in place
+  (`scripts/ui/ui_themes.gd`), so everything already holding it sees the change. Every UI (tablet, side
+  panel, windows, keyboard, hand badge) watches `UiThemes.revision` and re-themes **in place the next frame**:
+  nothing is rebuilt, so the selected tool, scroll position and toggles are kept. Contrast is tested per theme
+  (WCAG ratios). The choice persists (`user://settings.cfg`, applied before anything is built).
+  **Shader effects** (one switch, default ON): `shaders/ui_glass.gdshader` via `scripts/ui/fx_overlay.gd`, an
+  additive overlay over each panel (inner edge glow + faint top sheen, **static** so the idle render gating
+  still works), plus a soft glow on hovered / selected buttons (a stylebox shadow, no shader). Each theme sets
+  its strength with `fx_*` tokens; OFF hides the overlays and removes the glows, so it costs nothing.
+  Tests: `tests/ui_themes.gd`, theme/effects switching in `tests/tablet_v2.gd`, per-theme x effects renders in
+  `tests/ui_lab_render.gd` (shows the shader draws in every theme). Not verified: how the glow looks on a
+  Quest lens / at arm's length, and the Quest-standalone cost of the overlay (one extra fragment pass per render).
+- **Passthrough fix (real-headset report: choosing the Passthrough environment did nothing).** Root cause found by
+  reading Godot's own AR/passthrough docs against `environment_manager.gd`: it only ever called the **legacy**
+  `OpenXRInterface.start_passthrough()` (kept "for backwards compatibility") and **never set the environment blend
+  mode**, which is how Godot 4.3+ turns passthrough on (alpha blend "will also perform these extra steps"). So on any
+  runtime that exposes passthrough through blend modes, nothing happened. Now: ask the runtime
+  (`get_supported_environment_blend_modes()`); ALPHA_BLEND if offered (+ transparent viewport), else ADDITIVE (+ black
+  background), else the legacy layer; OPAQUE again when you leave; retried on `session_focussed` if the session wasn't
+  ready at startup (the saved scene is applied very early). **If it still fails, it now says why**: the Environment page's
+  status line (and the console) report what was used or what the runtime actually offers. `tests/passthrough.gd` covers
+  all of this against a fake runtime (alpha / additive / legacy / nothing / late session / desktop). **Not verified**: a
+  real headset (this sandbox has none), so whether your PCVR runtime offers alpha-blend over the link is unknown until
+  the next test. Standalone Quest builds additionally need the OpenXR Vendors plugin + the export's Passthrough option
+  (the project deliberately has no addons yet), which is NOT done.
+- **Distance grab of floating windows and the keyboard (so an awkwardly placed one can be fetched).** Point either
+  hand's LASER at a floating window or the popup keyboard (up to 6 m): it **glows** (a soft cyan halo, `shaders/ui_halo.gdshader`)
+  and the laser stops on it; **grip** carries it from where it is (brighter glow); it follows the hand's position
+  (smoothed) but always **turns to face you, upright** (the full keyboard keeps its lean); **A/X pulls it towards you,
+  B/Y pushes it away**, at a speed proportional to its distance (same constants as nudging a part), never closer than
+  0.25 m to the hand nor beyond 12 m; release drops it. Priorities: a part your hand is touching, the section gizmo and a
+  panel's own near handle all win over a distance grab; a part in front of the window blocks the hover; whole-model grab
+  stays out via the existing `window_held` meta. Implemented in `controller.gd` (`_update_panel_hover`,
+  `_try_grab_panel_at_distance`, `_nudge_carried_panel`) and `scripts/ui/panel_handle.gd` (halo, `start_laser_grab`,
+  `nudge`, facing-follow). Applies to every `diegetic_panels` member (all floating windows + the popup keyboard); NOT the
+  wrist tablet. The old near-handle grab is unchanged. Test: `tests/panel_distance_grab.gd` (+ halo renders in
+  `tests/windows_render.gd`). **Not verified**: the feel in a headset (smoothing rate, push/pull speed, whether hovering a
+  window you are clicking in should glow that strongly), and a real A/B press (only `nudge_carried_panel()` is tested).
+- **Removed the hovered-part name label** (e.g. "MESH 2") that floated beside the laser's hit point: the part still
+  highlights pale yellow; `controller.gd`'s `_aim_label` is gone, README wording updated, `tests/precise_picking.gd` now
+  checks there is none.
 - **Headset checklist for John's PCVR pass**: (1) the wrist icon still opens it, nothing else does; (2) text size and
   comfort of the 0.40 x 0.26 m panel on the wrist; (3) the angled side list: tune `side_yaw_degrees` /
   `side_pitch_degrees` on the WristTablet node; (4) the hand badge: size, position above the ring, readable;

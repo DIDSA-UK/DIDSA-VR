@@ -125,6 +125,9 @@ them himself. See "Shaders and library art" below.
 * The hand badge sits on the right hand's tracking ring: the button discs no longer exist.
 * The new tablet stays behind `Main > Wrist tablet > use_new_tablet` (default off) until Phase 4's PCVR pass.
 
+## Themes and shader effects — BUILT (first look-dev slice)
+Navy / Simple / Dark themes and a one-switch shader effects layer, in Settings > Appearance. See docs/status.md.
+
 ## Still to do after John's PCVR pass
 * Fix list from the headset test (tablet size, side-panel angle, badge, haptics, timings).
 * Delete `wrist_tablet.gd` once signed off, and port or retire the 10 tests pinned to it.

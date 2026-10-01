@@ -9,7 +9,12 @@ extends Control
 ## without the list flickering or losing the scroll position. An action with
 ## "confirm": true needs a second press within 3 s ("Sure?") before it runs.
 
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
+
 var tokens: Resource
+var _fx: ColorRect
+var _seen_revision := -1
 var scroll: ScrollContainer ## the host hands this to its LaserSurface as scroll_target
 var _title: Label
 var _count: Label
@@ -21,6 +26,7 @@ var _confirm_token := 0
 func setup(p_tokens: Resource, viewport_size: Vector2) -> void:
 	tokens = p_tokens
 	theme = tokens.build_theme()
+	_seen_revision = UiThemes.revision
 	size = viewport_size
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -46,6 +52,23 @@ func setup(p_tokens: Resource, viewport_size: Vector2) -> void:
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rows.add_theme_constant_override("separation", tokens.gap)
 	scroll.add_child(_rows)
+	_fx = FxOverlay.new()
+	add_child(_fx)
+	_fx.setup(tokens)
+
+
+func apply_theme() -> void:
+	## See tablet_ui.gd's apply_theme(): re-themed in place; the rows are rebuilt on the next poll
+	## (their state colours come from the theme), the scroll position is kept by the host's poll.
+	_seen_revision = UiThemes.revision
+	theme = tokens.build_theme()
+	_fx.refresh(tokens)
+	_signature = ""
+
+
+func _process(_delta: float) -> void:
+	if _seen_revision != UiThemes.revision:
+		apply_theme()
 
 
 func set_list(title: String, rows: Array, empty_text: String = "Nothing here yet.") -> void:

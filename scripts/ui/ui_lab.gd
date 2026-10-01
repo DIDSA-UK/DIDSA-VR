@@ -6,9 +6,12 @@ extends Control
 ##
 ##   Godot editor -> open res://lab/ui_lab.tscn -> F6.
 ##
-## To tune the look: open res://ui/didsa_ui_theme.tres in the Inspector, change a
+## To tune the look: open a preset in res://ui/themes/ in the Inspector, change a
 ## colour / radius / font size, save, press F6 again. The tablet, the side panel
 ## and (from Phase 3) windows and the keyboard are all built from that one resource.
+##
+## Along the bottom: the three themes (Navy / Simple / Dark) and the shader Effects switch: the
+## tablet and side panel re-theme live. Presets are ui/themes/*.tres: edit one in the Inspector, F6.
 ##
 ## Things to click: the category grid; the rail (Mates / Measure / Sections / Shoot
 ## hide are mode tools: only one is ever ON, see tool_manager.gd); the tool header
@@ -21,6 +24,7 @@ const ToolManager := preload("res://scripts/ui/tool_manager.gd")
 const TabletUI := preload("res://scripts/ui/tablet_ui.gd")
 const SidePanelUI := preload("res://scripts/ui/side_panel_ui.gd")
 const CommandStack := preload("res://scripts/command_stack.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const THEME_PATH := "res://ui/didsa_ui_theme.tres"
 const TABLET_PX := Vector2(1067, 693) ## the real tablet's viewport (0.40 x 0.26 m at 2667 px/m)
 const SIDE_PX := Vector2(452, 693)
@@ -44,7 +48,8 @@ func _ready() -> void:
 	window.content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
 	if DisplayServer.get_name() != "headless":
 		window.size = Vector2i(1600, 900)
-	tokens = load(THEME_PATH)
+	tokens = UiThemes.live() # the shared theme resource the real tablet, windows and keyboard use too
+	UiThemes.apply(UiThemes.current)
 	theme = tokens.build_theme()
 	var backdrop := ColorRect.new()
 	backdrop.color = Color(0.02, 0.03, 0.05)
@@ -82,6 +87,24 @@ func _ready() -> void:
 	add.text = "Add a category (max 8)"
 	add.pressed.connect(_add_category)
 	bar.add_child(add)
+	var theme_group := ButtonGroup.new()
+	for theme_name in UiThemes.ORDER:
+		var tb := Button.new()
+		tb.text = theme_name
+		tb.toggle_mode = true
+		tb.button_group = theme_group
+		tb.button_pressed = (theme_name == UiThemes.current)
+		tb.pressed.connect(func() -> void: UiThemes.apply(theme_name)) # every UI in the lab re-themes itself next frame
+		bar.add_child(tb)
+	var fx := Button.new()
+	fx.text = "Effects: ON" if UiThemes.fx_enabled else "Effects: off"
+	fx.toggle_mode = true
+	fx.button_pressed = UiThemes.fx_enabled
+	fx.toggled.connect(func(on: bool) -> void:
+		UiThemes.set_fx(on)
+		fx.text = "Effects: ON" if on else "Effects: off"
+	)
+	bar.add_child(fx)
 	_mode_log = Label.new()
 	_mode_log.theme_type_variation = &"LabelDim"
 	_mode_log.text = "Active mode tool: none"
@@ -89,7 +112,12 @@ func _ready() -> void:
 	_refresh_side()
 
 
+var _seen_revision := -1
+
 func _process(delta: float) -> void:
+	if _seen_revision != UiThemes.revision:
+		_seen_revision = UiThemes.revision
+		theme = tokens.build_theme() # the lab's own bar re-themes too (the tablet and side panel do it themselves)
 	tablet.tick(delta)
 	_refresh_side_rows()
 

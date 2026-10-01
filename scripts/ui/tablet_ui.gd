@@ -26,6 +26,8 @@ signal feedback(event: String) ## "error" / "confirm": the host turns it into a 
 signal activity ## anything on screen changed that the host's render gate should know about (a toast, a page switch)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 const LONG_PRESS_MS := 600
 const TOAST_SECONDS := 3.0
 
@@ -63,6 +65,9 @@ var _help_card: PanelContainer
 var _help_label: Label
 var _status_label: Label
 var _status_panel: PanelContainer
+var _divider: ColorRect
+var _fx: ColorRect ## the glass overlay (fx_overlay.gd)
+var _seen_revision := -1 ## ui_themes.gd's revision this UI was last themed at
 var _undo_button: Button
 var _redo_button: Button
 var _settings_button: Button
@@ -81,6 +86,7 @@ func setup(p_tokens: Resource, p_registry, p_manager, options: Dictionary = {}) 
 	command_stack = options.get("command_stack")
 	settings_builder = options.get("settings_builder", Callable())
 	theme = tokens.build_theme()
+	_seen_revision = UiThemes.revision
 	_build_shell()
 	rebuild()
 	manager.active_changed.connect(func(_id: String) -> void: _refresh_rail_visuals())
@@ -110,6 +116,7 @@ func _build_shell() -> void:
 	divider.custom_minimum_size = Vector2(2, 0)
 	divider.color = tokens.border
 	top.add_child(divider)
+	_divider = divider
 	var utility := HBoxContainer.new()
 	utility.add_theme_constant_override("separation", tokens.gap)
 	top.add_child(utility)
@@ -202,6 +209,10 @@ func _build_shell() -> void:
 	status.add_child(_status_label)
 	column.add_child(status)
 
+	_fx = FxOverlay.new() # last child of the root, so the glass sits over everything but the laser cursor the host adds after
+	add_child(_fx)
+	_fx.setup(tokens)
+
 
 func _utility_button(icon_name: String, toggle: bool) -> Button:
 	var b := Button.new()
@@ -236,11 +247,7 @@ func rebuild() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.clip_text = true
 		b.add_theme_font_size_override("font_size", tokens.font_small + 2)
-		var on_style: StyleBoxFlat = tokens.selected_box(cat.accent)
-		b.add_theme_stylebox_override("pressed", on_style)
-		b.add_theme_stylebox_override("hover_pressed", on_style)
-		b.add_theme_color_override("icon_pressed_color", cat.accent)
-		b.add_theme_color_override("icon_hover_pressed_color", cat.accent)
+		_style_selected(b, cat.accent, true)
 		b.pressed.connect(select_category.bind(cat.id))
 		_cat_grid.add_child(b)
 		_cat_buttons[cat.id] = b
@@ -286,14 +293,46 @@ func _rebuild_rail() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.theme_type_variation = &"ButtonRail"
 		b.add_theme_font_size_override("font_size", tokens.font_small + 2)
-		var on_style: StyleBoxFlat = tokens.selected_box(cat.accent)
-		b.add_theme_stylebox_override("pressed", on_style)
-		b.add_theme_stylebox_override("hover_pressed", on_style)
-		b.add_theme_color_override("icon_pressed_color", cat.accent)
+		_style_selected(b, cat.accent, false)
 		b.pressed.connect(_on_rail_pressed.bind(t.id))
 		_rail_box.add_child(b)
 		_rail_buttons[t.id] = b
 	_refresh_rail_visuals()
+
+
+func _style_selected(b: Button, accent: Color, both_icon_states: bool) -> void:
+	## A category / rail button's "selected" look in its category's accent colour (a per-button
+	## override on top of the theme, so it has to be re-applied when the theme changes).
+	var on_style: StyleBoxFlat = tokens.selected_box(accent)
+	b.add_theme_stylebox_override("pressed", on_style)
+	b.add_theme_stylebox_override("hover_pressed", on_style)
+	b.add_theme_color_override("icon_pressed_color", accent)
+	if both_icon_states:
+		b.add_theme_color_override("icon_hover_pressed_color", accent)
+
+
+func apply_theme() -> void:
+	## Re-themes in place after ui_themes.gd changed the shared theme or the effects switch: new
+	## Theme, the per-button accent overrides, the divider, the glass overlay. Nothing is rebuilt, so
+	## the selected tool, scroll position and every toggle stay exactly as they were.
+	_seen_revision = UiThemes.revision
+	theme = tokens.build_theme()
+	_divider.color = tokens.border
+	for cat in registry.categories():
+		if _cat_buttons.has(cat.id):
+			_style_selected(_cat_buttons[cat.id], cat.accent, true)
+	var current = registry.category(selected_category_id)
+	if current != null:
+		for id in _rail_buttons:
+			_style_selected(_rail_buttons[id], current.accent, false)
+	_fx.refresh(tokens)
+	_refresh_rail_visuals()
+	activity.emit()
+
+
+func _process(_delta: float) -> void:
+	if _seen_revision != UiThemes.revision:
+		apply_theme()
 
 
 func _refresh_rail_visuals() -> void:

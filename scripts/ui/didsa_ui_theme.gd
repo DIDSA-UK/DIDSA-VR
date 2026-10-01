@@ -17,6 +17,9 @@ extends Resource
 ## ButtonDanger, ButtonRail, PanelRaised.
 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+
+@export var display_name := "Navy" ## shown in Settings > Appearance
 
 # --- Colour -----------------------------------------------------------------
 @export_group("Colour")
@@ -52,6 +55,15 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 @export var font_title := 30
 @export var font_tiny := 16
 
+# --- Shader effects: how strong they are in THIS theme. Whether they are on at all is the
+# Settings > Appearance switch (ui_themes.gd's fx_enabled).
+@export_group("Effects")
+@export var fx_glow_colour := Color(0.31, 0.77, 1.0) ## the glass overlay's inner edge glow
+@export var fx_glow_strength := 0.30 ## 0 = no edge glow
+@export var fx_glow_width := 20.0 ## pixels the glow fades over
+@export var fx_sheen_strength := 0.05 ## the faint top-down highlight; 0 = none
+@export var fx_button_glow := 0.35 ## alpha of the soft glow around hovered / selected buttons; 0 = none
+
 # --- Motion (used from Phase 4; kept here so every duration is tunable in one place)
 @export_group("Motion")
 @export var reduce_motion := false
@@ -81,6 +93,23 @@ func box(fill: Color, outline: Color = Color(0, 0, 0, 0), radius: int = -1, marg
 	return sb
 
 
+func apply_from(other: Resource) -> void:
+	## Copies every token from another theme resource into this one, in place (so everything holding
+	## this resource sees the new look). ui_themes.gd uses it to switch presets.
+	for p in get_property_list():
+		if (int(p["usage"]) & PROPERTY_USAGE_SCRIPT_VARIABLE) and (int(p["usage"]) & PROPERTY_USAGE_STORAGE):
+			set(p["name"], other.get(p["name"]))
+
+
+func glow(sb: StyleBoxFlat, colour: Color, strength: float = 1.0) -> StyleBoxFlat:
+	## A soft outer glow around a stylebox: only with shader effects on and a theme that asks for it.
+	if UiThemes.fx_enabled and fx_button_glow * strength > 0.001:
+		sb.shadow_color = Color(colour.r, colour.g, colour.b, fx_button_glow * strength)
+		sb.shadow_size = 8
+		sb.shadow_offset = Vector2.ZERO
+	return sb
+
+
 func panel_box() -> StyleBoxFlat:
 	## The chrome of every top-level surface: tablet, floating window, keyboard.
 	return box(bg_panel, border, radius_panel, pad_panel)
@@ -94,7 +123,7 @@ func selected_box(accent_colour: Color = Color(0, 0, 0, 0)) -> StyleBoxFlat:
 	## A selected / toggled-on control: deep fill and a bright outline. Pass a
 	## category accent to tint it; the default is the global accent.
 	var a := accent if accent_colour.a <= 0.0 else accent_colour
-	return box(a.darkened(0.62), a, radius_control, pad_control, border_width)
+	return glow(box(a.darkened(0.62), a, radius_control, pad_control, maxi(border_width, 2)), a) # a selected control keeps a clear outline in every theme
 
 
 # --- Theme ------------------------------------------------------------------
@@ -172,7 +201,7 @@ func _button_states(t: Theme, type: String, fill: Color, outline: Color, selecte
 	var ink := text if label_colour.a <= 0.0 else label_colour
 	var hover_fill := fill.lightened(0.12)
 	t.set_stylebox("normal", type, box(fill, outline))
-	t.set_stylebox("hover", type, box(hover_fill, selected_accent.darkened(0.2)))
+	t.set_stylebox("hover", type, glow(box(hover_fill, selected_accent.darkened(0.2)), selected_accent, 0.6))
 	var on := selected_box(selected_accent)
 	t.set_stylebox("pressed", type, on)
 	t.set_stylebox("hover_pressed", type, on)

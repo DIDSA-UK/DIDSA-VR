@@ -7,24 +7,30 @@ extends WorldEnvironment
 ## never the floor grid or the model, so parts read consistently across all
 ## three rendered presets.
 ##
-## Passthrough: per Godot's own OpenXR passthrough flow (start_passthrough()/
-## stop_passthrough() on the OpenXRInterface, added alongside
-## is_passthrough_supported()), the viewport must render with a fully
-## transparent clear colour wherever nothing else is drawn, so the
-## runtime's own passthrough compositor layer shows through those pixels.
-## On desktop (no headset, or a non-Quest runtime without the passthrough
-## extension) this falls back to a plain black background and warns once —
-## there's no camera feed to show outside a real headset.
+## Passthrough: Godot 4.3+'s unified way (docs: tutorials/xr/ar_passthrough) is the
+## ENVIRONMENT BLEND MODE: ask the runtime which modes it offers
+## (get_supported_environment_blend_modes()); if ALPHA_BLEND is there set it and make
+## the viewport's background transparent (alpha blended over the camera feed, and Godot
+## performs the platform's extra "turn passthrough on" steps itself); else ADDITIVE with a
+## black background. Only if the runtime offers neither is the older
+## start_passthrough() tried. (The first version of this file used ONLY that older call
+## and never set a blend mode, which is why passthrough did nothing over a PC link.)
+## Leaving Passthrough sets OPAQUE again. Whatever happened is described in
+## passthrough_status(), which the tablet's Environment page shows, so a failure says
+## WHY (what the runtime offers) instead of just showing black. On desktop (no headset) it
+## falls back to a plain black background.
 
 signal scene_changed(scene_name: String)
 
 const SCENES: Array[String] = ["Light", "Dark", "Mid", "Passthrough"]
 
 var _sun: DirectionalLight3D
-var _xr_interface: XRInterface
+var _xr_interface: Object ## the OpenXRInterface (duck-typed so tests can pass a fake)
 var _viewport: Viewport
 var _grid_material: ShaderMaterial ## the floor's infinite_grid.gdshader material; its line colour follows the scene
 var current_scene: String = "Mid"
+var passthrough_active := false ## the camera feed is being shown (by any method)
+var passthrough_report := "" ## what Passthrough did and why — see passthrough_status()
 
 ## Light/Dark/Mid deliberately share ONE lighting rig (the Mid look: models
 ## read the same grey in all three) and differ only in background colour and
@@ -51,13 +57,17 @@ const _PRESETS := {
 }
 
 
-func setup(sun: DirectionalLight3D, xr_interface: XRInterface, viewport: Viewport, grid_material: ShaderMaterial = null) -> void:
+func setup(sun: DirectionalLight3D, xr_interface: Object, viewport: Viewport, grid_material: ShaderMaterial = null) -> void:
 	_grid_material = grid_material
 	_sun = sun
 	_xr_interface = xr_interface
 	_viewport = viewport
 	if environment == null:
 		environment = Environment.new()
+	if _xr_interface != null and _xr_interface.has_signal("session_focussed"):
+		# The OpenXR session may not be ready when the saved scene is first applied at startup;
+		# once the headset has focus, try again if Passthrough was wanted but didn't take.
+		_xr_interface.connect("session_focussed", _on_session_focussed)
 	set_scene(current_scene)
 
 
@@ -69,6 +79,12 @@ func set_scene(scene_name: String) -> void:
 		_apply_preset(_PRESETS[scene_name] if _PRESETS.has(scene_name) else _PRESETS["Mid"])
 	current_scene = scene_name
 	scene_changed.emit(current_scene)
+
+
+func _on_session_focussed() -> void:
+	if current_scene == "Passthrough" and not passthrough_active:
+		_enable_passthrough()
+		scene_changed.emit(current_scene) # so the tablet's status line refreshes
 
 
 func _apply_preset(p: Dictionary) -> void:
@@ -90,6 +106,17 @@ func _set_grid_color(color: Color) -> void:
 		_grid_material.set_shader_parameter("line_color", color)
 
 
+func _xr_ready() -> bool:
+	return _xr_interface != null and is_instance_valid(_xr_interface) and _xr_interface.has_method("is_initialized") and _xr_interface.is_initialized()
+
+
+func _blend_mode_names(modes: Array) -> String:
+	var names := []
+	for m in modes:
+		names.append({XRInterface.XR_ENV_BLEND_MODE_OPAQUE: "opaque", XRInterface.XR_ENV_BLEND_MODE_ADDITIVE: "additive", XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND: "alpha-blend"}.get(m, "mode %s" % str(m)))
+	return ", ".join(names) if not names.is_empty() else "none reported"
+
+
 func _enable_passthrough() -> void:
 	_set_grid_color(_GRID_WHITE)
 	if _sun:
@@ -103,29 +130,71 @@ func _enable_passthrough() -> void:
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color(0.6, 0.6, 0.6)
 	environment.ambient_light_energy = 0.6
-	if _viewport:
-		_viewport.transparent_bg = true
-	RenderingServer.set_default_clear_color(Color(0, 0, 0, 0))
-	if _xr_interface is OpenXRInterface:
-		var xr: OpenXRInterface = _xr_interface
-		if xr.is_passthrough_supported():
-			if not xr.start_passthrough():
-				push_warning("DIDSA VR: OpenXR passthrough is supported but failed to start — showing black instead.")
+	passthrough_active = false
+	if not _xr_ready():
+		passthrough_report = "No headset runtime is active (desktop preview), so there is no camera feed: showing a transparent/black background."
+		_set_transparent(true)
+		push_warning("DIDSA VR: " + passthrough_report)
+		return
+
+	var modes: Array = _xr_interface.get_supported_environment_blend_modes()
+	var offered := _blend_mode_names(modes)
+	var legacy_note := ""
+	if XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND in modes:
+		_xr_interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
+		_set_transparent(true)
+		passthrough_active = true
+		passthrough_report = "Passthrough ON (alpha blend). The runtime offers: %s." % offered
+	elif XRInterface.XR_ENV_BLEND_MODE_ADDITIVE in modes:
+		_xr_interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ADDITIVE
+		_set_transparent(false)
+		environment.background_color = Color(0, 0, 0, 1) # additive: black adds nothing, so the real world shows through
+		passthrough_active = true
+		passthrough_report = "Passthrough ON (additive: virtual parts look semi-transparent). The runtime offers: %s." % offered
+	elif _xr_interface.has_method("is_passthrough_supported") and _xr_interface.is_passthrough_supported():
+		_set_transparent(true)
+		if _xr_interface.start_passthrough():
+			passthrough_active = true
+			passthrough_report = "Passthrough ON (the headset's own passthrough layer). The runtime offers blend modes: %s." % offered
 		else:
-			push_warning("DIDSA VR: this headset/runtime doesn't support OpenXR passthrough — showing black instead of a camera feed.")
-	else:
-		push_warning("DIDSA VR: no OpenXR interface active (desktop preview) — Passthrough shows black instead of a camera feed.")
+			legacy_note = " The headset's passthrough layer is available but failed to start."
+	if not passthrough_active:
+		_set_transparent(true)
+		passthrough_report = "Passthrough is NOT available from this runtime. It offers blend modes: %s, and no passthrough layer.%s Check your streaming app's passthrough setting (Quest Link / Virtual Desktop); a standalone Quest build also needs the OpenXR Vendors plugin." % [offered, legacy_note]
+		push_warning("DIDSA VR: " + passthrough_report)
+	print("DIDSA VR: ", passthrough_report)
+
+
+func _set_transparent(on: bool) -> void:
+	if _viewport:
+		_viewport.transparent_bg = on
+	RenderingServer.set_default_clear_color(Color(0, 0, 0, 0) if on else Color(0, 0, 0, 1))
 
 
 func _disable_passthrough() -> void:
-	if _viewport:
-		_viewport.transparent_bg = false
-	RenderingServer.set_default_clear_color(Color(0, 0, 0, 1))
-	if _xr_interface is OpenXRInterface:
-		var xr: OpenXRInterface = _xr_interface
-		if xr.is_passthrough_supported():
-			xr.stop_passthrough()
+	var was_active := passthrough_active
+	passthrough_active = false
+	passthrough_report = ""
+	_set_transparent(false)
+	if _xr_ready():
+		var modes: Array = _xr_interface.get_supported_environment_blend_modes()
+		if XRInterface.XR_ENV_BLEND_MODE_OPAQUE in modes and _xr_interface.environment_blend_mode != XRInterface.XR_ENV_BLEND_MODE_OPAQUE:
+			_xr_interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE # back to full VR
+		if was_active and _xr_interface.has_method("is_passthrough_supported") and _xr_interface.is_passthrough_supported():
+			_xr_interface.stop_passthrough()
 
 
 func is_passthrough_supported() -> bool:
-	return _xr_interface is OpenXRInterface and (_xr_interface as OpenXRInterface).is_passthrough_supported()
+	## True if this runtime can show the camera feed by ANY method: an alpha-blend or additive
+	## environment blend mode, or the headset's own passthrough layer.
+	if not _xr_ready():
+		return false
+	var modes: Array = _xr_interface.get_supported_environment_blend_modes()
+	if XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND in modes or XRInterface.XR_ENV_BLEND_MODE_ADDITIVE in modes:
+		return true
+	return _xr_interface.has_method("is_passthrough_supported") and _xr_interface.is_passthrough_supported()
+
+
+func passthrough_status() -> String:
+	## One human-readable line (or two) about what Passthrough is doing; "" unless that scene is chosen.
+	return passthrough_report if current_scene == "Passthrough" else ""

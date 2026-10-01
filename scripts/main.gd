@@ -79,6 +79,9 @@ const API_PREFIX := "/document"
 
 func _ready() -> void:
 	_settings.load_from_disk()
+	UiThemes.set_fx(_settings.fx_enabled) # before anything is built, so the first frame already has the right look
+	if not UiThemes.apply(_settings.ui_theme):
+		UiThemes.apply("Navy")
 	UiFeedback.reduce_motion = _settings.reduce_motion
 	UiFeedback.set_haptics_level(_settings.haptics_level)
 	UiFeedback.set_sound_enabled(_settings.sound_enabled)
@@ -452,10 +455,36 @@ func is_passthrough_supported() -> bool:
 	return _world_environment.is_passthrough_supported()
 
 
+func passthrough_status() -> String:
+	## What Passthrough is doing and, if it can't, why (what the runtime offers): shown on the
+	## tablet's Environment page. "" unless the Passthrough scene is selected.
+	return _world_environment.passthrough_status()
+
+
 # --- Comfort settings (the redesigned tablet's Settings page): Reduce motion and haptics
 # intensity, persisted via app_settings.gd and applied through ui_feedback.gd's statics.
 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+
+func ui_theme() -> String:
+	return _settings.ui_theme
+
+
+func set_ui_theme(theme_name: String) -> void:
+	## Settings > Appearance: every tablet / window / keyboard re-themes itself in place.
+	if UiThemes.apply(theme_name):
+		_settings.set_ui_theme(theme_name)
+
+
+func fx_enabled() -> bool:
+	return _settings.fx_enabled
+
+
+func set_fx_enabled(on: bool) -> void:
+	_settings.set_fx_enabled(on)
+	UiThemes.set_fx(on)
+
 
 func reduce_motion() -> bool:
 	return _settings.reduce_motion

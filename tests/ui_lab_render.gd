@@ -63,6 +63,30 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE selecting a mode tool turns it on and shows the side list: ", lab.manager.active_id == "mates" and lab.side.visible and lab.side.row_count() == 2)
 
+	# Themes x effects: render each, check the shader and the themes are really visible.
+	var Themes = load("res://scripts/ui/ui_themes.gd")
+	var edge := Vector2i(24 + 8, 24 + 330) # a few pixels inside the tablet panel's left edge, mid-height
+	var panels := {}
+	var edge_on := {}
+	var edge_off := {}
+	for theme_name in Themes.ORDER:
+		Themes.apply(theme_name)
+		Themes.set_fx(true)
+		var shot_on := await _shot("ui_lab_%s_fx_on.png" % theme_name.to_lower())
+		edge_on[theme_name] = shot_on.get_pixelv(edge)
+		panels[theme_name] = shot_on.get_pixelv(Vector2i(60, 600))
+		Themes.set_fx(false)
+		var shot_off := await _shot("ui_lab_%s_fx_off.png" % theme_name.to_lower())
+		edge_off[theme_name] = shot_off.get_pixelv(edge)
+	Themes.set_fx(true)
+	Themes.apply("Navy")
+	print("SMOKE the three themes render visibly different panels: ", not panels["Navy"].is_equal_approx(panels["Simple"]) and not panels["Simple"].is_equal_approx(panels["Dark"]) and not panels["Navy"].is_equal_approx(panels["Dark"]))
+	var glow_seen := true
+	for theme_name in Themes.ORDER:
+		glow_seen = glow_seen and _luma(edge_on[theme_name]) > _luma(edge_off[theme_name]) + 0.004
+	print("SMOKE the glass shader actually draws: the panel edge is brighter with effects on, in every theme: ", glow_seen, " ", edge_on, edge_off)
+	print("SMOKE ...and Navy's glow is stronger than Simple's (each theme sets its own strength): ", _luma(edge_on["Navy"]) - _luma(edge_off["Navy"]) > _luma(edge_on["Simple"]) - _luma(edge_off["Simple"]))
+
 	# Eight categories + History open.
 	for i in 4:
 		lab._add_category()

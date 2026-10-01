@@ -20,6 +20,7 @@ signal toast(text: String, kind: String)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
@@ -146,6 +147,7 @@ func refresh() -> void:
 		var labels: Array = _mates_tool.picked_labels()
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
+	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
 	if _measure_picks_label and _measure_tool:
 		var m: Array = _measure_tool.picked_labels()
 		_measure_picks_label.text = "Picked: %s" % (", ".join(m) if not m.is_empty() else "none")
@@ -398,8 +400,8 @@ func _build_environment_page() -> Control:
 func _refresh_environment_status() -> void:
 	if _environment_status_label == null or _main == null:
 		return
-	if _main.current_scene() == "Passthrough" and not _main.is_passthrough_supported():
-		_environment_status_label.text = "Passthrough isn't supported on this headset/runtime — showing black instead of a camera feed."
+	if _main.current_scene() == "Passthrough":
+		_environment_status_label.text = _main.passthrough_status() # says whether it's on and, if not, what the runtime offers
 	else:
 		_environment_status_label.text = "Scene: %s" % _main.current_scene()
 
@@ -792,6 +794,9 @@ func settings_page() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
+	page.add_child(_hint("Appearance"))
+	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
+	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
 	page.add_child(_hint("Comfort"))
 	page.add_child(_mode_toggle("Reduce motion", func(on: bool) -> void: _main.set_reduce_motion(on), _main.reduce_motion()))
 	page.add_child(_mode_toggle("Sound", func(on: bool) -> void: _main.set_sound_enabled(on), _main.sound_enabled()))
