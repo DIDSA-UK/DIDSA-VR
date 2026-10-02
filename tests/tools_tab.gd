@@ -22,10 +22,14 @@ func find_button(pred: Callable) -> Button:
 	return null
 
 func aim_and_click(b: Button) -> void:
+	# The tablet is tilted on the wrist: stand the controller along its normal and look straight at the button.
 	var c: Vector2 = b.global_position + b.size * 0.5
 	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
 	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
-	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
+	var xf: Transform3D = tab._quad.global_transform
+	var p: Vector3 = xf * Vector3(lx, ly, 0.0)
+	var n: Vector3 = xf.basis.z.normalized()
+	r.global_transform = Transform3D(Basis.looking_at(-n, Vector3.UP), p + n * 0.4)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click")
@@ -36,7 +40,6 @@ func aim_and_click(b: Button) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -54,6 +57,7 @@ func _initialize() -> void:
 
 	# shoot the wrist bullseye to open the tablet (closed by default)
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
@@ -81,7 +85,7 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "View"))
 	var visibility_tab := find_button(func(b: Button) -> bool: return b.text == "Visibility")
 	await aim_and_click(visibility_tab)
-	print("SMOKE View > Visibility opens: ", tab._pages["View"].visible and visibility_tab.button_pressed)
+	print("SMOKE View > Visibility opens: ", tab.ui.selected_tool_id == "visibility")
 
 	# hide all / show all
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Hide all"))
@@ -113,7 +117,6 @@ func _initialize() -> void:
 	await physics_frame; await physics_frame
 	r._try_select()
 	print("SMOKE selected part1 for isolate: ", r.selected_node == parts[1])
-	r.rotation_degrees = Vector3(-90, 0, 0) # back to how aim_and_click expects the laser to point (straight down at the tablet)
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Isolate selected"))
 	print("SMOKE isolate hides everything except the selected part: ", parts[0].visible == false and parts[1].visible == true and parts[2].visible == false)
 	stack.undo()
@@ -121,8 +124,8 @@ func _initialize() -> void:
 
 	# shoot-to-hide: toggle the tool on, aim at a part, pull the trigger
 	stack.clear()
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text.begins_with("Shoot to hide")))
-	print("SMOKE shoot-to-hide toggled on both hands: ", l.hide_tool_active and r.hide_tool_active)
+	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Shoot hide"))
+	print("SMOKE shoot-to-hide toggled on both hands (selecting it on the rail turns it on): ", l.hide_tool_active and r.hide_tool_active and tab.manager.active_id == "shoot_hide")
 	r.position = parts[2].global_position + Vector3(0, 0, 2)
 	r.look_at(parts[2].global_position, Vector3.UP)
 	await physics_frame; await physics_frame

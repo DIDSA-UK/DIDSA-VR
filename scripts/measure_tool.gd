@@ -1,6 +1,6 @@
 extends Node
 ## Milestone 4's last assembly tool, "Measurements": laser-pick 1-2 vertex/
-## edge/face entities and query DIDSA-CAD's real, stateless
+## edge/face entities (an edge or vertex when the laser is on one: see topology_pick.gd) and query DIDSA-CAD's real, stateless
 ## POST /parts/{part_id}/measure endpoint (app.document.measure.measure) -
 ## the same one the flat app's own Measure panel uses
 ## (client/lib/viewport3d/measurement_panel.dart), never a VR-only
@@ -82,6 +82,18 @@ func status_text() -> String:
 	return ""
 
 
+func picked_entities() -> Array:
+	## [{part, kind, body_id, index, face_index, key}] for face_highlight.gd, in pick order (a face, edge or vertex).
+	var out := []
+	for p in _picks:
+		var entity: Dictionary = (p.get("entity", {}) as Dictionary).duplicate()
+		entity["part"] = p.get("part")
+		if not entity.has("face_index"):
+			entity["face_index"] = p.get("face_index", -1)
+		out.append(entity)
+	return out
+
+
 func picked_labels() -> Array:
 	var out := []
 	for p in _picks:
@@ -89,7 +101,7 @@ func picked_labels() -> Array:
 	return out
 
 
-func try_pick(part: Node3D, face_index: int) -> void:
+func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	## Called by controller.gd's trigger handler while the tool is active.
 	## Always sets status and emits picks_changed, even on rejection, so the
 	## wrist tablet can show *why* a pick didn't count (mirrors mates_tool.
@@ -111,6 +123,11 @@ func try_pick(part: Node3D, face_index: int) -> void:
 		clear_picks()
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
 	var subshape := MeshIdentity.subshape_ref_for_hit(part, face_index)
+	var kind := "face"
+	if not subshape.is_empty() and not entity.is_empty() and str(entity.get("kind", "face")) != "face":
+		# The laser was on an edge or vertex of that face (topology_pick.gd): measure that instead of the face.
+		kind = str(entity["kind"])
+		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
 	var rejection := _validate_pick(occ_ref, subshape)
 	if rejection != "":
 		_status = rejection
@@ -119,7 +136,10 @@ func try_pick(part: Node3D, face_index: int) -> void:
 	_picks.append({
 		"occurrence_id": occ_ref["occurrence_id"],
 		"subshape_ref": subshape,
-		"label": str(part.name), # Node.name is a StringName, not a String - cast once here (mates_tool.gd's own precedent)
+		"label": str(part.name) if kind == "face" else "%s (%s)" % [str(part.name), kind], # Node.name is a StringName, not a String - cast once here (mates_tool.gd's own precedent)
+		"part": part, # for face_highlight.gd: the picked face/edge/vertex stays lit
+		"face_index": face_index,
+		"entity": entity if kind != "face" else {},
 	})
 	_owner_part_id = occ_ref["owner_part_id"]
 	_status = ""

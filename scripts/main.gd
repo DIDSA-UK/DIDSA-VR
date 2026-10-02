@@ -27,9 +27,6 @@ extends Node3D
 @export var include_hidden: bool = false
 @export var tier: String = "" ## "" for full quality, or "coarse".
 
-@export_group("Wrist tablet")
-@export var use_new_tablet: bool = true ## the redesigned tablet (scripts/ui/wrist_tablet_v2.gd, docs/wrist-tablet-redesign-plan.md) instead of scripts/wrist_tablet.gd. Same job and public API; flip it to compare in the headset.
-
 @export_group("Placement")
 @export var spawn_position: Vector3 = Vector3(0, 1.0, -1.0)
 @export var local_glb_scale: float = 1.0 ## Scale for a .glb loaded from disk with the tablet's Files tab.
@@ -53,6 +50,7 @@ const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/fa
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
+var face_highlight: Node ## face-level hover / pick highlight for Mates and Measure — see face_highlight.gd
 var _two_hand: Node
 var _tablet: Node
 var _keyboard: Node
@@ -91,6 +89,7 @@ func _ready() -> void:
 	_add_two_hand_model()
 	_add_mates_tool()
 	_add_measure_tool()
+	_add_face_highlight()
 	_add_colour_tool()
 	_add_section_tool()
 	_add_assembly_tree_window()
@@ -146,6 +145,25 @@ func _add_measure_tool() -> void:
 	measure.name = "MeasureTool"
 	add_child(measure)
 	_measure_tool = measure
+
+
+func _add_face_highlight() -> void:
+	## Lights up just the hovered / picked FACE for Mates and Measure (see face_highlight.gd).
+	var highlight := preload("res://scripts/face_highlight.gd").new()
+	highlight.name = "FaceHighlight"
+	add_child(highlight)
+	face_highlight = highlight
+	var refresh := func() -> void:
+		var entries: Array = []
+		if _mates_tool.active:
+			entries = _mates_tool.picked_entities()
+		elif _measure_tool.active:
+			entries = _measure_tool.picked_entities()
+		highlight.set_picks(entries)
+	_mates_tool.picks_changed.connect(refresh)
+	_measure_tool.picks_changed.connect(refresh)
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.face_highlight = highlight
 
 
 func _add_colour_tool() -> void:
@@ -263,7 +281,7 @@ func open_window_count(kind: String) -> int:
 
 
 func _add_wrist_tablet() -> void:
-	var tablet: Node = (preload("res://scripts/ui/wrist_tablet_v2.gd") if use_new_tablet else preload("res://scripts/wrist_tablet.gd")).new()
+	var tablet: Node = preload("res://scripts/ui/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
 	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window)
 	_tablet = tablet

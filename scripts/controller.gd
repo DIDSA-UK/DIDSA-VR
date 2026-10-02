@@ -35,6 +35,8 @@ extends XRController3D
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, so the level numbers and cutoffs stay in one place
 const OneEuro := preload("res://scripts/one_euro.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const TopologyPick := preload("res://scripts/topology_pick.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -72,6 +74,13 @@ var _hover_material: StandardMaterial3D
 var _hover_node: Node3D = null ## the part a grip would grab right now, lightly highlighted
 var _aim_hover_material: StandardMaterial3D
 var _aim_hover_node: Node3D = null ## the part the laser would select right now, lightly highlighted
+var face_highlight = null ## set by main.gd; face_highlight.gd: with Mates / Measure on, the laser lights up only the FACE it would pick
+var _marker_material: StandardMaterial3D ## the small origin sphere; coloured from the UI theme (see _style_ring())
+var _ring_material: StandardMaterial3D ## the tracking ring
+var _ring_face_material: StandardMaterial3D ## its faint glass face
+var _ring_glow_material: StandardMaterial3D ## its soft outer glow (shader effects on)
+var _ring_glow_node: MeshInstance3D
+var _seen_theme_revision := -1
 var _hover_panel: Node3D = null ## the floating window / keyboard this hand's laser is on (it glows, and a grip would carry it)
 var _hover_panel_distance := -1.0
 var _pivot_local: Vector3 = Vector3.ZERO ## selected_node's local-space point the thumbstick rotates about
@@ -157,6 +166,8 @@ func _process(_delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _seen_theme_revision != UiThemes.revision:
+		_style_ring()
 	_update_grab_hover()
 	_update_aim_hover()
 	_update_panel_hover()
@@ -532,7 +543,7 @@ func _try_pick_mate_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or mates_tool == null:
 		return
-	mates_tool.try_pick(part, hit.get("face_index", -1))
+	mates_tool.try_pick(part, hit.get("face_index", -1), _mate_entity(hit))
 
 
 func _try_pick_measure_entity() -> void:
@@ -543,7 +554,25 @@ func _try_pick_measure_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or measure_tool == null:
 		return
-	measure_tool.try_pick(part, hit.get("face_index", -1))
+	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit))
+
+
+func _mate_entity(hit: Dictionary) -> Dictionary:
+	## What a Mates pick on this ray hit would take: a corner, a straight / circular edge, or the face.
+	var part: Node3D = hit.get("part")
+	if part == null or not hit.has("point"):
+		return {}
+	var distance := global_position.distance_to(hit["point"])
+	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance), true)
+
+
+func _measure_entity(hit: Dictionary) -> Dictionary:
+	## What a Measure pick on this ray hit would take: a vertex, an edge or a face (topology_pick.gd).
+	var part: Node3D = hit.get("part")
+	if part == null or not hit.has("point"):
+		return {}
+	var distance := global_position.distance_to(hit["point"])
+	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance))
 
 
 func _try_select() -> void:
@@ -616,7 +645,19 @@ func _update_aim_hover() -> void:
 	var hit := {}
 	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active or measure_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
-	_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
+	if face_highlight != null and (mates_tool_active or measure_tool_active):
+		# A pick takes one CAD face (Mates) or face / edge / vertex (Measure), so light up just that, not the
+		# whole mesh (which says nothing about what the trigger is about to take).
+		_set_aim_hover(null, Vector3.ZERO)
+		if measure_tool_active:
+			face_highlight.set_hover_entity(self, hit.get("part"), _measure_entity(hit))
+		else:
+			var mate_entity := _mate_entity(hit)
+			face_highlight.set_hover_entity(self, hit.get("part"), mate_entity if TopologyPick.is_mateable(hit.get("part"), mate_entity) else {})
+	else:
+		if face_highlight != null:
+			face_highlight.clear_hover(self)
+		_set_aim_hover(hit.get("part"), hit.get("point", Vector3.ZERO))
 	_part_hit_distance = global_position.distance_to(hit["point"]) if hit.has("point") else -1.0
 
 
@@ -673,12 +714,10 @@ func _add_visible_marker() -> void:
 	sphere.radius = 0.02 / 3.0
 	sphere.height = 0.04 / 3.0
 	marker.mesh = sphere
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 1.0, 1.0)
-	mat.albedo_color = Color(1.0, 1.0, 1.0)
-	sphere.material = mat
+	_marker_material = StandardMaterial3D.new()
+	_marker_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_marker_material.emission_enabled = true
+	sphere.material = _marker_material # coloured in _style_ring(): the UI theme's accent, like the rest of the redesign
 	add_child(marker)
 
 
@@ -689,19 +728,75 @@ func _add_visible_marker() -> void:
 ## +Z is back (this XRController3D's aim points down local -Z — see
 ## _add_laser()), and it moved by one ring diameter (0.096 m, twice its 0.048 m
 ## outer radius) on top of the earlier 0.011 m nudge.
+##
+## UI redesign: the ring now matches the wrist watch and the tablet — a thin accent-coloured ring
+## on a faint glass face, with a soft glow around it when shader effects are on; all colours come
+## from the live UI theme (so Navy / Simple / Dark restyle it) via _style_ring().
 func _add_tracking_ring() -> void:
+	var anchor := Node3D.new()
+	anchor.position = Vector3(0.0, 0.013, -0.024 + 0.011 + 0.096)
+	add_child(anchor)
+
+	_ring_glow_material = _flat_ring_material(true)
+	_ring_glow_node = MeshInstance3D.new()
+	var glow := TorusMesh.new()
+	glow.inner_radius = 0.040
+	glow.outer_radius = 0.058
+	glow.material = _ring_glow_material
+	_ring_glow_node.mesh = glow
+	_ring_glow_node.position.y = -0.0005
+	anchor.add_child(_ring_glow_node)
+
+	_ring_face_material = _flat_ring_material(false)
+	var face_node := MeshInstance3D.new()
+	var face := CylinderMesh.new()
+	face.top_radius = 0.0445
+	face.bottom_radius = 0.0445
+	face.height = 0.001
+	face.radial_segments = 48
+	face.material = _ring_face_material
+	face_node.mesh = face
+	anchor.add_child(face_node)
+
+	_ring_material = _flat_ring_material(false)
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
-	torus.inner_radius = 0.044
-	torus.outer_radius = 0.048
-	var ring_mat := StandardMaterial3D.new()
-	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ring_mat.albedo_color = Color(0.82, 0.85, 0.9, 0.6)
-	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	torus.material = ring_mat
+	torus.inner_radius = 0.0435
+	torus.outer_radius = 0.0485
+	torus.rings = 48
+	torus.material = _ring_material
 	ring.mesh = torus
-	ring.position = Vector3(0.0, 0.013, -0.024 + 0.011 + 0.096)
-	add_child(ring)
+	ring.position.y = 0.0006
+	anchor.add_child(ring)
+	_style_ring()
+
+
+func _flat_ring_material(additive: bool) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	if additive:
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	return mat
+
+
+func _style_ring() -> void:
+	## The hand marker and ring in the live UI theme's colours; re-run when the theme or the effects switch changes.
+	var theme: Resource = UiThemes.live()
+	_seen_theme_revision = UiThemes.revision
+	var accent: Color = theme.accent
+	if _marker_material:
+		var c: Color = accent.lightened(0.5)
+		_marker_material.albedo_color = c
+		_marker_material.emission = c
+	if _ring_material:
+		_ring_material.albedo_color = Color(accent.r, accent.g, accent.b, 0.85)
+	if _ring_face_material:
+		var panel: Color = theme.bg_panel
+		_ring_face_material.albedo_color = Color(panel.r, panel.g, panel.b, 0.28)
+	if _ring_glow_material:
+		_ring_glow_material.albedo_color = Color(accent.r, accent.g, accent.b, 0.22)
+		_ring_glow_node.visible = UiThemes.fx_enabled and theme.fx_button_glow > 0.001
 
 
 func _add_laser() -> void:

@@ -1,6 +1,6 @@
 extends SceneTree
 ## Headless regression checks for the "real-headset bug round" of 29 Sep 2026
-## (docs/status.md): snap-turn direction, the wrist tablet's one-row category
+## (docs/status.md): snap-turn direction, the wrist tablet's (layout/scroll/edge checks now live in tablet and laser_surface) category
 ## rail / scrolling / uncapped Files list, the assembly tree window's row list
 ## actually getting height, the A/X nudge steering, and the stripped-down
 ## controller ring. Boots main.tscn with NO backend.
@@ -11,7 +11,6 @@ var origin: XROrigin3D
 var cam: XRCamera3D
 var l: XRController3D
 var r: XRController3D
-var tab
 
 
 func _all_nodes(n: Node, out: Array) -> void:
@@ -23,7 +22,6 @@ func _all_nodes(n: Node, out: Array) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(main)
 	await process_frame
@@ -31,7 +29,6 @@ func _initialize() -> void:
 	cam = origin.get_node("XRCamera3D")
 	l = origin.get_node("LeftController")
 	r = origin.get_node("RightController")
-	tab = l.get_node("WristTablet")
 	for i in 4:
 		await process_frame
 
@@ -54,76 +51,13 @@ func _initialize() -> void:
 	for n in meshes:
 		if n is MeshInstance3D and n.mesh is CylinderMesh and n.get_parent() == r and n.mesh.height < 0.01 and n.mesh.top_radius < 0.02:
 			discs += 1
-		if n is MeshInstance3D and n.mesh is TorusMesh and n.get_parent() == r:
-			ring = n
+		if n is MeshInstance3D and n.mesh is TorusMesh and n.get_parent().get_parent() == r:
+			ring = n # the ring's pieces (glow, face, accent ring) share one anchor node, which carries the position
 	print("SMOKE controller has no thumbstick/button discs any more: ", discs == 0)
-	print("SMOKE controller ring is still there and moved back by ~one diameter (z ~ +0.083): ", ring != null and absf(ring.position.z - 0.083) < 0.002)
+	print("SMOKE controller ring is still there and moved back by ~one diameter (z ~ +0.083): ", ring != null and absf((ring.get_parent() as Node3D).position.z - 0.083) < 0.002)
 
-	# --- tablet: categories on ONE row; taller and wider than the old 640x600.
-	tab.open_tablet()
-	for i in 4:
-		await process_frame
-	var rail_ys := {}
-	var buttons: Array = []
-	_all_nodes(tab._viewport, buttons)
-	for b in buttons:
-		if b is Button and b.is_visible_in_tree() and b.text in ["View", "Assembly", "Windows", "Files", "Settings"]:
-			rail_ys[b.text] = snappedf(b.global_position.y, 1.0)
-	var ys := rail_ys.values()
-	print("calibration — rail button y positions: ", rail_ys)
-	print("SMOKE all four categories and Settings share one row: ", rail_ys.size() == 5 and ys.min() == ys.max())
-	print("SMOKE tablet is 20% taller and wider than before: ", tab.viewport_size.y == 720 and tab.viewport_size.x > 640 and is_equal_approx(tab.panel_size.y, 0.27))
-	var rail_right := 0.0
-	for b in buttons:
-		if b is Button and b.text in ["Settings", "X"] and b.is_visible_in_tree():
-			rail_right = maxf(rail_right, b.global_position.x + b.size.x)
-	print("SMOKE the rail fits inside the panel width: ", rail_right > 0.0 and rail_right <= tab.viewport_size.x)
-
-	# --- tablet scrolling: add a tall dummy page and drive the stick scroll.
-	var holder: Control = tab._pages_scroll.get_child(0)
-	var tall := Control.new()
-	tall.custom_minimum_size = Vector2(10, 2000)
-	holder.add_child(tall)
-	for i in 3:
-		await process_frame
-	tab._scroll_f = 0.0
-	tab._scroll_by_stick(-1.0, 0.2) # stick pushed DOWN
-	print("SMOKE pushing the right stick down scrolls the tablet down: ", tab._pages_scroll.scroll_vertical > 100)
-	var scrolled: int = tab._pages_scroll.scroll_vertical
-	tab._scroll_by_stick(1.0, 0.1) # stick pushed UP
-	print("SMOKE pushing it up scrolls back up: ", tab._pages_scroll.scroll_vertical < scrolled)
-	tab._scroll_by_stick(0.05, 0.1)
-	var held: int = tab._pages_scroll.scroll_vertical
-	tab._scroll_by_stick(0.0, 1.0)
-	print("SMOKE inside the deadzone nothing moves: ", tab._pages_scroll.scroll_vertical == held)
-	tab._scroll_by_stick(-1.0, 100.0) # absurdly long: must clamp, not run away
-	var bottom: int = tab._pages_scroll.scroll_vertical
-	tab._scroll_by_stick(1.0, 0.05)
-	print("SMOKE scrolling past the bottom clamps, and pushing back up responds immediately: ", tab._pages_scroll.scroll_vertical < bottom)
-	holder.remove_child(tall)
-	tall.free()
-
-	# --- a held click is forgiving at the panel's edge (a trigger squeeze tilts
-	# the controller: losing hover mid-press dropped the click and the laser
-	# ran through the panel).
-	l.position = Vector3(0, 1.0, 0)
-	for i in 3:
-		await process_frame
-	var edge_local := Vector3(tab.panel_size.x * 0.5 + 0.015, 0.0, 0.0) # 1.5 cm past the right edge
-	var edge_world: Vector3 = tab.global_transform * edge_local
-	r.global_position = edge_world + tab.global_transform.basis.z * 0.3
-	r.look_at(edge_world, Vector3.UP)
-	for i in 3:
-		await process_frame
-	print("SMOKE just past the panel edge, with no click held: not hovering: ", not tab._hovering)
-	tab._pressed = true
-	for i in 3:
-		await process_frame
-	print("SMOKE ...but hover is kept while a click is held (edge slack): ", tab._hovering)
-	tab._pressed = false
-	r.global_position = Vector3(0, 3, 0)
-	for i in 3:
-		await process_frame
+	# (The tablet's one-row category layout, size, stick scrolling and held-click edge slack moved with the
+	# redesign: tests/tablet.gd covers the layout and size, tests/laser_surface.gd the scrolling and edge slack.)
 
 	# --- locomotion backs off while the right laser is on a panel.
 	r.set_meta("ui_hover", true)
@@ -135,14 +69,9 @@ func _initialize() -> void:
 	var root_id: String = main.native_file_root_part_id("res://tests/fixtures/Assy_Test_Plate.didsa")
 	print("SMOKE native_file_root_part_id reads a fixture's root Part: ", root_id == "8e28a0bb-648e-4c30-959c-40288e4ec9c1")
 	print("SMOKE ...and returns '' for a missing file: ", main.native_file_root_part_id("res://tests/fixtures/nope.didsa") == "")
-	tab._rebuild_files()
-	var labels: Array = []
-	_all_nodes(tab._files_box, labels)
-	var has_more_label := false
-	for n in labels:
-		if n is Label and "more (not listed" in n.text:
-			has_more_label = true
-	print("SMOKE the Files list no longer has a '+ N more (not listed yet)' cap: ", not has_more_label)
+	var tab = l.get_node("WristTablet")
+	tab.pages._rescan_files()
+	print("SMOKE the Files list shows every model file found, with no '+ N more' cap: ", tab.pages._files_rows().size() == main.list_model_files().size())
 
 	# --- load errors carry the backend's own reason; overlapping loads are refused.
 	var body := '{"detail":"Cannot insert a Part into itself"}'.to_utf8_buffer()

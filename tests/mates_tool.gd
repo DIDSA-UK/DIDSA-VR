@@ -46,7 +46,7 @@ func _initialize() -> void:
 	var part_a := _tagged_part("part-root", "occ-a", "body-a", [0, 1, 2], "Bracket")
 	tool.try_pick(part_a, 1)
 	print("SMOKE first valid pick recorded: ", tool.picked_labels() == ["Bracket"])
-	print("SMOKE status asks for the second pick: ", tool.status_text().begins_with("Pick a face on the second"))
+	print("SMOKE status asks for the second pick: ", tool.status_text().begins_with("Pick a face, edge or corner on the second"))
 	print("SMOKE can't create with only one pick: ", tool.can_create() == false)
 
 	# --- picking the same part again is rejected, doesn't add a second pick
@@ -92,7 +92,7 @@ func _initialize() -> void:
 	# --- clear_picks resets everything
 	tool.clear_picks()
 	print("SMOKE clear_picks empties the pair: ", tool.picked_labels().is_empty())
-	print("SMOKE status resets to the first-pick prompt: ", tool.status_text().begins_with("Pick a face on the first"))
+	print("SMOKE status resets to the first-pick prompt: ", tool.status_text().begins_with("Pick a face, edge or corner on the first"))
 
 	# --- deactivating the tool also clears picks
 	tool.try_pick(part_a, 1)

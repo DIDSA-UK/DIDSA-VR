@@ -39,6 +39,7 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 	var json_nodes: Array = json.get("nodes", [])
 	var json_meshes: Array = json.get("meshes", [])
 	var scene_children := scene.get_children()
+	var topology_cache := {}
 	for i in mini(json_nodes.size(), scene_children.size()):
 		var node_json: Dictionary = json_nodes[i]
 		var scene_node := scene_children[i]
@@ -67,6 +68,55 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 				face_ids_int.append(int(fid))
 			scene_node.set_meta("face_ids", face_ids_int)
 			scene_node.set_meta("body_ids", prim_extras["body_ids"])
+			if prim_extras.has("topology"):
+				if not topology_cache.has(mesh_index): # instances of one mesh share one converted copy
+					topology_cache[mesh_index] = _convert_topology(prim_extras["topology"])
+				scene_node.set_meta("topology", topology_cache[mesh_index])
+
+
+static func _convert_topology(raw: Dictionary) -> Dictionary:
+	## The glb's per-Body real edges / vertices / face boundaries (DIDSA-CAD's `_topology_extras`), turned into
+	## what picking needs once, at tag time: per body_id
+	##   edges        {SubShapeRef index -> PackedVector3Array of segment endpoints (consecutive pairs), part-local}
+	##   vertices     {SubShapeRef index -> Vector3, part-local}
+	##   vertex_at    {quantised point (0.01 units) -> vertex index}, to find the vertex at an edge's end
+	##   face_edges   [face id -> PackedInt32Array of edge indices on that face's boundary]
+	##   edge_kinds   {edge index -> "line" | "circle" | "other"}; face_kinds [face id -> "plane" | "cylinder" | "other"]
+	##                (what a MATE can use: a straight or circular edge, a plane or cylinder; absent from older backends)
+	## Indices are the backend's raw SubShapeRef indices (NOT the dense drawing ids), so they can be sent
+	## straight back to /measure.
+	var out := {}
+	for body_id in raw:
+		var body: Dictionary = raw[body_id]
+		var edges := {}
+		var edge_kinds := {}
+		for e in body.get("edges", []):
+			var flat: Array = e["s"]
+			var pts := PackedVector3Array()
+			for i in range(0, flat.size() - 2, 3):
+				pts.append(Vector3(float(flat[i]), float(flat[i + 1]), float(flat[i + 2])))
+			edges[int(e["i"])] = pts
+			edge_kinds[int(e["i"])] = str(e.get("k", "other"))
+		var vertices := {}
+		var vertex_at := {}
+		for v in body.get("vertices", []):
+			var p: Array = v["p"]
+			var point := Vector3(float(p[0]), float(p[1]), float(p[2]))
+			vertices[int(v["i"])] = point
+			vertex_at[quantise(point)] = int(v["i"])
+		var face_edges: Array = []
+		for f in body.get("face_edges", []):
+			var ids := PackedInt32Array()
+			for e in f:
+				ids.append(int(e))
+			face_edges.append(ids)
+		out[str(body_id)] = {"edges": edges, "edge_kinds": edge_kinds, "vertices": vertices, "vertex_at": vertex_at,
+			"face_edges": face_edges, "face_kinds": body.get("face_kinds", [])}
+	return out
+
+
+static func quantise(point: Vector3) -> Vector3i:
+	return Vector3i((point * 100.0).round())
 
 
 static func subshape_ref_for_hit(part: Node3D, face_index: int) -> Dictionary:

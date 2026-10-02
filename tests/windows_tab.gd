@@ -1,6 +1,6 @@
 extends SceneTree
 ## Full-scene test (main.tscn, no backend) for milestone 3's floating-window
-## framework: the wrist tablet's new Windows tab, and scripts/
+## framework: the wrist tablet's Windows page, and scripts/
 ## diegetic_panel.gd's first-claim-per-frame arbitration across several open
 ## windows at once. Same real-button/real-laser-interaction style as
 ## tests/tablet_scene.gd/tests/popup_keyboard.gd for the parts this session
@@ -55,23 +55,16 @@ func aim_and_click(panel, viewport: SubViewport, button: Button) -> void:
 
 
 func aim_and_click_tablet(button: Button) -> void:
-	## The wrist tablet's own quad lies flat (horizontal - mount rotation
-	## turns its local +Z to point straight up, see wrist_tablet.gd's own
-	## setup() comment), so aiming at one of its buttons means looking
-	## straight down at it - exactly the case look_at(world, Vector3.UP)
-	## can't handle (forward parallel to the up vector is degenerate: the
-	## very bug this helper exists to avoid, caught by actually running
-	## this test against a real Godot instead of only inspecting the code -
-	## see docs/status.md). Ported directly from tests/section_tab.gd's own
-	## proven aim_and_click(), which has always aimed at this same tablet
-	## this same way: position the hand directly above the button (r's
-	## rotation fixed to look straight down, set once in _initialize()),
-	## rather than deriving an orientation from a look_at call at all.
+	## The wrist tablet is tilted on the wrist, so aim along its quad's normal: stand the hand 0.4 m out along it
+	## and look straight at the button (a look_at(world, UP) from above would be degenerate for a flat tablet; this
+	## one is tilted but the transform-based aim works for any tilt).
 	var c: Vector2 = button.global_position + button.size * 0.5
 	var lx: float = (c.x / tablet.viewport_size.x - 0.5) * tablet.panel_size.x
 	var ly: float = (0.5 - c.y / tablet.viewport_size.y) * tablet.panel_size.y
-	r.position = Vector3(l.position.x + tablet.mount_position.x + lx, 1.5, l.position.z + tablet.mount_position.z - ly)
-	r.rotation_degrees = Vector3(-90, 0, 0) # re-assert straight-down aim - a prior aim_and_click() (calc's own buttons) leaves r's rotation wherever its own look_at() pointed it
+	var xf: Transform3D = tablet._quad.global_transform
+	var p: Vector3 = xf * Vector3(lx, ly, 0.0)
+	var n: Vector3 = xf.basis.z.normalized()
+	r.global_transform = Transform3D(Basis.looking_at(-n, Vector3.UP), p + n * 0.4)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click")
@@ -83,7 +76,6 @@ func aim_and_click_tablet(button: Button) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -94,7 +86,6 @@ func _initialize() -> void:
 	cam.position = Vector3(0, 1.6, 0); cam.rotation = Vector3.ZERO
 	l.position = Vector3(-0.2, 1.0, 0)
 	r.position = Vector3(0.2, 1.0, 0)
-	r.rotation_degrees.x = -90 # aims straight down at the flat wrist tablet - see aim_and_click_tablet()
 	tablet = main._tablet
 	calc = main._calculator_window
 	tree_window = main._assembly_tree_window
@@ -111,7 +102,7 @@ func _initialize() -> void:
 	var windows_tab: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Windows")
 	print("SMOKE the Windows tab exists on the wrist tablet: ", windows_tab != null)
 	await aim_and_click_tablet(windows_tab)
-	print("SMOKE Windows tab selected: ", tablet._pages["Windows"].visible)
+	print("SMOKE Windows tab selected: ", tablet.ui.selected_tool_id == "windows")
 
 	var tree_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Assembly Tree")
 	await aim_and_click_tablet(tree_button)

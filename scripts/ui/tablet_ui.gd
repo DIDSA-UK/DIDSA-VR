@@ -6,7 +6,7 @@ extends Control
 ## and a one-line status bar along the bottom.
 ##
 ## Pure 2D Controls: no XR, no scene-tree dependency beyond itself, so it runs in a
-## plain window (the UI Lab) and on a SubViewport quad (wrist_tablet_v2.gd) alike.
+## plain window (the UI Lab) and on a SubViewport quad (wrist_tablet.gd) alike.
 ## It never names a specific tool: everything comes from the registry
 ## (tablet_registry.gd), and the one-active-tool rule from the tool manager
 ## (tool_manager.gd).
