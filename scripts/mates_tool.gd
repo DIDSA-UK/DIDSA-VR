@@ -733,7 +733,7 @@ func _request_anchor(part: Node3D, state: Dictionary) -> void:
 func handle_anchor_response(state: Dictionary, response: Dictionary, wish_sent) -> void:
 	## An anchor answer -> accept (new model, blend) or miss (hold). Only the
 	## contract fields are read: members / basis / chart / quality / converged —
-	## NOT the v0 aliases `transform` / `free_twists` (CAD S9 deletes them).
+	## NOT the v0 aliases `transform` / `free_twists` (removed by CAD S9).
 	## Public so tests can feed it synthetic answers without a network.
 	var hyst = state["hyst"]
 	var json = response["json"]

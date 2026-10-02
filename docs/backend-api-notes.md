@@ -315,9 +315,23 @@ release-time wish, exactly once. Response:
   client must **hold** the last pose and never read the missing basis as "all
   free". A `commit: true` with `converged: false` stores nothing (`committed`
   stays `false`); a `fixed` grabbed occurrence is a 422.
-* The response still echoes the v0 aliases `transform` and `free_twists` until
-  CAD S9 deletes them. **This client does not read them.** (`/solve`'s own
-  `transform` is the occurrence's stored pose and is unaffected.)
+* The v0 aliases `transform` and `free_twists` are **gone** from the response
+  (DIDSA-CAD S9, merged 2026-10-02, PR #276); this client never read them.
+  (`/solve`'s own `transform` is the occurrence's stored pose and is unaffected.)
+* **`quality.jump` and `max_step` are measured in the screw chart** (CAD S9 / F2):
+  the prediction is the same screw integration this client does, so on a screw
+  orbit `jump` is ~0 (swing scene, 15 mm slide + 90 deg: 1.83 -> 0.27). Still
+  telemetry / a conservative guard; acceptance uses the client-measured jump.
+* **The anchor is the weighted-nearest mate-satisfying pose** (CAD F1b: the backend
+  refines the Gauss-Newton answer with the nearest-point retraction), so on a
+  curved mate it no longer overshoots the linearised projection.
+* **Optional additions this client does not use** (additive, safe to ignore):
+  response `constraint_model` (the resolved mate geometry for a client-side local
+  retraction; request flag `include_constraint_model`, default true) and request
+  `reference` (the poses the client last accepted, a warm start; this client may
+  send it, the flat client does by default). VR does NOT run the local retraction:
+  the GDScript port cost p95 3.1 ms (k=1-2) / 7.8 ms (k=3) per frame on a Quest 3
+  against 0.56 ms for the projector (`docs/local-retraction-benchmark.md`).
 
 What the client does with it (DIDSA-CAD `docs/motion/projector-spec.md` is
 normative; `scripts/motion/*.gd` implement it and `tests/motion_vectors.gd` pins

@@ -20,7 +20,7 @@ and blocks chains; additive first-order integration + fixed 100 mm lever arm lea
 
 `scripts/motion/*.gd` (projector v2) + the rewritten live-drag in `scripts/mates_tool.gd`; the legacy `_sync_with_solve` /
 `_motion_supported` paths, `project_motion` / `weighted_basis` and the constant 100 mm lever arm are deleted and the v0 alias
-fields are no longer read — CAD S9 may now delete `transform` / `free_twists` from the `mate-motion` response. See `docs/status.md`.
+fields are no longer read — CAD S9 has since deleted `transform` / `free_twists` from the `mate-motion` response (merged 2026-10-02, DIDSA-CAD PR #276). See `docs/status.md`.
 
 ## Which sessions touch this repo
 
