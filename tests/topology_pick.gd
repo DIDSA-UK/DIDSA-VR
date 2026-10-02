@@ -166,14 +166,54 @@ func _initialize() -> void:
 	print("SMOKE near the cylinder's rim picks the circular EDGE (a polyline of many segments): ", hit_cyl.get("part") == cyl and e_cyl.get("kind") == "edge" and rim_pts.size() >= 16)
 	print("SMOKE ...and it is the top rim, at local z = 100: ", absf(rim_pts[0].z - 100.0) < 0.01 and absf(Vector2(rim_pts[0].x, rim_pts[0].y).length() - 30.0) < 0.05)
 
-	# ---- Mates stays face-only, even right on an edge
+	# ---- Mates picks what a mate can use: corners, straight / circular edges, planar / cylindrical faces
 	mt.set_active(false)
 	r.measure_tool_active = false
 	r.mates_tool_active = true
-	main._mates_tool.set_active(true)
+	var mates = main._mates_tool
+	mates.set_active(true)
 	aim_at(Vector3(0.05, 1.098, face_z), origin_far)
 	await frames(3)
-	print("SMOKE with Mates on, the same spot lights a FACE (Mates picks faces only): ", str(fh.hover_key(r)).begins_with("body_box:") and fh.hover_node(r).name == "FaceHighlight")
+	print("SMOKE with Mates on, hovering near a straight edge lights that EDGE (a mate can use it): ", str(fh.hover_key(r)).begins_with("edge:body_box:") and fh.hover_node(r).get_meta("highlight_kind") == "edge")
+	aim_at(Vector3(0.098, 1.098, face_z), origin_far)
+	await frames(3)
+	print("SMOKE ...and a corner lights that VERTEX: ", str(fh.hover_key(r)).begins_with("vertex:body_box:"))
+	aim_at(Vector3(0.05, 1.05, face_z), origin_far)
+	await frames(3)
+	print("SMOKE ...and a planar face lights the face: ", str(fh.hover_key(r)).begins_with("body_box:") and fh.hover_node(r).get_meta("highlight_kind") == "face")
+	aim_at(Vector3(0.05, 1.098, face_z), origin_far)
+	await frames(3)
+	r._on_button_pressed("trigger_click")
+	await frames(2)
+	var mate_ref: Dictionary = mates._picks[0]["subshape_ref"] if mates._picks.size() >= 1 else {}
+	print("SMOKE a Mates pick near an edge sends an EDGE ref (raw index), and keeps it lit: ", mate_ref.get("shape_type") == "edge" and mate_ref.get("body_id") == "body_box" and fh.pick_nodes().size() == 1 and fh.pick_nodes()[0].get_meta("highlight_kind") == "edge")
+	mates.clear_picks()
+	# the cylinder: a circular rim is a mate axis, the cylindrical wall too
+	aim_at(local_to_world(cyl, Vector3(0.0, 30.0 - 1.0, 100.0)), cyl_origin)
+	await frames(3)
+	print("SMOKE the cylinder's circular rim is offered to Mates (it is a concentric axis): ", str(fh.hover_key(r)).begins_with("edge:body_cyl:"))
+	var cyl_faces: Array = cyl_body["face_kinds"]
+	print("SMOKE the backend's face kinds reach the part (cylinder: 2 planes + 1 cylinder): ", cyl_faces.count("plane") == 2 and cyl_faces.count("cylinder") == 1)
+	var cyl_edge_kinds: Dictionary = cyl_body["edge_kinds"]
+	print("SMOKE ...and edge kinds (2 circles + the seam line): ", cyl_edge_kinds.values().count("circle") == 2 and cyl_edge_kinds.values().count("line") == 1)
+	# an edge a mate cannot use is never offered to Mates, but Measure still can: fake an "other" kind on that edge
+	var rim_index := int(e_cyl["index"])
+	(cyl_body["edge_kinds"] as Dictionary)[rim_index] = "other"
+	await frames(3)
+	print("SMOKE an edge that is neither straight nor circular is NOT offered to Mates (the face under it is, as a face): ", not str(fh.hover_key(r)).begins_with("edge:"))
+	var for_measure := TopologyPick.pick(cyl, int(hit_cyl["face_index"]), hit_cyl["point"], 0.009)
+	print("SMOKE ...while Measure can still measure it: ", for_measure.get("kind") == "edge" and int(for_measure["index"]) == rim_index)
+	(cyl_body["edge_kinds"] as Dictionary)[rim_index] = "circle"
+	# a face a mate cannot use (not a plane / cylinder) is rejected with a reason, never silently
+	var cap_face := TopologyPick.face_entity(cyl, int(hit_cyl["face_index"]))
+	(cyl_body["face_kinds"] as Array)[int(cap_face["index"])] = "other" # pretend the top cap is a surface a mate cannot use
+	var unmateable := TopologyPick.is_mateable(cyl, cap_face)
+	print("SMOKE a face that is not a plane or cylinder is not mateable: ", not unmateable)
+	aim_at(local_to_world(cyl, Vector3(0.0, 0.0, 100.0)), cyl_origin)
+	await frames(3)
+	r._on_button_pressed("trigger_click")
+	await frames(2)
+	print("SMOKE ...and a Mates pick on it is refused with a reason, nothing picked: ", mates._picks.is_empty() and mates.status_text().begins_with("A mate can only use"))
 	main._mates_tool.set_active(false)
 	r.mates_tool_active = false
 	await frames(2)

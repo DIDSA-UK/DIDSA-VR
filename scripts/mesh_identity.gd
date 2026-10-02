@@ -81,18 +81,22 @@ static func _convert_topology(raw: Dictionary) -> Dictionary:
 	##   vertices     {SubShapeRef index -> Vector3, part-local}
 	##   vertex_at    {quantised point (0.01 units) -> vertex index}, to find the vertex at an edge's end
 	##   face_edges   [face id -> PackedInt32Array of edge indices on that face's boundary]
+	##   edge_kinds   {edge index -> "line" | "circle" | "other"}; face_kinds [face id -> "plane" | "cylinder" | "other"]
+	##                (what a MATE can use: a straight or circular edge, a plane or cylinder; absent from older backends)
 	## Indices are the backend's raw SubShapeRef indices (NOT the dense drawing ids), so they can be sent
 	## straight back to /measure.
 	var out := {}
 	for body_id in raw:
 		var body: Dictionary = raw[body_id]
 		var edges := {}
+		var edge_kinds := {}
 		for e in body.get("edges", []):
 			var flat: Array = e["s"]
 			var pts := PackedVector3Array()
 			for i in range(0, flat.size() - 2, 3):
 				pts.append(Vector3(float(flat[i]), float(flat[i + 1]), float(flat[i + 2])))
 			edges[int(e["i"])] = pts
+			edge_kinds[int(e["i"])] = str(e.get("k", "other"))
 		var vertices := {}
 		var vertex_at := {}
 		for v in body.get("vertices", []):
@@ -106,7 +110,8 @@ static func _convert_topology(raw: Dictionary) -> Dictionary:
 			for e in f:
 				ids.append(int(e))
 			face_edges.append(ids)
-		out[str(body_id)] = {"edges": edges, "vertices": vertices, "vertex_at": vertex_at, "face_edges": face_edges}
+		out[str(body_id)] = {"edges": edges, "edge_kinds": edge_kinds, "vertices": vertices, "vertex_at": vertex_at,
+			"face_edges": face_edges, "face_kinds": body.get("face_kinds", [])}
 	return out
 
 

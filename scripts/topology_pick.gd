@@ -49,9 +49,9 @@ static func reach_for(part: MeshInstance3D, hit_distance: float) -> float:
 	return reach
 
 
-static func pick(part: Node3D, face_index: int, world_point: Vector3, world_reach: float) -> Dictionary:
+static func pick(part: Node3D, face_index: int, world_point: Vector3, world_reach: float, mates_only: bool = false) -> Dictionary:
 	## The entity a pick at `world_point` (on triangle `face_index` of `part`) takes. {} if the part has no face
-	## identity at all.
+	## identity at all. `mates_only`: only edges a mate can use (straight / circular) are candidates.
 	var face := face_entity(part, face_index)
 	if face.is_empty() or not part.has_meta("topology"):
 		return face
@@ -75,6 +75,8 @@ static func pick(part: Node3D, face_index: int, world_point: Vector3, world_reac
 		var pts: PackedVector3Array = edges.get(edge_index, PackedVector3Array())
 		if pts.size() < 2:
 			continue
+		if mates_only and not _edge_mateable(body, edge_index):
+			continue
 		var d := INF
 		for i in range(0, pts.size() - 1, 2):
 			d = minf(d, local.distance_to(Geometry3D.get_closest_point_to_segment(local, pts[i], pts[i + 1])))
@@ -96,6 +98,31 @@ static func pick(part: Node3D, face_index: int, world_point: Vector3, world_reac
 		return {"kind": "edge", "body_id": face["body_id"], "index": best_edge, "face_index": face_index,
 			"key": entity_key("edge", face["body_id"], best_edge)}
 	return face
+
+
+static func _edge_mateable(body: Dictionary, edge_index: int) -> bool:
+	var kind: String = (body.get("edge_kinds", {}) as Dictionary).get(edge_index, "")
+	return kind == "" or kind == "line" or kind == "circle" # no kind (an older backend): let the solver decide
+
+
+static func is_mateable(part: Node3D, entity: Dictionary) -> bool:
+	## Can a mate use this entity? A vertex always; an edge if straight or circular; a face if planar or
+	## cylindrical. Unknown (an older backend with no kinds) counts as yes: the solver then has the last word.
+	if entity.is_empty():
+		return false
+	var kind := str(entity.get("kind", "face"))
+	if kind == "vertex":
+		return true
+	var body: Dictionary = {}
+	if part != null and part.has_meta("topology"):
+		body = (part.get_meta("topology") as Dictionary).get(str(entity.get("body_id", "")), {})
+	if kind == "edge":
+		return _edge_mateable(body, int(entity.get("index", -1)))
+	var face_kinds: Array = body.get("face_kinds", [])
+	var face_id := int(entity.get("index", -1))
+	if face_id < 0 or face_id >= face_kinds.size():
+		return true
+	return str(face_kinds[face_id]) in ["plane", "cylinder"]
 
 
 static func edge_points(part: Node3D, body_id: String, index: int) -> PackedVector3Array:

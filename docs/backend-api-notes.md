@@ -177,9 +177,10 @@ same primitive's `extras` also carries `"topology"` (default on;
 `?topology=false` leaves it out), keyed by `body_id`:
 ```json
 "topology": {"<body_id>": {
-  "edges":      [{"i": 3, "s": [x1,y1,z1, x2,y2,z2, ...]}, ...],
+  "edges":      [{"i": 3, "k": "circle", "s": [x1,y1,z1, x2,y2,z2, ...]}, ...],
   "vertices":   [{"i": 0, "p": [x, y, z]}, ...],
-  "face_edges": [[3, 4, 7, 8], ...]
+  "face_edges": [[3, 4, 7, 8], ...],
+  "face_kinds": ["plane", "cylinder", "other", ...]
 }}
 ```
 `edges[].s` is the edge's polyline as consecutive start/end point pairs and
@@ -190,7 +191,11 @@ boundary. **`i` is the raw `SubShapeRef.index`** (the 0-based
 NOT the dense id the flat app's own mesh response draws with: they differ past
 any degenerate edge (a sphere pole, a cone apex), so it can be sent straight
 back as `{"body_id", "shape_type": "edge"|"vertex", "index": i}`.
-`mesh_identity.gd` converts it once at tag time; `topology_pick.gd` picks from it.
+`edges[].k` is `"line"` / `"circle"` / `"other"` and `face_kinds[face_id]` is
+`"plane"` / `"cylinder"` / `"other"`: exactly what a mate can use
+(`assembly_solver._resolve_local_geometry`: a plane's normal, a cylinder's axis,
+a straight or circular edge's axis, a vertex's point), so the Mates tool only
+offers those. `mesh_identity.gd` converts it once at tag time; `topology_pick.gd` picks from it.
 
 ## Mates — a real client to a real, pre-existing API
 
@@ -230,11 +235,14 @@ top-level Occurrence (see below).
 `type` is one of `coincident`/`concentric`/`parallel`/`distance`/`angle`;
 `value` is required (mm for distance, degrees for angle) for the last two,
 omit otherwise. `shape_type` is one of `"face"`/`"edge"`/`"vertex"`/`"body"`
-(`SubShapeType` in `models.py`) — **Mates still only sends `"face"`**; the
-**Measure** tool sends `"edge"` and `"vertex"` too: a ray only hits a face, so
+(`SubShapeType` in `models.py`) — the **Mates** and **Measure** tools send
+`"edge"` and `"vertex"` as well as `"face"`: a ray only hits a face, so
 `topology_pick.gd` takes the nearest of the HIT FACE's own boundary edges /
 corners within a small angular reach of the hit point (see "Edge / vertex
-topology" above). Mates' circular-edge picks are the next step.
+topology" above). Mates only offers what the solver can use (planar /
+cylindrical faces, straight / circular edges, corners); Measure takes any.
+Verified against a real backend by `tests/e2e_edges.gd` (a CONCENTRIC mate
+between two circular edges is accepted).
 
 **Creating a Mate does not move anything by itself** — `solve_for_occurrence`
 is a separate, explicit call. The flat app calls it immediately after

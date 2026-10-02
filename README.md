@@ -229,9 +229,13 @@ live-synced.
     four are undoable. A hidden part is click-through for both the laser
     and grip — it's out of the way, not just invisible.
 11. **Assembly > Mates** (milestone 4). Toggle **Mates tool** on, then point the
-    right hand's laser at a face and pull the trigger to pick it (while the
-    tool is on, only the face under the laser lights up, and a picked face
-    stays lit — first pick cyan, second orange) — pick a face on a second, different
+    right hand's laser at a face, a straight or circular edge, or a corner
+    and pull the trigger to pick it (while the tool is on, only what the
+    pick would take lights up: the face, a thin tube along the edge, or a
+    ball on the corner; a picked one stays lit — first pick cyan, second
+    orange; hole rims and cylinder walls are what **Concentric** wants).
+    A surface a mate cannot use (a sphere, say) is refused with a reason.
+    Pick a face on a second, different
     part to complete a pair; a status line explains why a pick didn't count
     (picking the assembly's own unplaced content, the same part twice, or a
     part from a different assembly all reject with their own message).
@@ -504,7 +508,7 @@ newly-added) DIDSA-CAD endpoint — never a VR-only representation, so
 anything authored here is readable and editable in the flat app and vice
 versa:
 
-- **Mates** — face-only picking (Measure also picks edges and vertices) (top-level Occurrences of the loaded root
+- **Mates** — picks faces, straight/circular edges and corners (top-level Occurrences of the loaded root
   Part only), a real client to `POST/GET/PATCH/DELETE .../mates` and
   `.../occurrences/{id}/solve`. Relax-all/Enforce-all supported.
 - **Colours** — `PATCH .../occurrences/{id}`'s existing `color` field,

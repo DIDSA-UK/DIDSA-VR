@@ -543,7 +543,7 @@ func _try_pick_mate_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or mates_tool == null:
 		return
-	mates_tool.try_pick(part, hit.get("face_index", -1))
+	mates_tool.try_pick(part, hit.get("face_index", -1), _mate_entity(hit))
 
 
 func _try_pick_measure_entity() -> void:
@@ -555,6 +555,15 @@ func _try_pick_measure_entity() -> void:
 	if part == null or measure_tool == null:
 		return
 	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit))
+
+
+func _mate_entity(hit: Dictionary) -> Dictionary:
+	## What a Mates pick on this ray hit would take: a corner, a straight / circular edge, or the face.
+	var part: Node3D = hit.get("part")
+	if part == null or not hit.has("point"):
+		return {}
+	var distance := global_position.distance_to(hit["point"])
+	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance), true)
 
 
 func _measure_entity(hit: Dictionary) -> Dictionary:
@@ -643,7 +652,8 @@ func _update_aim_hover() -> void:
 		if measure_tool_active:
 			face_highlight.set_hover_entity(self, hit.get("part"), _measure_entity(hit))
 		else:
-			face_highlight.set_hover(self, hit.get("part"), int(hit.get("face_index", -1)))
+			var mate_entity := _mate_entity(hit)
+			face_highlight.set_hover_entity(self, hit.get("part"), mate_entity if TopologyPick.is_mateable(hit.get("part"), mate_entity) else {})
 	else:
 		if face_highlight != null:
 			face_highlight.clear_hover(self)

@@ -52,6 +52,7 @@ signal mates_changed()
 
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
+const TopologyPick := preload("res://scripts/topology_pick.gd")
 const Se3 := preload("res://scripts/motion/se3.gd")
 const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
@@ -114,19 +115,23 @@ func status_text() -> String:
 		return _status
 	match _picks.size():
 		0:
-			return "Pick a face on the first part."
+			return "Pick a face, edge or corner on the first part."
 		1:
-			return "Pick a face on the second part."
+			return "Pick a face, edge or corner on the second part."
 		_:
 			return "Ready — choose a mate type and Create."
 	return ""
 
 
 func picked_entities() -> Array:
-	## [{part, face_index}] for face_highlight.gd, in pick order.
+	## [{part, kind, body_id, index, face_index, key}] for face_highlight.gd, in pick order (a face, edge or vertex).
 	var out := []
 	for p in _picks:
-		out.append({"part": p.get("part"), "face_index": p.get("face_index", -1)})
+		var entity: Dictionary = (p.get("entity", {}) as Dictionary).duplicate()
+		entity["part"] = p.get("part")
+		if not entity.has("face_index"):
+			entity["face_index"] = p.get("face_index", -1)
+		out.append(entity)
 	return out
 
 
@@ -137,7 +142,7 @@ func picked_labels() -> Array:
 	return out
 
 
-func try_pick(part: Node3D, face_index: int) -> void:
+func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	## Called by controller.gd's trigger handler while the tool is active.
 	## Always sets status and emits picks_changed, even on rejection, so the
 	## wrist tablet can show *why* a pick didn't count.
@@ -145,7 +150,14 @@ func try_pick(part: Node3D, face_index: int) -> void:
 		return
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
 	var subshape := MeshIdentity.subshape_ref_for_hit(part, face_index)
+	var kind := "face"
+	if not subshape.is_empty() and not entity.is_empty() and str(entity.get("kind", "face")) != "face":
+		# The laser was on a straight / circular edge or a corner of that face (topology_pick.gd): mate that.
+		kind = str(entity["kind"])
+		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
 	var rejection := _validate_pick(occ_ref, subshape)
+	if rejection == "" and not TopologyPick.is_mateable(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)):
+		rejection = "A mate can only use a plane, a cylinder, a straight or circular edge, or a corner - this surface is none of those."
 	if rejection != "":
 		_status = rejection
 		picks_changed.emit()
@@ -155,8 +167,10 @@ func try_pick(part: Node3D, face_index: int) -> void:
 		"occurrence_id": occ_ref["occurrence_id"],
 		"subshape_ref": subshape,
 		"label": str(part.name), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
-		"part": part, # for face_highlight.gd: the picked face stays lit
+		"part": part, # for face_highlight.gd: the picked face / edge / corner stays lit
 		"face_index": face_index,
+		"entity": entity if kind != "face" else {},
+		"kind": kind,
 	})
 	_status = ""
 	picks_changed.emit()
@@ -408,6 +422,8 @@ func _friendly_error(result: Dictionary) -> String:
 				return "that part is grounded (fixed)"
 			"mate_solve_did_not_converge":
 				return "the mates can't all be satisfied from there (over-constrained or conflicting)"
+			"unsupported_mate_geometry":
+				return "this mate type needs %s" % str(detail.get("needed", "different geometry"))
 		return str(detail.get("type", detail))
 	if detail != null:
 		return str(detail)

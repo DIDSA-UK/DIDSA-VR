@@ -18,6 +18,7 @@ extends Node
 
 const HOVER_COLOUR := Color(1.0, 0.93, 0.45, 0.55)
 const PICK_COLOURS: Array[Color] = [Color(0.25, 0.85, 1.0, 0.55), Color(1.0, 0.62, 0.22, 0.55)]
+const ClipShader := preload("res://shaders/highlight_clip.gdshader")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const MAX_CACHED_PARTS := 4
 const EDGE_RADIUS := 0.0018 ## world metres: the tube drawn along a highlighted edge
@@ -30,7 +31,7 @@ var _picks: Array = [] ## [{part, key, node}] in pick order
 var _cache := {} ## part instance id -> {faces: PackedVector3Array, map: Dictionary key -> PackedInt32Array}
 var _cache_order: Array = []
 var _hover_material := _make_material(HOVER_COLOUR)
-var _pick_materials: Array[StandardMaterial3D] = [_make_material(PICK_COLOURS[0]), _make_material(PICK_COLOURS[1])]
+var _pick_materials: Array[ShaderMaterial] = [_make_material(PICK_COLOURS[0]), _make_material(PICK_COLOURS[1])]
 
 
 static func face_key(part: Node, face_index: int) -> String:
@@ -113,17 +114,16 @@ func _free_node(entry: Dictionary) -> void:
 		entry["node"].queue_free()
 
 
-func _make_material(colour: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.albedo_color = colour
+func _make_material(colour: Color) -> ShaderMaterial:
+	## Clipped by the section plane like the part itself (shaders/highlight_clip.gdshader).
+	var m := ShaderMaterial.new()
+	m.shader = ClipShader
+	m.set_shader_parameter("colour", colour)
 	m.render_priority = 3
 	return m
 
 
-func _build_entity_node(part: Node3D, entity: Dictionary, material: StandardMaterial3D, lift: float) -> MeshInstance3D:
+func _build_entity_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	match str(entity.get("kind", "face")):
 		"edge":
 			return _build_edge_node(part, entity, material, lift)
@@ -132,14 +132,15 @@ func _build_entity_node(part: Node3D, entity: Dictionary, material: StandardMate
 	return _build_node(part, str(entity.get("key", "")), material, lift)
 
 
-func _line_material(material: StandardMaterial3D) -> StandardMaterial3D:
-	var m := material.duplicate() as StandardMaterial3D
-	m.albedo_color.a = LINE_ALPHA
+func _line_material(material: ShaderMaterial) -> ShaderMaterial:
+	var m := material.duplicate() as ShaderMaterial
+	var c: Color = material.get_shader_parameter("colour")
+	m.set_shader_parameter("colour", Color(c.r, c.g, c.b, LINE_ALPHA))
 	m.render_priority = 4
 	return m
 
 
-func _build_edge_node(part: Node3D, entity: Dictionary, material: StandardMaterial3D, lift: float) -> MeshInstance3D:
+func _build_edge_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	## A thin square-section tube along the edge's polyline, in the part's own space (so it follows the part).
 	var pts := TopologyPick.edge_points(part, str(entity["body_id"]), int(entity["index"]))
 	if pts.size() < 2:
@@ -174,7 +175,7 @@ func _build_edge_node(part: Node3D, entity: Dictionary, material: StandardMateri
 	return _attach(part, "EdgeHighlight", mesh, _line_material(material))
 
 
-func _build_vertex_node(part: Node3D, entity: Dictionary, material: StandardMaterial3D, lift: float) -> MeshInstance3D:
+func _build_vertex_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	var point = TopologyPick.vertex_point(part, str(entity["body_id"]), int(entity["index"]))
 	if point == null:
 		return null
@@ -189,7 +190,7 @@ func _build_vertex_node(part: Node3D, entity: Dictionary, material: StandardMate
 	return node
 
 
-func _attach(part: Node3D, node_name: String, mesh: Mesh, material: StandardMaterial3D) -> MeshInstance3D:
+func _attach(part: Node3D, node_name: String, mesh: Mesh, material: ShaderMaterial) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
 	node.name = node_name
 	node.set_meta("highlight_kind", node_name.trim_suffix("Highlight").to_lower()) # "edge" / "vertex" (the node's own name is made unique when two sit on one part)
@@ -200,7 +201,7 @@ func _attach(part: Node3D, node_name: String, mesh: Mesh, material: StandardMate
 	return node
 
 
-func _build_node(part: Node3D, key: String, material: StandardMaterial3D, lift: float) -> MeshInstance3D:
+func _build_node(part: Node3D, key: String, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	var data := _face_data(part)
 	if data.is_empty() or not (data["map"] as Dictionary).has(key):
 		return null
