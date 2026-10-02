@@ -24,6 +24,36 @@ For comparison the Dart port costs 0.07 ms (k=1-2), 0.9 ms (k=5), 3 ms (k=8): GD
 **Expectation, not a measurement:** a Quest 3's mobile CPU runs GDScript no faster than this Xeon, so the Quest figures should be
 the same or worse. On those numbers k=1-2 would eat ~10 % of the frame and k=3 ~25 % or more.
 
+## Result on the headset (Quest 3, 2 Oct 2026): NO-GO for the GDScript solver
+
+Debug APK of `scenes/bench_local_retraction.tscn`, flat (non-XR) Android build run as a 2D app on a Quest 3 (Adreno 740, Godot 4.7.2,
+Vulkan Forward Mobile), headset worn for the full 180 s, one `frame()` per rendered frame in round-robin. FINAL rows (microseconds):
+
+| case | n | mean | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| k=1 bolt in plate | 3377 | 2545 | 2485 | **3112** | 3447 | 6397 |
+| k=2 floating bolt | 3376 | 2533 | 2480 | **3096** | 3414 | 5929 |
+| k=3 row of 3 boxes | 3376 | 6970 | 6966 | **7794** | 8317 | 13447 |
+| *projector frame (today)* | 3376 | 370 | 343 | 555 | 699 | 3003 |
+
+- Against the decision rule (p95 <= 1.5 ms ship, 1.5-3 ms not worth it, > 3 ms no): **k=1-2 are at ~3.1 ms (no), k=3 at ~7.8 ms with a
+  13 ms worst case (no, more than a whole 90 Hz frame).**
+- The Quest ran this ~2.5x slower than the desktop Xeon for the solver (1.0 -> 2.5 ms, 2.6 -> 7.0 ms) and ~3.7x slower for the projector
+  (0.10 -> 0.37 ms). The solver costs ~7x the projector at k=1-2 and ~19x at k=3.
+- No thermal drift: the k=1 mean moved 2409 -> 2545 us (+5 %) over three minutes.
+- The reported frame interval was 11.1 ms (90 fps) at the start and end and 13.9 ms (72 fps) from about 30 s to 150 s; I cannot say from this
+  run whether that was the system's refresh/thermal management or this app, so it is an observation, not a finding.
+- Caveat: a flat 2D app, so the stereo render load of a real VR session is absent; if anything these numbers are kind to the headset.
+
+**Can it be made cheap enough?** Not by tuning. Two iterations instead of three converge on every scene for 1-3 mm hand steps (the hinge 28/30 at
+3 mm), which saves only about a quarter of the cost (the polish step, the acceptance residual and the interpreter overhead remain), so
+~3.1 ms -> ~2.3 ms at best against a 1.5 ms target; k=3 would still be ~5 ms. Reaching the budget would need a different implementation
+(native code / GDExtension, or a threaded solve one frame late), which is not justified for a polish feature.
+
+**Decision:** keep the projector in VR. The solver port stays in the repository, tested against the golden vectors and NOT wired into
+`mates_tool.gd`; the backend's anchors are already the weighted-nearest point (DIDSA-CAD F1b), which removes most of the curved-mate
+disagreement VR would see between anchors. Revisit only if VR shows a real curved-mate problem in use.
+
 ## Decision rule
 
 Wire the local retraction into the VR drag only for the member counts that pass, on the headset, with the app warm (3 minutes):
