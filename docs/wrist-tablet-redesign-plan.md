@@ -131,10 +131,76 @@ Navy / Simple / Dark themes and a one-switch shader effects layer, in Settings >
 ## Ergonomics round (2026-10-02)
 Tablet tipped 30 degrees toward the user; side panel parallel to the tablet's right edge with its far edge turned 5 degrees toward the user; wrist watch and hand rings restyled and the watch moved back; Mates/Measure highlight the hovered and picked face only. See docs/status.md.
 
-## Still to do after John's PCVR pass
-* Fix list from the headset test (tablet size, side-panel angle, badge, haptics, timings).
-* Delete `wrist_tablet.gd` once signed off, and port or retire the 10 tests pinned to it.
-* Optional look-dev stage (shaders, library art, sounds): `UiFeedback.set_sound()` and the theme tokens are the hooks.
+## Closure plan (2026-10-02) — John signed off the new tablet after PCVR testing
+
+The new tablet beat the old one in the headset, so the old one goes. What is left falls into
+three groups: remove the old tablet (mechanical, VR-only), close two known code gaps, and the
+headset-only checks that only John can do.
+
+### A. Remove the old tablet
+Size: 1842-line `scripts/wrist_tablet.gd`, the `Main.use_new_tablet` switch, and 10 tests pinned to
+the old one with `main.use_new_tablet = false`.
+
+1. **Audit (first, small).** List the old tablet's public methods/properties that anything outside
+   it calls (`main.gd`, `controller.gd`, `locomotion.gd`, the keyboard, the windows, tests) and
+   confirm `wrist_tablet_v2.gd` has each. Anything missing is ported, not dropped.
+2. **Triage the 10 pinned tests, line by line** (about 240 SMOKE lines). Each line is: *covered* by
+   `tablet_v2` / a shared-component test (delete), *tablet-independent* (keep, point at the new
+   tablet or at the underlying class), or *unique* (port to the new tablet).
+   * Mostly page tests, expected to be mostly covered or portable: `tablet_scene`, `tools_tab`,
+     `section_tab`, `windows_tab`.
+   * Touch the tablet only incidentally (3-4 references each), expected to need only the pin and
+     the aim helper changed: `popup_keyboard`, `full_keyboard`, `e2e_mates_motion`.
+   * Mixed, need real care: `bug_round` (stick scrolling, Files list, press/hover state),
+     `features_round` (speed slider), `laser_and_left_hand` (left-hand laser, close/open).
+   Output of the triage is a short table in `tests/README.md` of what moved where, so nothing the
+   old tests guarded quietly disappears.
+3. **Delete** `wrist_tablet.gd`, the `use_new_tablet` export and the switch in
+   `main.gd::_add_wrist_tablet()`, and any old-only helpers left in `main.gd`.
+4. **Rename** `wrist_tablet_v2.gd` to `wrist_tablet.gd` (and `tablet_v2*` tests to `tablet*`) once
+   nothing else is called "v2", so the codebase has one tablet and one name. Update the ~8
+   comments that cite the old file (`controller.gd`, `diegetic_panel.gd`, `locomotion.gd`,
+   `popup_keyboard.gd`, `laser_surface.gd`, `tablet_pages.gd`).
+5. **Docs**: README, `tests/README.md`, `docs/status.md`, `docs/backend-api-notes.md`; mark this
+   plan done.
+6. **Gate**: full `tests/run_all.sh` against a fresh baseline (test count falls; every removed
+   SMOKE line accounted for in the triage table), software render of the tablet, commit, push.
+
+Order: 1, 2, 3 in one commit so the tree never has tests pointing at a deleted file; 4-6 follow.
+Estimated as one session; the triage is most of the effort.
+
+### B. Close the known code gaps
+1. **Section planes don't clip the face highlight** (small). Give the highlight material a
+   clip-aware unshaded shader reading the same global uniforms as `shaders/section_clip.gdshader`
+   (`section_plane_*`, `section_enabled`). Test: render under Xvfb, highlight discards on the cut side.
+2. **Edge and vertex picking and highlight** (the real gap; cross-repo, own milestone). Today the
+   client can only resolve a laser hit to a face (`docs/backend-api-notes.md`), so Measure cannot
+   take an edge/vertex and Mates cannot take a circular edge from the headset, and there is
+   nothing to highlight. Needs:
+   * **DIDSA-CAD**: export edge geometry and identity with the mesh (per-body edge polylines
+     keyed by the same ids the measure/mate endpoints accept; vertices derive from edge ends).
+     Backend tests alongside.
+   * **VR**: pick the nearest edge or vertex within a small angular threshold of the hit point on
+     the hit face (face wins otherwise); extend `mates_tool` / `measure_tool` picks with
+     `shape_type`; extend `face_highlight.gd` to draw an edge as a lifted polyline and a vertex
+     as a small marker, in hover and pick colours.
+   * Decision for John: edge/vertex picking in Measure first (it is the tool that names them in
+     its prompt), with Mates' circular-edge concentric picks as the second step.
+3. Anything John's PCVR notes list (tablet size, panel angles, timings) is applied as a fix list
+   to the new tablet before the old one is removed, so the rename in A4 happens once.
+
+### C. Checks only John can do (headset)
+* The ergonomic round (30 degree tilt, side-window angle, watch position, ring restyle, face
+  highlight) is built but unverified in a headset.
+* **Quest 3 standalone has never been measured**: every test so far is PCVR or headless. Before
+  any Quest APK, run `tests/gpu_timing.gd` (or the in-headset equivalent) on the device with the
+  tablet, side panel, a window and the keyboard open, shader effects on and off. The effects
+  toggle is the quality lever if it is too heavy.
+
+### Stays parked
+Hand tracking / poke, Peek state, world-pinned tablet, handedness mirroring, embedded numpad,
+composition-layer rendering, concept-only tools, third-party icon/audio pipeline, optional
+look-dev stage.
 
 ## Not in this plan (parked)
 Hand-tracking/poke · Peek palm-up state · pinned world-locked tablet ·
