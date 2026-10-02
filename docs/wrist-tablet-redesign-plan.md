@@ -174,7 +174,7 @@ Estimated as one session; the triage is most of the effort.
 1. **Section planes don't clip the face highlight** (small). Give the highlight material a
    clip-aware unshaded shader reading the same global uniforms as `shaders/section_clip.gdshader`
    (`section_plane_*`, `section_enabled`). Test: render under Xvfb, highlight discards on the cut side.
-2. **Edge and vertex picking and highlight** (the real gap; cross-repo, own milestone). Today the
+2. **Edge and vertex picking and highlight** — DONE for Measure (2026-10-02; Mates' circular-edge picks are the next step). Original gap, kept for context: Today the
    client can only resolve a laser hit to a face (`docs/backend-api-notes.md`), so Measure cannot
    take an edge/vertex and Mates cannot take a circular edge from the headset, and there is
    nothing to highlight. Needs:

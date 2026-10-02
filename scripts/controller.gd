@@ -35,6 +35,7 @@ extends XRController3D
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, so the level numbers and cutoffs stay in one place
 const OneEuro := preload("res://scripts/one_euro.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const TopologyPick := preload("res://scripts/topology_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 
 @export var grab_action: String = "grip_click"
@@ -553,7 +554,16 @@ func _try_pick_measure_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or measure_tool == null:
 		return
-	measure_tool.try_pick(part, hit.get("face_index", -1))
+	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit))
+
+
+func _measure_entity(hit: Dictionary) -> Dictionary:
+	## What a Measure pick on this ray hit would take: a vertex, an edge or a face (topology_pick.gd).
+	var part: Node3D = hit.get("part")
+	if part == null or not hit.has("point"):
+		return {}
+	var distance := global_position.distance_to(hit["point"])
+	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance))
 
 
 func _try_select() -> void:
@@ -627,10 +637,13 @@ func _update_aim_hover() -> void:
 	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active or measure_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	if face_highlight != null and (mates_tool_active or measure_tool_active):
-		# A pick takes one CAD face, so light up just that face, not the whole mesh (which says nothing
-		# about what the trigger is about to take).
+		# A pick takes one CAD face (Mates) or face / edge / vertex (Measure), so light up just that, not the
+		# whole mesh (which says nothing about what the trigger is about to take).
 		_set_aim_hover(null, Vector3.ZERO)
-		face_highlight.set_hover(self, hit.get("part"), int(hit.get("face_index", -1)))
+		if measure_tool_active:
+			face_highlight.set_hover_entity(self, hit.get("part"), _measure_entity(hit))
+		else:
+			face_highlight.set_hover(self, hit.get("part"), int(hit.get("face_index", -1)))
 	else:
 		if face_highlight != null:
 			face_highlight.clear_hover(self)

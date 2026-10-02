@@ -6,6 +6,13 @@ headset or the desktop preview — headless tests generate their own
 throwaway fixtures instead (see `tests/e2e_add_component.gd`), so these
 exist for the interaction/feel testing headless can't cover.
 
+- **`topology_box_cylinder.glb`** — an `assembly-mesh.glb` built by DIDSA-CAD's
+  own `encode_assembly_glb` from real OCCT shapes (a 100 mm box and a 30 mm x
+  100 mm cylinder, two instances, occurrences `occ_box` / `occ_cyl`), with the
+  per-Body edge / vertex / face-boundary `topology` extras. Used by
+  `tests/topology_pick.gd` and `tests/topology_render.gd`. Regenerate from
+  `DIDSA-CAD/backend` (needs the pythonocc environment) with the snippet in
+  `tests/README.md` under `topology_pick.gd`.
 - **`Assy_Test_Plate.didsa`** — a single Part, no Occurrences. Open this
   first as the assembly root.
 - **`Assy_test_peg_2.DIDSAprt`** — a single Part, no Occurrences. Add this

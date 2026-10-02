@@ -172,6 +172,26 @@ real OCCT tessellation) — but Godot's own `PrimitiveMesh` generators (e.g.
 stand-in for testing per-triangle face identity; build a real (or
 real-shaped) glb instead, as `tests/mesh_identity.gd` does.
 
+**Edge / vertex topology (DIDSA-CAD, with the Measure edge/vertex pick).** The
+same primitive's `extras` also carries `"topology"` (default on;
+`?topology=false` leaves it out), keyed by `body_id`:
+```json
+"topology": {"<body_id>": {
+  "edges":      [{"i": 3, "s": [x1,y1,z1, x2,y2,z2, ...]}, ...],
+  "vertices":   [{"i": 0, "p": [x, y, z]}, ...],
+  "face_edges": [[3, 4, 7, 8], ...]
+}}
+```
+`edges[].s` is the edge's polyline as consecutive start/end point pairs and
+`vertices[].p` a point, both in the Part's own frame (the same frame as the
+triangles, mm); `face_edges[face_id]` lists the edge `i`s on that face's
+boundary. **`i` is the raw `SubShapeRef.index`** (the 0-based
+`TopTools_IndexedMapOfShape` position `resolve_subshape_from_bodies` uses),
+NOT the dense id the flat app's own mesh response draws with: they differ past
+any degenerate edge (a sphere pole, a cone apex), so it can be sent straight
+back as `{"body_id", "shape_type": "edge"|"vertex", "index": i}`.
+`mesh_identity.gd` converts it once at tag time; `topology_pick.gd` picks from it.
+
 ## Mates — a real client to a real, pre-existing API
 
 ```
@@ -210,10 +230,11 @@ top-level Occurrence (see below).
 `type` is one of `coincident`/`concentric`/`parallel`/`distance`/`angle`;
 `value` is required (mm for distance, degrees for angle) for the last two,
 omit otherwise. `shape_type` is one of `"face"`/`"edge"`/`"vertex"`/`"body"`
-(`SubShapeType` in `models.py`) — **this client only ever sends `"face"`
-today**; edge/vertex picking isn't wired up client-side yet (a raycast
-against a filled mesh naturally resolves to a face; an edge needs either
-separate wireframe-pickable geometry or a nearest-boundary-edge heuristic).
+(`SubShapeType` in `models.py`) — **Mates still only sends `"face"`**; the
+**Measure** tool sends `"edge"` and `"vertex"` too: a ray only hits a face, so
+`topology_pick.gd` takes the nearest of the HIT FACE's own boundary edges /
+corners within a small angular reach of the hit point (see "Edge / vertex
+topology" above). Mates' circular-edge picks are the next step.
 
 **Creating a Mate does not move anything by itself** — `solve_for_occurrence`
 is a separate, explicit call. The flat app calls it immediately after

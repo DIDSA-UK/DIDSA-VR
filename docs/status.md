@@ -2409,3 +2409,11 @@ Built from John's PCVR feedback; headless + software-render verified, **not yet 
 
 * Deleted `scripts/wrist_tablet.gd` (1842 lines) and `Main.use_new_tablet`; the redesigned tablet is renamed `scripts/ui/wrist_tablet.gd` (tests `tablet.gd`, `tablet_render.gd`). Audit first: the old tablet's external API (`setup`, `open_tablet`, `close_tablet`, `is_open`, `set_info`) is all on the new one.
 * The 10 tests that were pinned to the old tablet were ported or unpinned, with a per-test table in `tests/README.md` ("Old-tablet removal"). Nothing the old tests guarded was dropped without a covering test.
+
+## 2026-10-02 — Measure picks edges and vertices (cross-repo: DIDSA-CAD + VR)
+
+Closes the plan's "edge and vertex picking" gap for Measure. Not yet felt in a headset.
+
+* **DIDSA-CAD** (`backend/app/document/{mesh_data,mesh,mesh_export,router}.py`): the glb's per-primitive `extras` now also carry `topology` per Body: every real edge (polyline), every topology vertex and each face's boundary edge list, all keyed by the **raw `SubShapeRef.index`** (the `MapShapes` position the resolver uses). The flat app's dense edge ids skip degenerate edges, so they are NOT valid indices past a sphere pole or cone apex; `BodyTopology.edge_ref_indices` translates, with a test against the real resolver on a sphere. `?topology=false` opts out. Tests: `test_merged_body_mesh_data.py`, `test_assembly_mesh_glb.py`.
+* **VR**: `mesh_identity.gd` converts the topology once at tag time; `topology_pick.gd` picks vertex > edge > face from the hit face's own boundary within an angular reach (capped by part size); `face_highlight.gd` draws a hover/picked edge as a thin tube and a vertex as a ball; `measure_tool.gd` sends EDGE/VERTEX SubShapeRefs; `controller.gd` ties them together. Mates stays face-only. Tests: `tests/topology_pick.gd` (real import path + real physics rays on a glb made by the CAD encoder, fixture `tests/fixtures/topology_box_cylinder.glb`), `tests/topology_render.gd`.
+* **To tune in the headset**: the reach (`topology_pick.gd` `REACH_*`, `EDGE_REACH_FRACTION`) and the tube / ball size (`face_highlight.gd` `EDGE_RADIUS`, `VERTEX_RADIUS`). The glb grows by the topology JSON (the box+cylinder fixture is 15 KB); real-assembly size is unmeasured, and `?topology=false` is the lever if it is heavy.

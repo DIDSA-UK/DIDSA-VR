@@ -292,10 +292,14 @@ live-synced.
     Flip are not.
 14. **Assembly > Measure** (milestone 4 — the last of the four assembly tools).
     Toggle **Measure tool** on, then point the right hand's laser at a
-    vertex/edge/face and pull the trigger to pick it (hover and picks
-    highlight the face itself, not the whole part; today only faces are
-    pickable from the headset, so edges/vertices light up once they can be
-    picked) — unlike Mates, the currently-open Part's own
+    vertex/edge/face and pull the trigger to pick it: close to a corner it
+    takes that **vertex**, close to an edge that **edge**, otherwise the
+    **face** (how close is an angle, so it feels the same near and far, and
+    is capped by the part's size; only the face under the laser is
+    considered, so a corner on the far side of a thin part is never picked by
+    accident). Hover and picks light up exactly what would be / was taken (a
+    face, a thin tube along an edge, a ball on a vertex), not the whole part
+    — unlike Mates, the currently-open Part's own
     unplaced content is a valid pick here, and so is a second pick on the
     very same part (measuring across two features of one part is the
     common case, not a "two different parts" rule). One pick shows that
@@ -500,7 +504,7 @@ newly-added) DIDSA-CAD endpoint — never a VR-only representation, so
 anything authored here is readable and editable in the flat app and vice
 versa:
 
-- **Mates** — face-only picking (top-level Occurrences of the loaded root
+- **Mates** — face-only picking (Measure also picks edges and vertices) (top-level Occurrences of the loaded root
   Part only), a real client to `POST/GET/PATCH/DELETE .../mates` and
   `.../occurrences/{id}/solve`. Relax-all/Enforce-all supported.
 - **Colours** — `PATCH .../occurrences/{id}`'s existing `color` field,
