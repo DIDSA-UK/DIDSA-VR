@@ -3,11 +3,9 @@ extends Node3D
 ## world-space UI panel: a Control tree in a SubViewport, rendered onto a
 ## quad, hit-tested by hand against the right hand's laser (no physics
 ## involved) - extracted from popup_keyboard.gd, which was the first thing
-## in this repo built this way (wrist_tablet.gd predates it and still has
-## its own copy of the same mechanism, wrist-mounted instead of free-
-## floating; this base is deliberately NOT retrofitted onto either of those
-## two proven, already-headset-tested files - see docs/status.md's
-## "Floating windows" section for why).
+## in this repo built this way (the pointer plumbing has since moved into the
+## shared scripts/ui/laser_surface.gd, which this, the keyboard and the
+## wrist tablet all use).
 ##
 ## Real-headset feedback: these panels opened in front of the camera and
 ## then just stayed exactly there forever, with no way to move one out of

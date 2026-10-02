@@ -46,7 +46,6 @@ func type_number(text: String) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -105,7 +104,7 @@ func _initialize() -> void:
 	# --- real-headset regression, same class of bug as tests/tablet_scene.gd's
 	# own drift check: a real trigger squeeze isn't instantaneous, and Godot's
 	# BaseButton cancels a press on ANY intervening motion event landing
-	# outside its rect — see wrist_tablet.gd's _send_click() for the full
+	# outside its rect — see scripts/ui/laser_surface.gd's frozen-press logic for the full
 	# reasoning (popup_keyboard.gd shares the identical fix).
 	if kb.is_open(): # backspace above left it open — primary_click toggles, so close first or the next click would close it instead of opening it
 		kb.close()

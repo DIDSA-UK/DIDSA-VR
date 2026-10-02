@@ -28,15 +28,14 @@ func _find_button(txt: String) -> Button:
 
 func _aim_at_tablet_px(px: Vector2) -> void:
 	var local := Vector3((px.x / tab._viewport.size.x - 0.5) * tab.panel_size.x, (0.5 - px.y / tab._viewport.size.y) * tab.panel_size.y, 0.0)
-	var world: Vector3 = tab.global_transform * local
-	r.global_position = world + tab.global_transform.basis.z * 0.4
+	var world: Vector3 = tab._quad.global_transform * local
+	r.global_position = world + tab._quad.global_transform.basis.z * 0.4
 	r.look_at(world, Vector3.UP)
 
 
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(main)
 	await process_frame
@@ -61,11 +60,11 @@ func _initialize() -> void:
 	tab.open_tablet()
 	for i in 4:
 		await process_frame
-	var slider: HSlider = tab._speed_slider
+	var slider: HSlider = tab.pages._speed_slider
 	print("SMOKE the tablet has a Travel speed slider on View > Navigate, at the bottom by default: ", slider != null and slider.is_visible_in_tree() and slider.value == 0.0)
-	print("SMOKE its label shows the current speed: ", tab._speed_label.text.begins_with("Travel speed: 1.5 m/s"))
+	print("SMOKE its label shows the current speed: ", tab.pages._speed_label.text.begins_with("Travel speed: 1.5 m/s"))
 	slider.value = 1.0
-	print("SMOKE moving the slider sets the walk speed: ", is_equal_approx(origin.move_speed, 30.0) and "30.0 m/s" in tab._speed_label.text)
+	print("SMOKE moving the slider sets the walk speed: ", is_equal_approx(origin.move_speed, 30.0) and "30.0 m/s" in tab.pages._speed_label.text)
 	slider.value = 0.0
 
 	# --- dragging it with the laser (a press that starts on a slider keeps tracking the aim)
