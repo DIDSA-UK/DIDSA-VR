@@ -1,7 +1,7 @@
 extends Node3D
 ## The redesigned wrist tablet (see docs/wrist-tablet-redesign-plan.md). Same job and
 ## same public API as wrist_tablet.gd — setup(), is_open(), open_tablet(),
-## close_tablet(), set_info() — so main.gd can build either (Main > use_new_tablet).
+## close_tablet(), set_info() — so main.gd can talk to it.
 ## It is only the 3D half: the UI is tablet_ui.gd (+ side_panel_ui.gd), plain 2D
 ## Controls that also run in a desktop window (the UI Lab); the laser handling is the
 ## shared laser_surface.gd; what the UI shows is data (tablet_registry.gd, filled by

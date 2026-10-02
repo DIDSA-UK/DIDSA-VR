@@ -1,7 +1,7 @@
 extends SceneTree
 ## NEEDS A REAL RENDER, not --headless (Xvfb + llvmpipe, same recipe as
 ## tests/section_render.gd):
-##   TABLET_RENDER_DIR=/tmp/lab xvfb-run -a "$GODOT" --path . --script res://tests/tablet_v2_render.gd
+##   TABLET_RENDER_DIR=/tmp/lab xvfb-run -a "$GODOT" --path . --script res://tests/tablet_render.gd
 ## Opens the redesigned tablet in the real scene, goes to Assembly > Mates, and renders it
 ## from where a user's eyes would be, saving PNGs ($TABLET_RENDER_DIR) so the 3D result
 ## — quad, tilt, the angled side list, the hand badge — can be eyeballed. Checks the
@@ -12,7 +12,6 @@ func _initialize() -> void:
 	DisplayServer.window_set_size(Vector2i(1280, 720))
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg"
-	main.use_new_tablet = true
 	root.add_child(main)
 	await process_frame
 	var origin: XROrigin3D = main.get_node("XROrigin3D")
@@ -39,7 +38,7 @@ func _initialize() -> void:
 	var dir := OS.get_environment("TABLET_RENDER_DIR")
 	var img := root.get_texture().get_image()
 	if dir != "":
-		img.save_png(dir.path_join("tablet_v2_scene.png"))
+		img.save_png(dir.path_join("tablet_scene.png"))
 	var lit := 0
 	for y in range(0, img.get_height(), 8):
 		for x in range(0, img.get_width(), 8):
@@ -59,7 +58,7 @@ func _initialize() -> void:
 	eye.look_at(Vector3(0.0, 1.0, -0.33))
 	await create_timer(0.5).timeout
 	if dir != "":
-		root.get_texture().get_image().save_png(dir.path_join("tablet_v2_settings.png"))
+		root.get_texture().get_image().save_png(dir.path_join("tablet_settings.png"))
 	print("SMOKE the Settings page has Sound and Volume controls in Comfort: ", sound_btn != null)
 	print("SMOKE the tablet draws something into the 3D view: ", lit > 200)
 	print("SMOKE the side panel is up while Mates is shown, the badge is on the right hand: ", side_ok)

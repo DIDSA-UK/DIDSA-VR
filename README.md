@@ -14,12 +14,11 @@ hasn't been started. Still plain Godot 4 core (no `godot-xr-tools`, no
 addons) — the Browser window's one exception to that is documented in
 item 15 below (a separate server-side relay, not a Godot dependency).
 
-**Redesign in progress:** the wrist tablet, floating-window chrome and popup keyboard
-are being redesigned — plan in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
+**Redesigned UI (done):** the wrist tablet, floating-window chrome and popup keyboard
+were redesigned — plan and closure notes in [`docs/wrist-tablet-redesign-plan.md`](docs/wrist-tablet-redesign-plan.md).
 Try the new look without a headset: open `lab/ui_lab.tscn` in the Godot editor and press F6;
-tune it by editing a preset in `ui/themes/` (Navy / Simple / Dark; the Lab has buttons for them and for the effects). To see the new tablet in the headset, tick **Use New Tablet**
-on the Main node's Inspector (group *Wrist tablet*); it is off by default while the old tablet below
-is still the reference.
+tune it by editing a preset in `ui/themes/` (Navy / Simple / Dark; the Lab has buttons for them and for the effects).
+The old tablet has been removed; the redesigned one is the only wrist tablet.
 
 **Picking this up fresh (including a new Claude Code session)?** Read
 [`docs/status.md`](docs/status.md) first — what's built, what's open,
@@ -173,7 +172,7 @@ live-synced.
      open.
 
    With no `secrets.cfg` the app now starts anyway, ready for a local file.
-   **The redesigned tablet** (default; `scripts/ui/wrist_tablet_v2.gd`, plan in
+   **The wrist tablet** (`scripts/ui/wrist_tablet.gd`, plan in
    `docs/wrist-tablet-redesign-plan.md`). Same wrist icon, same "shoot it to open, never
    opens by itself", right-hand laser only. A 0.40 x 0.26 m panel laid out like the sketch:
    a **category grid** top-left (View, Assembly, Windows, Files; up to 8 in 4 x 2, a second

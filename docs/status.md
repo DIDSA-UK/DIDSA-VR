@@ -2404,3 +2404,8 @@ Built from John's PCVR feedback; headless + software-render verified, **not yet 
 * **Side panel**: its left (hinge) edge is parallel to the tablet's right edge, and its right edge is turned 5 degrees toward the user (`side_yaw_degrees = -5`, pitch 0 so the edges stay parallel).
 * **Face-level highlight** (`scripts/face_highlight.gd`, wired by `main.gd`/`controller.gd`): with Mates or Measure on, the laser lights only the face it is on, and picked faces stay lit (first cyan, second orange). Uses the backend glb's per-triangle `face_ids`; with no tool on, whole-part hover is unchanged. **Only faces are pickable client-side today**, so edge/vertex highlight needs edge/vertex picking first. The highlight is plain overlay geometry: it is not clipped by an active section plane.
 * Tests: `tests/face_highlight.gd` (new, in `run_all.sh`); `tests/tablet_v2.gd` now aims along the tilted tablet's normal and checks tilt, watch position, side-panel edges and the ring/watch re-theme.
+
+## 2026-10-02 — Old wrist tablet removed (John signed off the redesign after PCVR testing)
+
+* Deleted `scripts/wrist_tablet.gd` (1842 lines) and `Main.use_new_tablet`; the redesigned tablet is renamed `scripts/ui/wrist_tablet.gd` (tests `tablet.gd`, `tablet_render.gd`). Audit first: the old tablet's external API (`setup`, `open_tablet`, `close_tablet`, `is_open`, `set_info`) is all on the new one.
+* The 10 tests that were pinned to the old tablet were ported or unpinned, with a per-test table in `tests/README.md` ("Old-tablet removal"). Nothing the old tests guarded was dropped without a covering test.

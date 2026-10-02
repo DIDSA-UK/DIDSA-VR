@@ -1,6 +1,6 @@
 # Wrist tablet, window and keyboard redesign — plan
 
-Status: agreed direction, not started. Supersedes `wrist-tablet-redesign-brief.md`
+Status: built, tested on PCVR and signed off; the old tablet is removed (see Closure plan). Supersedes `wrist-tablet-redesign-brief.md`
 (an LLM-written brief written without access to this code) wherever they differ.
 Sources: John's sketch, the concept renders (visual direction only — their
 features are NOT in scope), and the existing code (`wrist_tablet.gd`,
@@ -137,7 +137,8 @@ The new tablet beat the old one in the headset, so the old one goes. What is lef
 three groups: remove the old tablet (mechanical, VR-only), close two known code gaps, and the
 headset-only checks that only John can do.
 
-### A. Remove the old tablet
+### A. Remove the old tablet — DONE (2026-10-02)
+Audit: the old tablet's external API was `setup`, `open_tablet`, `close_tablet`, `is_open`, `set_info`; all present on the new one. Ten pinned tests ported or unpinned (see tests/README.md, "Old-tablet removal"); the old script and the switch deleted; the new tablet renamed to `scripts/ui/wrist_tablet.gd` (tests `tablet.gd`, `tablet_render.gd`).
 Size: 1842-line `scripts/wrist_tablet.gd`, the `Main.use_new_tablet` switch, and 10 tests pinned to
 the old one with `main.use_new_tablet = false`.
 

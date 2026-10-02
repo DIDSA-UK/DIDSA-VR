@@ -1,12 +1,11 @@
 extends SceneTree
-## Full-scene test for the REDESIGNED tablet (scripts/ui/wrist_tablet_v2.gd, enabled with
-## main.use_new_tablet): main.tscn with NO backend, a simulated right laser. Covers opening
+## Full-scene test for the wrist tablet (scripts/ui/wrist_tablet.gd): main.tscn with NO backend, a simulated right laser. Covers opening
 ## by shooting the wrist icon, the category grid and tool rail, the one-active-tool rule and
 ## its hand badge (also with the tablet closed), the header switch, status line, the
 ## contextual side panel (mates list / model files / undo history) reached by a real laser
 ## aimed at the angled panel, Undo/Redo and the Undo long-press, Scale / Navigate / Settings
 ## pages, and that the laser claims ui_hover on both panels and lets go on close.
-## Run: "$GODOT" --headless --path . --script res://tests/tablet_v2.gd  (see tests/README.md)
+## Run: "$GODOT" --headless --path . --script res://tests/tablet.gd  (see tests/README.md)
 
 var main
 var tab
@@ -78,7 +77,6 @@ func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg"
-	main.use_new_tablet = true
 	root.add_child(main)
 	await process_frame
 	origin = main.get_node("XROrigin3D")
@@ -92,7 +90,7 @@ func _initialize() -> void:
 	var th = main._two_hand
 	for i in 4:
 		await process_frame
-	print("SMOKE the new tablet is what main built: ", tab.get_script().resource_path.ends_with("wrist_tablet_v2.gd"))
+	print("SMOKE the tablet is what main built: ", tab.get_script().resource_path.ends_with("wrist_tablet.gd"))
 
 	# --- closed by default, opens only by shooting the wrist icon
 	r.position = Vector3(1.0, 1.5, 1.0)

@@ -1,5 +1,5 @@
 extends SceneTree
-## Assembly > Sections sub-tab (wrist_tablet.gd, section_tool.gd's real
+## Assembly > Sections tool (the redesigned wrist tablet, section_tool.gd's real
 ## grab/reconcile pipeline): instantiates main.tscn (NO backend), loads a
 ## generated multi-part .glb the same way tools_tab.gd/tablet_scene.gd do,
 ## drives the real Sections buttons, and simulates a grip grab on the
@@ -24,10 +24,14 @@ func find_button(pred: Callable) -> Button:
 	return null
 
 func aim_and_click(b: Button) -> void:
+	# The tablet is tilted on the wrist: stand the controller along its normal and look straight at the button.
 	var c: Vector2 = b.global_position + b.size * 0.5
 	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
 	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
-	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
+	var xf: Transform3D = tab._quad.global_transform
+	var p: Vector3 = xf * Vector3(lx, ly, 0.0)
+	var n: Vector3 = xf.basis.z.normalized()
+	r.global_transform = Transform3D(Basis.looking_at(-n, Vector3.UP), p + n * 0.4)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click")
@@ -38,7 +42,6 @@ func aim_and_click(b: Button) -> void:
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -56,6 +59,7 @@ func _initialize() -> void:
 
 	# shoot the wrist bullseye to open the tablet (closed by default)
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
@@ -79,13 +83,11 @@ func _initialize() -> void:
 	var parts: Array = main.get_tree().get_nodes_in_group("grabbable_parts")
 
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Assembly"))
-	var sections_tab := find_button(func(b: Button) -> bool: return b.text == "Sections")
-	await aim_and_click(sections_tab)
-	print("SMOKE Assembly > Sections opens: ", tab._pages["Assembly"].visible and sections_tab.button_pressed)
 	print("SMOKE section tool starts off: ", main._section_tool.active == false)
 
-	# turn the tool on: spawns a gizmo, no parts wrapped yet until the next process frame's reconcile()
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text.begins_with("Section tool")))
+	# selecting Sections on the rail turns the tool on: spawns a gizmo, no parts wrapped yet until the next process frame's reconcile()
+	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Sections"))
+	print("SMOKE Assembly > Sections opens: ", tab.ui.selected_tool_id == "sections")
 	print("SMOKE section tool active after toggling on: ", main._section_tool.active == true)
 	print("SMOKE toggling on spawns a gizmo: ", main._section_tool.gizmo() != null)
 	for i in 3:
@@ -133,8 +135,8 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Flip"))
 	print("SMOKE flip toggles: ", main._section_tool.flipped == true)
 
-	# turning the tool off restores every part's real material and drops the gizmo
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text.begins_with("Section tool")))
+	# tapping the active Sections tool again turns it off: restores every part's real material and drops the gizmo
+	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Sections"))
 	print("SMOKE section tool off: gizmo dropped: ", main._section_tool.gizmo() == null)
 	print("SMOKE every part's material_override is restored (none were ever colour_tool-overridden): ", parts.all(func(p: MeshInstance3D) -> bool: return p.material_override == null))
 

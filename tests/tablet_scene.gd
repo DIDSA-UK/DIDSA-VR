@@ -1,5 +1,5 @@
 extends SceneTree
-## Full-scene test: instantiates main.tscn (with NO backend) and drives the wrist tablet with a simulated right laser: bullseye open/close and false positives, Files category loading a generated .glb, View > Scale Fit/Home/presets, View > Navigate toggles, Settings cogwheel (Steadiness, display levers), Assembly > Colours, one-hand drag.
+## Full-scene test: instantiates main.tscn (with NO backend) and drives the redesigned wrist tablet with a simulated right laser: wrist-watch open/close and false positives, Files category loading a generated .glb, View > Scale Fit/Home/presets, View > Navigate toggles, Settings (Steadiness, display levers), Assembly > Colours, one-hand drag. (Print-style calibration lines: read the values, see tests/README.md; the pass/fail version is tests/tablet_v2.gd.)
 ## Run: "$GODOT" --headless --path . --script res://tests/tablet_scene.gd  (see tests/README.md)
 
 var main
@@ -16,11 +16,24 @@ func find_button(pred: Callable) -> Button:
 		stack.append_array(n.get_children())
 	return null
 
-func aim_and_click(b: Button) -> void:
+func aim_at(vp_px: Vector2, vp_size: Vector2, width: float, quad: Node3D) -> void:
+	# The tablet is tilted on the wrist: stand the controller along the quad's normal and look straight at the point.
+	var lx: float = (vp_px.x / vp_size.x - 0.5) * width
+	var ly: float = (0.5 - vp_px.y / vp_size.y) * tab.panel_size.y
+	var xf: Transform3D = quad.global_transform
+	var p: Vector3 = xf * Vector3(lx, ly, 0.0)
+	var n: Vector3 = xf.basis.z.normalized()
+	r.global_transform = Transform3D(Basis.looking_at(-n, Vector3.UP), p + n * 0.4)
+
+func aim_and_click(b: Button, side: bool = false) -> void:
+	if not side and tab.ui.pages_scroll.is_ancestor_of(b):
+		tab.ui.pages_scroll.ensure_control_visible(b) # as the right thumbstick would scroll it into view
+		await process_frame
 	var c: Vector2 = b.global_position + b.size * 0.5
-	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
-	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
-	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
+	if side:
+		aim_at(c, Vector2(tab._side_viewport.size), tab.side_width, tab._side_quad)
+	else:
+		aim_at(c, Vector2(tab.viewport_size), tab.panel_size.x, tab._quad)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click")
@@ -28,10 +41,24 @@ func aim_and_click(b: Button) -> void:
 	r.button_released.emit("trigger_click")
 	await process_frame
 
+func find_side_open(file_name: String) -> Button:
+	# The Files list lives in the side panel: one row per file with an Open button; find the row's own.
+	var stack: Array = [tab._side_viewport]
+	var rows: Array = []
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is Button and n.is_visible_in_tree() and n.text == "Open":
+			rows.append(n)
+		stack.append_array(n.get_children())
+	return rows[0] if not rows.is_empty() else null
+
+func aim_at_watch() -> void:
+	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0)
+
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg"   # no backend => no network
 	root.add_child(main)
 	await process_frame
@@ -55,13 +82,14 @@ func _initialize() -> void:
 	print("SMOKE looking at wrist, no shot -> tablet open=", tab._open, " visible=", tab.visible, " bullseye visible=", tab._target.visible)
 	# laser sweeping across the tablet's area while closed must not click anything either
 	r.position = Vector3(l.position.x + 0.15, 1.5, l.position.z + tab.target_position.z)   # 15 cm to the side of the bullseye
+	r.rotation_degrees = Vector3(-90, 0, 0)
 	for i in 3:
 		await process_frame
 	print("SMOKE 15cm off the bullseye: hover=", tab._target_hover, " ui_hover meta=", r.get_meta("ui_hover"))
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click")
 	print("SMOKE trigger 15cm off the bullseye -> open=", tab._open)
 	# shoot the bullseye
-	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	aim_at_watch()
 	for i in 3:
 		await process_frame
 	print("SMOKE aiming at bullseye: hover=", tab._target_hover, " ui_hover meta=", r.get_meta("ui_hover"))
@@ -70,7 +98,7 @@ func _initialize() -> void:
 	# a quick second pull right after opening must be ignored (laser is still resting where the bullseye was)
 	var modes_before = [th.enabled, origin.enabled, l.parts_enabled]
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
-	print("SMOKE immediate second pull ignored: ", modes_before == [th.enabled, origin.enabled, l.parts_enabled], " (pressed=", tab._pressed, ")")
+	print("SMOKE immediate second pull ignored: ", modes_before == [th.enabled, origin.enabled, l.parts_enabled], " (pressed=", tab.surface.pressed, ")")
 	await create_timer(0.5).timeout
 
 	# make a real .glb in user://models and list/load it
@@ -84,13 +112,13 @@ func _initialize() -> void:
 
 	# Files tab via the tablet
 	await aim_and_click(find_button(func(b): return b.text == "Files"))
-	var fb := find_button(func(b): return b.text == "smoke_test.glb")
-	print("SMOKE files tab shows the file: ", fb != null)
-	await aim_and_click(fb)
+	var fb := find_side_open("smoke_test.glb")
+	print("SMOKE files tab shows the file (a row with an Open button in the side panel): ", fb != null)
+	await aim_and_click(fb, true)
 	print("SMOKE parts=", main._part_count, " ", th.scale_text(), " status=", main.status_text)
 
 	# reload same file again (replaces the model, no dangling refs)
-	await aim_and_click(find_button(func(b): return b.text == "smoke_test.glb"))
+	await aim_and_click(find_side_open("smoke_test.glb"), true)
 	print("SMOKE reloaded: parts=", main._part_count, " children=", main.assembly_root.get_child_count())
 
 	# Fit and Home on View > Scale
@@ -141,19 +169,17 @@ func _initialize() -> void:
 	# Settings cogwheel: Steadiness ("Strong") and Display (Shadows/
 	# Resolution/MSAA, formerly the Perf tab) both live here now
 	print("SMOKE steadiness default: ", th.STEADINESS_NAMES[th.steadiness])
-	await aim_and_click(find_button(func(b): return b.text == "Settings"))
+	await aim_and_click(tab.ui._settings_button)
 	await aim_and_click(find_button(func(b): return b.text == "Strong"))
 	print("SMOKE steadiness after clicking Strong: ", th.STEADINESS_NAMES[th.steadiness], " cutoff=", th._left_filter.min_cutoff)
 	await create_timer(0.7).timeout
-	print("SMOKE settings display info text: ", tab._info_label.text.replace("
-", " / "))
 	var light: DirectionalLight3D = main.get_node("DirectionalLight3D")
 	print("SMOKE shadows before: ", light.shadow_enabled)
 	await aim_and_click(find_button(func(b): return b.text.begins_with("Shadows")))
 	print("SMOKE shadows after click: ", light.shadow_enabled)
 	await aim_and_click(find_button(func(b): return b.text == "80%"))
 	print("SMOKE resolution 80% -> scaling_3d_scale=", main.get_viewport().scaling_3d_scale)
-	await aim_and_click(find_button(func(b): return b.text == "Off"))
+	await aim_and_click(find_button(func(b): return b.text == "Off" and b.get_parent().get_parent().get_child(0).text == "MSAA")) # the MSAA row's own Off
 	print("SMOKE MSAA Off -> ", main.get_viewport().msaa_3d, " (0 = disabled)")
 	print("SMOKE tablet panel rendering while open: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
 
@@ -165,23 +191,23 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b): return b.text == "Assembly"))
 	await aim_and_click(find_button(func(b): return b.text == "Colours"))
 	await aim_and_click(find_button(func(b): return b.text == "Clear colour"))
-	var message_text: String = tab._colour_status_label.text
+	var message_text: String = tab.ui.status_text()
 	print("SMOKE clearing with nothing selected shows the no-selection message: ", message_text.find("laser-select a part first") != -1)
 	await create_timer(0.3).timeout # outlasts one 0.25s refresh tick
-	print("SMOKE the message survives a periodic refresh tick: ", tab._colour_status_label.text == message_text)
-	# the "nothing selected" error and the plain live-selection refresh text
-	# happen to read identically when nothing really is selected, so prove
-	# the hold itself actually expires with a message that reads differently
-	# from whatever the refresh would show
-	tab._show_colour_message("TEST: transient message")
-	print("SMOKE _show_colour_message sets the text immediately: ", tab._colour_status_label.text == "TEST: transient message")
-	await create_timer(3.3).timeout # outlasts _show_colour_message()'s own default 3s hold
+	print("SMOKE the message survives a periodic refresh tick: ", tab.ui.status_text() == message_text)
+	# the "nothing selected" toast and the live selection text read identically when nothing is selected, so prove
+	# the hold itself expires with a message that reads differently from whatever the refresh would show
+	tab.ui.toast("TEST: transient message")
+	for i in 3:
+		await process_frame
+	print("SMOKE a toast shows immediately: ", tab.ui.status_text().ends_with("TEST: transient message"))
+	await create_timer(3.3).timeout # outlasts the toast's own 3s hold
 	await process_frame
-	print("SMOKE the message reverts to the live selection state once its hold expires: ", tab._colour_status_label.text != "TEST: transient message")
+	print("SMOKE the message reverts to the live state once its hold expires: ", not tab.ui.status_text().ends_with("TEST: transient message"))
 
-	await aim_and_click(find_button(func(b): return b.text == "X"))
+	await aim_and_click(find_button(func(b): return b.theme_type_variation == &"ButtonDanger" and b.icon != null))
 	print("SMOKE tablet panel rendering after close: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
-	await process_frame
+	await create_timer(0.4).timeout # the stow animation
 	print("SMOKE after pressing X -> open=", tab._open, " visible=", tab.visible, " bullseye visible=", tab._target.visible)
 
 	# --- real-headset regression: a real trigger squeeze takes real time,
@@ -193,7 +219,7 @@ func _initialize() -> void:
 	# dropped every real click while hover still looked completely normal
 	# throughout — exactly why aim_and_click()'s own press+release-in-place
 	# pattern above never caught it. Reproduce the drift deliberately here.
-	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	aim_at_watch()
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click"); await process_frame; r.button_released.emit("trigger_click"); await process_frame
@@ -204,20 +230,17 @@ func _initialize() -> void:
 	# top-level page again.
 	await aim_and_click(find_button(func(b): return b.text == "View"))
 	var scale_tab := find_button(func(b): return b.text == "Scale")
-	var c: Vector2 = scale_tab.global_position + scale_tab.size * 0.5
-	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
-	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
-	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
+	aim_at(scale_tab.global_position + scale_tab.size * 0.5, Vector2(tab.viewport_size), tab.panel_size.x, tab._quad)
 	for i in 3:
 		await process_frame
 	r.button_pressed.emit("trigger_click") # DOWN while aimed squarely at "Scale"
 	await process_frame
-	r.position.x += 0.05 # drift sideways mid-press — a real hand rarely holds a laser aim perfectly still for the ~100-300ms a trigger squeeze takes
+	r.global_position += tab._quad.global_transform.basis.x.normalized() * 0.05 # drift sideways mid-press — a real hand rarely holds a laser aim perfectly still for the ~100-300ms a trigger squeeze takes
 	for i in 3:
 		await process_frame # _update_pointer() keeps tracking the drifted aim every frame, same as it would on a real headset
 	r.button_released.emit("trigger_click") # UP now aimed somewhere else entirely
 	await process_frame
-	print("SMOKE a click still registers despite the hand drifting mid-press: ", scale_tab.button_pressed)
+	print("SMOKE a click still registers despite the hand drifting mid-press: ", tab.ui.selected_tool_id == "scale")
 
 	DirAccess.remove_absolute("user://models/smoke_test.glb")
 	quit()

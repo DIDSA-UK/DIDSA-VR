@@ -57,7 +57,6 @@ func has_keys(labels: Array) -> bool:
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
-	main.use_new_tablet = false # drives the OLD wrist tablet's internals (the new one is the default; see tests/tablet_v2.gd)
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(main)
 	await process_frame
@@ -198,11 +197,11 @@ func _initialize() -> void:
 
 	# --- callers that need real text now get the full keyboard; numbers stay numeric
 	var tablet = l.get_node("WristTablet")
-	tablet._on_custom_colour_pressed()
+	tablet.pages._on_custom_colour_pressed()
 	await process_frame
 	print("SMOKE the Custom colour hex entry uses the full keyboard (it needs a-f): ", kb.is_open() and kb.current_mode() == "full")
 	kb.close()
-	tablet._on_set_project_folder_pressed()
+	tablet.pages._on_set_project_folder_pressed()
 	await process_frame
 	print("SMOKE the project-folder entry uses the full keyboard (it's a path): ", kb.is_open() and kb.current_mode() == "full")
 	kb.close()
