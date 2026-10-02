@@ -122,6 +122,14 @@ func status_text() -> String:
 	return ""
 
 
+func picked_entities() -> Array:
+	## [{part, face_index}] for face_highlight.gd, in pick order.
+	var out := []
+	for p in _picks:
+		out.append({"part": p.get("part"), "face_index": p.get("face_index", -1)})
+	return out
+
+
 func picked_labels() -> Array:
 	var out := []
 	for p in _picks:
@@ -147,6 +155,8 @@ func try_pick(part: Node3D, face_index: int) -> void:
 		"occurrence_id": occ_ref["occurrence_id"],
 		"subshape_ref": subshape,
 		"label": str(part.name), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
+		"part": part, # for face_highlight.gd: the picked face stays lit
+		"face_index": face_index,
 	})
 	_status = ""
 	picks_changed.emit()

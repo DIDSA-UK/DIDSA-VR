@@ -54,10 +54,10 @@ func _initialize() -> void:
 	for n in meshes:
 		if n is MeshInstance3D and n.mesh is CylinderMesh and n.get_parent() == r and n.mesh.height < 0.01 and n.mesh.top_radius < 0.02:
 			discs += 1
-		if n is MeshInstance3D and n.mesh is TorusMesh and n.get_parent() == r:
-			ring = n
+		if n is MeshInstance3D and n.mesh is TorusMesh and n.get_parent().get_parent() == r:
+			ring = n # the ring's pieces (glow, face, accent ring) share one anchor node, which carries the position
 	print("SMOKE controller has no thumbstick/button discs any more: ", discs == 0)
-	print("SMOKE controller ring is still there and moved back by ~one diameter (z ~ +0.083): ", ring != null and absf(ring.position.z - 0.083) < 0.002)
+	print("SMOKE controller ring is still there and moved back by ~one diameter (z ~ +0.083): ", ring != null and absf((ring.get_parent() as Node3D).position.z - 0.083) < 0.002)
 
 	# --- tablet: categories on ONE row; taller and wider than the old 640x600.
 	tab.open_tablet()

@@ -230,8 +230,9 @@ live-synced.
     four are undoable. A hidden part is click-through for both the laser
     and grip — it's out of the way, not just invisible.
 11. **Assembly > Mates** (milestone 4). Toggle **Mates tool** on, then point the
-    right hand's laser at a face and pull the trigger to pick it (same
-    hover highlight as normal selection) — pick a face on a second, different
+    right hand's laser at a face and pull the trigger to pick it (while the
+    tool is on, only the face under the laser lights up, and a picked face
+    stays lit — first pick cyan, second orange) — pick a face on a second, different
     part to complete a pair; a status line explains why a pick didn't count
     (picking the assembly's own unplaced content, the same part twice, or a
     part from a different assembly all reject with their own message).
@@ -292,8 +293,10 @@ live-synced.
     Flip are not.
 14. **Assembly > Measure** (milestone 4 — the last of the four assembly tools).
     Toggle **Measure tool** on, then point the right hand's laser at a
-    vertex/edge/face and pull the trigger to pick it (same hover+name as
-    normal selection) — unlike Mates, the currently-open Part's own
+    vertex/edge/face and pull the trigger to pick it (hover and picks
+    highlight the face itself, not the whole part; today only faces are
+    pickable from the headset, so edges/vertices light up once they can be
+    picked) — unlike Mates, the currently-open Part's own
     unplaced content is a valid pick here, and so is a second pick on the
     very same part (measuring across two features of one part is the
     common case, not a "two different parts" rule). One pick shows that

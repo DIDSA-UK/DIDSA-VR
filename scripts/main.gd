@@ -53,6 +53,7 @@ const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/fa
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
 # on-headset. Timestamps are Time.get_ticks_msec() values.
+var face_highlight: Node ## face-level hover / pick highlight for Mates and Measure — see face_highlight.gd
 var _two_hand: Node
 var _tablet: Node
 var _keyboard: Node
@@ -91,6 +92,7 @@ func _ready() -> void:
 	_add_two_hand_model()
 	_add_mates_tool()
 	_add_measure_tool()
+	_add_face_highlight()
 	_add_colour_tool()
 	_add_section_tool()
 	_add_assembly_tree_window()
@@ -146,6 +148,25 @@ func _add_measure_tool() -> void:
 	measure.name = "MeasureTool"
 	add_child(measure)
 	_measure_tool = measure
+
+
+func _add_face_highlight() -> void:
+	## Lights up just the hovered / picked FACE for Mates and Measure (see face_highlight.gd).
+	var highlight := preload("res://scripts/face_highlight.gd").new()
+	highlight.name = "FaceHighlight"
+	add_child(highlight)
+	face_highlight = highlight
+	var refresh := func() -> void:
+		var entries: Array = []
+		if _mates_tool.active:
+			entries = _mates_tool.picked_entities()
+		elif _measure_tool.active:
+			entries = _measure_tool.picked_entities()
+		highlight.set_picks(entries)
+	_mates_tool.picks_changed.connect(refresh)
+	_measure_tool.picks_changed.connect(refresh)
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.face_highlight = highlight
 
 
 func _add_colour_tool() -> void:

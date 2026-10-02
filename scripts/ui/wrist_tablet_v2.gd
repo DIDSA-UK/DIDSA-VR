@@ -36,11 +36,11 @@ const IDLE_REFRESH_SECONDS := 0.25 ## an idle open tablet re-renders this often 
 @export var pixels_per_metre: float = 2667.0
 @export var side_width: float = 0.17 ## metres, the contextual list panel
 @export var side_gap: float = 0.012 ## metres between the tablet's right edge and the list panel
-@export var side_yaw_degrees: float = -10.0 ## fans the list panel's outer edge up toward you
-@export var side_pitch_degrees: float = 8.0 ## tips its far edge up toward you
-@export var mount_position := Vector3(0.0, 0.06, 0.07) ## relative to the left controller: above and a little behind it
-@export var mount_tilt_degrees: float = 0.0
-@export var target_position := Vector3(0.0, 0.05, 0.122) ## the wrist icon, relative to the left controller
+@export var side_yaw_degrees: float = -5.0 ## swings the list panel's outer (right) edge towards you, hinged on the tablet's right edge
+@export var side_pitch_degrees: float = 0.0 ## keep 0: any pitch stops the list panel's left edge being parallel to the tablet's right edge
+@export var mount_position := Vector3(0.0, 0.125, 0.0875) ## relative to the left controller: the tablet's CENTRE. With the default 30 degree tilt this is the position that keeps its near (lower) edge where the flat tablet's was, so it hinges up from there
+@export var mount_tilt_degrees: float = 30.0 ## tips the tablet towards you (its top edge away and up) so your wrist can stay neutral while reading; 0 = flat on the wrist
+@export var target_position := Vector3(0.0, 0.05, 0.153) ## the wrist icon ("watch"), relative to the left controller: moved back (towards you) by half its own diameter
 @export var target_radius: float = 0.035 ## metres; how generous the "shot" hit area is
 @export var max_point_distance: float = 2.0
 @export var click_action: String = "trigger_click"
@@ -68,7 +68,11 @@ var _side_viewport: SubViewport
 var _side_quad: MeshInstance3D
 var _side_open := false
 var _target: Node3D
-var _target_materials: Array[StandardMaterial3D] = []
+var _watch_ring: StandardMaterial3D
+var _watch_icon: StandardMaterial3D
+var _watch_face: StandardMaterial3D
+var _watch_glow: StandardMaterial3D
+var _watch_glow_mesh: MeshInstance3D
 var _target_hover := false
 var _last_target_hover := false
 var _open := false
@@ -282,40 +286,84 @@ func _make_quad(viewport: SubViewport, size: Vector2) -> MeshInstance3D:
 
 
 func _build_target() -> void:
-	# The wrist icon: a thin ring with a landscape rectangle inside it (a stylised
-	# tablet), thin white lines like the rest of the app. Shooting it opens the tablet.
+	# The wrist "watch": a small glass face (the theme's panel colour) in an accent ring, with a
+	# landscape rectangle on it — a stylised tablet — and, with shader effects on, a soft glow
+	# around it. Shooting it opens the tablet. Same design language as the tablet itself.
 	_target = Node3D.new()
 	_left.add_child(_target)
 	_target.position = target_position
+
+	_watch_glow = _flat_material(true)
+	_watch_glow_mesh = _target_mesh(_watch_glow)
+	var glow_ring := TorusMesh.new()
+	glow_ring.inner_radius = 0.026
+	glow_ring.outer_radius = 0.042
+	_watch_glow_mesh.mesh = glow_ring
+	_watch_glow_mesh.position.y = -0.0006
+
+	_watch_face = _flat_material(false)
+	var face := CylinderMesh.new()
+	face.top_radius = 0.0295
+	face.bottom_radius = 0.0295
+	face.height = 0.0012
+	face.radial_segments = 48
+	_target_mesh(_watch_face).mesh = face
+
+	_watch_ring = _flat_material(false)
 	var ring := TorusMesh.new()
-	ring.inner_radius = 0.027
-	ring.outer_radius = 0.031
-	_add_target_mesh(ring)
-	var half_width := 0.017
-	var half_height := 0.011
-	var bar_thickness := 0.0025
-	var bar_height := 0.001
-	for bar in [
-		{"size": Vector3(half_width * 2.0 + bar_thickness, bar_height, bar_thickness), "pos": Vector3(0.0, 0.0, -half_height)},
-		{"size": Vector3(half_width * 2.0 + bar_thickness, bar_height, bar_thickness), "pos": Vector3(0.0, 0.0, half_height)},
-		{"size": Vector3(bar_thickness, bar_height, half_height * 2.0 + bar_thickness), "pos": Vector3(-half_width, 0.0, 0.0)},
-		{"size": Vector3(bar_thickness, bar_height, half_height * 2.0 + bar_thickness), "pos": Vector3(half_width, 0.0, 0.0)},
+	ring.inner_radius = 0.0272
+	ring.outer_radius = 0.0312
+	ring.rings = 48
+	var ring_node := _target_mesh(_watch_ring)
+	ring_node.mesh = ring
+	ring_node.position.y = 0.0008
+
+	_watch_icon = _flat_material(false)
+	var half_width := 0.0155
+	var half_height := 0.0100
+	var bar := 0.0024
+	for spec in [
+		{"size": Vector3(half_width * 2.0 + bar, 0.0008, bar), "pos": Vector3(0.0, 0.0, -half_height)},
+		{"size": Vector3(half_width * 2.0 + bar, 0.0008, bar), "pos": Vector3(0.0, 0.0, half_height)},
+		{"size": Vector3(bar, 0.0008, half_height * 2.0 + bar), "pos": Vector3(-half_width, 0.0, 0.0)},
+		{"size": Vector3(bar, 0.0008, half_height * 2.0 + bar), "pos": Vector3(half_width, 0.0, 0.0)},
 	]:
 		var box := BoxMesh.new()
-		box.size = bar["size"]
-		_add_target_mesh(box).position = bar["pos"]
+		box.size = spec["size"]
+		var n := _target_mesh(_watch_icon)
+		n.mesh = box
+		n.position = spec["pos"] + Vector3(0.0, 0.0012, 0.0)
+	_style_watch()
 
 
-func _add_target_mesh(mesh: Mesh) -> MeshInstance3D:
+func _flat_material(additive: bool) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.8, 0.83, 0.87)
-	mesh.material = mat
-	_target_materials.append(mat)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	if additive:
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	return mat
+
+
+func _target_mesh(mat: StandardMaterial3D) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
+	instance.material_override = mat
 	_target.add_child(instance)
 	return instance
+
+
+func _style_watch() -> void:
+	## The watch's colours from the live theme (and hover): re-run when the theme or the effects switch changes.
+	var hover := _target_hover
+	_watch_ring.albedo_color = tokens.accent.lightened(0.4) if hover else tokens.accent.darkened(0.1)
+	_watch_icon.albedo_color = Color.WHITE if hover else tokens.text
+	var face_colour: Color = tokens.surface_hover if hover else tokens.bg_panel
+	_watch_face.albedo_color = Color(face_colour.r, face_colour.g, face_colour.b, 0.92)
+	var glow: Color = tokens.accent
+	var strength: float = 0.5 if hover else 0.2
+	_watch_glow.albedo_color = Color(glow.r, glow.g, glow.b, strength)
+	_watch_glow_mesh.visible = UiThemes.fx_enabled and tokens.fx_button_glow > 0.001
+	_target.scale = Vector3.ONE * (1.2 if hover else 1.0) # a slight swell on hover
 
 
 # --- Per frame -----------------------------------------------------------------------
@@ -326,6 +374,7 @@ func _process(delta: float) -> void:
 	if _seen_revision != UiThemes.revision:
 		_seen_revision = UiThemes.revision # the UIs re-theme themselves; this node redraws the badge and the panels
 		badge.refresh()
+		_style_watch()
 		poke_render()
 	_target.visible = not _open
 	_update_target_hover()
@@ -383,9 +432,7 @@ func _update_target_hover() -> void:
 			_right.set_meta("ui_hit_distance", hit_distance)
 	if _target_hover != _last_target_hover:
 		_last_target_hover = _target_hover
-		for mat in _target_materials:
-			mat.albedo_color = Color(0.75, 0.85, 1.0) if _target_hover else Color(0.8, 0.83, 0.87) # a slight blue tint plus a swell on hover
-		_target.scale = Vector3.ONE * (1.2 if _target_hover else 1.0)
+		_style_watch()
 
 
 func _on_right_pressed(action_name: String) -> void:

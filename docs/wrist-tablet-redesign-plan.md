@@ -128,6 +128,9 @@ them himself. See "Shaders and library art" below.
 ## Themes and shader effects — BUILT (first look-dev slice)
 Navy / Simple / Dark themes and a one-switch shader effects layer, in Settings > Appearance. See docs/status.md.
 
+## Ergonomics round (2026-10-02)
+Tablet tipped 30 degrees toward the user; side panel parallel to the tablet's right edge with its far edge turned 5 degrees toward the user; wrist watch and hand rings restyled and the watch moved back; Mates/Measure highlight the hovered and picked face only. See docs/status.md.
+
 ## Still to do after John's PCVR pass
 * Fix list from the headset test (tablet size, side-panel angle, badge, haptics, timings).
 * Delete `wrist_tablet.gd` once signed off, and port or retire the 10 tests pinned to it.

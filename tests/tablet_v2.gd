@@ -33,11 +33,14 @@ func click_now() -> void:
 	await process_frame
 
 func aim_only(b: Button) -> void:
+	# The tablet is tilted on the wrist: place the controller along its normal and look straight at the point.
 	var c: Vector2 = b.global_position + b.size * 0.5
 	var lx: float = (c.x / tab.viewport_size.x - 0.5) * tab.panel_size.x
 	var ly: float = (0.5 - c.y / tab.viewport_size.y) * tab.panel_size.y
-	r.position = Vector3(l.position.x + tab.mount_position.x + lx, 1.5, l.position.z + tab.mount_position.z - ly)
-	r.rotation_degrees = Vector3(-90, 0, 0)
+	var xf: Transform3D = tab._quad.global_transform
+	var p: Vector3 = xf * Vector3(lx, ly, 0.0)
+	var n: Vector3 = xf.basis.z.normalized()
+	r.global_transform = Transform3D(Basis.looking_at(-n, Vector3.UP), p + n * 0.4)
 	for i in 3:
 		await process_frame
 
@@ -95,18 +98,25 @@ func _initialize() -> void:
 	r.position = Vector3(1.0, 1.5, 1.0)
 	for i in 5:
 		await process_frame
+	print("SMOKE the wrist watch sits back from the hand by about half its own diameter (0.031 m beyond the old spot): ", absf(tab.target_position.z - (0.122 + 0.031)) < 0.002)
 	print("SMOKE staring at the wrist never opens it: ", not tab._open and not tab.visible and tab._target.visible)
 	r.position = Vector3(l.position.x + 0.15, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0) # straight down at the wrist icon
 	for i in 3:
 		await process_frame
 	await click_now()
 	print("SMOKE a trigger pull 15 cm off the icon doesn't open it: ", not tab._open)
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0) # straight down at the wrist icon
 	for i in 3:
 		await process_frame
 	print("SMOKE aiming at the icon: it swells and the laser is claimed: ", tab._target_hover and r.get_meta("ui_hover") == true)
 	await click_now()
 	print("SMOKE shooting the icon opens the tablet and hides the icon: ", tab._open and tab.visible and not tab._target.visible)
+	var tilt_xf: Transform3D = tab._quad.global_transform
+	var tilt_deg: float = rad_to_deg(acos(clampf(tilt_xf.basis.z.normalized().dot(Vector3.UP), -1.0, 1.0)))
+	print("SMOKE the tablet is tipped ~30 degrees toward you (neutral wrist), not flat: ", absf(tilt_deg - 30.0) < 0.5, " (", tilt_deg, ")")
+	print("SMOKE ...and its top edge is away from you (it faces up and back at the eye, not away): ", tilt_xf.basis.z.dot(Vector3(0, 0, 1)) > 0.45)
 	var modes_before = [th.enabled, origin.enabled, l.parts_enabled]
 	await click_now()
 	print("SMOKE an immediate second pull is ignored (settle window): ", modes_before == [th.enabled, origin.enabled, l.parts_enabled] and not tab.surface.pressed)
@@ -143,7 +153,16 @@ func _initialize() -> void:
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)
 	print("SMOKE the right hand shows the badge for Mates: ", tab.badge.visible and tab.badge.shown_tool_id() == "mates" and tab.badge._label.text == "Mates")
 	print("SMOKE the Mates list opens the side panel (angled, beside the tablet): ", tab._side_open and tab._side_pivot.visible and tab.side_ui._title.text == "Mates")
-	print("SMOKE the side panel tilts up toward you (not flat with the tablet): ", absf(tab._side_pivot.rotation_degrees.y) > 1.0 and absf(tab._side_pivot.rotation_degrees.x) > 1.0)
+	var tq: Transform3D = tab._quad.global_transform
+	var sq: Transform3D = tab._side_quad.global_transform
+	var t_right: Vector3 = tq.basis.y.normalized() # the tablet's right edge runs along its local up axis
+	var s_left: Vector3 = tab._side_pivot.global_transform.basis.y.normalized() # the side panel's hinge (left) edge
+	print("SMOKE the side panel's left edge is parallel to the tablet's right edge: ", t_right.dot(s_left) > 0.9999)
+	var s_right: Vector3 = (sq.basis.y).normalized()
+	print("SMOKE ...and its right edge is turned about 5 degrees toward you (yaw -5, no pitch, so the edges stay parallel): ", is_equal_approx(tab._side_pivot.rotation_degrees.y, -5.0) and is_equal_approx(tab._side_pivot.rotation_degrees.x, 0.0) and s_right.dot(t_right) > 0.9999)
+	var side_x: Vector3 = sq.basis.x.normalized()
+	var toward_user: float = rad_to_deg(asin(clampf(side_x.dot(tq.basis.z.normalized()), -1.0, 1.0)))
+	print("SMOKE ...the outward turn measured against the tablet face is ~5 degrees: ", absf(toward_user - 5.0) < 0.5, " (", toward_user, ")")
 	print("SMOKE the status bar shows the Mates tool's own status: ", ui.status_text().contains("Pick a face"))
 	await aim_and_click(find_button(func(b): return b.text == "Measure"))
 	print("SMOKE tapping Measure turns Measure ON and Mates OFF: ", tab.manager.active_id == "measure" and r.measure_tool_active and not r.mates_tool_active and not main._mates_tool.active and main._measure_tool.active)
@@ -164,6 +183,7 @@ func _initialize() -> void:
 	print("SMOKE closing drops the laser claim (a closed tablet can't hold the trigger): ", r.get_meta("ui_hover") == false)
 	print("SMOKE closing does NOT turn the active tool off, and the badge stays: ", tab.manager.active_id == "sections" and main._section_tool.active and tab.badge.visible)
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
+	r.rotation_degrees = Vector3(-90, 0, 0) # straight down at the wrist icon
 	for i in 3:
 		await process_frame
 	await click_now()
@@ -266,6 +286,7 @@ func _initialize() -> void:
 	print("SMOKE ...without rebuilding anything: same tool, still on Settings, same scroll position: ", tab.ui.selected_tool_id == tool_before and tab.ui.settings_open and absf(tab.ui.pages_scroll.scroll_vertical - pane_before) < 2.0)
 	print("SMOKE a floating window and the keyboard that were closed pick up the theme too: ", (calc._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg and (kb_node._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
 	print("SMOKE the window's resize brackets and handle follow the theme's accent: ", calc._corner_hot == Themes.live().accent)
+	print("SMOKE the wrist watch and the hand rings take the theme too (accent ring, panel-coloured face): ", tab._watch_ring.albedo_color.is_equal_approx(Themes.live().accent.darkened(0.1)) and r._ring_material.albedo_color.is_equal_approx(Color(Themes.live().accent.r, Themes.live().accent.g, Themes.live().accent.b, r._ring_material.albedo_color.a)) and l._ring_face_material.albedo_color.r == Themes.live().bg_panel.r)
 	await click_text(func(b): return b.text == "Simple")
 	await process_frame
 	await process_frame
