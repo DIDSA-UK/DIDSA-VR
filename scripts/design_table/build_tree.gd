@@ -12,7 +12,7 @@ const LABELS := {
 	"merge": "Merge", "split": "Split", "shell": "Shell", "import": "Import", "delete_body": "Delete Body",
 	"scale_body": "Scale", "move_body": "Move Body", "delete_face": "Delete Face", "move_face": "Move Face",
 }
-const EDITABLE := ["extrude", "fillet", "chamfer"] ## the types whose value the table can change (a PATCH of one number)
+const EDITABLE := ["extrude", "revolve", "shell", "fillet", "chamfer"] ## the types whose value the table can change (a PATCH of one number)
 
 
 static func label(type: String) -> String:
@@ -56,6 +56,10 @@ static func glyph(type: String) -> String:
 			return "tool_fillet"
 		"chamfer":
 			return "tool_chamfer"
+		"shell":
+			return "tool_shell"
+		"mirror":
+			return "tool_mirror"
 	return "cat_feature"
 
 
@@ -78,6 +82,18 @@ static func summary(features: Array, index: int) -> String:
 		"extrude":
 			var depth := absf(float(f.get("end_distance", 0.0)) - float(f.get("start_distance", 0.0)))
 			return "%s %s mm" % ["Cut" if str(f.get("extrude_type", "boss")) == "cut" else "Boss", number(depth)]
+		"revolve":
+			return "%s %s deg" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", number(float(f.get("angle", 360.0)))]
+		"shell":
+			return "%s mm, %d face(s) open" % [number(float(f.get("thickness", 0.0))), (f.get("faces_to_remove", []) as Array).size()]
+		"mirror":
+			var plane = f.get("mirror_plane")
+			var which := "a face"
+			if plane is Dictionary and plane.get("fixed_plane") != null:
+				which = "%s plane" % str(plane["fixed_plane"])
+			elif plane is Dictionary and plane.get("plane_feature_id") != null:
+				which = "a plane"
+			return "across %s" % which
 		"fillet":
 			return "R %s mm, %d edge(s)" % [number(float(f.get("radius", 0.0))), (f.get("edge_refs", []) as Array).size()]
 		"chamfer":
@@ -92,6 +108,10 @@ static func value_of(feature: Dictionary) -> float:
 	match str(feature.get("type", "")):
 		"extrude":
 			return absf(float(feature.get("end_distance", 0.0)) - float(feature.get("start_distance", 0.0)))
+		"revolve":
+			return float(feature.get("angle", 360.0))
+		"shell":
+			return float(feature.get("thickness", 0.0))
 		"fillet":
 			return float(feature.get("radius", 0.0))
 		"chamfer":
@@ -100,7 +120,7 @@ static func value_of(feature: Dictionary) -> float:
 
 
 static func value_title(type: String) -> String:
-	return {"extrude": "Depth (mm)", "fillet": "Radius (mm)", "chamfer": "Distance (mm)"}.get(type, "Value (mm)")
+	return {"extrude": "Depth (mm)", "revolve": "Angle (deg)", "shell": "Thickness (mm)", "fillet": "Radius (mm)", "chamfer": "Distance (mm)"}.get(type, "Value (mm)")
 
 
 static func edit_payload(feature: Dictionary, new_value: float) -> Dictionary:
@@ -112,6 +132,10 @@ static func edit_payload(feature: Dictionary, new_value: float) -> Dictionary:
 			var end := float(feature.get("end_distance", 0.0))
 			var direction := 1.0 if end >= start else -1.0
 			return {"start_distance": start, "end_distance": start + direction * new_value}
+		"revolve":
+			return {"angle": new_value}
+		"shell":
+			return {"thickness": new_value}
 		"fillet":
 			return {"radius": new_value}
 		"chamfer":
@@ -136,6 +160,13 @@ static func dependencies(feature: Dictionary) -> Array:
 		out.append(base_id(str(body_id)))
 	for ref in feature.get("edge_refs", []):
 		out.append(base_id(str((ref as Dictionary).get("body_id", ""))))
+	var shell_body = feature.get("body_id")
+	if shell_body != null and str(shell_body) != "":
+		out.append(base_id(str(shell_body)))
+	for ref in feature.get("faces_to_remove", []):
+		out.append(base_id(str((ref as Dictionary).get("body_id", ""))))
+	for body_id in feature.get("source_body_ids", []):
+		out.append(base_id(str(body_id)))
 	for ref in feature.get("face_refs", []):
 		var inner = (ref as Dictionary).get("face_ref", ref)
 		out.append(base_id(str((inner as Dictionary).get("body_id", ""))))

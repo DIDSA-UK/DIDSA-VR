@@ -105,6 +105,29 @@ func _initialize() -> void:
 	var fewer := part([square(0, false)], ["plane"], "occ1")
 	print("SMOKE a face index that no longer exists has drifted: ", Health.drifted(captured, [fewer, same_two]).size() == 1)
 
+
+	# --- remaking a mate on the equivalent face
+	var kinds5 := ["plane", "plane", "plane", "plane", "plane"]
+	var grown_one := part([wall(0, false), wall(10, true), square(10, true, 0.0, 10.0), square(22, true, 2.0, 6.0), square(0, false)], kinds5, "occ1")
+	var grown_two := part([wall(0, false), wall(10, true), square(10, true, 0.0, 10.0), square(22, true, 2.0, 6.0), square(0, false)], kinds5, "occ2")
+	print("SMOKE after a boss renumbers the faces, the old TOP (face 1) is found again as the plate's top (face 2), not the boss's top at another height: ", Health.equivalent_face(captured[0]["before"], grown_one, "B") == 2)
+	print("SMOKE ...and the old BOTTOM as the new bottom (face 4): ", Health.equivalent_face(captured[1]["before"], grown_two, "B") == 4)
+	var mate_full := [{"id": "m1", "type": "coincident", "value": null, "flipped": true, "allow_rotation": false, "suppressed": false, "references": [
+		{"occurrence_id": "occ1", "subshape_ref": {"body_id": "B", "shape_type": "face", "index": 1}, "plane_ref": null, "point_ref": null},
+		{"occurrence_id": "occ2", "subshape_ref": {"body_id": "B", "shape_type": "face", "index": 0}, "plane_ref": null, "point_ref": null}]}]
+	var baseline: Array = captured
+	var moved_refs := Health.drifted(captured, [grown_one, grown_two])
+	var plan := Health.remake_plan(mate_full, moved_refs, baseline, [grown_one, grown_two])
+	print("SMOKE a mate whose faces all have an equivalent can be remade: one entry, the same type / flipped / rotation, both references moved: ", plan.size() == 1 and plan[0]["mate_id"] == "m1" and plan[0]["type"] == "coincident" and plan[0]["flipped"] == true and plan[0]["allow_rotation"] == false and plan[0]["moved"] == 2)
+	print("SMOKE ...onto the equivalent faces (occ1: 1 -> 2, occ2: 0 -> 4), the rest of each reference kept: ", plan[0]["references"][0]["subshape_ref"]["index"] == 2 and plan[0]["references"][1]["subshape_ref"]["index"] == 4 and plan[0]["references"][0]["occurrence_id"] == "occ1" and plan[0]["references"][0]["subshape_ref"]["body_id"] == "B" and mate_full[0]["references"][0]["subshape_ref"]["index"] == 1)
+	var no_bottom_one := part([wall(0, false), wall(10, true), square(10, true, 0.0, 10.0)], ["plane", "plane", "plane"], "occ1")
+	var no_bottom_two := part([wall(0, false), wall(10, true), square(10, true, 0.0, 10.0)], ["plane", "plane", "plane"], "occ2")
+	var drift_missing := Health.drifted(captured, [no_bottom_one, no_bottom_two])
+	print("SMOKE a mate with a face that is gone for good is NOT offered for remaking (it has to be made by hand): ", Health.remake_plan(mate_full, drift_missing, baseline, [no_bottom_one, no_bottom_two]).is_empty())
+	print("SMOKE the table's drift (mate id -> references) flattens to the list these functions read: ", Health.flatten_drift({"m1": moved_refs.slice(0, 1), "m2": moved_refs.slice(1)}).size() == 2)
+	var split := part([wall(0, false), wall(10, true), square(10, true, 0.0, 4.0), square(10, true, 5.0, 10.0)], ["plane", "plane", "plane", "plane"], "occ1")
+	print("SMOKE when an edit splits a face in two, the biggest piece of the same plane is taken: ", Health.equivalent_face(captured[0]["before"], split, "B") == 3)
+
 	# --- what capture leaves out
 	var skipped := Health.capture([before_one], [
 		{"id": "s", "suppressed": true, "references": [{"occurrence_id": "occ1", "subshape_ref": {"body_id": "B", "shape_type": "face", "index": 1}}]},

@@ -120,6 +120,10 @@ func _initialize() -> void:
 	print("SMOKE ...with a short second line: ", BuildTree.summary(rows_pure, 0) == "on a reference plane" and BuildTree.summary(rows_pure, 1) == "Boss 12 mm" and BuildTree.summary(rows_pure, 2) == "R 2 mm, 1 edge(s)")
 	print("SMOKE an extrude's edit keeps its start and direction, a fillet's replaces its radius: ", BuildTree.edit_payload(rows_pure[1], 20.0) == {"start_distance": 0.0, "end_distance": 20.0} and BuildTree.edit_payload({"type": "extrude", "start_distance": 0.0, "end_distance": -5.0}, 8.0) == {"start_distance": 0.0, "end_distance": -8.0} and BuildTree.edit_payload(rows_pure[2], 3.0) == {"radius": 3.0})
 	print("SMOKE a cascade preview names what is built on the feature (the sketch takes the extrude and the fillet): ", BuildTree.dependents(rows_pure, "sk_box") == ["body_box", "fil_box"] and BuildTree.dependents(rows_pure, "fil_box").is_empty())
+	var more_rows := [{"type": "revolve", "id": "rv", "sketch_feature_id": "sk_box", "angle": 270.0, "mode": "cut"}, {"type": "shell", "id": "sh", "body_id": "rv", "faces_to_remove": [{"body_id": "rv", "shape_type": "face", "index": 1}], "thickness": 1.5}, {"type": "mirror", "id": "mi", "source_body_ids": ["sh"], "mirror_plane": {"fixed_plane": "YZ"}}]
+	print("SMOKE revolve, shell and mirror have one-line summaries (a cut revolve with its angle, a wall with the faces opened, the plane mirrored across): ", BuildTree.summary(more_rows, 0) == "Cut 270 deg" and BuildTree.summary(more_rows, 1) == "1.5 mm, 1 face(s) open" and BuildTree.summary(more_rows, 2) == "across YZ plane")
+	print("SMOKE ...revolve and shell are editable (angle, wall) with the right PATCH, mirror is not: ", BuildTree.EDITABLE.has("revolve") and BuildTree.EDITABLE.has("shell") and not BuildTree.EDITABLE.has("mirror") and BuildTree.value_of(more_rows[0]) == 270.0 and BuildTree.edit_payload(more_rows[0], 90.0) == {"angle": 90.0} and BuildTree.edit_payload(more_rows[1], 3.0) == {"thickness": 3.0} and BuildTree.value_title("revolve") == "Angle (deg)" and BuildTree.value_title("shell") == "Thickness (mm)")
+	print("SMOKE ...a cascade through them: deleting the sketch takes the revolve, the shell on its body and the mirror of the shell: ", BuildTree.dependents([rows_pure[0], more_rows[0], more_rows[1], more_rows[2]], "sk_box") == ["rv", "sh", "mi"])
 	print("SMOKE rolling back to a row skips every later one: ", BuildTree.rolled_back_ids(rows_pure, 0) == ["body_box", "fil_box"] and BuildTree.rolled_back_ids(rows_pure, 2).is_empty())
 
 	# --- the window: two tabs, opens on Build when a part is seated
@@ -136,6 +140,21 @@ func _initialize() -> void:
 	print("SMOKE the Parts tab is the assembly list as before (and Build comes back): ", table.tree._parts_pane.visible and not table.tree._build_pane.visible and table.tree.scroll_target == table.tree._parts_scroll)
 	table.tree.show_tab("build")
 	print("SMOKE ...the stick scrolls whichever pane shows: ", table.tree.scroll_target == table.tree._build_scroll)
+
+	# --- rename the part (G16): the Build tab's Rename opens the full keyboard; confirming renames the part and every instance
+	var rename_btn: Button = table.tree._rename_button
+	print("SMOKE the Build tab has a Rename button while a part is on the table: ", rename_btn != null and rename_btn.visible)
+	rename_btn.pressed.emit()
+	await frames(2)
+	print("SMOKE ...it opens the FULL keyboard on the current name: ", main._keyboard.is_open() and main._keyboard.current_mode() == "full")
+	main._keyboard.close()
+	fake.calls.clear()
+	var renamed: bool = await table.rename_part_to("  Bracket  ")
+	var patched_name: Array = calls_to("PATCH /document/parts/PART_BOX")
+	print("SMOKE a confirmed name is trimmed and sent as a PATCH of the PART (so every placed instance follows): ", renamed and patched_name.size() == 1 and patched_name[0][1] == {"name": "Bracket"})
+	print("SMOKE ...the arena node takes the name, the title and the status say so, and the document counts as unsaved: ", str(box.name).begins_with("Bracket") and table.tree._build_title.text.begins_with("Bracket") and table.status() == "Renamed to Bracket." and main.document_dirty)
+	fake.calls.clear()
+	print("SMOKE an empty name or the same name sends nothing: ", not (await table.rename_part_to("   ")) and (await table.rename_part_to("Bracket")) and calls_to("PATCH").is_empty())
 
 	# --- select and light up
 	row_button("Extrude 1").pressed.emit()

@@ -60,7 +60,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
 		return _ok(feature_rows.get(path.get_slice("/", 3), []))
-	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
+	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/revolve-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
 		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 		for row in rows:
 			if row["id"] == path.get_file():
@@ -96,12 +96,16 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": true, "code": 204, "json": null, "error": ""}
 	if verb == "GET" and path.ends_with("/occurrences"):
 		return _ok(occurrences.get(path.get_slice("/", 3), []))
-	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):
+	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/revolve-features") or path.ends_with("/shell-features") or path.ends_with("/mirror-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):
 		return _ok({"id": next_id("feat")})
 	if verb == "DELETE" and path.contains("/features/"):
 		return _ok(null)
 	if verb == "PATCH" and path.contains("/mates/"):
 		return _ok({})
+	if verb == "PATCH" and path.begins_with("/document/parts/") and path.count("/") == 3:
+		return _ok({"id": path.get_file(), "name": body.get("name", "")})
+	if verb == "POST" and path.ends_with("/mates"):
+		return _ok({"id": next_id("mate")})
 	if path.ends_with("/create-plane-features"):
 		if plane_for.is_valid():
 			var answer: Dictionary = plane_for.call(body)

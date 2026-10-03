@@ -366,6 +366,50 @@ func _initialize() -> void:
 	var undone: bool = await settle(func() -> bool: return ed.feature_stack.size() == 1)
 	print("SMOKE the deck's Undo deletes the last feature on the backend and refreshes the part: ", undone and not calls_to("DELETE /document/parts/PART_BOX/features/").is_empty())
 
+	# --- Shell: pick the faces to open, then the wall thickness
+	table.reset_pose() # (the part was zoomed up for the grip tests: back to its fitted size, so the laser starts outside it)
+	table.manager.activate("shell")
+	pivot_world = table.pivot.global_position
+	print("SMOKE Shell switches to face picking and shows Wall, Inward, Outward, Clear and Apply: ", ed.state == "pick_faces" and ["thickness", "shell_in", "shell_out", "clear_faces", "apply"].all(func(o): return table.ui.option_button(o) != null) and table.ui.option_button("apply").disabled)
+	await aim(pivot_world + table.global_transform.basis * Vector3(0.0, 0.25, 0.45), pivot_world)
+	print("SMOKE aiming at the part lights a FACE (not an edge): ", ed.hovering and ed._hover_face.get("kind") == "face")
+	var shell_face: Dictionary = ed._hover_face.duplicate()
+	await pull()
+	print("SMOKE a pull adds it to the faces to open, lit, and Apply counts it: ", ed.faces.size() == 1 and table.ui.option_button("apply").text == "Apply (1)" and not table.ui.option_button("apply").disabled and ed.highlight.set_nodes().size() == 1)
+	await pull()
+	print("SMOKE a second pull on the same face takes it out again: ", ed.faces.is_empty() and ed.highlight.set_nodes().is_empty())
+	await pull()
+	ed.option_typed("thickness", "1.5")
+	await ed.on_option("shell_out")
+	print("SMOKE Outward and a typed wall are kept: ", ed.options["shell_direction"] == "outward" and ed.options["thickness"] == 1.5 and table.ui.option_button("thickness").text == "Wall 1.50 mm")
+	await ed.on_option("shell_in")
+	await ed.apply_feature()
+	var shell_call: Array = calls_to("/shell-features")[0] if not calls_to("/shell-features").is_empty() else []
+	print("SMOKE Apply sends the body, the opened face as a face ref, the wall and the direction (inward): ", not shell_call.is_empty() and shell_call[1]["body_id"] == shell_face["body_id"] and shell_call[1]["faces_to_remove"] == [{"body_id": shell_face["body_id"], "shape_type": "face", "index": shell_face["index"]}] and shell_call[1]["thickness"] == 1.5 and shell_call[1]["thickness_direction"] == "inward")
+	print("SMOKE ...the faces are forgotten (the new shape renumbers them) and the feature is on Undo's stack: ", ed.faces.is_empty() and ed.feature_stack.size() >= 2)
+	table.manager.deactivate()
+
+	# --- Mirror: one pull on a plane (or a flat face) mirrors the whole part across it
+	table.manager.activate("mirror")
+	print("SMOKE Mirror goes back to plane picking and offers Fuse into one (off): ", ed.state == "pick_plane" and table.ui.option_button("mirror_fuse") != null and not table.ui.option_button("mirror_fuse").button_pressed)
+	var mirror_xy := {"origin": Vector3.ZERO, "x": Vector3(1, 0, 0), "y": Vector3(0, 1, 0), "n": Vector3(0, 0, 1)}
+	var mirror_centre: Vector3 = table.table_copy.get_aabb().get_center()
+	var mirror_beside: Vector3 = mirror_centre - (mirror_xy["n"] as Vector3) * mirror_centre.dot(mirror_xy["n"]) + Vector3(80, 0, 0)
+	var mirror_world: Vector3 = table.table_copy.global_transform * mirror_beside
+	var mirror_normal: Vector3 = (table.table_copy.global_transform.basis * Vector3(0, 0, 1)).normalized()
+	await aim(mirror_world + mirror_normal * 0.4 + Vector3(0, 0, 0.001), mirror_world)
+	var feature_count: int = ed.feature_stack.size()
+	await pull()
+	var mirrored: bool = await settle(func() -> bool: return not calls_to("/mirror-features").is_empty() )
+	var mirror_call: Array = calls_to("/mirror-features")[0] if not calls_to("/mirror-features").is_empty() else []
+	print("SMOKE a pull on the XY plane mirrors every body of the part across it (keep separate): ", not mirror_call.is_empty() and mirror_call[1]["mirror_plane"] == {"fixed_plane": "XY"} and mirror_call[1]["source_body_ids"] == ed.body_ids() and mirror_call[1]["merge"] == "keep_separate")
+	print("SMOKE ...and no sketch was opened for it: ", ed.state == "pick_plane" and ed.session == null and ed.feature_stack.size() == feature_count + 1)
+	await ed.on_option("mirror_fuse")
+	await ed.mirror_across({"face": {"body_id": "B1", "index": 3}})
+	var last_mirror: Array = calls_to("/mirror-features").back()
+	print("SMOKE ...with Fuse on it asks for fuse_into_one, and a flat face can be the plane: ", last_mirror[1]["merge"] == "fuse_into_one" and last_mirror[1]["mirror_plane"] == {"face_ref": {"body_id": "B1", "shape_type": "face", "index": 3}})
+	table.manager.deactivate()
+
 	# --- picking a reference plane beside the part
 	table.manager.deactivate()
 	var xy := {"origin": Vector3.ZERO, "x": Vector3(1, 0, 0), "y": Vector3(0, 1, 0), "n": Vector3(0, 0, 1)}
@@ -404,6 +448,26 @@ func _initialize() -> void:
 	print("SMOKE with Reduce motion on, the turn is instant: ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP))
 	table.reset_pose()
 	print("SMOKE Reset while a sketch is open goes back to the tilted sketch pose (not flat): ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP) and is_equal_approx(table.user_scale, 1.0))
+
+	# --- Revolve: the axis is a line of the open sketch, picked with the laser
+	var rev_line: String = ed.session.lines.keys()[0]
+	var rev_mid: Vector2 = (ed.session.points[ed.session.lines[rev_line]["a"]] + ed.session.points[ed.session.lines[rev_line]["b"]]) * 0.5
+	table.manager.activate("revolve")
+	print("SMOKE Revolve shows Boss, Cut, Angle 360 deg, Axis: pick, and an Apply that waits for the axis: ", ["boss", "cut", "angle", "axis", "apply"].all(func(o): return table.ui.option_button(o) != null) and table.ui.option_button("angle").text == "Angle 360 deg" and table.ui.option_button("axis").text == "Axis: pick" and table.ui.option_button("apply").disabled)
+	print("SMOKE ...and the sketch stays live (state sketch) so the laser can pick the axis: ", ed.state == "sketch" and ed.session.tool == "revolve")
+	await aim_uv(rev_mid)
+	print("SMOKE aiming at the sketch finds only LINES for the axis: ", ed._hover_entity.get("kind") == "line")
+	await pull()
+	print("SMOKE a pull makes that line the axis (lit), the button says so and Apply is on: ", ed.revolve_axis != "" and ed.session.selection.size() == 1 and table.ui.option_button("axis").text == "Axis: set" and not table.ui.option_button("apply").disabled)
+	ed.option_typed("angle", "400")
+	print("SMOKE an angle over 360 or zero is refused: ", ed.options["angle"] == 360.0)
+	ed.option_typed("angle", "90")
+	print("SMOKE ...90 is kept and shown: ", ed.options["angle"] == 90.0 and table.ui.option_button("angle").text == "Angle 90 deg")
+	var gets_rev: int = calls_to("/assembly-mesh.glb").size()
+	await ed.apply_feature()
+	var revolve_call: Array = calls_to("/revolve-features")[0] if not calls_to("/revolve-features").is_empty() else []
+	print("SMOKE Apply sends the sketch feature, the axis as a LINE ref of the sketch, the angle and Boss: ", not revolve_call.is_empty() and revolve_call[1]["sketch_feature_id"] == "feat1" and revolve_call[1]["axis_ref"] == {"sketch_id": "sk1", "entity_type": "line", "entity_id": rev_line} and revolve_call[1]["angle"] == 90.0 and revolve_call[1]["mode"] == "boss")
+	print("SMOKE ...fetches the new mesh, spends the sketch (back to choosing a plane) and forgets the axis: ", calls_to("/assembly-mesh.glb").size() > gets_rev and ed.state == "pick_plane" and ed.session == null and ed.revolve_axis == "")
 
 	# --- lifting while editing, and the part closing it all down
 	table.close()

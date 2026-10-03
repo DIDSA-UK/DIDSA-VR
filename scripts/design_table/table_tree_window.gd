@@ -22,6 +22,7 @@ var _parts_pane: Control
 var _build_pane: Control
 var _parts_scroll: ScrollContainer
 var _build_scroll: ScrollContainer
+var _rename_button: Button
 var _build_title: Label
 var _build_rows: VBoxContainer
 var _tab := "parts"
@@ -134,9 +135,18 @@ func _tab_button(text: String, icon_name: String, group: ButtonGroup, which: Str
 func _make_build_pane() -> Control:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 8)
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 8)
+	box.add_child(title_row)
 	_build_title = Label.new()
 	_build_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_build_title)
+	_build_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(_build_title)
+	_rename_button = Button.new()
+	_rename_button.text = "Rename"
+	_rename_button.custom_minimum_size = Vector2(150, 52)
+	_rename_button.pressed.connect(func() -> void: table.rename_part())
+	title_row.add_child(_rename_button)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -158,6 +168,7 @@ func _redraw_build() -> void:
 	for child in _build_rows.get_children():
 		_build_rows.remove_child(child)
 		child.queue_free()
+	_rename_button.visible = table.seated != null and table.editor.part_id != ""
 	if table.seated == null:
 		_build_title.text = "Nothing is on the table."
 		_add_note("Carry a part over the slab, pick one in Parts, or press + for a new one.")

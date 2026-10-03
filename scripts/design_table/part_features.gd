@@ -33,6 +33,46 @@ func extrude(owner_part_id: String, sketch_feature_id: String, boss: bool, start
 	return _result(r)
 
 
+func revolve(owner_part_id: String, sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
+	## {ok, id, error}. Spins the sketch's closed profile `angle` degrees (0-360) about one of the sketch's lines. Same Boss / Cut rule as extrude.
+	if not boss and target_body_ids.is_empty():
+		return {"ok": false, "id": "", "error": "There is nothing to cut yet."}
+	if axis_line_id == "":
+		return {"ok": false, "id": "", "error": "Pick the line to spin it about first."}
+	if angle <= 0.0 or angle > 360.0:
+		return {"ok": false, "id": "", "error": "The angle has to be more than 0 and at most 360 degrees."}
+	var r: Dictionary = await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/revolve-features" % owner_part_id, {
+		"sketch_feature_id": sketch_feature_id,
+		"axis_ref": {"sketch_id": sketch_id, "entity_type": "line", "entity_id": axis_line_id},
+		"angle": angle,
+		"mode": "boss" if boss else "cut",
+		"target_body_ids": target_body_ids})
+	return _result(r)
+
+
+func shell(owner_part_id: String, body_id: String, faces: Array, thickness: float, direction: String) -> Dictionary:
+	## {ok, id, error}. Hollows a solid body, opening the given faces (SubShape refs on that body) and leaving walls `thickness` thick,
+	## grown "inward", "outward" or "symmetric".
+	if faces.is_empty():
+		return {"ok": false, "id": "", "error": "Pick the faces to open first."}
+	if thickness <= 0.0:
+		return {"ok": false, "id": "", "error": "The thickness has to be bigger than zero."}
+	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/shell-features" % owner_part_id, {
+		"body_id": body_id, "faces_to_remove": faces, "thickness": thickness, "thickness_direction": direction}))
+
+
+func mirror(owner_part_id: String, body_ids: Array, plane: Dictionary, fuse: bool) -> Dictionary:
+	## {ok, id, error}. Reflects every body across a plane: {fixed_plane: "XY"} or {face_ref: {body_id, shape_type, index}}.
+	if body_ids.is_empty():
+		return {"ok": false, "id": "", "error": "There is nothing to mirror yet."}
+	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/mirror-features" % owner_part_id, {
+		"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"}))
+
+
+static func face_ref(body_id: String, index: int) -> Dictionary:
+	return {"body_id": body_id, "shape_type": "face", "index": index}
+
+
 func fillet(owner_part_id: String, edges: Array, radius: float) -> Dictionary:
 	if edges.is_empty():
 		return {"ok": false, "id": "", "error": "Pick the edges to round first."}
@@ -64,7 +104,7 @@ func list_features(owner_part_id: String) -> Dictionary:
 
 func update_feature(owner_part_id: String, feature_type: String, feature_id: String, payload: Dictionary) -> Dictionary:
 	## Changes the one number of an extrude / fillet / chamfer (PATCH: any feature of the part, not just the last). {ok, id, error}.
-	var route: String = {"extrude": "extrude-features", "fillet": "fillet-features", "chamfer": "chamfer-features"}.get(feature_type, "")
+	var route: String = {"extrude": "extrude-features", "revolve": "revolve-features", "shell": "shell-features", "fillet": "fillet-features", "chamfer": "chamfer-features"}.get(feature_type, "")
 	if route == "":
 		return {"ok": false, "id": "", "error": "That kind of feature can't be edited here."}
 	return _result(await api.call(HTTPClient.METHOD_PATCH, "/document/parts/%s/%s/%s" % [owner_part_id, route, feature_id], payload))

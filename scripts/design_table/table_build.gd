@@ -245,8 +245,8 @@ func edit_typed(feature_id: String, text: String) -> void:
 	## The numeric pad's answer: PATCH the feature, show the result, remember how to take it back.
 	var f := row(feature_id)
 	var cleaned := text.strip_edges()
-	if f.is_empty() or not cleaned.is_valid_float() or cleaned.to_float() <= 0.0:
-		_table.set_status("Enter a number bigger than zero.")
+	if f.is_empty() or not cleaned.is_valid_float() or cleaned.to_float() <= 0.0 or (str(f.get("type", "")) == "revolve" and cleaned.to_float() > 360.0):
+		_table.set_status("Enter a number bigger than zero (an angle: up to 360)." if str(f.get("type", "")) == "revolve" else "Enter a number bigger than zero.")
 		UiFeedback.haptic(_table._right, "error")
 		return
 	var editor = _table.editor

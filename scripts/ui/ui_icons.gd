@@ -70,6 +70,8 @@ const _ICONS := {
 	"tool_revolve": '<path d="M24 6V42"/><path d="M24 14C34 14 40 20 40 24S34 34 24 34"/>',
 	"tool_fillet": '<path d="M8 8V28a12 12 0 0 0 12 12H40"/>',
 	"tool_chamfer": '<path d="M8 8V28L20 40H40"/>',
+	"tool_shell": '<rect x="7" y="9" width="34" height="30" rx="3"/><rect x="15" y="17" width="18" height="14" rx="1"/>',
+	"tool_mirror": '<path d="M24 5V43" stroke-dasharray="3 3"/><path d="M19 14L7 24L19 34Z"/><path d="M29 14L41 24L29 34Z"/>',
 	"tool_more": '<path d="M11 24V24.5M24 24V24.5M37 24V24.5"/>',
 	"snap": '<path d="M10 8V26a14 14 0 0 0 28 0V8H28V26a4 4 0 0 1-8 0V8Z"/><path d="M10 14H20M28 14H38"/>',
 	"feat_plane": '<path d="M8 32L20 14H42L30 32Z"/><path d="M24 36V42"/>',

@@ -103,6 +103,7 @@ var editor ## table_editor.gd: the editing session on the seated part
 var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
 var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
 var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
+var remake_plan: Array = [] ## the mates Enforce turned off that can be remade on the equivalent face (mate_health.gd remake_plan), offered on the button after it
 var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
@@ -183,7 +184,11 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	enforce_button.name = "EnforceMates"
 	main.add_child(enforce_button) # a sibling, not a child: it must stay visible when the table is put away
 	enforce_button.setup(right, camera)
-	enforce_button.pressed_enforce.connect(enforce_mates)
+	enforce_button.pressed_enforce.connect(func() -> void:
+		if remake_plan.is_empty():
+			await enforce_mates()
+		else:
+			await remake_mates())
 	if mates_tool != null:
 		mates_tool.enforce_finished.connect(_on_enforce_finished)
 	build = TableBuild.new()
@@ -801,6 +806,39 @@ func _refresh_trees() -> void:
 	_main.refresh_assembly_tree()
 
 
+func rename_part() -> void:
+	## The Build tab's Rename: the full keyboard opens on the part's name; confirming renames the PART (every placed instance of it).
+	if seated == null or editor.part_id == "":
+		return
+	var node := seated
+	_main.open_keyboard_for(str(node.name), func(text: String) -> void: await rename_part_to(text), {"mode": "full", "title": "Part name", "confirm_label": "Rename"})
+
+
+func rename_part_to(new_name: String) -> bool:
+	## PATCH /document/parts/{id} {name}; the arena nodes that show the part take the name too, and the trees reload.
+	var clean := new_name.strip_edges()
+	if seated == null or editor.part_id == "" or clean == "":
+		return false
+	if clean == str(seated.name):
+		return true
+	var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s" % editor.part_id, {"name": clean})
+	if not r["ok"]:
+		set_status("Couldn't rename it: %s" % str(r["error"]))
+		UiFeedback.haptic(_right, "error")
+		return false
+	var nodes: Array = await editor.arena_nodes_of(editor.part_id)
+	if seated != null and not nodes.has(seated):
+		nodes.append(seated)
+	for node in nodes:
+		if is_instance_valid(node):
+			node.name = clean
+	_main.mark_dirty()
+	_refresh_trees()
+	build.changed.emit()
+	set_status("Renamed to %s." % clean)
+	return true
+
+
 func new_part() -> void:
 	## "New part" (the tree's + and the tablet's Table page): starts an empty part on the table, ready to be sketched on. The table
 	## opens if it is closed, a part already on it goes back where it came from, and with no assembly loaded yet an empty one is
@@ -1123,6 +1161,8 @@ func enforce_mates() -> void:
 		return
 	enforce_button.set_busy(true)
 	var suppressed := 0
+	var arena_nodes := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D)
+	remake_plan = MateHealth.remake_plan(_mates_tool.mates, MateHealth.flatten_drift(mate_drift), mate_baseline, arena_nodes)
 	for mate_id in mate_drift.keys():
 		var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/mates/%s" % [owner_id, mate_id], {"suppressed": true})
 		if r["ok"]:
@@ -1133,13 +1173,49 @@ func enforce_mates() -> void:
 	await _mates_tool.enforce_all(owner_id)
 
 
+func remake_mates() -> void:
+	## The offer after Enforce: each turned-off mate whose face has an equivalent in the new shape is made again on that face (a new mate with
+	## the same type and value; DIDSA-CAD never changes what a mate references) and the old one is deleted, then everything is solved again.
+	var plan := remake_plan.duplicate(true)
+	remake_plan.clear()
+	var owner_id: String = _main.current_root_part_id()
+	if _mates_tool == null or owner_id == "" or plan.is_empty():
+		return
+	enforce_button.set_busy(true)
+	var made := 0
+	var failed := 0
+	for entry in plan:
+		var body := {"type": entry["type"], "references": entry["references"], "flipped": entry["flipped"], "allow_rotation": entry["allow_rotation"]}
+		if entry["value"] != null:
+			body["value"] = entry["value"]
+		var created: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/mates" % owner_id, body)
+		if created["ok"]:
+			await api.request(HTTPClient.METHOD_DELETE, "/document/parts/%s/mates/%s" % [owner_id, entry["mate_id"]], null)
+			made += 1
+		else:
+			failed += 1
+	_main.mark_dirty()
+	await _mates_tool.refresh_mates(owner_id)
+	var text := "%d mate(s) remade on the equivalent face.%s" % [made, "" if failed == 0 else " %d could not be (the backend refused): remake them from Assembly > Mates." % failed]
+	enforce_button.reset_label()
+	await _mates_tool.enforce_all(owner_id)
+	enforce_button.set_message(text)
+	enforce_button.set_busy(false)
+	enforce_button.hide_after(8.0)
+	set_status(text)
+
+
 func _on_enforce_finished(result: Dictionary) -> void:
 	enforce_button.set_busy(false)
 	var suppressed := _last_suppressed
 	_last_suppressed = 0
 	if bool(result.get("ok", false)):
 		var cleared := DirtyMates.clear_all(get_tree())
-		if suppressed > 0:
+		if suppressed > 0 and not remake_plan.is_empty():
+			var offer_text := "%d mate(s) turned off: the edit changed the face they were made on. %d can be remade on the face that is now the same one." % [suppressed, remake_plan.size()]
+			enforce_button.offer("Remake %d mate(s)" % remake_plan.size(), offer_text)
+			set_status(offer_text)
+		elif suppressed > 0:
 			var text := "%d mate(s) turned off: the edit changed the face they were made on. Remake them from Assembly > Mates." % suppressed
 			enforce_button.set_message(text)
 			enforce_button.hide_after(8.0) # long enough to read; the badges are gone, so this is the only place it's said

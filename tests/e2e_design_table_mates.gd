@@ -149,6 +149,16 @@ func _initialize() -> void:
 	print("SMOKE A: Enforce turns that mate OFF on the backend rather than solving it against the wrong faces: ", mates_now["ok"] and mates_now["json"].size() == 1 and bool(mates_now["json"][0]["suppressed"]))
 	print("SMOKE A: ...says so on the button, clears the stale flags, and leaves the plate where it was (not dragged somewhere wrong): ", table.enforce_button.message().contains("turned off") and DirtyMates.dirty_nodes(self).is_empty() and absf(two.transform.origin.z - 50.0) < 0.05)
 
+	var offered: bool = table.remake_plan.size() == 1 and table.enforce_button.button().text.begins_with("Remake")
+	print("SMOKE A: the turned-off mate is OFFERED for remaking (its top face is still there, just renumbered): ", offered)
+	var old_mate_id: String = str(mates_now["json"][0]["id"])
+	await table.remake_mates()
+	await create_timer(0.8).timeout
+	var after_remake: Dictionary = await req(HTTPClient.METHOD_GET, "/document/parts/%s/mates" % asm_id)
+	var fresh: Dictionary = after_remake["json"][0] if after_remake["ok"] and (after_remake["json"] as Array).size() == 1 else {}
+	print("SMOKE A: remaking makes ONE new live mate on the backend (the old one deleted), same type, not suppressed: ", not fresh.is_empty() and str(fresh["id"]) != old_mate_id and not bool(fresh["suppressed"]) and str(fresh["type"]) == str(mates_now["json"][0]["type"]))
+	print("SMOKE A: ...and the solver puts the knocked plate back on the stack (z back to 10): ", absf(two.transform.origin.z - 10.0) < 0.1, " ", two.transform.origin.z)
+
 	# ===== B: an edit that leaves the mated faces alone (a fillet on a vertical edge)
 	var b := await build_stack()
 	var one_b: MeshInstance3D = b["one"]

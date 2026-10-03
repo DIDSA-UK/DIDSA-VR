@@ -44,8 +44,11 @@ const CONSTRAIN_TOOLS := [
 ## DIDSA-CAD's feature picker: "Sketch-based" and "Modify" sections.
 const FEATURE_TOOLS := [
 	["extrude", "Extrude", "tool_extrude"],
+	["revolve", "Revolve", "tool_revolve"],
 	["fillet", "Fillet", "tool_fillet"],
 	["chamfer", "Chamfer", "tool_chamfer"],
+	["shell", "Shell", "tool_shell"],
+	["mirror", "Mirror", "tool_mirror"],
 ]
 
 const HINTS := {
@@ -63,8 +66,11 @@ const HINTS := {
 	"perpendicular": "Pick two lines.",
 	"coincident": "Pick two points, or a point and a line or circle.",
 	"extrude": "Draw a closed shape, set Boss or Cut and the depth, then Apply.",
+	"revolve": "Draw a closed shape and a line to spin it about. Press Axis, pull the trigger on that line, set Boss or Cut and the angle, then Apply.",
 	"fillet": "Pick edges on the part, set the radius, then Apply.",
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
+	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",
+	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
 }
 
 
