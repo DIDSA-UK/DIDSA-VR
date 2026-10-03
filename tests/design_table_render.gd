@@ -42,11 +42,15 @@ func _initialize() -> void:
 			"x_axis": [pl["x"].x, pl["x"].y, pl["x"].z], "y_axis": [pl["y"].x, pl["y"].y, pl["y"].z]}
 	table.editor.api = fake
 
+	table.tree._tree = [{"id": "", "name": "Pump_Assy", "named": true, "resolved_part_id": owner_id, "expanded": true, "children": [
+		{"id": "occ_box", "name": "Housing", "named": true, "resolved_part_id": "PART_BOX", "children": null, "expanded": false},
+		{"id": "occ_cyl", "name": "Impeller", "named": true, "resolved_part_id": "PART_CYL", "children": null, "expanded": false}]}]
 	var eye := Camera3D.new()
-	eye.fov = 62.0
+	eye.fov = 75.0
 	main.add_child(eye)
 	eye.make_current()
 	table.open()
+	table.tree._rebuild_rows()
 	table.seat(box)
 	for i in 60:
 		await process_frame
