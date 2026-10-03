@@ -36,6 +36,7 @@ const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its
 const OneEuro := preload("res://scripts/one_euro.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const LaserPick := preload("res://scripts/laser_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 
 @export var grab_action: String = "grip_click"
@@ -576,20 +577,12 @@ func _try_pick_measure_entity() -> void:
 
 func _mate_entity(hit: Dictionary) -> Dictionary:
 	## What a Mates pick on this ray hit would take: a corner, a straight / circular edge, or the face.
-	var part: Node3D = hit.get("part")
-	if part == null or not hit.has("point"):
-		return {}
-	var distance := global_position.distance_to(hit["point"])
-	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance), true)
+	return LaserPick.entity_for(hit.get("part"), hit, global_position, true)
 
 
 func _measure_entity(hit: Dictionary) -> Dictionary:
 	## What a Measure pick on this ray hit would take: a vertex, an edge or a face (topology_pick.gd).
-	var part: Node3D = hit.get("part")
-	if part == null or not hit.has("point"):
-		return {}
-	var distance := global_position.distance_to(hit["point"])
-	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance))
+	return LaserPick.entity_for(hit.get("part"), hit, global_position)
 
 
 func _try_select() -> void:
@@ -636,23 +629,12 @@ func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> 
 	## (world-space hit point).
 	if not is_inside_tree():
 		return {}
-	var space_state := get_world_3d().direct_space_state
-	var excluded: Array[RID] = []
-	for _attempt in 8: # generous cap so a stack of hidden/held parts can't loop forever
-		var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * max_distance)
-		query.exclude = excluded
-		var result := space_state.intersect_ray(query)
-		if result.is_empty():
-			return {}
-		var collider: Object = result.get("collider")
-		var part: Node3D = collider.get_parent() if collider is StaticBody3D else null
-		if part == null or not part.is_in_group("grabbable_parts"):
-			return {}
+	return LaserPick.ray(get_world_3d(), origin, direction, max_distance, func(part: Node3D) -> int:
+		if not part.is_in_group("grabbable_parts"):
+			return LaserPick.BLOCK # something solid that isn't an arena part (a design table copy): nothing behind it can be picked
 		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
-			excluded.append((collider as StaticBody3D).get_rid())
-			continue
-		return {"part": part, "point": result.get("position"), "face_index": result.get("face_index", -1)}
-	return {}
+			return LaserPick.SKIP
+		return LaserPick.HIT)
 
 
 func _update_aim_hover() -> void:

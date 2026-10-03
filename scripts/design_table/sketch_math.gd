@@ -80,7 +80,7 @@ static func from_sheet(uv: Vector2, plane: Dictionary) -> Vector3:
 
 static func plane_from_face_triangles(points: PackedVector3Array) -> Dictionary:
 	## A provisional basis for a planar face from its triangles' corner points (3 per
-	## triangle, part frame): origin = the mean, n = the area-weighted outward normal, x/y
+	## triangle in the mesh's own winding, part frame): origin = the mean, n = the area-weighted outward normal, x/y
 	## picked deterministically. Used only to turn the part to face the plane while the
 	## backend creates the real one; the backend's response replaces it.
 	if points.size() < 3:
@@ -91,7 +91,7 @@ static func plane_from_face_triangles(points: PackedVector3Array) -> Dictionary:
 		var a := points[i]
 		var b := points[i + 1]
 		var c := points[i + 2]
-		normal += (b - a).cross(c - a) # twice the triangle's area, times its normal
+		normal += (c - a).cross(b - a) # Godot front faces are clockwise, so this is the outward normal (twice the triangle's area long)
 		centre += a + b + c
 	centre /= float(points.size())
 	if normal.length() < 0.000001:

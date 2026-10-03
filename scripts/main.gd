@@ -115,6 +115,7 @@ func _ready() -> void:
 	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
 	_assembly_tree_window.configure_backend(backend_url, api_key)
+	design_table.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
@@ -1151,6 +1152,55 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
 	_mates_tool.refresh_state(_resolved_part_id)
 	return true
+
+
+func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
+	## The design table changed a part: puts its new mesh (and the face / edge identity that goes with it) on every arena node
+	## in `nodes` — every placed instance of that part — leaving their poses, selection and the undo history alone (unlike
+	## _show_model, which replaces everything). `glb_bytes` is the part's own assembly-mesh.glb: one node, in the part's own
+	## frame, the same frame every instance's mesh is in. Returns how many nodes were updated.
+	var gltf_document := GLTFDocument.new()
+	var gltf_state := GLTFState.new()
+	if gltf_document.append_from_buffer(glb_bytes, "", gltf_state) != OK:
+		return 0
+	var scene := gltf_document.generate_scene(gltf_state)
+	if scene == null:
+		return 0
+	MeshIdentity.tag_scene(gltf_state, scene)
+	var candidates: Array[Node] = _all_descendants(scene)
+	candidates.push_front(scene)
+	var template: MeshInstance3D = null
+	for node in candidates:
+		if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+			template = node
+			break
+	if template == null:
+		scene.free()
+		return 0
+	var updated := 0
+	for node in nodes:
+		if not is_instance_valid(node) or not (node is MeshInstance3D):
+			continue
+		var part := node as MeshInstance3D
+		part.mesh = template.mesh
+		for key in ["face_ids", "body_ids", "topology"]:
+			if template.has_meta(key):
+				part.set_meta(key, template.get_meta(key))
+			elif part.has_meta(key):
+				part.remove_meta(key)
+		for child in part.get_children():
+			if child is StaticBody3D:
+				part.remove_child(child)
+				child.free()
+		part.create_trimesh_collision()
+		if face_highlight != null:
+			face_highlight.invalidate(part)
+		updated += 1
+	scene.free()
+	if updated > 0:
+		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
+		_measure_tool.clear_picks()
+	return updated
 
 
 func _make_picks_double_sided(part: MeshInstance3D) -> void:

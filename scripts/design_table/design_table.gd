@@ -28,6 +28,7 @@ extends Node3D
 signal part_seated(part: Node3D)
 signal part_lifted(part: Node3D)
 signal tool_changed(tool_id: String)
+signal part_edited(part_id: String) ## a feature was added or taken back: the part's geometry changed
 signal status_changed(text: String)
 signal opened
 signal closed
@@ -37,6 +38,9 @@ const ToolManager := preload("res://scripts/ui/tool_manager.gd")
 const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const TableUI := preload("res://scripts/design_table/table_ui.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
+const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
+const CadApi := preload("res://scripts/design_table/cad_api.gd")
+const TableEditor := preload("res://scripts/design_table/table_editor.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
@@ -73,6 +77,8 @@ var ui: Control ## table_ui.gd
 var surface ## LaserSurface for the tool deck
 var handle ## PanelHandle on the slab's front edge
 var snap_enabled := true
+var api ## cad_api.gd: the serial line to the backend
+var editor ## table_editor.gd: the editing session on the seated part
 
 var active_tool := ""
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
@@ -103,6 +109,7 @@ var _status := ""
 var _seat_local_basis := Basis.IDENTITY ## the arena node's own basis (relative to its parent) when it was seated
 var _seat_pose := Transform3D.IDENTITY ## its world transform when it was seated: what undo goes back to
 var _last_drop_ok := false
+var _orient_tween: Tween = null
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node, mates_tool: Node = null) -> void:
@@ -122,6 +129,15 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	_build_slab()
 	_build_deck()
 	_build_handle()
+	api = CadApi.new()
+	api.name = "CadApi"
+	add_child(api)
+	editor = TableEditor.new()
+	editor.name = "Editor"
+	add_child(editor)
+	editor.setup(self, api)
+	ui.undo_pressed.connect(func() -> void: editor.undo())
+	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting
 	add_to_group("diegetic_panels") # ...and about its grab handle, like every floating window (handle_in_reach below)
 	visible = false
@@ -196,12 +212,14 @@ func tool_activated(tool_id: String) -> void:
 	var def = registry.tool_def(tool_id)
 	if def != null and def.hint != "":
 		set_status(def.hint)
+	editor.on_tool_changed(tool_id)
 	tool_changed.emit(tool_id)
 
 
 func tool_deactivated(tool_id: String) -> void:
 	if active_tool == tool_id:
 		active_tool = ""
+		editor.on_tool_changed("")
 		tool_changed.emit("")
 
 
@@ -463,10 +481,11 @@ func seat(part: MeshInstance3D) -> bool:
 		if child is StaticBody3D:
 			(child as StaticBody3D).collision_layer = TABLE_LAYER
 			(child as StaticBody3D).collision_mask = 0
-	set_status("Editing %s. Pick a face to sketch on." % part.name)
+	set_status("Editing %s." % part.name)
 	poke_render()
 	UiFeedback.haptic(_right, "confirm")
 	part_seated.emit(part)
+	editor.on_seated() # finds which part this is, then opens plane picking (a coroutine: not waited for)
 	return true
 
 
@@ -509,6 +528,10 @@ func on_model_replaced() -> void:
 
 
 func _clear_seat() -> void:
+	if editor != null:
+		editor.on_cleared() # before the copy it hangs things on is freed
+	if _orient_tween and _orient_tween.is_valid():
+		_orient_tween.kill()
 	if pivot != null and is_instance_valid(pivot):
 		remove_child(pivot)
 		pivot.queue_free()
@@ -516,3 +539,62 @@ func _clear_seat() -> void:
 	table_copy = null
 	seated = null
 	fit_scale = 0.0
+
+
+# --- Editing support (table_editor.gd) ----------------------------------------------------------
+
+func configure_backend(url: String, key: String) -> void:
+	api.configure(url, key)
+
+
+func orient_to_plane(plane: Dictionary) -> void:
+	## Turns the part on the table so the sketch plane lies flat, x to the right, y away from you.
+	if pivot == null:
+		return
+	var target := SketchMath.orient_to_table(plane)
+	if _orient_tween and _orient_tween.is_valid():
+		_orient_tween.kill()
+	var duration: float = tokens.duration(tokens.anim_medium)
+	if duration <= 0.0:
+		pivot.basis = target
+		return
+	var from := pivot.basis.get_rotation_quaternion()
+	var to := target.get_rotation_quaternion()
+	var target_pivot := pivot
+	_orient_tween = create_tween()
+	_orient_tween.tween_method(func(t: float) -> void:
+		if is_instance_valid(target_pivot):
+			target_pivot.basis = Basis(from.slerp(to, t)), 0.0, 1.0, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+func sync_copy_from_seated() -> void:
+	## The arena node's mesh was replaced after an edit: show the same on the table copy and re-centre it.
+	if seated == null or table_copy == null:
+		return
+	table_copy.mesh = seated.mesh
+	for key in COPIED_METAS:
+		if seated.has_meta(key):
+			table_copy.set_meta(key, seated.get_meta(key))
+		elif table_copy.has_meta(key):
+			table_copy.remove_meta(key)
+	for child in table_copy.get_children():
+		if child is StaticBody3D:
+			table_copy.remove_child(child)
+			child.free()
+	table_copy.create_trimesh_collision()
+	for child in table_copy.get_children():
+		if child is StaticBody3D:
+			(child as StaticBody3D).collision_layer = TABLE_LAYER
+			(child as StaticBody3D).collision_mask = 0
+	var aabb := table_copy.get_aabb()
+	var refit := TableSeat.fit_scale(aabb, fit_radius)
+	if refit > 0.0:
+		fit_scale = refit
+		table_copy.scale = Vector3.ONE * fit_scale
+		table_copy.position = TableSeat.copy_offset(aabb, fit_scale, Basis.IDENTITY)
+	poke_render()
+
+
+func notify_edited(edited_part_id: String) -> void:
+	## A feature was added or taken back on this part.
+	part_edited.emit(edited_part_id)

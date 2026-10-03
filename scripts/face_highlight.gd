@@ -28,6 +28,8 @@ const HOVER_LIFT := 1.8 ## the hover layer sits this much further off the surfac
 
 var _hover := {} ## source (the hand) -> {part, key, node}
 var _picks: Array = [] ## [{part, key, node}] in pick order
+var _set: Array = [] ## nodes of the design table's multi-entity set (set_set)
+var _set_part: Node3D = null
 var _cache := {} ## part instance id -> {faces: PackedVector3Array, map: Dictionary key -> PackedInt32Array}
 var _cache_order: Array = []
 var _hover_material := _make_material(HOVER_COLOUR)
@@ -89,6 +91,55 @@ func set_picks(entries: Array) -> void:
 		var node := _build_entity_node(part, entity, _pick_materials[i], 1.0)
 		if node != null:
 			_picks.append({"part": part, "key": key, "node": node})
+
+
+func invalidate(part: Node3D) -> void:
+	## The part's mesh was replaced (an edit on the design table): forget the triangles cached for it and drop any
+	## highlight built on the old ones, so nothing lights up the wrong face.
+	if part == null:
+		return
+	var id := part.get_instance_id()
+	_cache.erase(id)
+	_cache_order.erase(id)
+	for source in _hover.keys():
+		if _hover[source].get("part") == part:
+			_free_node(_hover[source])
+			_hover.erase(source)
+	var kept: Array = []
+	for p in _picks:
+		if p.get("part") == part:
+			_free_node(p)
+		else:
+			kept.append(p)
+	_picks = kept
+	if _set_part == part:
+		clear_set()
+
+
+func set_set(part: Node3D, entities: Array) -> void:
+	## Lights up any NUMBER of faces / edges / vertices of one part in the second pick colour (the design table's
+	## "edges to fillet"), replacing the previous set. [] clears it. Separate from hover and from the two-slot picks
+	## the Mates / Measure tools use, so neither disturbs the other.
+	clear_set()
+	if part == null or not is_instance_valid(part):
+		return
+	_set_part = part
+	for entity in entities:
+		var node := _build_entity_node(part, entity, _pick_materials[1], 1.0)
+		if node != null:
+			_set.append(node)
+
+
+func clear_set() -> void:
+	for node in _set:
+		if is_instance_valid(node):
+			node.queue_free()
+	_set.clear()
+	_set_part = null
+
+
+func set_nodes() -> Array:
+	return _set.filter(func(n): return is_instance_valid(n))
 
 
 func hover_key(source: Object) -> String:
