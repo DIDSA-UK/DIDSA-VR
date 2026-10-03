@@ -15,12 +15,18 @@ extends Node3D
 ## Putting a part on the table: carry a part (grip) over the slab and let go. The arena's
 ## own node is left exactly where it was, hidden, and a COPY of it appears on the table,
 ## scaled to fit and floating at the middle of the slab. The copy is what gets edited; the
-## arena node is only touched again when the part is lifted off (grip it) or the table is
-## closed. Lifting it brings the real node back at the arena's scale, in its original
-## orientation, where the copy was, and from then on it's an ordinary part: put it down
-## anywhere and that pose is saved like any other move. A copy rather than a reparent,
-## because the arena's parts sit under a scaled root whose frame mates, pose saving and
-## hide/section all assume (see docs/design-table.md).
+## arena node is only touched again when the part leaves the table. A copy rather than a
+## reparent, because the arena's parts sit under a scaled root whose frame mates, pose saving
+## and hide/section all assume (see docs/design-table.md).
+##
+## Handling the part on the table (table_manip.gd) is independent of the world: grip it to move
+## it, grip it with both hands to turn and scale it, the right stick spins it, A / B push and
+## pull it. It happens only while the table is ENGAGED, which is automatic (a hand on the part, or
+## the right laser on it) and shown by the slab's frame glowing and a "Table active" chip on the
+## deck. Leaving: let go of it over the slab to keep it there; carry it off the slab and let go
+## and the real part goes back to the arena at that spot (at the arena's scale, in its original
+## orientation: a normal move, undoable and saved); or press Return on the deck to put it back
+## exactly where it came from.
 ##
 ## Laser: the deck is a LaserSurface like the tablet's, and it takes the shared
 ## "ui_hover" claim, so a trigger on the console never also selects an arena part.
@@ -38,6 +44,7 @@ const ToolManager := preload("res://scripts/ui/tool_manager.gd")
 const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const TableUI := preload("res://scripts/design_table/table_ui.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
+const TableManip := preload("res://scripts/design_table/table_manip.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
@@ -92,7 +99,9 @@ var active_tool := ""
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
 var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis is the part's orientation on the table
 var table_copy: MeshInstance3D = null ## what's edited; a child of pivot, in the part's own mm frame
-var fit_scale := 0.0 ## metres per mm of the part
+var fit_scale := 0.0 ## metres per mm of the part at its fitted size
+var user_scale := 1.0 ## how much bigger / smaller than fitted the part has been made with two hands (the pivot carries it; fit_scale does not change)
+var manip ## table_manip.gd: gripping, turning, scaling and nudging the part, and whether the table is engaged
 
 var _left: XRController3D
 var _right: XRController3D
@@ -117,6 +126,9 @@ var _status := ""
 var _seat_local_basis := Basis.IDENTITY ## the arena node's own basis (relative to its parent) when it was seated
 var _seat_pose := Transform3D.IDENTITY ## its world transform when it was seated: what undo goes back to
 var _last_drop_ok := false
+var _engaged := false ## drawn: the slab's frame glows
+var _leave_cue := false ## drawn: the frame turns amber because letting go here sends the part to the arena
+var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table when it was put there (what Reset goes back to before a sketch plane is chosen)
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 
@@ -156,7 +168,12 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	enforce_button.pressed_enforce.connect(enforce_mates)
 	if mates_tool != null:
 		mates_tool.enforce_finished.connect(_on_enforce_finished)
+	manip = TableManip.new()
+	manip.setup(self)
+	manip.engaged_changed.connect(set_engaged)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
+	ui.reset_pressed.connect(reset_pose)
+	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting
 	add_to_group("diegetic_panels") # ...and about its grab handle, like every floating window (handle_in_reach below)
@@ -296,9 +313,13 @@ func _build_slab() -> void:
 func _style_materials() -> void:
 	## Colours from the live UI theme: re-run when the theme changes.
 	_slab_material.albedo_color = tokens.bg_raised
-	_frame_material.albedo_color = tokens.accent
 	var ring: Color = tokens.accent
-	_ring_material.albedo_color = Color(ring.r, ring.g, ring.b, 0.85 if _last_drop_ok else 0.30)
+	var frame: Color = tokens.warn if _leave_cue else (ring.lightened(0.55) if _engaged else ring)
+	_frame_material.albedo_color = frame
+	_frame_material.emission_enabled = _engaged or _leave_cue
+	_frame_material.emission = frame
+	_frame_material.emission_energy_multiplier = 1.6
+	_ring_material.albedo_color = Color(ring.r, ring.g, ring.b, 0.85 if (_last_drop_ok or _engaged) else 0.30)
 
 
 func _build_deck() -> void:
@@ -393,6 +414,7 @@ func _process(delta: float) -> void:
 		return
 	surface.process(delta, true)
 	_update_drop_ring()
+	manip.process(delta)
 	_gate_rendering(delta)
 
 
@@ -488,6 +510,8 @@ func seat(part: MeshInstance3D) -> bool:
 	pivot.position = Vector3(0.0, hover_height, 0.0)
 	# It keeps the orientation it had in the arena, upright as you saw it, not the console's lean.
 	pivot.basis = (global_transform.basis.inverse() * part.global_transform.basis.orthonormalized()).orthonormalized()
+	_seat_pivot_basis = pivot.basis
+	user_scale = 1.0
 
 	table_copy = MeshInstance3D.new()
 	table_copy.name = "TableCopy"
@@ -505,6 +529,7 @@ func seat(part: MeshInstance3D) -> bool:
 			(child as StaticBody3D).collision_layer = TABLE_LAYER
 			(child as StaticBody3D).collision_mask = 0
 	set_status("Editing %s." % part.name)
+	ui.set_part_present(true)
 	poke_render()
 	UiFeedback.haptic(_right, "confirm")
 	part_seated.emit(part)
@@ -512,25 +537,87 @@ func seat(part: MeshInstance3D) -> bool:
 	return true
 
 
-func try_lift(hand: XRController3D) -> Dictionary:
-	## controller.gd calls this when a grip starts. If the hand is on the seated part, the arena
-	## node comes back at the arena's scale and its original orientation, where the copy was,
-	## ready to be carried. {} if not; else {node, start} (start = the pose undo goes back to).
-	if not _open or seated == null or pivot == null:
-		return {}
-	if hand.global_position.distance_to(pivot.global_position) > fit_radius + lift_reach:
-		return {}
+func try_grab(hand: XRController3D) -> bool:
+	## controller.gd calls this when a grip starts. True if the grip is on the part on the table (it moves with the hand,
+	## and with a second hand it turns and scales; the arena is not involved).
+	return manip.try_grab(hand)
+
+
+func release_grab(hand: Object) -> bool:
+	## controller.gd calls this when a grip lets go. True if that hand was holding the part on the table.
+	return manip.release(hand)
+
+
+func owns_stick(hand: Object) -> bool:
+	## True for the right hand while the table is engaged: its stick and A / B handle the part on the table, not a selected arena part or walking.
+	return _open and manip != null and manip.owns_stick(hand)
+
+
+func part_radius() -> float:
+	## Metres: the part's bounding sphere on the table now (the fitted radius times how much it has been scaled).
+	return fit_radius * user_scale
+
+
+func effective_scale() -> float:
+	## Metres per part mm right now: the fitted scale times the user's own scaling.
+	return fit_scale * user_scale
+
+
+func set_engaged(on: bool) -> void:
+	## The table has taken over (or let go of) the right stick and A / B: the slab's frame glows and the deck says so.
+	if _engaged == on:
+		return
+	_engaged = on
+	_style_materials()
+	ui.set_engaged(on)
+	poke_render()
+
+
+func set_leave_cue(on: bool) -> void:
+	## A hand is carrying the part past the slab: the frame turns amber, because letting go now sends it to the arena.
+	if _leave_cue == on:
+		return
+	_leave_cue = on
+	_style_materials()
+	if on:
+		set_status("Let go here to send it back to the arena, or bring it back over the slab to keep it.")
+	elif seated != null and manip.is_gripping():
+		set_status("Over the table: let go to keep it here.")
+	poke_render()
+
+
+func send_to_arena(world_centre: Vector3) -> void:
+	## The part was let go of beyond the slab: the real node comes back at the arena's scale, in its original orientation, with
+	## the middle of its bounds at `world_centre`, as an ordinary move (undoable, saved, its mates flagged if it was edited).
+	if seated == null:
+		return
 	var node := seated
-	var start := _seat_pose
-	var lifted_pose := TableSeat.lift_transform(
-		(node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), pivot.global_position)
-	node.global_transform = lifted_pose
+	if _mates_tool != null and (_mates_tool.is_constrained(node) or _mates_tool.is_locked(node)):
+		return_to_arena() # held by its mates: free placement would break them, so it goes back where it came from
+		set_status("%s is held by its mates, so it went back where it came from." % node.name)
+		return
+	var before := _seat_pose
+	var after := TableSeat.lift_transform((node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), world_centre)
+	node.global_transform = after
 	node.visible = true
 	node.remove_meta("on_table")
 	_clear_seat()
-	set_status("Put it down anywhere, or back on the table to keep editing.")
+	_push_move("move %s" % node.name, node, before, after)
+	_persist(node)
+	set_status("Put %s back in the arena." % node.name)
 	part_lifted.emit(node)
-	return {"node": node, "start": start}
+	part_put_down(node)
+	UiFeedback.haptic(_right, "confirm")
+
+
+func return_to_arena() -> void:
+	## The Return button: the real part goes back exactly where it came from. The table is free for the next one.
+	if seated == null:
+		return
+	var name_text := seated.name
+	return_part()
+	set_status("%s is back where it came from." % name_text)
+	UiFeedback.haptic(_right, "confirm")
 
 
 func return_part() -> void:
@@ -556,6 +643,10 @@ func on_model_replaced() -> void:
 
 
 func _clear_seat() -> void:
+	if manip != null:
+		manip.cancel() # no grip outlives the part it was on
+	if ui != null:
+		ui.set_part_present(false)
 	if editor != null:
 		editor.on_cleared() # before the copy it hangs things on is freed
 	if _orient_tween and _orient_tween.is_valid():
@@ -567,6 +658,7 @@ func _clear_seat() -> void:
 	table_copy = null
 	seated = null
 	fit_scale = 0.0
+	user_scale = 1.0
 
 
 # --- Editing support (table_editor.gd) ----------------------------------------------------------
@@ -607,20 +699,25 @@ func bring_part(node: Node3D) -> String:
 	var before := node.global_transform
 	var centre: Vector3 = node.global_transform * (node as MeshInstance3D).get_aabb().get_center()
 	node.global_position += spot - centre
-	var after := node.global_transform
-	var stack = _main.command_stack
-	if stack != null:
-		stack.push("bring %s" % node.name,
-			func() -> void:
-				if is_instance_valid(node):
-					node.global_transform = before
-					_persist(node),
-			func() -> void:
-				if is_instance_valid(node):
-					node.global_transform = after
-					_persist(node))
+	_push_move("bring %s" % node.name, node, before, node.global_transform)
 	_persist(node)
 	return "Brought %s to you." % node.name
+
+
+func _push_move(label: String, node: Node3D, before: Transform3D, after: Transform3D) -> void:
+	## One undo step for an ordinary move of an arena part (undo goes back to `before`, redo to `after`, both saved).
+	var stack = _main.command_stack
+	if stack == null or before.is_equal_approx(after):
+		return
+	stack.push(label,
+		func() -> void:
+			if is_instance_valid(node):
+				node.global_transform = before
+				_persist(node),
+		func() -> void:
+			if is_instance_valid(node):
+				node.global_transform = after
+				_persist(node))
 
 
 func _persist(node: Node3D) -> void:
@@ -629,23 +726,57 @@ func _persist(node: Node3D) -> void:
 
 
 func orient_to_plane(plane: Dictionary) -> void:
-	## Turns the part on the table so the sketch plane lies flat, x to the right, y away from you.
+	## Turns the part on the table so the sketch plane lies flat, x to the right, y away from you. Where it is and how big it
+	## is stay as the user left them.
 	if pivot == null:
 		return
-	var target := SketchMath.orient_to_table(plane)
+	_animate_pose(SketchMath.orient_to_table(plane), pivot.position, user_scale)
+
+
+func reset_pose() -> void:
+	## The Reset button: the part goes back to the middle of the slab at its fitted size, with the sketch plane flat (or, before
+	## one is chosen, the way it was put on the table).
+	if pivot == null:
+		return
+	var rotation := _seat_pivot_basis
+	var text := "Back where it started."
+	if editor != null and editor.session != null and not (editor.session.plane as Dictionary).is_empty():
+		rotation = SketchMath.orient_to_table(editor.session.plane)
+		text = "Back to the sketch plane."
+	_animate_pose(rotation, Vector3(0.0, hover_height, 0.0), 1.0)
+	set_status(text)
+	UiFeedback.haptic(_right, "confirm")
+
+
+func apply_pose(centre: Vector3, rotation: Basis, scale: float) -> void:
+	## Sets the part's pose on the table: where its middle is (console frame), how it is turned and how much it is scaled
+	## (a multiple of the fitted size). The scale lives on the pivot, so everything on the copy (the sketch sheet, the plane
+	## markers, the drawing) follows it.
+	user_scale = scale
+	pivot.position = centre
+	pivot.basis = rotation.orthonormalized() * scale
+
+
+func stop_pose_tween() -> void:
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
+
+
+func _animate_pose(target_rotation: Basis, target_position: Vector3, target_scale: float) -> void:
+	stop_pose_tween()
 	var duration: float = tokens.duration(tokens.anim_medium)
 	if duration <= 0.0:
-		pivot.basis = target
+		apply_pose(target_position, target_rotation, target_scale)
 		return
-	var from := pivot.basis.get_rotation_quaternion()
-	var to := target.get_rotation_quaternion()
+	var from := pivot.basis.orthonormalized().get_rotation_quaternion()
+	var to := target_rotation.orthonormalized().get_rotation_quaternion()
+	var from_position := pivot.position
+	var from_scale := user_scale
 	var target_pivot := pivot
 	_orient_tween = create_tween()
 	_orient_tween.tween_method(func(t: float) -> void:
-		if is_instance_valid(target_pivot):
-			target_pivot.basis = Basis(from.slerp(to, t)), 0.0, 1.0, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		if is_instance_valid(target_pivot) and pivot == target_pivot:
+			apply_pose(from_position.lerp(target_position, t), Basis(from.slerp(to, t)), lerpf(from_scale, target_scale, t)), 0.0, 1.0, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
 func sync_copy_from_seated() -> void:

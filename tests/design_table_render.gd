@@ -99,6 +99,17 @@ func _initialize() -> void:
 		await create_timer(0.4).timeout
 		root.get_texture().get_image().save_png(dir.path_join("table_3_deck.png"))
 
+	# handled on the table: moved aside and scaled up with two hands, the table engaged (glowing frame, TABLE ACTIVE chip)
+	if dir != "":
+		table.apply_pose(Vector3(0.12, 0.26, 0.02), table.pivot.basis.orthonormalized(), 1.4)
+		table.set_engaged(true)
+		await create_timer(0.4).timeout
+		root.get_texture().get_image().save_png(dir.path_join("table_4_engaged_deck.png"))
+		eye.global_position = cam.global_position + Vector3(0.0, 0.0, 0.1)
+		eye.look_at(table.global_position + Vector3(0.0, 0.12, 0.0))
+		await create_timer(0.3).timeout
+		root.get_texture().get_image().save_png(dir.path_join("table_5_engaged.png"))
+
 	var lit := 0
 	for y in range(0, shot2.get_height(), 8):
 		for x in range(0, shot2.get_width(), 8):

@@ -2437,7 +2437,7 @@ Full write-up: [`docs/design-table.md`](design-table.md). The brief it started f
 
 **What was built** (all in `scripts/design_table/` unless noted): a summonable console (slab, grab handle, deck, tree) reached from
 Assembly → Table on the wrist tablet; putting a part on it by carrying it over the slab or from the tree, as a scaled **copy** (the
-arena node stays put, hidden) that lifts back out at arena scale; plane picking on flat faces and the three reference planes; the
+arena node stays put, hidden) that goes back to the arena at arena scale (see the follow-up below); plane picking on flat faces and the three reference planes; the
 sketch sheet and Line / Rectangle / Circle / Arc / Polygon / Point; snapping with a toggle; the constraint tools; Dimension with values
 typed on the existing numeric pad; Extrude (boss / cut / flip / depth), Fillet, Chamfer, with a fresh mesh put on the table copy and on
 every placed instance of the part; Undo; stale-mates flags, badges and the **Enforce mates** button; Files → Save as new file. Shared
@@ -2473,3 +2473,31 @@ rule), and redrawing that big a sketch takes ~5.5 ms (only when it changes). Ren
 and tilt, the carry-over-and-let-go gesture, the lift, the Enforce button's placement); Quest 2 at all; a sketch of more than a few dozen
 entities on a headset (redraw hitch); a mated assembly more than one level deep (only the top-level mates are checked and enforced); Save
 on a Quest (the write location, `user://models`, is assumed to be writable and visible to the Files tab).
+
+### 2026-10-03 (later) — Milestone 2, follow-up: handling the part on the table
+
+John asked how a part is manipulated "on the table" (answer: it couldn't be, beyond the console handle and the automatic turn to a
+sketch plane) and asked for: **grab to move, independent of the world; two-hand grab to rotate and scale, also independent of the
+world**; plus the stick, A / B push-pull and a reset button; and a way to know you are "in the design table". Decisions (his answers):
+engagement is **automatic with a clear tell**, and leaving is **carry it off the slab and let go**.
+
+**Built** (`scripts/design_table/table_manip.gd`, `table_pose.gd`; hooks in `design_table.gd`, `controller.gd`, `two_hand_model.gd`,
+`table_ui.gd`):
+- A grip on the part now moves the table's **copy** (`try_grab`, replacing the old "grip lifts the real part out"); two grips turn and
+  scale it (shortest-arc swing, spread ratio, clamped 0.4x-3x); the right stick spins and tips it; A / B push and pull it along the line
+  from the hand, kept over the slab. The scale lives on the copy's pivot (`user_scale`), so the sheet, plane squares and drawing follow;
+  the editor's snap / pick / label radii use `effective_scale()`. Nothing touches the real part, `assembly_root` or the world scale.
+- **Engaged** (no button): a hand gripping the part, or the right laser within 1.4 x its bounding sphere or on the sketch sheet (never
+  while the laser is on the deck). The frame glows, a TABLE ACTIVE chip shows on the deck, the right hand ticks on entering and
+  leaving, and there is a 0.15 s grace so it doesn't flicker. While engaged the right stick and A / B are the table's:
+  `controller.is_manipulating()` (so locomotion keeps off), and the selected-part stick / nudge code skips.
+- A hand gripping the part carries a `table_part_held` meta so `two_hand_model.gd` doesn't also drag the world.
+- **Leaving:** let go over the slab keeps it; let go beyond it sends the real part back to the arena where you let go (arena scale,
+  original orientation, one undoable move, saved; the frame turns amber while you carry it past the slab); a part held by enforced mates
+  goes back where it came from instead. Deck buttons **Reset** (centre, fitted size, sketch plane flat) and **To arena** (back exactly
+  where it came from, no move recorded).
+- Tests: `design_table_logic` (the pose maths), `design_table_scene` (rewritten lift section: move, two hands, clamp, engaged tell, stick,
+  A / B, Reset, send back, To arena, close mid-grip).
+
+**Not confirmed:** all of it on a headset. In particular the engaged threshold, the 90 deg/s stick rate and the A / B speed are guesses,
+and whether a second grip "anywhere over the table" is picked up the way a person expects.

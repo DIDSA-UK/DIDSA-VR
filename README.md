@@ -401,8 +401,13 @@ live-synced.
     (Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident) and **Feature** (Extrude,
     Fillet, Chamfer) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
     dimension values are **typed on the numeric pad**, and a finished feature appears on the table
-    and on every other placed copy of that part. **Grip the part on the table to lift it back
-    out** at arena scale. Edited parts get a warning badge, are no longer steered by their mates,
+    and on every other placed copy of that part. **Grip the part on the table to move it, grip it
+    with both hands to turn and scale it** (independent of the world); the right stick spins it
+    and A / B push and pull it. The table takes the controls automatically while you grip the part
+    or aim at it (a **TABLE ACTIVE** chip and a glowing frame say so); **Reset** re-centres it.
+    **Let go over the slab to keep it there; carry it off the slab and let go to send it back to
+    the arena** where you let go (at arena scale), or press **To arena** to put it back exactly
+    where it came from. Edited parts get a warning badge, are no longer steered by their mates,
     and an **Enforce mates** button floats over one when it's put down — it turns off any mate
     whose face the edit changed rather than solving it against the wrong face. **Files → Save as new file**
     writes the session as a `.didsa` the flat app opens. What's built, how it works, what the
@@ -625,8 +630,8 @@ headset.
 ## What "done" looks like for milestone 2
 
 - **Built, and confirmed against a real backend and the real solver** (`tests/e2e_design_table.gd`,
-  `tests/e2e_design_table_mates.gd`; the rest headless): the console and its deck; seating, lifting and
-  closing; looking up the part behind a placed occurrence; sketching on a real face and on the reference
+  `tests/e2e_design_table_mates.gd`; the rest headless): the console and its deck; seating, handling the part on
+  the table (move, two-hand turn and scale, stick, A / B, Reset), sending it back to the arena and closing; looking up the part behind a placed occurrence; sketching on a real face and on the reference
   planes; Line / Rectangle / Circle / Arc / Polygon / Point; snapping; typed dimensions; the constraint
   tools; Extrude (boss and cut), Fillet, Chamfer with a fresh mesh on every placed copy; Undo; the assembly
   tree with Table and Bring; stale-mates flags with the Enforce button (and detecting that an edit renumbered

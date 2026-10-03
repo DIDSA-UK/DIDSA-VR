@@ -321,6 +321,10 @@ func _hand_free_ignoring_button(hand: XRController3D) -> bool:
 	# "window_held") — grabbing a window also moved the world otherwise.
 	if hand.has_meta("window_held") and hand.get_meta("window_held"):
 		return false
+	# Same for the part on the design table (table_manip.gd sets "table_part_held"): moving, turning or scaling it is
+	# independent of the world, so the grip must not also drag the model.
+	if hand.has_meta("table_part_held") and hand.get_meta("table_part_held"):
+		return false
 	# controller.gd exposes held_node; a hand carrying a part isn't free.
 	return hand.get("held_node") == null
 

@@ -36,11 +36,32 @@ This page is what was decided and built, what the code turned out to say, and wh
    * **Fillet / Chamfer:** pull the trigger on edges (each pull adds or removes one; they light up), set the size, **Apply**.
    The new shape appears on the table **and on every other placed instance of that part in the arena**.
 6. **Undo** (deck): takes back sketch steps first, then the features made on the table. (Undo only — like the flat sketcher, no redo.)
-7. **Lift it off:** grip the part on the table. The real part comes back at the arena's scale, in the orientation it had when it went
-   on, where the copy was; put it down anywhere (or back on the table). Closing the table does the same in place.
-8. **Edited parts have stale mates.** Every instance of an edited part gets a **warning badge** and stops being steered by its mates.
+7. **Handle it on the table** (all of this is on the table's copy and **independent of the world**: the real part, the model and
+   the arena's scale are never touched):
+   * **Grip** the part (one hand) to **move** it; it follows your hand 1:1 (through the same steadiness filter as an arena part).
+   * **Grip it with both hands** to **turn and scale** it: it moves with the midpoint between your hands, turns as the line between
+     them swings, and grows or shrinks as you spread or close them (0.4x to 3x its fitted size). The second hand may grip anywhere
+     over the table. Letting go of one hand carries on one-handed without a jump.
+   * The **right stick** spins it about the slab's up axis (left/right) and tips it (up/down); **A** pulls it nearer to your hand
+     and **B** pushes it farther, never off the slab or through it.
+   * **Reset** (deck) puts it back in the middle of the slab at its fitted size, with the sketch plane flat (or the way it went on, before
+     a plane is chosen).
+   The sketch sheet, plane squares and drawing are children of the part, so they move, turn and scale with it.
+   **How you know the table has the controls:** it is automatic, with no button. The table is **engaged** while a hand grips the part or
+   the right laser is on the part or its sketch sheet (not on the deck). Then the slab's frame **glows brighter**, a **TABLE ACTIVE** chip
+   shows on the deck, and the right hand gets a small haptic tick as it comes and goes (a quarter-second of grace so it doesn't flicker
+   at the part's edge). Only while engaged do the right stick and A / B belong to the table, so they never also turn you, teleport you
+   or spin a selected arena part. It is the same rule that makes the stick scroll a window while the laser is on it.
+8. **Leave the table:**
+   * **Let go over the slab:** it stays on the table.
+   * **Carry it off the slab and let go:** the real part goes back to the arena **where you let go**, at the arena's scale and in the
+     orientation it had when it went on (a normal move: undoable, saved). While you carry it past the slab the frame turns **amber**
+     and the status line says letting go will send it back. A part held by enforced mates goes back where it came from instead.
+   * **To arena** (deck): the real part goes back **exactly where it came from**, nothing moved.
+   * Closing the table does the same as To arena.
+9. **Edited parts have stale mates.** Every instance of an edited part gets a **warning badge** and stops being steered by its mates.
    When one is put down (or handed back), an **Enforce mates** button floats over it. See below.
-9. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open.
+10. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open.
 
 ## The deck
 
@@ -72,8 +93,9 @@ There is no AI category: the repo has no hook for it.
 
 | Piece | Where | What it does |
 |---|---|---|
-| Console | `design_table.gd` | Slab, deck, handle, theme, seating and lifting, the Enforce plumbing. Joins the `design_tables` and `diegetic_panels` groups so `controller.gd` asks it about seating, lifting and its handle. |
-| Deck UI | `table_ui.gd` | Category row, paged tool row, an options row, status line, Snap / Undo / Close. Pure 2D `Control`s in the shared theme (`ButtonRail`, per-category accent, `FxOverlay`), so it also runs in a plain window. |
+| Console | `design_table.gd` | Slab, deck, handle, theme, seating, sending the part back, Reset, the Enforce plumbing. Joins the `design_tables` and `diegetic_panels` groups so `controller.gd` asks it about seating, gripping the part and its handle. |
+| Handling the part | `table_manip.gd`, `table_pose.gd` | Grips (one hand moves, two turn and scale), the right stick and A / B, the "engaged" rule and its tell. `table_pose.gd` is pure maths in the console's own frame (two-hand step, stick turn, nudge, clamps) so it is unit-tested. Gripping sets a `table_part_held` meta on the hand, which `two_hand_model.gd` reads so the grip doesn't also drag the world; `controller.gd` hands the table its grips first (`_try_grab_table`, `_try_release`) and asks it who owns the stick (`is_manipulating`). |
+| Deck UI | `table_ui.gd` | Category row, paged tool row, an options row, status line with the TABLE ACTIVE chip, Snap / Reset / To arena / Undo / Close. Pure 2D `Control`s in the shared theme (`ButtonRail`, per-category accent, `FxOverlay`), so it also runs in a plain window. |
 | Tool data | `table_tools.gd`, `tool_pager.gd` | Uses the wrist tablet's own `TabletRegistry` + `ToolManager`: one active tool across categories. |
 | Editing session | `table_editor.gd` | The state machine (pick plane → sketch → features), the laser hover and the shared `ui_hover` claim, tool routing, the options row, applying features, refreshing geometry, undo. |
 | Sketch logic | `sketch_session.gd` | No scene: the backend sketch, the local copy of it, each tool's calls, selection, dimension candidates, undo. Takes an `api` Callable, so tests give it a fake. |
@@ -88,7 +110,9 @@ There is no AI category: the repo has no hook for it.
 **A copy, not a reparent.** The arena's parts sit under a scaled root (`assembly_root`) whose frame the mates tool, pose saving, hide
 and section all assume. Rescaling or reparenting a node onto the table would break all of them. So putting a part on the table hides the
 arena node (untouched) and shows a scaled **copy** (own collider on a private physics layer, not in `grabbable_parts`, so no arena tool
-ever sees it). The copy is what you edit; lifting brings the real node back. Hide-all / show-all / reverse / isolate skip the node that's
+ever sees it). The copy is what you edit; the real node comes back when the part leaves the table. The user's own scale lives on the copy's **pivot**
+(not the copy), so the sketch sheet, plane squares and drawing, which are children of the copy, follow it; the snap, pick and label
+radii use `effective_scale()` (fitted scale x the user's scale). Hide-all / show-all / reverse / isolate skip the node that's
 on the table.
 
 **One request at a time.** The backend's single in-memory document races under overlapping calls and a sketch's calls build on each
@@ -176,6 +200,7 @@ and the glb `quality` the table fetches (0.5).
 * **Persisted dirty flags**, and a bulk "enforce" or mate-health endpoint on the backend (DIDSA-CAD roadmap's reference-drift idea). The
   client-side check above covers planar faces well and others loosely.
 * **A feature preview** before Apply, and editing a feature's values afterwards (only Undo).
+* **Not handled on the table yet:** turning with a single hand's wrist (deliberately two-handed, like the world's one-hand drag), rolling about the line between two hands (the stick spins about the slab instead), and snapping a turned part back to the nearest face. Where the **engaged** threshold sits (the laser has to pass within 1.4 x the part's bounding sphere, or be on the sheet), the 90 deg/s stick rate and the A / B speed are guesses until someone tries them.
 * **On a headset:** nothing here has been seen in a headset. The laser, the grips and the layout are tested with simulated
   controllers and rendered once in software; the feel (deck size, tilt, snap radius, ghost label hit radius) needs a session with a
   real controller.
@@ -183,8 +208,8 @@ and the glb `quality` the table fetches (0.5).
 
 ## Testing
 
-Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane maths, snapping, seat numbers), `design_table_scene`
-(summon, deck clicks, seat/lift/close, handle), `sketch_session` (the sketch calls against a fake backend,
+Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane maths, snapping, seat numbers, the pose maths), `design_table_scene`
+(summon, deck clicks, seat, move / two-hand turn and scale / stick / A-B / engaged tell / Reset, send back to the arena, To arena, close, handle), `sketch_session` (the sketch calls against a fake backend,
 `tests/helpers/fake_cad.gd`), `design_table_editing` (the real laser end to end), `design_table_tree`, `design_table_mates`,
 `design_table_save`, `mate_health`. Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
 session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver). Rendering and timing:

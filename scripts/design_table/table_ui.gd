@@ -15,6 +15,8 @@ extends Control
 signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
 signal undo_pressed
+signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
+signal return_pressed ## "To arena": the real part goes back where it came from
 signal close_requested
 signal feedback(event: String) ## "press" / "error": the host turns it into a haptic pulse and a sound
 signal activity ## something on screen changed that the host's render gate should know about
@@ -37,6 +39,9 @@ var _status_label: Label
 var _snap_button: Button
 var _undo_button: Button
 var _close_button: Button
+var _reset_button: Button
+var _return_button: Button
+var _active_chip: Label
 var _fx: ColorRect
 var _cat_group := ButtonGroup.new()
 var _cat_buttons := {}
@@ -94,7 +99,18 @@ func _build_shell() -> void:
 	_status_label = Label.new()
 	_status_label.theme_type_variation = &"LabelDim"
 	_status_label.clip_text = true
-	status_panel.add_child(_status_label)
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", tokens.gap)
+	_active_chip = Label.new()
+	_active_chip.text = "TABLE ACTIVE"
+	_active_chip.theme_type_variation = &"LabelSmall"
+	_active_chip.visible = false
+	_active_chip.add_theme_color_override("font_color", tokens.accent)
+	_active_chip.add_theme_font_size_override("font_size", tokens.font_small + 3)
+	status_row.add_child(_active_chip)
+	status_row.add_child(_status_label)
+	status_panel.add_child(status_row)
 	bottom.add_child(status_panel)
 	_snap_button = _utility("snap", "Snap", true)
 	_snap_button.set_pressed_no_signal(true)
@@ -102,6 +118,18 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		snap_toggled.emit(on))
 	bottom.add_child(_snap_button)
+	_reset_button = _utility("recentre", "Reset", false)
+	_reset_button.disabled = true
+	_reset_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		reset_pressed.emit())
+	bottom.add_child(_reset_button)
+	_return_button = _utility("to_arena", "To arena", false)
+	_return_button.disabled = true
+	_return_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		return_pressed.emit())
+	bottom.add_child(_return_button)
 	_undo_button = _utility("undo", "", false)
 	_undo_button.disabled = true
 	_undo_button.pressed.connect(func() -> void:
@@ -253,6 +281,7 @@ func apply_theme() -> void:
 	if current != null:
 		for id in _tool_buttons:
 			_style_selected(_tool_buttons[id], current.accent, false)
+	_active_chip.add_theme_color_override("font_color", tokens.accent)
 	_fx.refresh(tokens)
 	activity.emit()
 
@@ -273,6 +302,21 @@ func set_status(text: String) -> void:
 func set_undo_enabled(on: bool) -> void:
 	if _undo_button.disabled == on:
 		_undo_button.disabled = not on
+		activity.emit()
+
+
+func set_part_present(on: bool) -> void:
+	## Reset and To arena only mean something while a part is on the table.
+	if _reset_button.disabled == on:
+		_reset_button.disabled = not on
+		_return_button.disabled = not on
+		activity.emit()
+
+
+func set_engaged(on: bool) -> void:
+	## The chip that says the table has the stick and A / B (the part is gripped or the laser is on it).
+	if _active_chip.visible != on:
+		_active_chip.visible = on
 		activity.emit()
 
 
@@ -342,6 +386,18 @@ func option_button(option_id: String) -> Button:
 		if str(_options[i].get("id", "")) == option_id:
 			return _options_row.get_child(i) as Button
 	return null
+
+
+func reset_button() -> Button:
+	return _reset_button
+
+
+func return_button() -> Button:
+	return _return_button
+
+
+func chip_visible() -> bool:
+	return _active_chip.visible
 
 
 func status_text() -> String:

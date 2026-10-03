@@ -2,7 +2,7 @@ extends SceneTree
 ## The design table's pure logic, no scene tree (scripts/design_table/): the tool-row
 ## pager ("More" slot), the tool registration (real DIDSA-CAD names, one active tool),
 ## the sketch-plane maths (fixed planes, turning a part to lie on the table, ray to
-## sheet) and the seat / lift numbers.
+## sheet), the seat / lift numbers and the pose maths (two-hand move / turn / scale, stick, nudge, engagement).
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_logic.gd  (see tests/README.md)
 
 const Pager := preload("res://scripts/design_table/tool_pager.gd")
@@ -10,6 +10,7 @@ const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const Snap := preload("res://scripts/design_table/snap_resolver.gd")
+const TablePose := preload("res://scripts/design_table/table_pose.gd")
 
 
 class Handler extends RefCounted:
@@ -148,4 +149,32 @@ func _initialize() -> void:
 	print("SMOKE a diagonal is left alone: ", diagonal["infer"] == "" and diagonal["uv"] == Vector2(200, 150))
 	print("SMOKE too close to the start to say which way it points: ", Snap.resolve(Vector2(101, 50.5), fake, 3.0, true, [], Vector2(100, 50))["infer"] == "")
 	print("SMOKE with Snap off the axis is not inferred either: ", Snap.resolve(Vector2(200, 53.0), fake, 3.0, false, [], Vector2(100, 50))["infer"] == "")
+	# --- handling the part on the table (table_pose.gd)
+	var id := Basis.IDENTITY
+	var spread := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.15, 0, 0), Vector3(0.15, 0, 0), Vector3(0, 0.2, 0), id, 1.0)
+	print("SMOKE spreading the hands 1.5x scales the part 1.5x about the midpoint: ", absf(spread["scale"] - 1.5) < 0.0001 and _near(spread["centre"], Vector3(0, 0.2, 0) * 1.5))
+	var shift := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(0.0, 0, 0), Vector3(0.2, 0, 0), Vector3(0, 0.2, 0), id, 1.0)
+	print("SMOKE moving both hands together carries the part along, without turning or scaling it: ", _near(shift["centre"], Vector3(0.1, 0.2, 0)) and absf(shift["scale"] - 1.0) < 0.0001 and (shift["rotation"] as Basis).is_equal_approx(id))
+	var quarter := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(0, 0, 0.1), Vector3(0, 0, -0.1), Vector3(0.1, 0, 0), id, 1.0)
+	print("SMOKE swinging the line a quarter turn turns the part a quarter turn about the midpoint (shortest arc): ", (quarter["rotation"] as Basis).is_equal_approx(Basis(Vector3.UP, deg_to_rad(90.0))) and _near(quarter["centre"], Vector3(0, 0, -0.1)))
+	var huge := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3.ZERO, id, 1.0)
+	print("SMOKE the scale is clamped at the top and the bottom: ", huge["scale"] == TablePose.MAX_SCALE and TablePose.two_hand(Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3(-0.03, 0, 0), Vector3(0.03, 0, 0), Vector3.ZERO, id, 1.0)["scale"] == TablePose.MIN_SCALE)
+	print("SMOKE hands almost together make no swing or scale (too short a line to read): ", TablePose.two_hand(Vector3(0, 0, 0), Vector3(0.01, 0, 0), Vector3(0, 0, 0), Vector3(0, 0.01, 0), Vector3.ZERO, id, 1.0)["scale"] == 1.0)
+	var flipped := TablePose.swing(Vector3.RIGHT, Vector3.LEFT)
+	print("SMOKE hands swapped through each other still gives a proper half turn: ", (flipped * Vector3.RIGHT).distance_to(Vector3.LEFT) < 0.001 and absf(flipped.determinant() - 1.0) < 0.001)
+	var spun := TablePose.stick_turn(id, Vector2(1, 0), 1.0, 90.0)
+	print("SMOKE the stick pushed right for a second spins the part a quarter turn about the slab's up axis: ", spun.is_equal_approx(Basis(Vector3.UP, deg_to_rad(90.0))))
+	var tipped := TablePose.stick_turn(id, Vector2(0, 1), 0.5, 90.0)
+	print("SMOKE ...and pushed up it tips the top away from you (towards -Z): ", (tipped * Vector3.UP).z < -0.5)
+	print("SMOKE ...and rests when the stick does: ", TablePose.stick_turn(id, Vector2.ZERO, 1.0, 90.0).is_equal_approx(id))
+	var slab := Vector2(0.6, 0.4)
+	print("SMOKE a point is pulled back over the slab and above it: ", _near(TablePose.clamp_to_zone(Vector3(2, -1, -2), slab, 0.05, 0.6), Vector3(0.3, 0.05, -0.2)))
+	var hand := Vector3(0, 0.5, 0.5)
+	var centre := Vector3(0, 0.2, 0)
+	var pushed := TablePose.nudge(centre, hand, Vector3(0, 0, -1), 1.0, 0.1, 1.0, 0.15)
+	var pulled := TablePose.nudge(centre, hand, Vector3(0, 0, -1), -1.0, 0.1, 1.0, 0.15)
+	print("SMOKE B pushes the part along the line from the hand, A pulls it back along it: ", pushed.distance_to(hand) > centre.distance_to(hand) + 0.09 and pulled.distance_to(hand) < centre.distance_to(hand) - 0.09 and _near((pushed - hand).normalized(), (centre - hand).normalized()))
+	print("SMOKE A will not pull the part through your hand (it stays put once it is that close): ", TablePose.nudge(Vector3(0, 0.5, 0.4), hand, Vector3(0, 0, -1), -1.0, 5.0, 1.0, 0.15) == Vector3(0, 0.5, 0.4))
+	print("SMOKE a part at the hand is pushed out along where you point: ", _near(TablePose.nudge(hand, hand, Vector3(0, 0, -1), 1.0, 0.1, 1.0, 0.15), hand + Vector3(0, 0, -0.1)))
+	print("SMOKE the laser counts as on the part within its sphere and in front of the hand only: ", TablePose.ray_near_sphere(Vector3.ZERO, Vector3(0, 0, -1), Vector3(0.05, 0, -1), 0.1) and not TablePose.ray_near_sphere(Vector3.ZERO, Vector3(0, 0, -1), Vector3(0.5, 0, -1), 0.1) and not TablePose.ray_near_sphere(Vector3.ZERO, Vector3(0, 0, -1), Vector3(0, 0, 1), 0.1))
 	quit()

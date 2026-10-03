@@ -179,8 +179,8 @@ func _physics_process(delta: float) -> void:
 		_update_held_part(delta)
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
-	if selected_node == null:
-		return
+	if selected_node == null or _table_owns_input():
+		return # (the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
 
 	var stick: Vector2 = get_vector2("primary")
 	# The laser on the wrist tablet / a floating window means the stick scrolls
@@ -266,8 +266,9 @@ func nudge_speed_for(part: Node3D) -> float:
 
 func is_manipulating() -> bool:
 	## Lets locomotion.gd know this hand's thumbstick is busy rotating a
-	## selected part right now, so it doesn't also drive movement/turning.
-	return selected_node != null
+	## selected part (or the part on the design table) right now, so it doesn't
+	## also drive movement/turning.
+	return selected_node != null or _table_owns_input()
 
 
 func set_parts_enabled(on: bool) -> void:
@@ -288,6 +289,8 @@ func reset_interaction() -> void:
 
 func _on_button_pressed(action_name: String) -> void:
 	if action_name == grab_action:
+		if _try_grab_table():
+			return
 		if _try_grab_panel_at_distance():
 			return
 		# The section-plane gizmo is independent of "Individual part
@@ -324,14 +327,6 @@ func _try_grab() -> void:
 	if section_tool and section_tool.try_grab(self, grab_reach):
 		return # gizmo grabbed instead — see section_tool.gd's own docstring for why this is checked first
 
-	# A part sitting on the design table: gripping its copy lifts the real part back out (design_table.gd).
-	for table in get_tree().get_nodes_in_group("design_tables"):
-		var lifted: Dictionary = table.try_lift(self)
-		if not lifted.is_empty():
-			_set_grab_hover(null)
-			_begin_hold(lifted["node"], lifted["start"])
-			return
-
 	# Deliberately ignores selected_node so grip never feels tied to the laser-select state.
 	var target := _find_grab_target()
 	if target and mates_tool and mates_tool.is_locked(target):
@@ -345,9 +340,36 @@ func _try_grab() -> void:
 		_begin_hold(target, target.global_transform)
 
 
+func _try_grab_table() -> bool:
+	## A part on the design table: gripping its copy moves it (and with the other hand turns and scales it), on the table
+	## only and independent of the world (design_table.gd / table_manip.gd). Independent of "Individual part
+	## manipulation" mode, like the section gizmo, and checked before the distance-grab of a window; a floating window's
+	## own drag handle in reach still wins, as it does over every other grip.
+	if held_node != null:
+		return false
+	var tables := get_tree().get_nodes_in_group("design_tables")
+	if tables.is_empty():
+		return false
+	for panel in get_tree().get_nodes_in_group("diegetic_panels"):
+		if panel.handle_in_reach(self):
+			return false
+	for table in tables:
+		if table.try_grab(self):
+			_set_grab_hover(null)
+			return true
+	return false
+
+
+func _table_owns_input() -> bool:
+	## The design table is engaged (a hand is on its part, or this hand's laser is): this hand's stick and A / B are the table's.
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.owns_stick(self):
+			return true
+	return false
+
+
 func _begin_hold(target: Node3D, start_transform: Transform3D) -> void:
-	## Starts carrying `target`. `start_transform` is the pose undo returns it to: where it was
-	## when picked up, or for a part lifted off the design table, where it was before it went on.
+	## Starts carrying `target`. `start_transform` is the pose undo returns it to: where it was when picked up.
 	target.set_meta("held", true)
 	_held_start_transform = start_transform
 	# Its pose relative to this hand right now, kept exactly where you took
@@ -485,6 +507,9 @@ func _set_grab_hover(target: Node3D) -> void:
 
 
 func _try_release() -> void:
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.release_grab(self):
+			return # let go of the part on the design table: it stays there or goes back to the arena (design_table.gd)
 	if section_tool and section_tool.release(self):
 		return
 	if held_node == null:

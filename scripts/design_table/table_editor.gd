@@ -286,7 +286,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(null)
 		return
 	_hover_uv = uv
-	var radius_mm: float = SNAP_RADIUS / maxf(table.fit_scale, 0.000001)
+	var radius_mm: float = SNAP_RADIUS / maxf(table.effective_scale(), 0.000001)
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
@@ -298,7 +298,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension":
-		var pick_mm: float = PICK_RADIUS / maxf(table.fit_scale, 0.000001)
+		var pick_mm: float = PICK_RADIUS / maxf(table.effective_scale(), 0.000001)
 		var kinds: Array = ["point", "line", "circle", "arc"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular"]:
 			kinds = ["line"]
@@ -488,7 +488,7 @@ func _sketch_trigger() -> void:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
 	elif tool == "dimension":
-		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / maxf(table.fit_scale, 0.000001))
+		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / maxf(table.effective_scale(), 0.000001))
 		if ghost != "":
 			_type_dimension(ghost)
 		elif not _hover_entity.is_empty():

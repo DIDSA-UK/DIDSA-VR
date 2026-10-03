@@ -3,10 +3,15 @@ extends SceneTree
 ## simulated right laser and hand-built parts. Covers the tablet's Table page summoning it, the deck's category
 ## and tool rows by real laser clicks (the one-active-tool rule, hints, the "ui_hover" claim), putting a part on
 ## the table by letting go of it over the slab (the arena node stays put, hidden; a scaled copy floats above the
-## slab), refusals (no backend identity, table full, outside the slab), lifting it off by grip (original
-## orientation, the arena's scale, saved as an ordinary move), closing with a part on it, hide-all not bringing
+## slab), refusals (no backend identity, table full, outside the slab), handling it on the table (one grip moves it,
+## two turn and scale it, the stick spins it, A / B push and pull it, all independent of the world; the engaged tell;
+## Reset), letting go beyond the slab sending the real part back (original orientation, the arena's scale, saved as an
+## ordinary move), the To arena button, closing with a part on it, hide-all not bringing
 ## the seated node back, and the grab handle moving the console with the part riding along.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_scene.gd  (see tests/README.md)
+
+const TableSeat := preload("res://scripts/design_table/table_seat.gd")
+const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 var main
 var table
@@ -67,6 +72,15 @@ func carry_to(hand: XRController3D, node: Node3D, world_point: Vector3) -> void:
 	hand.global_position = world_point
 	await physics_frame
 	await physics_frame
+
+func _settles_disengaged() -> bool:
+	# Laser far away, no grips: after the grace period the table lets go of the stick.
+	r.global_transform = Transform3D(Basis.IDENTITY, Vector3(1.0, 1.5, 1.0))
+	for i in 3:
+		await process_frame
+	table.manip.process(0.2)
+	return not table.manip.engaged and not table.ui.chip_visible() and not table._engaged and not r.is_manipulating()
+
 
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
@@ -167,27 +181,161 @@ func _initialize() -> void:
 	print("SMOKE ...and let go as an ordinary move: ", main.command_stack.can_undo())
 	main.command_stack.clear()
 
-	# --- lifting
+	# --- handling the part on the table: independent of the world
+	UiFeedback.reduce_motion = true
 	r.global_position = Vector3(1.0, 1.5, 1.0)
 	var arena_scale := 0.001
-	l.global_position = table.pivot.global_position + Vector3(0.05, 0.0, 0.0)
+	var root_before: Transform3D = main.assembly_root.global_transform
+	print("SMOKE Reset and To arena are on the deck and live while a part is on the table: ", table.ui.reset_button() != null and not table.ui.reset_button().disabled and not table.ui.return_button().disabled)
+	print("SMOKE the table is not engaged while nobody is on the part: ", not table.manip.engaged and not table.ui.chip_visible())
+	var home: Vector3 = table.pivot.position
+	var pivot_world: Vector3 = table.pivot.global_position
+	l.global_position = pivot_world + Vector3(0.05, 0.0, 0.0)
 	await physics_frame
-	var count_before: int = table.get_child_count()
+	l.button_pressed.emit("grip_click")
+	await process_frame
+	print("SMOKE gripping the part on the table holds the COPY, not the real part: ", table.manip.is_gripping() and l.held_node == null and table.seated == body and not body.visible and body.has_meta("on_table"))
+	print("SMOKE ...the hand is marked so the world is not also dragged: ", l.get_meta("table_part_held", false) and not main._two_hand._hand_free_ignoring_button(l))
+	print("SMOKE ...and the table is engaged: chip on the deck and the frame glowing: ", table.manip.engaged and table.ui.chip_visible() and table._engaged and table._frame_material.emission_enabled)
+	l.global_position = pivot_world + Vector3(0.05, 0.0, 0.0) + table.global_transform.basis * Vector3(0.10, 0.04, 0.0)
+	await process_frame
+	await process_frame
+	print("SMOKE moving the hand moves the part 1:1 along the console's own axes: ", (table.pivot.position - (home + Vector3(0.10, 0.04, 0.0))).length() < 0.002)
+	print("SMOKE ...while the arena (the real part, the model, the world scale) is untouched: ", body.global_transform.is_equal_approx(original) and main.assembly_root.global_transform.is_equal_approx(root_before))
+	print("SMOKE ...and the part's own turn and size on the table are unchanged by a one-hand move: ", is_equal_approx(table.user_scale, 1.0) and table.pivot.basis.is_equal_approx(table._seat_pivot_basis))
+	l.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE letting go over the slab leaves it on the table, where you put it: ", table.seated == body and not table.manip.is_gripping() and not l.get_meta("table_part_held", false) and (table.pivot.position - (home + Vector3(0.10, 0.04, 0.0))).length() < 0.002)
+	print("SMOKE ...and a move on the table is not an arena move (nothing to undo): ", not main.command_stack.can_undo())
+	print("SMOKE ...the table stops being engaged once the hands are off and the laser is elsewhere: ", await _settles_disengaged())
+
+	# two hands: turn and scale about the midpoint
+	var c: Vector3 = table.pivot.position
+	var basis_before: Basis = table.pivot.basis.orthonormalized()
+	l.global_position = table.to_global(c + Vector3(-0.10, 0.0, 0.0))
+	r.global_position = table.to_global(c + Vector3(0.10, 0.0, 0.0))
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	r.button_pressed.emit("grip_click")
+	await process_frame
+	print("SMOKE a second grip joins: two hands on the part, both marked: ", table.manip.grip_count() == 2 and r.get_meta("table_part_held", false))
+	await process_frame
+	r.global_position = table.to_global(c + Vector3(0.20, 0.0, 0.0)) # hands 0.2 m apart -> 0.3 m
+	await process_frame
+	await process_frame
+	print("SMOKE spreading the hands scales the part (1.5x for 1.5x the spread): ", absf(table.user_scale - 1.5) < 0.02)
+	print("SMOKE ...the scale lives on the pivot so the sketch sheet follows, and the fitted scale is unchanged: ", absf(table.pivot.basis.get_scale().x - table.user_scale) < 0.001 and absf(table.effective_scale() - table.fit_scale * 1.5) < 0.00001)
+	print("SMOKE ...and its bounding sphere is bigger by the same factor: ", absf(table.part_radius() - table.fit_radius * 1.5) < 0.004)
+	print("SMOKE ...all while the arena is untouched: ", body.global_transform.is_equal_approx(original) and main.assembly_root.global_transform.is_equal_approx(root_before))
+	var mid_now: Vector3 = table.to_local((l.global_position + r.global_position) * 0.5)
+	r.global_position = table.to_global(c + Vector3(-0.10, 0.0, -0.30) + Vector3(0.0, 0.0, 0.0)) # swing the line from +X to -Z (a quarter turn)
+	l.global_position = table.to_global(c + Vector3(-0.10, 0.0, 0.0))
+	await process_frame
+	await process_frame
+	var turned: Basis = table.pivot.basis.orthonormalized()
+	print("SMOKE swinging the line between the hands turns the part (a quarter turn about the slab's up axis): ", (turned * basis_before.inverse() * Vector3.RIGHT).distance_to(Vector3(0, 0, -1)) < 0.2 or (turned * basis_before.inverse()).get_euler().length() > 0.8)
+	r.global_position = table.to_global(c + Vector3(3.0, 0.0, 0.0)) # far beyond any sane spread
+	await process_frame
+	await process_frame
+	print("SMOKE scale is clamped (at most 3x fitted): ", table.user_scale <= 3.0 + 0.0001)
+	l.global_position = table.to_global(c + Vector3(-0.10, 0.0, 0.0)) # hands back over the slab
+	r.global_position = table.to_global(c + Vector3(0.10, 0.0, 0.0))
+	await process_frame
+	await process_frame
+	var before_release: Vector3 = table.pivot.position
+	r.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE letting go of one hand carries on one-handed without a jump: ", table.manip.grip_count() == 1 and (table.pivot.position - before_release).length() < 0.002)
+	l.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE ...and the table keeps it when the last hand lets go over the slab: ", table.seated == body and not table.manip.is_gripping() and not l.get_meta("table_part_held", false) and not r.get_meta("table_part_held", false))
+
+	# a grip far from the part, with no other hand on it, is not for the table
+	l.global_position = table.to_global(Vector3(0.4, 0.6, 0.0))
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	print("SMOKE a grip away from the part does nothing on the table: ", not table.manip.is_gripping())
+	l.button_released.emit("grip_click")
+
+	# the right stick and A / B, while engaged
+	r.global_position = table.to_global(Vector3(0.0, 0.55, 0.55))
+	r.global_transform = Transform3D(Basis.looking_at((table.pivot.global_position - r.global_position).normalized(), Vector3.UP), r.global_position)
+	for i in 3:
+		await process_frame
+	print("SMOKE aiming the right laser at the part engages the table (a tick, a chip, a glowing frame): ", table.manip.engaged and table.ui.chip_visible() and table._engaged)
+	print("SMOKE ...and the right stick is the table's now, so it neither turns you nor spins a selected part: ", r.is_manipulating() and not l.is_manipulating() and table.owns_stick(r))
+	var spin_from: Basis = table.pivot.basis.orthonormalized()
+	table.manip.drive_input(Vector2(1.0, 0.0), false, false, 1.0)
+	print("SMOKE the stick spins the part about the slab's up axis (a second at full tilt is a quarter turn): ", (table.pivot.basis.orthonormalized() * spin_from.inverse() * Vector3.RIGHT).distance_to(Basis(Vector3.UP, deg_to_rad(90.0)) * Vector3.RIGHT) < 0.01)
+	var tip_from: Basis = table.pivot.basis.orthonormalized()
+	table.manip.drive_input(Vector2(0.0, 1.0), false, false, 0.5)
+	print("SMOKE ...and up on the stick tips it away from you: ", (table.pivot.basis.orthonormalized() * tip_from.inverse() * Vector3.UP).z < -0.5)
+	var p0: Vector3 = table.pivot.position
+	var hand_local: Vector3 = table.to_local(r.global_position)
+	table.manip.drive_input(Vector2.ZERO, false, true, 0.5) # B: push away
+	var p1: Vector3 = table.pivot.position
+	print("SMOKE B pushes it farther from your hand: ", p1.distance_to(hand_local) > p0.distance_to(hand_local) + 0.01)
+	table.manip.drive_input(Vector2.ZERO, true, false, 0.5) # A: pull nearer
+	print("SMOKE A pulls it nearer: ", table.pivot.position.distance_to(hand_local) < p1.distance_to(hand_local) - 0.01)
+	for i in 40:
+		table.manip.drive_input(Vector2.ZERO, false, true, 0.5)
+	print("SMOKE ...but pushing never walks it off the table or through the slab: ", TableSeat.in_drop_zone(table.pivot.position, table.slab_size, table.drop_floor, table.drop_ceiling) and table.pivot.position.y >= 0.05 - 0.0001)
+	r.set_meta("ui_hover", true)
+	var held_basis: Basis = table.pivot.basis
+	table.manip.drive_input(Vector2(1.0, 0.0), false, false, 1.0)
+	print("SMOKE with the laser on the tool deck the stick is the deck's, not the part's: ", table.pivot.basis.is_equal_approx(held_basis))
+	r.set_meta("ui_hover", false)
+
+	# Reset
+	table.ui.reset_button().pressed.emit()
+	print("SMOKE Reset puts it back in the middle of the slab at its fitted size, the way it was put on: ", table.pivot.position.is_equal_approx(Vector3(0, table.hover_height, 0)) and is_equal_approx(table.user_scale, 1.0) and table.pivot.basis.is_equal_approx(table._seat_pivot_basis))
+
+	# letting go beyond the slab sends the real part back to the arena, at that spot, at the arena's scale
 	var fit_before: float = table.fit_scale
-	l._try_grab()
-	print("SMOKE gripping the part on the table lifts the real one out: ", l.held_node == body and body.visible and not body.has_meta("on_table") and table.seated == null)
+	var leave_at: Vector3 = table.to_global(Vector3(1.2, 0.3, 0.1))
+	l.global_position = table.pivot.global_position + Vector3(0.04, 0.0, 0.0)
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	await process_frame
+	l.global_position = leave_at + Vector3(0.04, 0.0, 0.0)
+	await process_frame
+	await process_frame
+	print("SMOKE carrying it past the slab turns the frame amber and says what letting go will do: ", table._leave_cue and table.manip.carry_outside and table.status().contains("send it back to the arena"))
+	var release_centre: Vector3 = table.pivot.global_position
+	l.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE letting go there sends the real part back to the arena: ", table.seated == null and body.visible and not body.has_meta("on_table") and l.held_node == null)
 	print("SMOKE ...at the arena's scale (the copy was ", snappedf(fit_before / arena_scale, 0.01), "x bigger): ", absf(body.global_transform.basis.get_scale().x - arena_scale) < 0.00001)
 	print("SMOKE ...in its original orientation: ", body.global_transform.basis.orthonormalized().is_equal_approx(original.basis.orthonormalized()))
 	var lifted_centre: Vector3 = body.global_transform * aabb.get_center()
-	print("SMOKE ...with its middle where the copy's middle was: ", lifted_centre.distance_to(table.to_global(Vector3(0, table.hover_height, 0))) < 0.003)
-	print("SMOKE the copy and its pivot are gone: ", table.pivot == null and table.table_copy == null and table.get_child_count() == count_before - 1)
-	l.global_position = Vector3(-0.8, 1.0, -0.6)
-	await physics_frame
-	await physics_frame
-	l._try_release()
-	print("SMOKE put down in the arena it is an ordinary move, undoable back to the pre-table pose: ", main.command_stack.can_undo() and not body.get_meta("held", false))
+	print("SMOKE ...with its middle where the copy's middle was when you let go: ", lifted_centre.distance_to(release_centre) < 0.003)
+	print("SMOKE the copy and its pivot are gone, the amber is off and the deck is idle: ", table.pivot == null and table.table_copy == null and table.get_node_or_null("TablePivot") == null and not table._leave_cue and not table.manip.engaged and table.ui.return_button().disabled)
+	print("SMOKE it is an ordinary move, undoable back to the pre-table pose: ", main.command_stack.can_undo())
 	main.command_stack.undo()
 	print("SMOKE ...and undo puts it back where it was before it went on the table: ", body.global_transform.is_equal_approx(original))
+	main.command_stack.clear()
+
+	# the Return button: back exactly where it came from, nothing moved
+	await carry_to(l, body, above_slab)
+	l._try_release()
+	print("SMOKE seated again: ", table.seated == body)
+	table.ui.return_button().pressed.emit()
+	print("SMOKE To arena puts the real part back exactly where it came from: ", table.seated == null and body.visible and not body.has_meta("on_table") and body.global_transform.is_equal_approx(original))
+	print("SMOKE ...without recording a move: ", not main.command_stack.can_undo())
+
+	# closing while a hand is on the part drops the grip cleanly
+	await carry_to(l, body, above_slab)
+	l._try_release()
+	l.global_position = table.pivot.global_position
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	table.close()
+	print("SMOKE closing the table with a hand on the part lets go cleanly: ", not table.manip.is_gripping() and not l.get_meta("table_part_held", false) and body.visible and body.global_transform.is_equal_approx(original))
+	l.button_released.emit("grip_click")
+	table.open()
+	r.global_position = Vector3(1.0, 1.5, 1.0)
+	r.rotation = Vector3.ZERO
+	await process_frame
 
 	# --- no backend identity: not editable
 	var local := part(Vector3(30, 30, 30), Vector3(0, 100, 0), "")
