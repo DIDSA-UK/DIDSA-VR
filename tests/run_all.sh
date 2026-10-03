@@ -5,6 +5,11 @@
 set -u
 GODOT="${GODOT:-godot}"
 fail=0
+# Tests that change settings (a resized table is remembered, the view mode, the theme...) write to their own file, never the real one, and each
+# run starts from defaults. (Running a single test by hand without this variable uses the real settings file.)
+export DIDSA_SETTINGS_PATH="user://settings_test.cfg"
+reset_settings() { rm -f "$HOME/.local/share/godot/app_userdata/DIDSA VR Spike/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR Spike/settings_test.cfg" 2>/dev/null; }
+reset_settings
 
 echo "== parse check"
 for f in scripts/*.gd scripts/motion/*.gd scripts/ui/*.gd; do
@@ -14,6 +19,7 @@ done
 
 for t in steadiness_filter sensitivity two_hand_rotation grab_and_scale precise_picking undo_redo popup_keyboard tools_tab tablet_scene mesh_identity mates_tool measure_tool colour_tool section_tool section_tab laser_and_left_hand assembly_tree_window calculator_window windows_tab browser_window bug_round features_round mates_motion motion_vectors local_retraction full_keyboard windows_round laser_surface tablet_registry tool_manager side_panel_ui ui_feedback ui_sounds ui_themes passthrough panel_distance_grab tablet keyboard_handle face_highlight topology_pick design_table_logic design_table_scene sketch_session design_table_editing design_table_tree design_table_mates design_table_save mate_health new_document design_table_build_tree view_modes work_loss table_handling; do
   echo "== $t"
+  reset_settings # every test starts from default settings (one test's remembered table size must not shape the next)
   out=$(timeout 300 "$GODOT" --headless --path . --script "res://tests/$t.gd" 2>&1)
   echo "$out" | grep -E "SMOKE" | cut -c1-200
   if echo "$out" | grep -qE "SCRIPT ERROR|Parse Error"; then

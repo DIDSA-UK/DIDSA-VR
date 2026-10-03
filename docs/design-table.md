@@ -52,10 +52,15 @@ This page is what was decided and built, what the code turned out to say, and wh
      and pull the trigger** to open the numeric pad, type, confirm. Typing over a value that already exists changes it.
    * **Constraints:** pick the line(s) / point(s) under the laser (or use Select and its menu).
    * A constraint the rest of the sketch can't satisfy is taken straight back out.
-5. **Add a feature** (Feature category → **Extrude**, **Fillet**, **Chamfer**; settings appear in the row under the tools):
+5. **Add a feature** (Feature category → **Extrude**, **Revolve**, **Fillet**, **Chamfer**, **Shell**, **Mirror**; settings appear in the row under the tools):
    * **Extrude:** Boss or Cut, Flip, New body, Depth (numeric pad), then **Apply**. A boss grows out of the face you sketched on; a
      cut goes into the part.
+   * **Revolve:** draw a closed shape and a line to spin it about; press **Axis** and pull the trigger on that line (it lights), set Boss or Cut and
+     the **Angle** (up to 360), **Apply**. The sketch stays live while you choose the axis.
    * **Fillet / Chamfer:** pull the trigger on edges (each pull adds or removes one; they light up), set the size, **Apply**.
+   * **Shell:** pull the trigger on the faces to open (they light; faces of one body), set the **Wall** thickness and **Inward** or **Outward**, **Apply**.
+   * **Mirror:** aim at a reference plane or a flat face and pull the trigger: every body of the part is reflected across it (**Fuse into one**
+     joins them; the default keeps them separate). There is no Apply; it is one pull, taken back by Undo.
    The new shape appears on the table **and on every other placed instance of that part in the arena**.
    * **Done** (deck) leaves the open sketch. If it was changed the part is rebuilt from it (everything built on the sketch follows) and the part's
      mates are flagged like any edit; an untouched sketch just closes. A sketch is also spent by an Extrude, as before.
@@ -111,7 +116,7 @@ speed dial, constraint ribbon and feature picker); a category with more than six
 |---|---|---|
 | **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point (seven, so the row shows five and More) | Slot, Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
 | **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident (the rest, Equal, Collinear, Concentric, Equal radius, Tangent, Fix, are in Select's menu) | |
-| **Feature** | Extrude, Fillet, Chamfer | Revolve, Sweep, Loft, Plane, Shell, Mirror, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
+| **Feature** | Extrude, Revolve, Fillet, Chamfer, Shell, Mirror | Sweep, Loft, Plane, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
 
 The deck has room for two more categories (the concept art's five); **Modify** (direct edit) and **Inspect** (Measure, Section) are
 the natural ones and are not built. The deck is data (`table_tools.gd`), so adding a tool is one registration plus its behaviour.
@@ -188,12 +193,18 @@ nothing**, because it had quietly joined two side faces. (A fillet on a vertical
    clears the warning** — confirmed against the real backend.
 3. **Enforce.** The button appears over a flagged part when it's put down (or handed back when the table closes). It **suppresses**
    (not deletes) every mate whose face changed — `PATCH …/mates/{id} {suppressed: true}`, reversible and saved in the file — then
-   re-solves the rest, clears the flags only if everything could be met, and says on the button what it turned off ("Remake them from
-   Assembly > Mates"). A failed solve keeps the flags and says why.
+   re-solves the rest, clears the flags only if everything could be met, and says on the button what it turned off. A failed solve keeps
+   the flags and says why.
+4. **Remake** (second step, on the same button). For each turned-off mate whose faces all still exist in the new shape, `mate_health.gd` finds
+   the face that is now **the same one** (same kind and, for a plane, the same direction at the same place; the biggest if an edit split it)
+   and the button becomes **"Remake N mate(s)"**. Pressing it creates a new mate of the same type, value and flip on those faces (DIDSA-CAD never
+   changes what a mate references, so it is a new mate), deletes the old turned-off one, and solves again. A mate with a face that is gone for good
+   is not offered and has to be made by hand (Assembly > Mates). Checked against the real solver: the plate returns to the stack.
 
-Limits: the flags live on the nodes, so a reload forgets them (a reload re-reads the mates fresh, but a mate that already names the
-wrong face stays wrong — which is why the suppression, being saved, matters). Only the top-level assembly's mates are checked and
-enforced (`enforce_all` works on the root). Non-planar faces are compared loosely (kind, centroid, area).
+Limits: the flags live on the nodes and are saved as the VR-only `vr_stale_mates` extra (see "Not losing work"); a reload without them re-reads the
+mates fresh, but a mate that already names the wrong face stays wrong, which is why the suppression, being saved, matters. Only the top-level
+assembly's mates are checked and enforced (`enforce_all` works on the root; sub-assemblies are not walked). Non-planar faces are compared loosely
+(kind, centroid, area).
 
 ## Saving
 
@@ -231,7 +242,7 @@ and the glb `quality` the table fetches (0.5).
 
 ## Not built / known gaps
 
-* The tool list above (Revolve, the rest of Sketch / Constrain / Feature, Modify, Inspect, AI).
+* The tool list above (the rest of Sketch / Feature, Modify, Inspect, AI).
 * **Editing an existing sketch** is now there (Build tree > a sketch row > Edit), except a sketch the flat app **flipped or turned** (refused with
   a message). The flat app's separate Planes / Surfaces / Curves sections are not built (planes are rows in the feature list; surfaces and curves
   are not shown).
@@ -256,7 +267,7 @@ Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane ma
 (summon, deck clicks, seat, move / two-hand turn and scale / stick / A-B / engaged tell / Reset, send back to the arena, To arena, close, handle), `sketch_session` (the sketch calls against a fake backend,
 `tests/helpers/fake_cad.gd`), `design_table_editing` (the real laser end to end), `design_table_tree`, `design_table_mates`,
 `design_table_save`, `mate_health`, `view_modes`, `work_loss`, `table_handling`. Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
-session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver), **`e2e_sketch_select`** (the origin point and every Select menu option against the backend's real constraint schemas) and `e2e_build_tree` (which now also reopens a sketch, changes a dimension, presses Done and sees the rebuilt part). Rendering and timing:
+session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver), **`e2e_sketch_select`** (the origin point and every Select menu option against the backend's real constraint schemas) `e2e_revolve` and `e2e_features` (Revolve, Shell and Mirror against the real feature schemas) and `e2e_build_tree` (which now also reopens a sketch, changes a dimension, presses Done and sees the rebuilt part). Rendering and timing:
 `design_table_render`, `design_table_perf`. See `tests/README.md` for what each line should say, and `docs/status.md` "How this has been
 worked on" for standing up a throwaway backend.
 
@@ -291,8 +302,9 @@ part changes. Tap a row to select it; a strip under it offers:
 
 * **Select and light up:** an extrude lights the faces of the body it made, a fillet / chamfer its edges, a plane (or a sketch on a plane feature)
   its faces; a sketch on a reference plane just says so.
-* **Edit** (extrude, fillet, chamfer): the numeric pad opens on the current depth / radius / distance; the value goes to the backend as a PATCH (any
+* **Edit** (extrude, revolve, shell, fillet, chamfer): the numeric pad opens on the current depth / angle / wall / radius / distance (on a sketch row: it reopens the sketch); the value goes to the backend as a PATCH (any
   feature, not only the last) and the part updates on the table and in the arena. The table's **Undo** puts the old value back.
+* **Rename** (beside the title): the full keyboard opens on the part's name; confirming renames the part (`PATCH /document/parts/{id}`) and every placed instance.
 * **Delete:** two presses ("Sure? Deleting Sketch 1 also removes Extrude 1, Fillet 1"); the backend's cascade deletes the feature, everything built
   on it and the sketches they owned. Not undoable (as in the flat app).
 * **Hide / Show** and **Roll back / Roll forward:** change **only the table's copy**. The arena's real part always shows everything. Hide leaves a

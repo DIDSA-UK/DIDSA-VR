@@ -10,6 +10,12 @@ extends RefCounted
 ## it lives under user:// where an exported build can actually write to it.
 
 const PATH := "user://settings.cfg"
+const PATH_ENV := "DIDSA_SETTINGS_PATH" ## set this environment variable to read and write a different file (tests/run_all.sh does, so a test run never touches the real settings)
+
+
+static func path() -> String:
+	var override := OS.get_environment(PATH_ENV)
+	return override if override != "" else PATH
 
 var project_folder: String = ""
 var last_scene: String = "Mid"
@@ -27,7 +33,7 @@ var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / L
 
 func load_from_disk() -> void:
 	var config := ConfigFile.new()
-	if config.load(PATH) != OK:
+	if config.load(path()) != OK:
 		return # no settings saved yet, or unreadable — defaults stand
 	project_folder = config.get_value("files", "project_folder", project_folder)
 	last_scene = config.get_value("environment", "last_scene", last_scene)
@@ -58,9 +64,9 @@ func save_to_disk() -> void:
 	config.set_value("table", "slab_d", table_slab_size.y)
 	config.set_value("comfort", "sound_enabled", sound_enabled)
 	config.set_value("comfort", "sound_volume", sound_volume)
-	var err := config.save(PATH)
+	var err := config.save(path())
 	if err != OK:
-		push_warning("DIDSA VR: couldn't save %s (error %d)" % [PATH, err])
+		push_warning("DIDSA VR: couldn't save %s (error %d)" % [path(), err])
 
 
 func set_project_folder(path: String) -> void:

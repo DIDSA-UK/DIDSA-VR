@@ -412,9 +412,16 @@ live-synced.
     whose face the edit changed rather than solving it against the wrong face. **New part** (the **+**
     in the tree's header, or the tablet's Table page) starts an empty part on the table to sketch on;
     **Files → New assembly** (press twice) starts an empty assembly. **Files → Save as new file**
-    writes the session as a `.didsa` the flat app opens. What's built, how it works, what the
-    code said about the brief's six questions, performance numbers, and what isn't built:
-    [`docs/design-table.md`](docs/design-table.md).
+    writes the session as a `.didsa` the flat app opens, says where it went, and anything that
+    would replace unsaved work asks first. From the first headset session: the sketch **stands up
+    60 degrees** on a big gridded sheet with its **origin as a snap point**, a **Select** tool
+    (on by default) offers a menu of what applies to the selection, one grip pans and two zoom the
+    sketch, **View > Display** gives Shaded / Shaded + edges / Wireframe, and each slab corner has a
+    point to aim at. **Revolve, Shell and Mirror** join Extrude / Fillet / Chamfer, an existing
+    sketch reopens from the Build tree, and a mate turned off by an edit can be remade. What's built,
+    how it works, what the code said about the brief's six questions, performance numbers, and what
+    isn't built: [`docs/design-table.md`](docs/design-table.md); the gap list and what became of
+    each: [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 
 ## 1. Drop in a real assembly
 
