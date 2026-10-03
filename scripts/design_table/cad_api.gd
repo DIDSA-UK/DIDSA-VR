@@ -7,12 +7,13 @@ extends Node
 ## coroutines (a tap and a dimension, say) can never reorder or overlap.
 ##
 ## Paths are the full route ("/document/parts/..." or "/sketch/sketches/..."); sketch routes live under
-## /sketch, not /document, so unlike mates_tool.gd's helper nothing is prefixed here. The VR client sends no
-## X-Document-Session header, so everything lands in the "default" session its other tools use.
+## /sketch, not /document, so unlike mates_tool.gd's helper nothing is prefixed here. Every call carries the app's own
+## X-Document-Session (backend_session.gd), so VR's document is separate from the flat app's on a shared backend.
 ##
 ## request() returns {ok, code, json, error}; fetch_bytes() returns {ok, code, bytes, error}. Both are
 ## coroutines. Tests give the sketch logic a fake Callable with the same shape instead of this node.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 signal _turn
 
 var backend_url := ""
@@ -43,6 +44,34 @@ func request(method: int, path: String, body_dict = null) -> Dictionary:
 	return result
 
 
+var _view_filters := -1 ## -1 = not asked yet, 0 = the backend lacks the Build tree's glb parameters, 1 = it has them
+
+
+func supports_view_filters() -> bool:
+	## Does this backend's assembly-mesh.glb take hidden_feature_ids and rollback_excluded_feature_ids (DIDSA-CAD 2026-10-03)? Asked once
+	## from its OpenAPI document and remembered. An older backend ignores them silently, so Hide / Show and Roll back would claim to
+	## work and change nothing. If the question itself can't be answered (no network) the answer is "yes" and is not remembered.
+	if _view_filters >= 0:
+		return _view_filters == 1
+	var r: Dictionary = await request(HTTPClient.METHOD_GET, "/openapi.json", null)
+	if not r["ok"] or not (r["json"] is Dictionary):
+		return true
+	_view_filters = 1 if view_filters_in(r["json"]) else 0
+	return _view_filters == 1
+
+
+static func view_filters_in(openapi: Dictionary) -> bool:
+	## True if the OpenAPI document's assembly-mesh.glb GET lists both parameters.
+	var paths: Dictionary = openapi.get("paths", {})
+	for route in paths:
+		if str(route).ends_with("/assembly-mesh.glb"):
+			var names: Array = []
+			for param in (paths[route] as Dictionary).get("get", {}).get("parameters", []):
+				names.append(str((param as Dictionary).get("name", "")))
+			return names.has("hidden_feature_ids") and names.has("rollback_excluded_feature_ids")
+	return false
+
+
 func fetch_bytes(path: String) -> Dictionary:
 	var ticket := _next_ticket
 	_next_ticket += 1
@@ -60,7 +89,7 @@ func _send(method: int, path: String, body_dict, want_bytes: bool = false) -> Di
 	requests_sent += 1
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	var body := "" if body_dict == null else JSON.stringify(body_dict)
 	var err := req.request(backend_url + path, headers, method, body)
 	if err != OK:

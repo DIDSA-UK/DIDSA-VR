@@ -143,6 +143,25 @@ func _initialize() -> void:
 	await frames(2)
 	print("SMOKE a sketch on a reference plane says so (editing an existing sketch is not built) and has no Edit: ", table.status().contains("reference plane") and find_button(table.tree._build_rows, "Edit").disabled)
 
+	# --- an older backend: the glb ignores hidden / rollback, so Hide and Roll back are switched off and the tree says why
+	print("SMOKE the backend was asked once whether it can hide and roll back, and said yes: ", table.build.view_filters_ok and calls_to("GET /openapi.json").size() == 1)
+	fake.view_filters = false
+	table.build._probed = false
+	await table.build.probe_backend()
+	row_button("Extrude 1").pressed.emit()
+	await frames(2)
+	var hide_btn: Button = find_button(table.tree._build_rows, "Hide")
+	var back_btn: Button = find_button(table.tree._build_rows, "Roll back")
+	print("SMOKE an older backend switches Hide and Roll back off, with a note saying why: ", not table.build.view_filters_ok and hide_btn != null and hide_btn.disabled and back_btn.disabled and table.tree._build_rows.find_children("*", "Label", true, false).any(func(l): return l.text.contains("older than DIDSA-CAD 2026-10-03")))
+	var calls_before: int = fake.calls.size()
+	await table.build.toggle_hidden_selected()
+	await table.build.toggle_rollback_selected()
+	print("SMOKE ...and pressing them anyway does nothing (no glb fetch, nothing hidden): ", fake.calls.size() == calls_before and table.build.hidden_ids().is_empty() and table.build.rollback_to == "")
+	fake.view_filters = true
+	table.build.view_filters_ok = true
+	table.build.changed.emit()
+	await frames(2)
+
 	# --- Edit values
 	row_button("Extrude 1").pressed.emit()
 	await frames(2)
@@ -239,4 +258,14 @@ func _initialize() -> void:
 	table.return_to_arena()
 	await frames(3)
 	print("SMOKE when the part leaves the table the tree goes back to Parts and the Build state is empty: ", table.tree.current_tab() == "parts" and table.build.features.is_empty() and table.build.selected_id == "" and table.build.rollback_to == "")
+	# --- a normal part that loses every solid goes blank, like a new one (it used to keep its last shape in the arena)
+	table.seat(box)
+	await settle(func() -> bool: return table.editor.part_id == "PART_BOX" and table.editor.state == "pick_plane")
+	var had_mesh: bool = box.mesh != null and not box.get_meta("blank", false)
+	fake.mesh_bytes = empty_glb()
+	await table.editor.refresh_geometry()
+	print("SMOKE a normal part whose last solid is gone becomes the blank placeholder in the arena and on the table: ", had_mesh and box.get_meta("blank", false) and table.is_blank() and not box.has_meta("topology"))
+	fake.mesh_bytes = box_bytes
+	await table.editor.refresh_geometry()
+	print("SMOKE ...and a feature put back (undo, or a new one) makes it a real part again: ", not box.get_meta("blank", false) and not table.is_blank() and box.has_meta("topology"))
 	quit()

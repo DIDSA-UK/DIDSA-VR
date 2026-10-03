@@ -172,6 +172,8 @@ func _redraw_build() -> void:
 		_build_rows.add_child(_feature_row(build, i, f, hidden.has(id)))
 		if id == build.selected_id:
 			_build_rows.add_child(_action_strip(build, id, hidden.has(id)))
+	if not build.view_filters_ok:
+		_add_note("Hide / Show and Roll back are off: this backend is older than DIDSA-CAD 2026-10-03 and would ignore them. Update the backend to use them.")
 	var bodies: Array = build.body_ids()
 	if not bodies.is_empty():
 		var heading := Label.new()
@@ -237,10 +239,12 @@ func _action_strip(build, id: String, is_hidden: bool) -> Control:
 	var edit := _strip_button("Edit", "settings", func() -> void: build.edit_selected())
 	edit.disabled = not build.can_edit(id)
 	strip.add_child(edit)
-	strip.add_child(_strip_button("Show" if is_hidden else "Hide", "visibility", func() -> void: build.toggle_hidden_selected()))
+	var hide_button := _strip_button("Show" if is_hidden else "Hide", "visibility", func() -> void: build.toggle_hidden_selected())
+	hide_button.disabled = not build.view_filters_ok
+	strip.add_child(hide_button)
 	var is_last: bool = build.index_of(id) >= build.features.size() - 1
 	var back := _strip_button("Roll forward" if build.rollback_to == id else "Roll back", "history", func() -> void: build.toggle_rollback_selected())
-	back.disabled = is_last and build.rollback_to != id
+	back.disabled = (is_last and build.rollback_to != id) or not build.view_filters_ok
 	strip.add_child(back)
 	var delete := _strip_button("Sure?" if build.armed(id) else "Delete", "close", func() -> void: build.delete_selected())
 	delete.theme_type_variation = &"ButtonDanger"

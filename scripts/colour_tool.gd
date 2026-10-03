@@ -23,6 +23,7 @@ extends Node
 ## Mates tool's create/delete: a backend-committed action, not a purely
 ## local, instant transform.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const DEFAULT_MATERIAL_COLOR := Color(0.7, 0.7, 0.7, 1.0) ## plain neutral grey shown after "Clear colour"
@@ -142,7 +143,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	## _api_request — see that function's docstring.
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	var body := "" if body_dict == null else JSON.stringify(body_dict)
 	var err := req.request(backend_url + API_PREFIX + path, headers, method, body)
 	if err != OK:

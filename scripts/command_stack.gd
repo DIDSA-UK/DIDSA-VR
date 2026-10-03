@@ -14,6 +14,8 @@ extends RefCounted
 ## A fresh push clears the redo stack, same as any standard undo/redo history:
 ## once you've done something new, "redo" no longer means anything.
 
+signal changed ## something was pushed, undone or redone: the document is no longer as it was saved or loaded
+
 var _undo_stack: Array[Dictionary] = []
 var _redo_stack: Array[Dictionary] = []
 
@@ -21,6 +23,7 @@ var _redo_stack: Array[Dictionary] = []
 func push(label: String, undo: Callable, redo: Callable) -> void:
 	_undo_stack.append({"label": label, "undo": undo, "redo": redo})
 	_redo_stack.clear()
+	changed.emit()
 
 
 func can_undo() -> bool:
@@ -62,6 +65,7 @@ func undo() -> void:
 	var entry: Dictionary = _undo_stack.pop_back()
 	(entry["undo"] as Callable).call()
 	_redo_stack.append(entry)
+	changed.emit()
 
 
 func redo() -> void:
@@ -70,6 +74,7 @@ func redo() -> void:
 	var entry: Dictionary = _redo_stack.pop_back()
 	(entry["redo"] as Callable).call()
 	_undo_stack.append(entry)
+	changed.emit()
 
 
 func clear() -> void:

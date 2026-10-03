@@ -47,6 +47,7 @@ extends Node
 ##   * solve failures and grounded-part refusals are reported on the tablet
 ##     instead of being swallowed.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 signal picks_changed()
 signal mates_changed()
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
@@ -970,7 +971,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	stat_requests += 1
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	var body := "" if body_dict == null else JSON.stringify(body_dict)
 	var err := req.request(backend_url + API_PREFIX + path, headers, method, body)
 	if err != OK:

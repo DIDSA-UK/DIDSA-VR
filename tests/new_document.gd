@@ -175,6 +175,7 @@ func _initialize() -> void:
 	print("SMOKE closing the table discards an empty part the same way: ", calls_to("DELETE /document/parts/part1/occurrences/").size() == 1 and table.seated == null)
 
 	# --- cold start: no assembly loaded yet
+	main.mark_clean() # (a fresh app: nothing unsaved to ask about)
 	main._resolved_part_id = ""
 	fake.calls.clear()
 	await table.new_part()
@@ -202,6 +203,7 @@ func _initialize() -> void:
 	var new_assembly_button: Button = find_button(files_page, "New assembly")
 	print("SMOKE Files has a New assembly button: ", new_assembly_button != null)
 	fake.calls.clear()
+	main.mark_clean() # the New part above made something unsaved; the plain two-press is what a clean document gets (the Unsaved wording is in work_loss.gd)
 	new_assembly_button.pressed.emit()
 	await frames(2)
 	print("SMOKE the first press only arms it (it asks to be pressed again, and nothing is discarded): ", new_assembly_button.text == "Press again to discard" and calls_to("/document/new").is_empty())

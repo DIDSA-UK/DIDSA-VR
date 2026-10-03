@@ -25,6 +25,7 @@ extends Node
 ## two unrelated assemblies anyway, and this client only ever has one
 ## loaded at a time.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 signal picks_changed()
 signal result_changed()
 
@@ -194,7 +195,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	## gd's own _api_request - see either's docstring.
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	var body := "" if body_dict == null else JSON.stringify(body_dict)
 	var err := req.request(backend_url + API_PREFIX + path, headers, method, body)
 	if err != OK:

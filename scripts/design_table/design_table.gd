@@ -1030,6 +1030,7 @@ func notify_edited(edited_part_id: String, nodes: Array = []) -> void:
 		DirtyMates.mark(node)
 	if seated != null:
 		DirtyMates.mark(seated)
+	_main.mark_dirty()
 	part_edited.emit(edited_part_id)
 
 

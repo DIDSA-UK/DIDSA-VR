@@ -21,6 +21,7 @@ extends "res://scripts/diegetic_panel.gd"
 ## per placed *leaf* instance), so tapping one shows a status message
 ## instead of silently doing nothing.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 const API_PREFIX := "/document"
 
 var backend_url := ""
@@ -282,7 +283,7 @@ func _get_json(path: String) -> Dictionary:
 	## own _api_request - see either for the docstring this mirrors.
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key]
+	var headers := BackendSession.headers(api_key)
 	var err := req.request(backend_url + API_PREFIX + path, headers, HTTPClient.METHOD_GET)
 	if err != OK:
 		req.queue_free()

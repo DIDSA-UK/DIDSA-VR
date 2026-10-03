@@ -71,6 +71,7 @@ var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
 var _files_count_label: Label
+var _dirty_label: Label ## "Unsaved changes" on the Files page
 var _new_assembly_button: Button
 var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
 const NEW_ASSEMBLY_CONFIRM_MS := 4000
@@ -796,6 +797,12 @@ func _build_files_page() -> Control:
 	page.add_child(_hint("Loads from res://models, user://models, and the Settings project folder. Pick Open or Add beside the tablet."))
 	_files_count_label = Label.new()
 	page.add_child(_files_count_label)
+	_dirty_label = _hint("")
+	_dirty_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
+	page.add_child(_dirty_label)
+	if _main != null:
+		_main.dirty_changed.connect(func(_d: bool) -> void: _refresh_dirty_label())
+	_refresh_dirty_label()
 	page.add_child(_button("Refresh list", _rescan_files))
 	page.add_child(_hint("Save writes the whole session, including edits made on the design table, as a new .didsa file the flat app can open. It never overwrites the file you opened.", true))
 	page.add_child(_button("Save as new file", func() -> void:
@@ -808,6 +815,19 @@ func _build_files_page() -> Control:
 	return page
 
 
+func _refresh_dirty_label() -> void:
+	if _dirty_label == null or _main == null:
+		return
+	var dir: String = ProjectSettings.globalize_path(_main.snapshot_path().get_base_dir())
+	_dirty_label.text = ("Unsaved changes. Save as new file before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
+	if _new_assembly_button:
+		_new_assembly_button.text = "New assembly" if _new_assembly_armed_until_ms == 0 else _new_assembly_armed_text()
+
+
+func _new_assembly_armed_text() -> String:
+	return "Unsaved! Press again to discard" if _main != null and _main.document_dirty else "Press again to discard"
+
+
 func _on_new_assembly_pressed() -> void:
 	## Two presses: the first arms the button ("Press again to discard"), the second, within a few seconds, starts the empty assembly.
 	if _main == null:
@@ -815,11 +835,11 @@ func _on_new_assembly_pressed() -> void:
 	var now := Time.get_ticks_msec()
 	if _new_assembly_armed_until_ms == 0 or now > _new_assembly_armed_until_ms:
 		_new_assembly_armed_until_ms = now + NEW_ASSEMBLY_CONFIRM_MS
-		_new_assembly_button.text = "Press again to discard"
+		_new_assembly_button.text = _new_assembly_armed_text()
 		_new_assembly_button.theme_type_variation = &"ButtonDanger"
 		return
 	_disarm_new_assembly()
-	if await _main.new_assembly():
+	if await _main.new_assembly(true):
 		_rescan_files()
 
 

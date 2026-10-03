@@ -24,6 +24,7 @@ var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
 var origin_id := ""
+var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
 
@@ -33,6 +34,11 @@ func is_configured() -> bool:
 
 func request(method: int, path: String, body = null) -> Dictionary:
 	return handle(method, path, body)
+
+
+func supports_view_filters() -> bool:
+	calls.append(["GET /openapi.json", null])
+	return view_filters
 
 
 func fetch_bytes(path: String) -> Dictionary:

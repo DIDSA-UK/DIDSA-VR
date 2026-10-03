@@ -12,6 +12,7 @@ extends Node3D
 ## or type in by hand. Only backend_url and api_key need editing in the
 ## Inspector on the "Main" node.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 @export_group("Backend")
 @export var backend_url: String = "" ## Loaded from secrets.cfg at runtime (see README) — don't hardcode a real
 ## URL/key here, this script is committed to git.
@@ -45,6 +46,14 @@ var xr_interface: XRInterface
 var _resolved_part_id: String = ""
 var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
+signal dirty_changed(dirty: bool)
+const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
+const STALE_MATES_KEY := "vr_stale_mates" ## the native-file extra that carries the design table's "mates need redoing" flags
+const DISCARD_CONFIRM_MS := 6000 ## how long a "this will discard your unsaved changes" warning stays armed for a second press
+var last_saved_path := "" ## the .didsa the last save wrote
+var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
+var _discard_armed_for := ""
+var _discard_armed_until_ms := 0
 var _settings := preload("res://scripts/app_settings.gd").new() ## project folder + last-picked scene — see app_settings.gd
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
@@ -105,6 +114,7 @@ func _ready() -> void:
 	_add_design_table()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
+	command_stack.changed.connect(mark_dirty)
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
@@ -624,6 +634,7 @@ func _load_secrets() -> void:
 		return
 	backend_url = config.get_value("backend", "url", backend_url)
 	api_key = config.get_value("backend", "api_key", api_key)
+	BackendSession.set_session_id(str(config.get_value("backend", "document_session", ""))) # optional: a fixed document session id (default: a fresh one per launch)
 	relay_url = config.get_value("browser_relay", "url", relay_url)
 	relay_api_key = config.get_value("browser_relay", "api_key", relay_api_key)
 
@@ -693,7 +704,7 @@ func _begin_import() -> void:
 	_import_started_ms = Time.get_ticks_msec()
 
 	var url := "%s%s/import/native" % [backend_url, API_PREFIX]
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	_load_busy = true # released by _on_import_completed() (on failure) or _on_mesh_completed()
 	var error := http_request.request(url, headers, HTTPClient.METHOD_POST, raw_text)
 	if error != OK:
@@ -725,7 +736,7 @@ func _fetch_mesh() -> void:
 	]
 	if tier != "":
 		url += "&tier=%s" % tier
-	var headers := ["X-API-Key: %s" % api_key]
+	var headers := BackendSession.headers(api_key)
 	var error := http_request.request(url, headers, HTTPClient.METHOD_GET)
 	if error != OK:
 		_set_status("Mesh request failed to start (error %d)" % error)
@@ -847,6 +858,8 @@ func _read_native_json(path: String) -> Variant:
 
 
 func open_native_file(path: String) -> void:
+	if not confirm_discard("Open " + path.get_file()):
+		return
 	if not _claim_load("Open"):
 		return
 	await _open_native_file_impl(path)
@@ -877,7 +890,7 @@ func _open_native_file_impl(path: String) -> void:
 
 	var req := HTTPRequest.new() # a separate node from http_request, which is spoken for by the startup import chain
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	_set_status("Importing %s (part %s)..." % [path.get_file(), root_part_id])
 	req.request("%s%s/import/native" % [backend_url, API_PREFIX], headers, HTTPClient.METHOD_POST, raw_text)
 	var import_result: Array = await req.request_completed
@@ -937,7 +950,7 @@ func _add_component_file_impl(path: String) -> void:
 
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	_set_status("Adding %s to the assembly..." % path.get_file())
 	req.request(
 		"%s%s/parts/%s/add-component" % [backend_url, API_PREFIX, _resolved_part_id], headers,
@@ -963,6 +976,7 @@ func _add_component_file_impl(path: String) -> void:
 		return
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
+	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
 
 
@@ -970,6 +984,8 @@ func load_glb_file(path: String) -> void:
 	## Load a bare .glb/.gltf straight from disk — no backend round trip.
 	if not FileAccess.file_exists(path):
 		_set_status("No such file: %s" % path)
+		return
+	if not confirm_discard("Open " + path.get_file()):
 		return
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
@@ -981,6 +997,8 @@ func load_glb_file(path: String) -> void:
 
 
 func _import_external_file(path: String, source_format: String) -> void:
+	if not confirm_discard("Open " + path.get_file()):
+		return
 	if not _claim_load("the import"):
 		return
 	await _import_external_file_impl(path, source_format)
@@ -1010,7 +1028,7 @@ func _import_external_file_impl(path: String, source_format: String) -> void:
 
 	var req := HTTPRequest.new() # a separate node from http_request, which is spoken for by the startup import chain
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 
 	_set_status("Creating a part for %s..." % path.get_file())
 	# A clean document first: POST /parts only ever ADDS, so without this every import in one session piled another part onto
@@ -1082,7 +1100,7 @@ func _get_mesh_result(req: HTTPRequest, url: String) -> Array:
 	## a repeat is diagnosable from the console.
 	var result: Array = []
 	for attempt in 2:
-		req.request(url, ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+		req.request(url, BackendSession.headers(api_key), HTTPClient.METHOD_GET)
 		result = await req.request_completed
 		if attempt == 0 and result[0] == HTTPRequest.RESULT_SUCCESS and int(result[1]) >= 500:
 			push_error("DIDSA VR: assembly-mesh.glb fetch got HTTP %d, retrying once: %s" % [result[1], (result[3] as PackedByteArray).get_string_from_utf8().left(300)])
@@ -1181,17 +1199,53 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
 	_mates_tool.refresh_state(_resolved_part_id)
 	view_modes.apply_all() # the saved view mode (edges / wireframe) for the parts that were just loaded
+	mark_clean() # what is loaded is the baseline: nothing to lose yet
+	restore_stale_mates()
 	return true
+
+
+# --- Unsaved changes -------------------------------------------------------------------
+
+func mark_dirty() -> void:
+	## An edit that a save would write. Set by the undo stack (moves, mates, colours...), by the design table (a feature, a value, a new
+	## part, hide / show) and by adding a component; cleared by a save and by loading something (the loaded file is the new baseline).
+	if not document_dirty:
+		document_dirty = true
+		dirty_changed.emit(true)
+
+
+func mark_clean() -> void:
+	_discard_armed_for = ""
+	if document_dirty:
+		document_dirty = false
+		dirty_changed.emit(false)
+
+
+func confirm_discard(what: String) -> bool:
+	## Ask before replacing the document. Clean: true at once. With unsaved edits the first call says so (and what to do) and returns false;
+	## the same `what` again within DISCARD_CONFIRM_MS goes ahead and discards them. Different actions don't share a confirmation.
+	if not document_dirty:
+		return true
+	var now := Time.get_ticks_msec()
+	if _discard_armed_for == what and now < _discard_armed_until_ms:
+		_discard_armed_for = ""
+		return true
+	_discard_armed_for = what
+	_discard_armed_until_ms = now + DISCARD_CONFIRM_MS
+	_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
+	return false
 
 
 # --- New assembly / new part -----------------------------------------------------------
 
-func new_assembly() -> bool:
+func new_assembly(confirmed: bool = false) -> bool:
 	## Files tab "New assembly": throws away what is loaded and starts an empty assembly (a fresh backend document with one empty
 	## root part, so the design table's New part has somewhere to put parts). Needs the backend: a bare local file has no document
 	## to start. True if it worked.
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("New assembly needs a backend (see secrets.cfg.example).")
+		return false
+	if not confirmed and not confirm_discard("New assembly"):
 		return false
 	if not _claim_load("New assembly"):
 		return false
@@ -1235,6 +1289,7 @@ func add_blank_part(root_id: String, occurrence_id: String, local_pose: Transfor
 	## empty part, so there is nothing to carry or seat; this stands in for it: a hidden-on-the-table placeholder box, tagged with
 	## the occurrence it belongs to exactly like a loaded node, so the table's edit flow finds it. `blank` says it still is
 	## only a placeholder: the first feature swaps the real mesh in (swap_part_mesh) and clears it.
+	mark_dirty() # a new part is in the backend document
 	var node := MeshInstance3D.new()
 	node.mesh = blank_mesh()
 	node.set_meta("occurrence_id", occurrence_id)
@@ -1287,7 +1342,32 @@ func native_extras_to_add(exported: Dictionary) -> Dictionary:
 	for key in _native_extras:
 		if not exported.has(key):
 			out[key] = _native_extras[key]
+	out.erase(STALE_MATES_KEY) # the live flags below replace whatever the file came with
+	var stale: Array = stale_mate_occurrences()
+	if not stale.is_empty() and not exported.has(STALE_MATES_KEY):
+		out[STALE_MATES_KEY] = stale
 	return out
+
+
+func stale_mate_occurrences() -> Array:
+	## The occurrence ids of the arena parts flagged "mates need redoing" (design_table/dirty_mates.gd), for a save to write as the VR-only
+	## extra `vr_stale_mates` (the flat app ignores keys it does not know) so the flags survive a save and open.
+	var out: Array = []
+	for node in DirtyMates.dirty_nodes(get_tree()):
+		var occurrence := str(node.get_meta("occurrence_id", ""))
+		if occurrence != "" and not out.has(occurrence):
+			out.append(occurrence)
+	return out
+
+
+func restore_stale_mates() -> void:
+	## After a model is shown: flags the parts a saved file listed in `vr_stale_mates` (set by an earlier VR session that edited them).
+	var listed = _native_extras.get(STALE_MATES_KEY, [])
+	if not (listed is Array) or (listed as Array).is_empty():
+		return
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if (listed as Array).has(str(node.get_meta("occurrence_id", ""))):
+			DirtyMates.mark(node)
 
 
 static func append_to_json_object(text: String, extras: Dictionary) -> String:
@@ -1316,7 +1396,7 @@ func save_native_snapshot(path: String = "") -> String:
 	var req := HTTPRequest.new()
 	add_child(req)
 	_set_status("Saving...")
-	req.request("%s%s/export/native" % [backend_url, API_PREFIX], ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	req.request("%s%s/export/native" % [backend_url, API_PREFIX], BackendSession.headers(api_key), HTTPClient.METHOD_GET)
 	var result: Array = await req.request_completed
 	req.queue_free()
 	if result[0] != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
@@ -1338,8 +1418,17 @@ func save_native_snapshot(path: String = "") -> String:
 	file.store_string(out_text)
 	file.close()
 	_native_root_id_cache.erase(target)
-	_set_status("Saved %s." % target.get_file())
+	mark_clean()
+	last_saved_path = target
+	_set_status("Saved %s." % saved_location_text(target))
 	return target
+
+
+func saved_location_text(target: String) -> String:
+	## "name.didsa in /full/folder": where a save really is. user:// is the app's own data folder (on a Quest, under Android/data/<app>/files,
+	## which the Files app shows), so the full path is spelled out rather than left as user://.
+	var dir := ProjectSettings.globalize_path(target.get_base_dir()) if target.begins_with("user://") or target.begins_with("res://") else target.get_base_dir()
+	return "%s in %s" % [target.get_file(), dir]
 
 
 func mesh_from_glb(glb_bytes: PackedByteArray) -> Dictionary:
@@ -1380,7 +1469,7 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 	if not parsed["ok"]:
 		return 0
 	if parsed["mesh"] == null:
-		return _blank_out(nodes) # no geometry: only a part made on the table can be in that state
+		return _blank_out(nodes) # no geometry: a new part with nothing drawn yet, or any part whose last feature was deleted
 	var updated := 0
 	for node in nodes:
 		if not is_instance_valid(node) or not (node is MeshInstance3D):
@@ -1425,14 +1514,16 @@ func set_feature_hidden(feature_id: String, hidden: bool) -> void:
 		_native_extras.erase("hidden_feature_ids")
 	else:
 		_native_extras["hidden_feature_ids"] = ids
+	mark_dirty() # the hidden set is written into a save
 
 
 func _blank_out(nodes: Array) -> int:
-	## The part's glb has no geometry. That is only expected for a part made with the table's New part (nothing drawn on it yet,
-	## or its first feature taken back): its node goes back to the placeholder box, flagged blank. Any other node is left alone.
+	## The part's glb has no geometry: a part made with the table's New part (nothing drawn on it yet, or its first feature taken back),
+	## or ANY part whose last solid was deleted in the Build tree (the arena would otherwise keep showing the shape that is gone). Its node
+	## goes back to the placeholder box, flagged blank.
 	var updated := 0
 	for node in nodes:
-		if not is_instance_valid(node) or not (node is MeshInstance3D) or not node.get_meta("new_part", false):
+		if not is_instance_valid(node) or not (node is MeshInstance3D):
 			continue
 		var part := node as MeshInstance3D
 		if not part.get_meta("blank", false):

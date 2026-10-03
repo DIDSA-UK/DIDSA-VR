@@ -6,8 +6,10 @@ extends RefCounted
 ## and shows a small warning badge on each. While flagged a part is not steered by its mates (mates_tool.gd checks the meta) and is
 ## not an anchor others are solved against; "Enforce mates" (enforce_button.gd) re-solves them and clears the flags.
 ##
-## The flags live on the nodes, so they are gone when the model is reloaded: nothing about them is saved. That is deliberate for
-## now (docs/design-table.md): a reload re-reads every mate fresh from the backend, which is exactly the check the flag stands in for.
+## The flags live on the nodes. A save writes the flagged parts' occurrence ids as the VR-only extra `vr_stale_mates` (main.gd,
+## stale_mate_occurrences(); the flat app ignores keys it does not know), and opening that file flags them again (restore_stale_mates()),
+## so "this part's mates need redoing" survives a save and open. Loading anything else starts with no flags: a reload re-reads every
+## mate fresh from the backend, which is exactly the check the flag stands in for.
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
