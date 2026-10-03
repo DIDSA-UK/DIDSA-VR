@@ -12,6 +12,7 @@ extends "res://scripts/assembly_tree_window.gd"
 ## a shaky squeeze can't cancel a button press), so a drag from a row would need a second gesture of its own.
 
 var table ## design_table.gd
+var _new_part_button: Button
 @export var dock_position := Vector3(-0.50, 0.20, 0.06) ## in the console's frame
 @export var dock_yaw_degrees: float = 24.0 ## turns the panel in towards the slab
 
@@ -23,6 +24,14 @@ func setup_for_table(p_table, left: XRController3D, right: XRController3D, camer
 	viewport_size = Vector2i(447, 585)
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
+	# "+" in the header beside the close button: a new empty part on the table (the same as the tablet's Table page > New part).
+	var plus := add_header_button("", func() -> void: table.new_part(), false)
+	plus.icon = UiIcons.texture("plus", 64)
+	plus.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	plus.expand_icon = false
+	plus.theme_type_variation = &"ButtonAccent"
+	_header.move_child(plus, _header.get_child_count() - 2) # between the title and the close button
+	_new_part_button = plus
 
 
 func _place_in_front_of_camera() -> void:

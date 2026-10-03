@@ -2512,3 +2512,16 @@ John asked for the table to be glass with radii on the corners, a border, and a 
   (the console's origin follows, as a window's does), clamped 0.5 x 0.3 .. 1.4 x 1.0 m. `design_table.gd: set_slab_size()` moves the handle, deck and tree.
 - Because the slab is see-through now, the handle's halo (`ui_halo.gdshader`) gained a `hollow` switch so it glows around the slab, not over it.
 - Not done: the deck stays 0.6 m wide whatever the slab's size; the size is not remembered between sessions. Not seen on a headset (rendered once in software).
+
+### 2026-10-03 (evening) — Milestone 2: New assembly and New part
+
+John asked whether the table could create a part and whether the arena could clear and start a new assembly (it could do neither). Built
+(plan agreed first, then implemented): `scripts/design_table/new_document.gd` (backend sequences), `Main.new_assembly()` / `add_blank_part()` /
+blank handling in `swap_part_mesh`, `design_table.new_part()` and blank-aware seating, Files > **New assembly** (two-press confirm), the tree's
+**+** and the Table page's **New part**; STEP / STL / OBJ import now starts from `POST /document/new`. Choices: auto-named "Part N"; a part already on
+the table goes back first. Tests: `tests/new_document.gd` (fake backend, in `run_all.sh`), `tests/e2e_new_part.gd` (real backend, passes, incl. export /
+re-import in the flat app's bundle shape and "importing twice leaves one part"). Details and the compatibility reasoning: `docs/design-table.md`,
+"Starting from nothing".
+
+**Not confirmed:** on a headset (the + is an icon-only button in the tree header; whether it is discoverable enough); opening a VR-saved file in
+the flat app's own UI. **Not built:** renaming a part, a part inside a sub-assembly, drawing on the root's own content.

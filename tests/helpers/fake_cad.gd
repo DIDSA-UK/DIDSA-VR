@@ -20,6 +20,7 @@ var plane_for: Callable = Callable()
 var mesh_bytes := PackedByteArray()
 var mesh_ok := true
 var configured := true
+var created_parts: Array = [] ## {id, name} for each POST /document/parts
 
 
 func is_configured() -> bool:
@@ -45,6 +46,24 @@ func handle(method: int, path: String, body) -> Dictionary:
 	calls.append([verb + " " + path, body])
 	if fail != "" and path.contains(fail) and verb == "POST":
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
+	if verb == "POST" and path == "/document/new":
+		occurrences.clear()
+		created_parts.clear()
+		return {"ok": true, "code": 201, "json": {"document_id": "doc1", "part_ids": []}, "error": ""}
+	if verb == "POST" and path == "/document/parts":
+		var part_id := next_id("part")
+		created_parts.append({"id": part_id, "name": body["name"]})
+		return {"ok": true, "code": 201, "json": {"id": part_id, "name": body["name"]}, "error": ""}
+	if verb == "POST" and path.ends_with("/occurrences"):
+		var owner := path.get_slice("/", 3)
+		var rows: Array = occurrences.get(owner, [])
+		rows.append({"id": body["id"], "resolved_part_id": body.get("resolved_part_id"), "name_override": body.get("name_override"), "transform": body.get("transform")})
+		occurrences[owner] = rows
+		return {"ok": true, "code": 201, "json": body, "error": ""}
+	if verb == "DELETE" and path.contains("/occurrences/"):
+		var owner := path.get_slice("/", 3)
+		occurrences[owner] = (occurrences.get(owner, []) as Array).filter(func(o): return o["id"] != path.get_file())
+		return {"ok": true, "code": 204, "json": null, "error": ""}
 	if verb == "GET" and path.ends_with("/occurrences"):
 		return _ok(occurrences.get(path.get_slice("/", 3), []))
 	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):

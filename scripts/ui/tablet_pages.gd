@@ -71,6 +71,9 @@ var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
 var _files_count_label: Label
+var _new_assembly_button: Button
+var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
+const NEW_ASSEMBLY_CONFIRM_MS := 4000
 var _files_cache: Array = [] ## [{path, native, root_id}] — scanned on select/Refresh, never per frame (a project folder may be a network mount)
 
 
@@ -129,7 +132,7 @@ func register(reg) -> void:
 
 	reg.add_tool("assembly", "table", "Table", "table", _build_table_page, {
 		"status": _table_status,
-		"help": "Summon the design table in front of you. Carry a part over it with grip and let go to edit it there; grip the part on the table to lift it back out. Mated parts: Relax all mates first, or they stay steered by their mates."})
+		"help": "Summon the design table in front of you. New part starts an empty one to sketch on; or carry a part over it with grip and let go to edit it. Grip the part on the table to move it, both hands to turn and scale it; carry it off the slab and let go to send it back to the arena. Mated parts: Relax all mates first, or they stay steered by their mates."})
 
 	reg.add_category("windows", "Windows", "windows", ACCENT_WINDOWS)
 	reg.add_tool("windows", "windows", "Windows", "windows", _build_windows_page, {
@@ -138,7 +141,7 @@ func register(reg) -> void:
 	reg.add_category("files", "Files", "files", ACCENT_FILES)
 	reg.add_tool("files", "models", "Models", "models", _build_files_page, {
 		"on_select": _rescan_files, "status": _files_status, "list": _files_rows, "list_empty": "No model files found.",
-		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. Needs a configured backend for STEP, STL and OBJ."})
+		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
 
 
 func refresh() -> void:
@@ -156,6 +159,8 @@ func refresh() -> void:
 		_mates_create_button.disabled = not _mates_tool.can_create()
 	if _table_button and _design_table:
 		_table_button.text = "Dismiss table" if _design_table.is_open() else "Summon table"
+	if _new_assembly_button and _new_assembly_armed_until_ms > 0 and Time.get_ticks_msec() > _new_assembly_armed_until_ms:
+		_disarm_new_assembly()
 	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
 	if _measure_picks_label and _measure_tool:
 		var m: Array = _measure_tool.picked_labels()
@@ -730,7 +735,8 @@ func _build_table_page() -> Control:
 	page.add_child(_button("Bring it to me", func() -> void:
 		if _design_table.is_open():
 			_design_table.recall()))
-	page.add_child(_hint("Carry a part over the table with grip and let go to edit it there. Grip the part on the table to lift it back out. If the part is mated, Relax all mates first."))
+	page.add_child(_button("New part", func() -> void: _design_table.new_part(), &"ButtonAccent"))
+	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it. If a part is mated, Relax all mates first."))
 	return page
 
 
@@ -777,7 +783,32 @@ func _build_files_page() -> Control:
 		var saved: String = await _main.save_native_snapshot()
 		if saved != "":
 			_rescan_files()))
+	page.add_child(_hint("New assembly throws away what is loaded (Save first if you want to keep it) and starts an empty one; then add parts with the design table's New part. Needs the backend.", true))
+	_new_assembly_button = _button("New assembly", _on_new_assembly_pressed)
+	page.add_child(_new_assembly_button)
 	return page
+
+
+func _on_new_assembly_pressed() -> void:
+	## Two presses: the first arms the button ("Press again to discard"), the second, within a few seconds, starts the empty assembly.
+	if _main == null:
+		return
+	var now := Time.get_ticks_msec()
+	if _new_assembly_armed_until_ms == 0 or now > _new_assembly_armed_until_ms:
+		_new_assembly_armed_until_ms = now + NEW_ASSEMBLY_CONFIRM_MS
+		_new_assembly_button.text = "Press again to discard"
+		_new_assembly_button.theme_type_variation = &"ButtonDanger"
+		return
+	_disarm_new_assembly()
+	if await _main.new_assembly():
+		_rescan_files()
+
+
+func _disarm_new_assembly() -> void:
+	_new_assembly_armed_until_ms = 0
+	if _new_assembly_button:
+		_new_assembly_button.text = "New assembly"
+		_new_assembly_button.theme_type_variation = &""
 
 
 func _rescan_files() -> void:
