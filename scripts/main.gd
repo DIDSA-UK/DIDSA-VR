@@ -1328,18 +1328,16 @@ func save_native_snapshot(path: String = "") -> String:
 	return target
 
 
-func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
-	## The design table changed a part: puts its new mesh (and the face / edge identity that goes with it) on every arena node
-	## in `nodes` — every placed instance of that part — leaving their poses, selection and the undo history alone (unlike
-	## _show_model, which replaces everything). `glb_bytes` is the part's own assembly-mesh.glb: one node, in the part's own
-	## frame, the same frame every instance's mesh is in. Returns how many nodes were updated.
+func mesh_from_glb(glb_bytes: PackedByteArray) -> Dictionary:
+	## A part's own assembly-mesh.glb as a mesh and the face / edge identity that goes with it: {ok, mesh (null if the part has no
+	## geometry), metas: {face_ids, body_ids, topology}}. ok is false if the bytes are not a readable glb.
 	var gltf_document := GLTFDocument.new()
 	var gltf_state := GLTFState.new()
 	if gltf_document.append_from_buffer(glb_bytes, "", gltf_state) != OK:
-		return 0
+		return {"ok": false, "mesh": null, "metas": {}}
 	var scene := gltf_document.generate_scene(gltf_state)
 	if scene == null:
-		return 0
+		return {"ok": false, "mesh": null, "metas": {}}
 	MeshIdentity.tag_scene(gltf_state, scene)
 	var candidates: Array[Node] = _all_descendants(scene)
 	candidates.push_front(scene)
@@ -1348,8 +1346,26 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
 			template = node
 			break
-	if template == null:
-		scene.free()
+	var metas := {}
+	var mesh: Mesh = null
+	if template != null:
+		mesh = template.mesh
+		for key in ["face_ids", "body_ids", "topology"]:
+			if template.has_meta(key):
+				metas[key] = template.get_meta(key)
+	scene.free()
+	return {"ok": true, "mesh": mesh, "metas": metas}
+
+
+func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
+	## The design table changed a part: puts its new mesh (and the face / edge identity that goes with it) on every arena node
+	## in `nodes` — every placed instance of that part — leaving their poses, selection and the undo history alone (unlike
+	## _show_model, which replaces everything). `glb_bytes` is the part's own assembly-mesh.glb: one node, in the part's own
+	## frame, the same frame every instance's mesh is in. Returns how many nodes were updated.
+	var parsed := mesh_from_glb(glb_bytes)
+	if not parsed["ok"]:
+		return 0
+	if parsed["mesh"] == null:
 		return _blank_out(nodes) # no geometry: only a part made on the table can be in that state
 	var updated := 0
 	for node in nodes:
@@ -1358,10 +1374,10 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		var part := node as MeshInstance3D
 		if part.has_meta("blank"):
 			part.set_meta("blank", false) # a new part's placeholder is a real part from its first feature on
-		part.mesh = template.mesh
+		part.mesh = parsed["mesh"]
 		for key in ["face_ids", "body_ids", "topology"]:
-			if template.has_meta(key):
-				part.set_meta(key, template.get_meta(key))
+			if (parsed["metas"] as Dictionary).has(key):
+				part.set_meta(key, parsed["metas"][key])
 			elif part.has_meta(key):
 				part.remove_meta(key)
 		for child in part.get_children():
@@ -1372,11 +1388,28 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		if face_highlight != null:
 			face_highlight.invalidate(part)
 		updated += 1
-	scene.free()
 	if updated > 0:
 		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
 		_measure_tool.clear_picks()
 	return updated
+
+
+func hidden_feature_ids() -> Array:
+	## The features hidden on the design table: the flat app's own `hidden_feature_ids` (a flat list of feature ids, kept with the
+	## session's native extras so a save writes them back and the flat app reads them).
+	return (_native_extras.get("hidden_feature_ids", []) as Array).duplicate()
+
+
+func set_feature_hidden(feature_id: String, hidden: bool) -> void:
+	var ids: Array = hidden_feature_ids()
+	if hidden and not ids.has(feature_id):
+		ids.append(feature_id)
+	elif not hidden:
+		ids.erase(feature_id)
+	if ids.is_empty():
+		_native_extras.erase("hidden_feature_ids")
+	else:
+		_native_extras["hidden_feature_ids"] = ids
 
 
 func _blank_out(nodes: Array) -> int:

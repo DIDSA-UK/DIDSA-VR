@@ -392,7 +392,7 @@ live-synced.
 
 17. **Design table** (milestone 2). Wrist tablet → **Assembly → Table → Summon table** puts a
     tilted console in front of you: a slab with the part floating above it, a grab handle on its
-    front edge (grip it to move and turn the whole console), the assembly tree at its left and a
+    front edge (grip it to move and turn the whole console), the **tree** at its left (a **Build** tab with the part's own build tree: select, edit values, hide, roll back, delete; a **Parts** tab with the assembly) and a
     tool deck in front. **Carry a part (grip) over the slab and let go** — or press **Table** on a
     part in the tree — to edit it (a mated part needs **Relax all mates** first if you carry it).
     The arena's own part is left alone and hidden; a scaled copy floats above the slab. **Aim at a

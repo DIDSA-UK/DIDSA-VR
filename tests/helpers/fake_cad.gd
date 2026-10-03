@@ -21,6 +21,8 @@ var mesh_bytes := PackedByteArray()
 var mesh_ok := true
 var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
+var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
+var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
 
 func is_configured() -> bool:
@@ -33,7 +35,8 @@ func request(method: int, path: String, body = null) -> Dictionary:
 
 func fetch_bytes(path: String) -> Dictionary:
 	calls.append(["GET " + path, null])
-	return {"ok": mesh_ok, "code": 200, "json": null, "bytes": mesh_bytes, "error": ""}
+	var filtered := path.contains("hidden_feature_ids") or path.contains("rollback_excluded_feature_ids")
+	return {"ok": mesh_ok, "code": 200, "json": null, "bytes": filtered_mesh_bytes if filtered else mesh_bytes, "error": ""}
 
 
 func next_id(prefix: String) -> String:
@@ -46,6 +49,24 @@ func handle(method: int, path: String, body) -> Dictionary:
 	calls.append([verb + " " + path, body])
 	if fail != "" and path.contains(fail) and verb == "POST":
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
+	if verb == "GET" and path.ends_with("/features"):
+		return _ok(feature_rows.get(path.get_slice("/", 3), []))
+	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
+		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
+		for row in rows:
+			if row["id"] == path.get_file():
+				for key in body:
+					row[key] = body[key]
+		return _ok({"id": path.get_file()})
+	if verb == "DELETE" and path.ends_with("/cascade"):
+		var owner := path.get_slice("/", 3)
+		var rows: Array = feature_rows.get(owner, [])
+		var BuildTree = load("res://scripts/design_table/build_tree.gd")
+		var victim: String = path.get_slice("/", 5)
+		var gone: Array = BuildTree.dependents(rows, victim)
+		gone.append(victim)
+		feature_rows[owner] = rows.filter(func(r): return not gone.has(r["id"]))
+		return _ok({"deleted_feature_ids": gone, "deleted_sketch_ids": []})
 	if verb == "POST" and path == "/document/new":
 		occurrences.clear()
 		created_parts.clear()
