@@ -1,0 +1,270 @@
+extends SceneTree
+## The design table's sketch logic (scripts/design_table/sketch_session.gd) against a small FAKE backend that speaks
+## the real routes' shapes, so the exact call sequences can be pinned without a server: opening on a reference
+## plane and on a face, each drawing tool's calls (points first, then the entity, then ONE solve-and-refresh and an
+## export), line chaining and the horizontal inference, the constraint tools, dimension candidates and typing a
+## value (a PATCH of the existing dimension, a new one, a circle's provisional radius), refusals, and undo.
+## Run: "$GODOT" --headless --path . --script res://tests/sketch_session.gd  (see tests/README.md)
+
+const Session := preload("res://scripts/design_table/sketch_session.gd")
+const Fake := preload("res://tests/helpers/fake_cad.gd")
+
+
+var fake: Fake
+var s
+
+
+func fresh(tool_id: String = "") -> void:
+	fake = Fake.new()
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	await s.open_sketch({"fixed": "XY"})
+	fake.calls.clear()
+	if tool_id != "":
+		s.set_tool(tool_id)
+
+
+func _initialize() -> void:
+	# --- opening
+	fake = Fake.new()
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	var ok: bool = await s.open_sketch({"fixed": "XZ"})
+	print("SMOKE opening on a reference plane makes one sketch feature then reads the sketch: ", ok and fake.paths() == ["POST /document/parts/P/features/sketch", "POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export"])
+	print("SMOKE ...asking for the plane by name, and keeping the plane basis (XZ's x is -X): ", fake.calls[0][1] == {"plane": "XZ"} and s.plane["x"].is_equal_approx(Vector3(-1, 0, 0)) and s.is_open())
+	print("SMOKE ...and remembers the sketch feature (what an extrude names): ", s.feature_id == "feat1" and s.sketch_id == "sk1")
+	fake = Fake.new()
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	ok = await s.open_sketch({"face": {"body_id": "B", "index": 4}})
+	print("SMOKE opening on a face makes a plane on it first, then a sketch on that plane: ", ok and fake.paths()[0] == "POST /document/parts/P/create-plane-features" and fake.paths()[1] == "POST /document/parts/P/features/sketch")
+	print("SMOKE ...an offset_face plane with the face as a body face ref: ", fake.calls[0][1] == {"plane_type": "offset_face", "face_refs": [{"face_ref": {"body_id": "B", "shape_type": "face", "index": 4}}], "offset": 0.0})
+	print("SMOKE ...the sketch is anchored to that plane, and the plane basis comes from the backend's answer: ", fake.calls[1][1] == {"plane_feature_id": "plane1"} and s.plane["origin"].is_equal_approx(Vector3(0, 0, 10)))
+	fake = Fake.new()
+	fake.fail = "create-plane"
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	var said := []
+	s.status.connect(func(t): said.append(t))
+	ok = await s.open_sketch({"face": {"body_id": "B", "index": 4}})
+	print("SMOKE a refused plane (not a flat face) opens nothing and says why: ", not ok and not s.is_open() and said.size() == 1 and said[0].contains("nope"))
+
+	# --- line
+	await fresh("line")
+	var r: Dictionary = await s.tap({"uv": Vector2(0, 0)})
+	print("SMOKE the first tap of a line only remembers it: ", r["ok"] and not r["done"] and fake.calls.is_empty())
+	r = await s.tap({"uv": Vector2(30, 0)})
+	print("SMOKE the second makes two points, the line, then one solve-and-refresh and an export: ", r["done"] and fake.paths() == [
+		"POST /sketch/sketches/sk1/points", "POST /sketch/sketches/sk1/points", "POST /sketch/sketches/sk1/lines",
+		"POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export"])
+	print("SMOKE the points carry the tapped positions: ", fake.calls[0][1] == {"x": 0.0, "y": 0.0} and fake.calls[1][1] == {"x": 30.0, "y": 0.0})
+	print("SMOKE the local model now holds the line and its points: ", s.lines.size() == 1 and s.points.size() == 2 and s.entity_count() == 1)
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(30, 20)})
+	print("SMOKE the next tap CONTINUES the chain from the last end (one new point, not two): ", r["done"] and fake.count("/points") == 1 and fake.count("/lines") == 1)
+	s.finish_chain()
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(50, 50)})
+	print("SMOKE after finishing the chain a tap starts afresh: ", not r["done"] and fake.calls.is_empty())
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(40, 1), "infer": "horizontal"})
+	print("SMOKE a line inferred horizontal gets a horizontal constraint: ", r["done"] and fake.count("/constraints") == 1 and fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0][1]["type"] == "horizontal")
+	await fresh("line")
+	var existing: Dictionary = await s.tap({"uv": Vector2(5, 5)})
+	await s.tap({"uv": Vector2(9, 9)})
+	var a_id: String = s.points.keys()[0]
+	var b_id: String = s.points.keys()[1]
+	s.finish_chain()
+	fake.calls.clear()
+	await s.tap({"uv": Vector2(5, 5), "id": a_id})
+	await s.tap({"uv": Vector2(9, 12), "id": ""})
+	print("SMOKE a tap snapped to an existing point reuses it instead of making another: ", fake.count("/points") == 1 and fake.calls.filter(func(c): return c[0].ends_with("/lines"))[0][1]["start_point_id"] == a_id)
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0), "id": ""})
+	fake.calls.clear()
+	fake.fail = "/lines"
+	r = await s.tap({"uv": Vector2(10, 0)})
+	print("SMOKE a refused line takes its new points back out: ", not r["ok"] and fake.paths().filter(func(p): return p.begins_with("DELETE") and p.contains("/points/")).size() == 2)
+
+	# --- rectangle
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(40, 30)})
+	print("SMOKE a rectangle is four corner points then one rectangle: ", r["done"] and fake.count("/points") == 4 and fake.count("/rectangles") == 1)
+	var rect_body: Dictionary = fake.calls.filter(func(c): return c[0].ends_with("/rectangles"))[0][1]
+	var corner_uvs: Array = (rect_body["corner_point_ids"] as Array).map(func(id): return fake.points[id])
+	print("SMOKE ...the corners go round in order: ", corner_uvs == [Vector2(0, 0), Vector2(40, 0), Vector2(40, 30), Vector2(0, 30)])
+	print("SMOKE ...and the sketch now has a closed profile to extrude: ", s.profile_ok() and s.shapes.size() == 1 and s.lines.size() == 4)
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(40, 0)})
+	print("SMOKE two corners in a line are refused (no zero-area rectangle): ", not r["ok"] and fake.count("/rectangles") == 0)
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0), "id": "pt-origin"})
+	fake.calls.clear()
+	await s.tap({"uv": Vector2(40, 30)})
+	var rect_ids: Array = fake.calls.filter(func(c): return c[0].ends_with("/rectangles"))[0][1]["corner_point_ids"]
+	print("SMOKE a corner snapped to an existing point is reused: ", rect_ids[0] == "pt-origin" and fake.count("/points") == 3)
+
+	# --- circle, arc, polygon, point
+	await fresh("circle")
+	await s.tap({"uv": Vector2(10, 10)})
+	r = await s.tap({"uv": Vector2(20, 10)})
+	print("SMOKE a circle is a centre point, a rim point, then the circle on both: ", r["done"] and fake.count("/circles") == 1 and s.circles.size() == 1 and s.profile_ok())
+	await fresh("arc")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(0, 20)})
+	var arc_body: Dictionary = fake.calls.filter(func(c): return c[0].ends_with("/arcs"))[0][1]
+	print("SMOKE an arc's free end is sent as an ANGLE from the centre so it lands on the circle: ", r["done"] and arc_body.has("end_angle") and not arc_body.has("end_point_id") and absf(arc_body["end_angle"] - PI * 0.5) < 0.0001 and fake.count("/points") == 2) # the centre and the start; the end is the backend's
+	await fresh("arc")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	fake.calls.clear()
+	await s.tap({"uv": Vector2(0, 10), "id": "pt-existing"})
+	print("SMOKE ...an end snapped to an existing point is sent as that point: ", fake.calls.filter(func(c): return c[0].ends_with("/arcs"))[0][1]["end_point_id"] == "pt-existing")
+	await fresh("polygon")
+	s.polygon_sides = 5
+	await s.tap({"uv": Vector2(0, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(10, 0)})
+	print("SMOKE a polygon is a centre, a first corner and the side count: ", r["done"] and fake.calls.filter(func(c): return c[0].ends_with("/polygons"))[0][1]["sides"] == 5)
+	await fresh("point")
+	r = await s.tap({"uv": Vector2(7, 8)})
+	print("SMOKE the point tool makes one point and needs no entity: ", r["done"] and fake.count("/points") == 1 and fake.count("/lines") == 0 and fake.count("/export") == 0)
+
+	# --- finding things under the laser
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 30)})
+	print("SMOKE the nearest point wins within the radius: ", s.nearest_point(Vector2(1, 1), 3.0) != "" and s.nearest_point(Vector2(20, 15), 3.0) == "")
+	var near_line: Dictionary = s.nearest_entity(Vector2(20, 0.8), 2.0)
+	print("SMOKE ...and a line is found along its length: ", near_line.get("kind") == "line")
+	print("SMOKE ...a point beats the line it's on: ", s.nearest_entity(Vector2(0.5, 0.5), 2.0).get("kind") == "point")
+	print("SMOKE ...and nothing far away is found: ", s.nearest_entity(Vector2(200, 200), 2.0).is_empty())
+	await fresh("circle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	print("SMOKE a circle is found on its rim, not at its middle: ", s.nearest_entity(Vector2(0, 10.2), 1.0, ["circle"]).get("kind") == "circle" and s.nearest_entity(Vector2(0, 0.1), 1.0, ["circle"]).is_empty())
+
+	# --- constraint tools
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 30)})
+	var line_ids: Array = s.lines.keys()
+	s.set_tool("horizontal")
+	fake.calls.clear()
+	r = await s.select({"kind": "line", "id": line_ids[0]})
+	print("SMOKE Horizontal on a line is one constraint then a solve (no export: nothing new to draw): ", r["done"] and fake.count("/constraints") == 1 and fake.count("/solve-and-refresh") == 1 and fake.count("/export") == 0)
+	s.set_tool("horizontal")
+	r = await s.select({"kind": "point", "id": "x"})
+	print("SMOKE ...a point is refused with a reason: ", not r["ok"] and r["message"] == "Pick a line.")
+	s.set_tool("parallel")
+	fake.calls.clear()
+	r = await s.select({"kind": "line", "id": line_ids[0]})
+	print("SMOKE Parallel waits for the second line: ", r["ok"] and not r["done"] and fake.calls.is_empty())
+	r = await s.select({"kind": "line", "id": line_ids[0]})
+	print("SMOKE ...and refuses the same line twice: ", not r["ok"] or fake.count("/constraints") == 0)
+	s.set_tool("parallel")
+	await s.select({"kind": "line", "id": line_ids[0]})
+	r = await s.select({"kind": "line", "id": line_ids[2]})
+	print("SMOKE two lines make a parallel constraint naming both: ", r["done"] and fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0][1] == {"type": "parallel", "line1_id": line_ids[0], "line2_id": line_ids[2]})
+	s.set_tool("coincident")
+	var pids: Array = s.points.keys()
+	fake.calls.clear()
+	await s.select({"kind": "point", "id": pids[0]})
+	r = await s.select({"kind": "point", "id": pids[1]})
+	print("SMOKE two points make a coincident constraint: ", r["done"] and fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0][1]["type"] == "coincident")
+	s.set_tool("coincident")
+	fake.calls.clear()
+	await s.select({"kind": "point", "id": pids[0]})
+	await s.select({"kind": "line", "id": line_ids[1]})
+	print("SMOKE a point and a line make point_on_line: ", fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0][1]["type"] == "point_on_line")
+	s.set_tool("horizontal")
+	fake.converge = false
+	fake.calls.clear()
+	r = await s.select({"kind": "line", "id": line_ids[0]})
+	print("SMOKE a constraint that can't be satisfied is taken straight back out: ", not r["ok"] and fake.count("DELETE /sketch/sketches/sk1/constraints/") == 1 and r["message"].contains("conflicts"))
+	fake.converge = true
+
+	# --- dimensions
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 30)})
+	s.set_tool("dimension")
+	var bottom: String = ""
+	for id in s.lines:
+		var l: Dictionary = s.lines[id]
+		if s.points[l["a"]].y == 0 and s.points[l["b"]].y == 0 and not l["construction"]:
+			bottom = id
+	await s.select({"kind": "line", "id": bottom})
+	print("SMOKE one line offers its length: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "length" and absf(s.ghosts[0]["value"] - 40.0) < 0.001)
+	fake.calls.clear()
+	r = await s.confirm_ghost("length", 50.0)
+	var dim_call: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0]
+	print("SMOKE typing a length makes a linear distance constraint between the ends: ", r["ok"] and dim_call[1]["type"] == "distance" and dim_call[1]["distance"] == 50.0 and dim_call[1]["orientation"] == "linear")
+	print("SMOKE ...then one solve; the selection and candidates clear: ", fake.count("/solve-and-refresh") == 1 and s.ghosts.is_empty() and s.selection.is_empty())
+	await s.select({"kind": "line", "id": bottom})
+	print("SMOKE asking again finds the dimension that's there, so typing PATCHes it rather than adding a second: ", s.ghosts[0]["apply"].has("patch_id"))
+	fake.calls.clear()
+	await s.confirm_ghost("length", 60.0)
+	print("SMOKE ...(PATCH of that constraint with the new value): ", fake.count("PATCH") == 1 and fake.calls.filter(func(c): return c[0].begins_with("PATCH"))[0][1] == {"value": 60.0})
+	r = await s.confirm_ghost("length", 60.0)
+	print("SMOKE a value with nothing selected does nothing: ", not r["ok"])
+	await s.select({"kind": "line", "id": bottom})
+	r = await s.confirm_ghost("length", -5.0)
+	print("SMOKE zero or negative is refused: ", not r["ok"])
+	s.set_tool("dimension")
+	var pts: Array = s.points.keys()
+	await s.select({"kind": "point", "id": pts[0]})
+	await s.select({"kind": "point", "id": pts[1]})
+	print("SMOKE two points offer distance, horizontal and vertical: ", s.ghosts.map(func(g): return g["key"]) == ["linear", "horizontal", "vertical"])
+	s.set_tool("dimension")
+	await fresh("circle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	s.set_tool("dimension")
+	await s.select({"kind": "circle", "id": s.circles.keys()[0]})
+	print("SMOKE a circle offers radius and diameter: ", s.ghosts.map(func(g): return g["key"]) == ["radius", "diameter"] and absf(s.ghosts[0]["value"] - 10.0) < 0.001 and absf(s.ghosts[1]["value"] - 20.0) < 0.001)
+	fake.calls.clear()
+	await s.confirm_ghost("diameter", 30.0)
+	var patch_call: Array = fake.calls.filter(func(c): return c[0].begins_with("PATCH"))[0]
+	print("SMOKE typing a DIAMETER sets the radius constraint to half of it (the circle's provisional one is PATCHed): ", patch_call[1] == {"value": 15.0} and patch_call[0].contains("/constraints/"))
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	s.finish_chain()
+	await s.tap({"uv": Vector2(0, 5)})
+	await s.tap({"uv": Vector2(10, 5)})
+	s.set_tool("dimension")
+	var ls: Array = s.lines.keys()
+	await s.select({"kind": "line", "id": ls[0]})
+	await s.select({"kind": "line", "id": ls[1]})
+	print("SMOKE two parallel lines offer a distance, not an angle: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "line_distance" and absf(s.ghosts[0]["value"] - 5.0) < 0.001)
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	s.finish_chain()
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(0, 10)})
+	s.set_tool("dimension")
+	ls = s.lines.keys()
+	await s.select({"kind": "line", "id": ls[0]})
+	await s.select({"kind": "line", "id": ls[1]})
+	print("SMOKE two lines at a corner offer an angle in degrees: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "angle" and absf(s.ghosts[0]["value"] - 90.0) < 0.01)
+
+	# --- undo
+	await fresh("rectangle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 30)})
+	print("SMOKE after drawing, undo is available and named: ", s.can_undo() and s.undo_label() == "rectangle")
+	fake.calls.clear()
+	await s.undo()
+	print("SMOKE undo deletes what the last action made and refreshes: ", fake.count("DELETE /sketch/sketches/sk1/rectangles/") == 1 and fake.count("/solve-and-refresh") == 1 and s.entity_count() == 0)
+	print("SMOKE ...and there's nothing left to undo: ", not s.can_undo() and not await s.undo())
+	quit()

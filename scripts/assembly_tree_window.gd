@@ -263,9 +263,14 @@ func _add_rows(rows: Array, depth: int) -> void:
 		name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_button.pressed.connect(_on_row_selected.bind(row["id"], is_expandable))
 		line.add_child(name_button)
+		_add_row_actions(line, row, is_expandable)
 		_rows_box.add_child(line)
 		if is_expandable and row["expanded"] and row["children"] != null:
 			_add_rows(row["children"], depth + 1)
+
+
+func _add_row_actions(_line: HBoxContainer, _row: Dictionary, _is_expandable: bool) -> void:
+	pass # a subclass adds its own buttons to a row here (the design table's tree: "Table" and "Bring")
 
 
 func _list_occurrences(part_id: String) -> Dictionary:

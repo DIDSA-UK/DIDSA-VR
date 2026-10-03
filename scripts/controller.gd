@@ -36,6 +36,7 @@ const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its
 const OneEuro := preload("res://scripts/one_euro.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const LaserPick := preload("res://scripts/laser_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 
 @export var grab_action: String = "grip_click"
@@ -178,8 +179,8 @@ func _physics_process(delta: float) -> void:
 		_update_held_part(delta)
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
-	if selected_node == null:
-		return
+	if selected_node == null or _table_owns_input():
+		return # (the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
 
 	var stick: Vector2 = get_vector2("primary")
 	# The laser on the wrist tablet / a floating window means the stick scrolls
@@ -265,8 +266,9 @@ func nudge_speed_for(part: Node3D) -> float:
 
 func is_manipulating() -> bool:
 	## Lets locomotion.gd know this hand's thumbstick is busy rotating a
-	## selected part right now, so it doesn't also drive movement/turning.
-	return selected_node != null
+	## selected part (or the part on the design table) right now, so it doesn't
+	## also drive movement/turning.
+	return selected_node != null or _table_owns_input()
 
 
 func set_parts_enabled(on: bool) -> void:
@@ -287,6 +289,8 @@ func reset_interaction() -> void:
 
 func _on_button_pressed(action_name: String) -> void:
 	if action_name == grab_action:
+		if _try_grab_table():
+			return
 		if _try_grab_panel_at_distance():
 			return
 		# The section-plane gizmo is independent of "Individual part
@@ -333,16 +337,49 @@ func _try_grab() -> void:
 		return
 	if target:
 		_set_grab_hover(null)
-		target.set_meta("held", true)
-		_held_start_transform = target.global_transform
-		# Its pose relative to this hand right now, kept exactly where you took
-		# hold of it: turning your hand turns the part about that spot. Stays
-		# under assembly_root rather than reparenting to the hand, since
-		# _update_held_part() drives its transform explicitly every frame (so
-		# steadiness — see below — can filter the hand's position first).
-		_grab_offset = global_transform.affine_inverse() * target.global_transform
-		_grab_filter.reset(global_position)
-		held_node = target
+		_begin_hold(target, target.global_transform)
+
+
+func _try_grab_table() -> bool:
+	## A part on the design table: gripping its copy moves it (and with the other hand turns and scales it), on the table
+	## only and independent of the world (design_table.gd / table_manip.gd). Independent of "Individual part
+	## manipulation" mode, like the section gizmo, and checked before the distance-grab of a window; a floating window's
+	## own drag handle in reach still wins, as it does over every other grip.
+	if held_node != null:
+		return false
+	var tables := get_tree().get_nodes_in_group("design_tables")
+	if tables.is_empty():
+		return false
+	for panel in get_tree().get_nodes_in_group("diegetic_panels"):
+		if panel.handle_in_reach(self):
+			return false
+	for table in tables:
+		if table.try_grab(self):
+			_set_grab_hover(null)
+			return true
+	return false
+
+
+func _table_owns_input() -> bool:
+	## The design table is engaged (a hand is on its part, or this hand's laser is): this hand's stick and A / B are the table's.
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.owns_stick(self):
+			return true
+	return false
+
+
+func _begin_hold(target: Node3D, start_transform: Transform3D) -> void:
+	## Starts carrying `target`. `start_transform` is the pose undo returns it to: where it was when picked up.
+	target.set_meta("held", true)
+	_held_start_transform = start_transform
+	# Its pose relative to this hand right now, kept exactly where you took
+	# hold of it: turning your hand turns the part about that spot. Stays
+	# under assembly_root rather than reparenting to the hand, since
+	# _update_held_part() drives its transform explicitly every frame (so
+	# steadiness — see below — can filter the hand's position first).
+	_grab_offset = global_transform.affine_inverse() * target.global_transform
+	_grab_filter.reset(global_position)
+	held_node = target
 
 
 func _update_panel_hover() -> void:
@@ -470,6 +507,9 @@ func _set_grab_hover(target: Node3D) -> void:
 
 
 func _try_release() -> void:
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.release_grab(self):
+			return # let go of the part on the design table: it stays there or goes back to the arena (design_table.gd)
 	if section_tool and section_tool.release(self):
 		return
 	if held_node == null:
@@ -480,7 +520,12 @@ func _try_release() -> void:
 	held_node = null
 	if mates_tool and mates_tool.end_drag(part):
 		return # constrained part: mates_tool.gd finishes the last solve and records the undo step
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.try_seat_released(part, _held_start_transform):
+			return # let go over the design table: the table took it, and the part's pose in the assembly is unchanged
 	_push_move_command(part, _held_start_transform)
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		table.part_put_down(part) # a part whose mates went stale in an edit gets the Enforce mates button here
 
 
 func _update_held_part(delta: float) -> void:
@@ -559,20 +604,12 @@ func _try_pick_measure_entity() -> void:
 
 func _mate_entity(hit: Dictionary) -> Dictionary:
 	## What a Mates pick on this ray hit would take: a corner, a straight / circular edge, or the face.
-	var part: Node3D = hit.get("part")
-	if part == null or not hit.has("point"):
-		return {}
-	var distance := global_position.distance_to(hit["point"])
-	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance), true)
+	return LaserPick.entity_for(hit.get("part"), hit, global_position, true)
 
 
 func _measure_entity(hit: Dictionary) -> Dictionary:
 	## What a Measure pick on this ray hit would take: a vertex, an edge or a face (topology_pick.gd).
-	var part: Node3D = hit.get("part")
-	if part == null or not hit.has("point"):
-		return {}
-	var distance := global_position.distance_to(hit["point"])
-	return TopologyPick.pick(part, int(hit.get("face_index", -1)), hit["point"], TopologyPick.reach_for(part as MeshInstance3D, distance))
+	return LaserPick.entity_for(hit.get("part"), hit, global_position)
 
 
 func _try_select() -> void:
@@ -619,23 +656,12 @@ func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> 
 	## (world-space hit point).
 	if not is_inside_tree():
 		return {}
-	var space_state := get_world_3d().direct_space_state
-	var excluded: Array[RID] = []
-	for _attempt in 8: # generous cap so a stack of hidden/held parts can't loop forever
-		var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * max_distance)
-		query.exclude = excluded
-		var result := space_state.intersect_ray(query)
-		if result.is_empty():
-			return {}
-		var collider: Object = result.get("collider")
-		var part: Node3D = collider.get_parent() if collider is StaticBody3D else null
-		if part == null or not part.is_in_group("grabbable_parts"):
-			return {}
+	return LaserPick.ray(get_world_3d(), origin, direction, max_distance, func(part: Node3D) -> int:
+		if not part.is_in_group("grabbable_parts"):
+			return LaserPick.BLOCK # something solid that isn't an arena part (a design table copy): nothing behind it can be picked
 		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
-			excluded.append((collider as StaticBody3D).get_rid())
-			continue
-		return {"part": part, "point": result.get("position"), "face_index": result.get("face_index", -1)}
-	return {}
+			return LaserPick.SKIP
+		return LaserPick.HIT)
 
 
 func _update_aim_hover() -> void:

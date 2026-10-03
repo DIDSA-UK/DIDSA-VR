@@ -2430,3 +2430,85 @@ Measured on a Quest 3 (flat 2D debug APK, headset worn 180 s): one local-retract
 ## 2026-10-02 - Constrained drag S9 (VR half): docs follow the CAD cleanup
 
 DIDSA-CAD S9 (PR #276) removed the v0 `transform` / `free_twists` aliases from `mate-motion` and moved `quality.jump` / `max_step` into the screw chart; DIDSA-CAD F1b made the anchor the weighted-nearest pose. VR needed no code change (it never read the aliases; `tests/e2e_mates_motion.gd` already asserts that). Updated: `docs/backend-api-notes.md` (aliases gone, screw-chart `jump`/`max_step`, nearest-point anchors, the optional `constraint_model` / `reference` / `include_constraint_model` fields VR ignores, and why VR does not run the local retraction), `docs/constrained-drag-rollout.md` (S9 happened), and one comment in `scripts/mates_tool.gd`. **Ran:** `tests/run_all.sh` (Godot 4.7.2 headless, clean) and `tests/e2e_mates_motion.gd` against a throwaway local backend built from DIDSA-CAD `main` after S9 + F1b (PR #278 merge, b9f4290): every SMOKE line `true`, the 60-frame drag cost 6 requests, group follow, atomic commit and the `converged:false` hold all pass. **Not run:** a headset, a PCVR session.
+
+## 2026-10-03 — Milestone 2: the design table (built; headless- and real-backend-confirmed, not yet on a headset)
+
+Full write-up: [`docs/design-table.md`](design-table.md). The brief it started from is saved as `docs/design-table-brief.md`.
+
+**What was built** (all in `scripts/design_table/` unless noted): a summonable console (slab, grab handle, deck, tree) reached from
+Assembly → Table on the wrist tablet; putting a part on it by carrying it over the slab or from the tree, as a scaled **copy** (the
+arena node stays put, hidden) that goes back to the arena at arena scale (see the follow-up below); plane picking on flat faces and the three reference planes; the
+sketch sheet and Line / Rectangle / Circle / Arc / Polygon / Point; snapping with a toggle; the constraint tools; Dimension with values
+typed on the existing numeric pad; Extrude (boss / cut / flip / depth), Fillet, Chamfer, with a fresh mesh put on the table copy and on
+every placed instance of the part; Undo; stale-mates flags, badges and the **Enforce mates** button; Files → Save as new file. Shared
+picking moved to `scripts/laser_pick.gd`; `FaceHighlight` gained `invalidate()` and a multi-edge set; `Main` gained `swap_part_mesh()`,
+`save_native_snapshot()`.
+
+**Things the code taught us that the brief didn't know** (each cost an hour if you hit it blind):
+- A glb node's `owner_part_id` is the **assembly that holds the occurrence**, not the part it shows; the part is `resolved_part_id` on
+  the owner's occurrences. The table looks it up (and refuses an assembly of parts).
+- The backend names a mate's faces by **index**, and an edit **renumbers** them: a boss on a plate's top turned the mated "top" and
+  "bottom" into the two side faces, and Enforce mates then "succeeded" while the stack stayed apart. The client now records what each
+  mate's face looked like before the first edit, compares after every change (so Undo clears it), and Enforce **suppresses** a mate whose
+  face changed instead of solving it. `mate_health.gd`; verified against the real solver in `tests/e2e_design_table_mates.gd`.
+- **Godot reads every JSON number as a float.** Re-serialising a native file writes `rotation_quarter_turns: 0.0`, which the backend
+  accepts and then crashes on when it renders. `open_native_file` and `add_component_file` did this (a latent bug for any file with
+  sketches); they now send the file's own text, and saving writes the backend's own text with the flat app's extra keys appended.
+- A mated part with enforced mates is steered by a live solve while carried, so it can't be carried to the table; relax mates, or use the
+  tree's Table button. A part with stale mates is deliberately not steered.
+- The backend's sketch `solve-and-refresh` points are the truth: the first real length dimension rescales the whole sketch about its first
+  point, so nothing drawn stays where it was tapped.
+
+**Tests added:** `design_table_logic`, `design_table_scene`, `sketch_session` (with `tests/helpers/fake_cad.gd`), `design_table_editing`,
+`design_table_tree`, `design_table_mates`, `design_table_save`, `mate_health` (all in `run_all.sh`); local-only `e2e_design_table` and
+`e2e_design_table_mates` (real backend, real solver); `design_table_render` (Xvfb PNGs) and `design_table_perf` (script timing).
+The full headless suite and the existing real-backend e2e tests (`e2e_add_component`, `_mates`, `_measure`, `_assembly_tree`, `_colour`,
+`_section`, `_backend`, `_edges`) pass.
+
+**Quest 2:** still nothing measured anywhere. What exists is `tests/design_table_perf.gd`: the table costs about 0.06 ms of script per
+frame with the laser on a part and 0.13-0.17 ms with it on a 150-entity sketch on a desktop (x3.7 for a Quest 3 = 0.2-0.6 ms of the 1.5 ms
+rule), and redrawing that big a sketch takes ~5.5 ms (only when it changes). Rendering cost is unmeasured.
+
+**Untested paths (add to the list above):** everything on a real headset (laser on the sheet, snap radius, label hit radius, console size
+and tilt, the carry-over-and-let-go gesture, the lift, the Enforce button's placement); Quest 2 at all; a sketch of more than a few dozen
+entities on a headset (redraw hitch); a mated assembly more than one level deep (only the top-level mates are checked and enforced); Save
+on a Quest (the write location, `user://models`, is assumed to be writable and visible to the Files tab).
+
+### 2026-10-03 (later) — Milestone 2, follow-up: handling the part on the table
+
+John asked how a part is manipulated "on the table" (answer: it couldn't be, beyond the console handle and the automatic turn to a
+sketch plane) and asked for: **grab to move, independent of the world; two-hand grab to rotate and scale, also independent of the
+world**; plus the stick, A / B push-pull and a reset button; and a way to know you are "in the design table". Decisions (his answers):
+engagement is **automatic with a clear tell**, and leaving is **carry it off the slab and let go**.
+
+**Built** (`scripts/design_table/table_manip.gd`, `table_pose.gd`; hooks in `design_table.gd`, `controller.gd`, `two_hand_model.gd`,
+`table_ui.gd`):
+- A grip on the part now moves the table's **copy** (`try_grab`, replacing the old "grip lifts the real part out"); two grips turn and
+  scale it (shortest-arc swing, spread ratio, clamped 0.4x-3x); the right stick spins and tips it; A / B push and pull it along the line
+  from the hand, kept over the slab. The scale lives on the copy's pivot (`user_scale`), so the sheet, plane squares and drawing follow;
+  the editor's snap / pick / label radii use `effective_scale()`. Nothing touches the real part, `assembly_root` or the world scale.
+- **Engaged** (no button): a hand gripping the part, or the right laser within 1.4 x its bounding sphere or on the sketch sheet (never
+  while the laser is on the deck). The frame glows, a TABLE ACTIVE chip shows on the deck, the right hand ticks on entering and
+  leaving, and there is a 0.15 s grace so it doesn't flicker. While engaged the right stick and A / B are the table's:
+  `controller.is_manipulating()` (so locomotion keeps off), and the selected-part stick / nudge code skips.
+- A hand gripping the part carries a `table_part_held` meta so `two_hand_model.gd` doesn't also drag the world.
+- **Leaving:** let go over the slab keeps it; let go beyond it sends the real part back to the arena where you let go (arena scale,
+  original orientation, one undoable move, saved; the frame turns amber while you carry it past the slab); a part held by enforced mates
+  goes back where it came from instead. Deck buttons **Reset** (centre, fitted size, sketch plane flat) and **To arena** (back exactly
+  where it came from, no move recorded).
+- Tests: `design_table_logic` (the pose maths), `design_table_scene` (rewritten lift section: move, two hands, clamp, engaged tell, stick,
+  A / B, Reset, send back, To arena, close mid-grip).
+
+**Not confirmed:** all of it on a headset. In particular the engaged threshold, the 90 deg/s stick rate and the A / B speed are guesses,
+and whether a second grip "anywhere over the table" is picked up the way a person expects.
+
+### 2026-10-03 (later still) — Milestone 2: glass slab with rounded corners, a border and drag-to-resize corners
+
+John asked for the table to be glass with radii on the corners, a border, and a variable size with drag corners as the windows have.
+- The slab (was an opaque box with four frame bars) is now one flat pane drawn by `shaders/table_glass.gdshader`: rounded corners
+  (`slab_radius` 4.5 cm), a rim (`slab_border` 6 mm) and a soft inner glow from a signed-distance rounded box in metres, a clear middle with a faint sheen.
+  The rim is the engaged / amber tell from before (shader `glow` and `border_color`).
+- `table_resize.gd`: four arc-and-arm brackets hugging the rounded corners, hover claims the laser, trigger-drag resizes with the opposite corner fixed
+  (the console's origin follows, as a window's does), clamped 0.5 x 0.3 .. 1.4 x 1.0 m. `design_table.gd: set_slab_size()` moves the handle, deck and tree.
+- Because the slab is see-through now, the handle's halo (`ui_halo.gdshader`) gained a `hollow` switch so it glows around the slab, not over it.
+- Not done: the deck stays 0.6 m wide whatever the slab's size; the size is not remembered between sessions. Not seen on a headset (rendered once in software).

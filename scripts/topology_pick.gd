@@ -139,3 +139,44 @@ static func vertex_point(part: Node3D, body_id: String, index: int) -> Variant:
 		return null
 	var body: Dictionary = (part.get_meta("topology") as Dictionary).get(body_id, {})
 	return (body.get("vertices", {}) as Dictionary).get(index)
+
+
+static func face_triangles(part: Node3D, body_id: String, face_id: int) -> PackedVector3Array:
+	## The corner points (three per triangle, part-local, in the mesh's own winding) of one CAD face, from the same
+	## per-triangle face identity the picking ray uses. Empty if the part carries none.
+	if not (part is MeshInstance3D) or (part as MeshInstance3D).mesh == null or not part.has_meta("face_ids"):
+		return PackedVector3Array()
+	var faces := (part as MeshInstance3D).mesh.get_faces()
+	var face_ids: Array = part.get_meta("face_ids")
+	var body_ids: Array = part.get_meta("body_ids")
+	var out := PackedVector3Array()
+	for t in mini(mini(face_ids.size(), body_ids.size()), faces.size() / 3):
+		if int(face_ids[t]) == face_id and str(body_ids[t]) == body_id:
+			out.append(faces[t * 3])
+			out.append(faces[t * 3 + 1])
+			out.append(faces[t * 3 + 2])
+	return out
+
+
+static func is_planar_face(part: Node3D, body_id: String, face_id: int) -> bool:
+	## True if the backend says the face is a plane. An older backend sends no kinds: then the face counts as
+	## planar if its triangles all face the same way.
+	if part != null and part.has_meta("topology"):
+		var body: Dictionary = (part.get_meta("topology") as Dictionary).get(body_id, {})
+		var kinds: Array = body.get("face_kinds", [])
+		if face_id >= 0 and face_id < kinds.size():
+			return str(kinds[face_id]) == "plane"
+	var tris := face_triangles(part, body_id, face_id)
+	if tris.size() < 3:
+		return false
+	var first := Vector3.ZERO
+	for i in range(0, tris.size() - 2, 3):
+		var n := (tris[i + 2] - tris[i]).cross(tris[i + 1] - tris[i])
+		if n.length() < 0.0000001:
+			continue
+		n = n.normalized()
+		if first == Vector3.ZERO:
+			first = n
+		elif first.dot(n) < 0.999:
+			return false
+	return first != Vector3.ZERO
