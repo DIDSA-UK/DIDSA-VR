@@ -22,6 +22,8 @@ var mesh_ok := true
 var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
+var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
+var origin_id := ""
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
 
@@ -99,6 +101,13 @@ func handle(method: int, path: String, body) -> Dictionary:
 			answer["id"] = "plane1"
 			return _ok(answer)
 		return _ok({"id": "plane1", "origin": [0, 0, 10], "normal": [0, 0, 1], "x_axis": [1, 0, 0], "y_axis": [0, 1, 0]})
+	if verb == "GET" and path.contains("/sketch/sketches/") and path.count("/") == 3:
+		if not origin:
+			return {"ok": false, "code": 404, "json": null, "error": "no such route"}
+		if origin_id == "":
+			origin_id = next_id("pt")
+			points[origin_id] = Vector2.ZERO
+		return _ok({"id": path.get_file(), "plane": null, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
 	if path.ends_with("/points") and verb == "POST":
@@ -152,6 +161,11 @@ func handle(method: int, path: String, body) -> Dictionary:
 		c["id"] = id
 		cons[id] = c
 		return _ok(c)
+	if verb == "PATCH" and (path.contains("/lines/") or path.contains("/circles/") or path.contains("/arcs/")):
+		for e in entities:
+			if e["id"] == path.get_file():
+				e["construction"] = bool(body.get("construction", e.get("construction", false)))
+		return _ok({"id": path.get_file()})
 	if path.contains("/constraints/") and verb == "PATCH":
 		var k: String = path.get_file()
 		cons[k]["distance"] = body["value"]

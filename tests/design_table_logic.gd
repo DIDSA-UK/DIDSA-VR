@@ -6,6 +6,7 @@ extends SceneTree
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_logic.gd  (see tests/README.md)
 
 const Pager := preload("res://scripts/design_table/tool_pager.gd")
+const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
@@ -25,6 +26,10 @@ class SnapModel extends RefCounted:
 	var lines := {}
 	var circles := {}
 	var arcs := {}
+	var origin_id := ""
+
+	func is_origin(id: String) -> bool:
+		return origin_id != "" and id == origin_id
 
 
 func _near(a: Vector3, b: Vector3, eps := 0.0001) -> bool:
@@ -58,8 +63,8 @@ func _initialize() -> void:
 		for t in c.tools:
 			ids.append(t.id)
 	print("SMOKE categories are Sketch, Constrain, Feature: ", reg.categories().map(func(c): return c.label) == ["Sketch", "Constrain", "Feature"])
-	print("SMOKE Sketch has DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["line", "rectangle", "circle", "arc", "polygon", "point"])
-	print("SMOKE no category is over the six-slot row yet: ", reg.categories().all(func(c): return c.tools.size() <= Pager.SLOTS))
+	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point"])
+	print("SMOKE only Sketch is over the six-slot row (seven tools, so it pages: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
 	print("SMOKE five category slots are enough: ", reg.categories().size() <= 5)
 	print("SMOKE every tool is a mode tool with a hint: ", reg.mode_tools().size() == ids.size() and ids.all(func(i): return reg.tool_def(i).hint != ""))
 	mgr.activate("line")
@@ -191,4 +196,46 @@ func _initialize() -> void:
 	var bracket := TableResize._bracket_mesh(0.045, 0.012, 0.05, 0.01)
 	var bb := bracket.get_aabb()
 	print("SMOKE a corner bracket is a flat ribbon round the rounded corner (arc plus two arms, in the slab's plane): ", bb.size.y < 0.001 and bb.size.x > 0.07 and bb.size.z > 0.07 and bracket.get_surface_count() == 1)
+
+	# --- the origin as a snap target, the grid step, locked-pose maths
+	var with_origin := SnapModel.new()
+	with_origin.points = {"o": Vector2.ZERO, "p": Vector2(40, 0)}
+	with_origin.origin_id = "o"
+	var near_origin := Snap.resolve(Vector2(1.0, -1.0), with_origin, 3.0, true)
+	print("SMOKE near the sketch origin it snaps to it, kind 'origin', carrying the origin's id: ", near_origin["kind"] == "origin" and near_origin["id"] == "o" and near_origin["uv"] == Vector2.ZERO)
+	print("SMOKE another existing point is still just a 'point': ", Snap.resolve(Vector2(40.5, 0.5), with_origin, 3.0, true)["kind"] == "point")
+	print("SMOKE the grid step is the 1-2-5 spacing at or just above the target (3 -> 5, 5 -> 5, 6 -> 10, 0.07 -> 0.1, 12 -> 20, 130 -> 200): ", SketchMath.grid_step(3.0) == 5.0 and SketchMath.grid_step(5.0) == 5.0 and SketchMath.grid_step(6.0) == 10.0 and is_equal_approx(SketchMath.grid_step(0.07), 0.1) and SketchMath.grid_step(12.0) == 20.0 and SketchMath.grid_step(130.0) == 200.0)
+	var still := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(0, 0, 0.1), Vector3(0, 0, -0.1), Vector3(0.1, 0, 0), Basis.IDENTITY, 1.0, false)
+	print("SMOKE with the turn locked, a quarter swing of the hands does not turn the part (it only moves with the midpoint): ", still["rotation"].is_equal_approx(Basis.IDENTITY) and is_equal_approx(still["scale"], 1.0))
+	var zoomed := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.5, 0, 0), Vector3(0.5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)
+	print("SMOKE while sketching, hands five times as far apart zoom to 5x (the cap is 8x; ordinarily 3x): ", is_equal_approx(zoomed["scale"], 5.0) and TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)["scale"] == TablePose.SKETCH_MAX_SCALE)
+	print("SMOKE Fit scales a 100 x 50 mm sketch to fill 80% of a 0.8 x 0.4 m window (3.2 mm per mm at fit 0.003 is 1.07x), clamped to the cap: ", is_equal_approx(TablePose.fit_scale(Vector2(100, 50), Vector2(0.8, 0.4), 0.8, 0.003, 8.0), 0.0064 / 0.003) and TablePose.fit_scale(Vector2(1, 1), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == 8.0 and TablePose.fit_scale(Vector2(10000, 10000), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == TablePose.MIN_SCALE)
+
+	# --- the Select tool's menu (sketch_selection.gd), mirroring the flat app's availableConstraintOptions
+	var model := SnapModel.new()
+	model.points = {"o": Vector2.ZERO}
+	model.origin_id = "o"
+	model.lines = {"l1": {"a": "p", "b": "q", "construction": false}, "l2": {"a": "q", "b": "r", "construction": true}}
+	model.circles = {"c1": {"c": "m", "p": "n", "k": "", "construction": false}, "c2": {"c": "m", "p": "n", "k": "", "construction": false}}
+	model.arcs = {"a1": {"c": "m", "s": "s1", "e": "e1", "k": "", "construction": false}, "a2": {"c": "m", "s": "e1", "e": "e2", "k": "", "construction": false}, "a3": {"c": "m", "s": "x", "e": "y", "k": "", "construction": false}}
+	var sel_of := func(entities: Array) -> Array:
+		return entities.map(func(e): return {"kind": e[0], "id": e[1]})
+	var menu_ids := func(entities: Array) -> Array:
+		return SketchSelection.options(sel_of.call(entities), model).map(func(o): return o["id"])
+	print("SMOKE nothing selected, no menu: ", menu_ids.call([]).is_empty())
+	print("SMOKE one line: Horizontal, Vertical, Fix, Construction, Delete, Clear: ", menu_ids.call([["line", "l1"]]) == ["horizontal", "vertical", "fix", "construction", "delete", "clear"])
+	print("SMOKE two lines: Parallel, Perpendicular, Equal, Collinear (and the second being construction means the pair is not all-solid): ", menu_ids.call([["line", "l1"], ["line", "l2"]]).slice(0, 4) == ["parallel", "perpendicular", "equal_length", "collinear"] and SketchSelection.options(sel_of.call([["line", "l1"], ["line", "l2"]]), model).filter(func(o): return o["id"] == "construction")[0]["text"] == "Construction")
+	print("SMOKE a construction line offers Solid: ", SketchSelection.options(sel_of.call([["line", "l2"]]), model).filter(func(o): return o["id"] == "construction")[0]["text"] == "Solid")
+	print("SMOKE three lines: Equal and Collinear only (no pairwise ones): ", menu_ids.call([["line", "l1"], ["line", "l2"], ["line", "l1x"]]).slice(0, 2) == ["equal_length", "collinear"])
+	print("SMOKE two points: Coincident; the origin and a point also; one point: only the generic ones: ", menu_ids.call([["point", "o"], ["point", "p"]]).slice(0, 1) == ["coincident"] and menu_ids.call([["point", "p"]]) == ["fix", "delete", "clear"])
+	print("SMOKE the origin alone can be fixed and cleared but never deleted: ", menu_ids.call([["point", "o"]]) == ["fix", "clear"])
+	print("SMOKE a point and a line: On line, Midpoint; a point and a circle: On curve; a line and a circle: Tangent: ", menu_ids.call([["point", "p"], ["line", "l1"]]).slice(0, 2) == ["point_on_line", "at_midpoint"] and menu_ids.call([["point", "p"], ["circle", "c1"]])[0] == "point_on_curve" and menu_ids.call([["line", "l1"], ["circle", "c1"]])[0] == "tangent")
+	print("SMOKE two circles: Concentric and Equal radius; two arcs sharing an end add Tangent, arcs that do not share one do not: ", menu_ids.call([["circle", "c1"], ["circle", "c2"]]).slice(0, 2) == ["concentric", "equal_radius"] and not menu_ids.call([["circle", "c1"], ["circle", "c2"]]).has("tangent") and menu_ids.call([["arc", "a1"], ["arc", "a2"]]).has("tangent") and not menu_ids.call([["arc", "a1"], ["arc", "a3"]]).has("tangent"))
+	print("SMOKE the dimension candidates come first, as 'dim:<key>' options with their value: ", SketchSelection.options(sel_of.call([["line", "l1"]]), model, [{"key": "length", "label": "Length", "value": 40.0}])[0] == {"id": "dim:length", "text": "Length 40.00"})
+	var long_list: Array = []
+	for i in 9:
+		long_list.append({"id": "o%d" % i, "text": "O%d" % i})
+	var p0 := SketchSelection.page(long_list, 0, 6)
+	var p1 := SketchSelection.page(long_list, 1, 6)
+	print("SMOKE a menu longer than the six-button row shows five and More, then the rest; a short one shows all: ", p0["items"].size() == 5 and p0["has_more"] and p0["pages"] == 2 and p1["items"].size() == 4 and p1["items"][0]["id"] == "o5" and SketchSelection.page(long_list.slice(0, 6), 0, 6)["has_more"] == false and SketchSelection.page(long_list, 9, 6)["page"] == 1)
 	quit()

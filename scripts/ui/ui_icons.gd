@@ -58,6 +58,7 @@ const _ICONS := {
 	"tool_circle": '<circle cx="24" cy="24" r="16"/><path d="M24 24V24.5"/>',
 	"tool_arc": '<path d="M8 36A20 20 0 0 1 40 36"/><path d="M8 36V36.5M40 36V36.5M24 36V36.5"/>',
 	"tool_polygon": '<path d="M24 6L41 18L35 38H13L7 18Z"/>',
+	"tool_select": '<path d="M10 6L10 36L19 28L25 42L31 39L25 26L37 26Z"/>',
 	"tool_point": '<circle cx="24" cy="24" r="4"/><path d="M24 7V14M24 34V41M7 24H14M34 24H41"/>',
 	"tool_dimension": '<path d="M8 34H40"/><path d="M8 28V40M40 28V40"/><path d="M14 14H34"/>',
 	"tool_horizontal": '<path d="M6 24H42"/><path d="M6 17V31M42 17V31"/>',
@@ -75,6 +76,8 @@ const _ICONS := {
 	"plus": '<path d="M24 10V38M10 24H38"/>',
 	"recentre": '<circle cx="24" cy="24" r="9"/><circle cx="24" cy="24" r="2"/><path d="M24 5V13M24 35V43M5 24H13M35 24H43"/>',
 	"to_arena": '<path d="M24 31V8"/><path d="M15 17L24 8L33 17"/><path d="M8 34V40H40V34"/>',
+	"lock": '<rect x="10" y="22" width="28" height="20" rx="3"/><path d="M16 22V15a8 8 0 0 1 16 0V22"/>',
+	"fit": '<path d="M7 17V7H17M31 7H41V17M41 31V41H31M17 41H7V31"/><rect x="17" y="17" width="14" height="14" rx="1"/>',
 	"enforce": '<path d="M10 25L20 35L38 13"/><circle cx="24" cy="24" r="20"/>',
 	# environment scenes
 	"scene_light": '<circle cx="24" cy="24" r="8"/><path d="M24 4V10M24 38V44M4 24H10M38 24H44M10 10L14 14M34 34L38 38M38 10L34 14M14 34L10 38"/>',

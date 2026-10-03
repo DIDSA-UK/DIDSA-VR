@@ -8,6 +8,7 @@ extends SceneTree
 
 const Session := preload("res://scripts/design_table/sketch_session.gd")
 const Fake := preload("res://tests/helpers/fake_cad.gd")
+const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 
 
 var fake: Fake
@@ -30,7 +31,7 @@ func _initialize() -> void:
 	s = Session.new(Callable(fake, "handle"))
 	s.owner_part_id = "P"
 	var ok: bool = await s.open_sketch({"fixed": "XZ"})
-	print("SMOKE opening on a reference plane makes one sketch feature then reads the sketch: ", ok and fake.paths() == ["POST /document/parts/P/features/sketch", "POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export"])
+	print("SMOKE opening on a reference plane makes one sketch feature then reads the sketch: ", ok and fake.paths() == ["POST /document/parts/P/features/sketch", "GET /sketch/sketches/sk1", "POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export"])
 	print("SMOKE ...asking for the plane by name, and keeping the plane basis (XZ's x is -X): ", fake.calls[0][1] == {"plane": "XZ"} and s.plane["x"].is_equal_approx(Vector3(-1, 0, 0)) and s.is_open())
 	print("SMOKE ...and remembers the sketch feature (what an extrude names): ", s.feature_id == "feat1" and s.sketch_id == "sk1")
 	fake = Fake.new()
@@ -257,6 +258,131 @@ func _initialize() -> void:
 	await s.select({"kind": "line", "id": ls[0]})
 	await s.select({"kind": "line", "id": ls[1]})
 	print("SMOKE two lines at a corner offer an angle in degrees: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "angle" and absf(s.ghosts[0]["value"] - 90.0) < 0.01)
+
+
+	# --- the sketch origin: a real point, found by reading the sketch (the backend makes it lazily), snappable and dimensionable
+	fake = Fake.new()
+	fake.origin = true
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	await s.open_sketch({"fixed": "XY"})
+	print("SMOKE opening reads the sketch for its origin point, so the origin is one of the sketch's points at (0, 0): ", s.origin_id != "" and s.is_origin(s.origin_id) and s.points.get(s.origin_id) == Vector2.ZERO and fake.count("GET /sketch/sketches/sk1") >= 1)
+	var snap: Dictionary = SnapResolver.resolve(Vector2(0.8, -0.5), s, 2.0, true)
+	print("SMOKE aiming near the origin snaps to it as the 'origin' kind, carrying its id: ", snap["kind"] == "origin" and snap["id"] == s.origin_id and snap["uv"] == Vector2.ZERO)
+	print("SMOKE ...but not with snap off, or out of range: ", SnapResolver.resolve(Vector2(0.8, -0.5), s, 2.0, false)["id"] == "" and SnapResolver.resolve(Vector2(9, 9), s, 2.0, true)["id"] == "")
+	print("SMOKE the origin counts as the nearest point for picking (constraints, dimensions): ", s.nearest_point(Vector2(0.4, 0.4), 2.0) == s.origin_id and s.nearest_entity(Vector2(0.4, 0.4), 2.0)["id"] == s.origin_id)
+	s.set_tool("line")
+	await s.tap({"uv": Vector2.ZERO, "id": s.origin_id})
+	fake.calls.clear()
+	await s.tap({"uv": Vector2(30, 0)})
+	var line_calls: Array = fake.calls.filter(func(c): return c[0].ends_with("/lines"))
+	print("SMOKE a line started on the origin shares it (one new point, the line's start is the origin): ", fake.count("/points") == 1 and line_calls.size() == 1 and line_calls[0][1]["start_point_id"] == s.origin_id)
+	s.set_tool("dimension")
+	var far: String = ""
+	for id in s.points:
+		if id != s.origin_id:
+			far = id
+	await s.select({"kind": "point", "id": s.origin_id})
+	await s.select({"kind": "point", "id": far})
+	fake.calls.clear()
+	await s.confirm_ghost("horizontal", 25.0)
+	var made: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE a dimension can start at the origin (distance constraint with the origin as one end): ", made.size() == 1 and made[0][1]["point_a_id"] == s.origin_id and made[0][1]["point_b_id"] == far and made[0][1]["orientation"] == "horizontal")
+	fake = Fake.new() # a backend with no such route: the sketch still opens, just with no origin point
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	ok = await s.open_sketch({"fixed": "XY"})
+	print("SMOKE a backend that does not answer the sketch read still opens it, with no origin: ", ok and s.origin_id == "" and not s.is_origin(""))
+
+	# --- the Select tool and its contextual menu
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 0)})
+	s.finish_chain()
+	await s.tap({"uv": Vector2(0, 20)})
+	await s.tap({"uv": Vector2(40, 20)})
+	s.finish_chain()
+	var sl: Array = s.lines.keys()
+	s.set_tool("select")
+	await s.select({"kind": "line", "id": sl[0]})
+	print("SMOKE with Select, one pick selects a line and offers its length as a dimension candidate: ", s.selection.size() == 1 and s.ghosts.size() == 1 and s.ghosts[0]["key"] == "length" and s.menu()[0]["id"] == "dim:length")
+	await s.select({"kind": "line", "id": sl[1]})
+	print("SMOKE ...a second line joins the selection (no limit of one or two) and the menu is the two-line one: ", s.selection.size() == 2 and s.menu().map(func(o): return o["id"]).has("parallel") and s.menu().map(func(o): return o["id"]).has("perpendicular"))
+	await s.select({"kind": "line", "id": sl[1]})
+	print("SMOKE ...picking a selected entity again takes it out: ", s.selection.size() == 1 and s.selection[0]["id"] == sl[0])
+	await s.select({"kind": "line", "id": sl[1]})
+	fake.calls.clear()
+	var r2: Dictionary = await s.apply_menu("parallel")
+	var cons_calls: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE the Parallel option posts one parallel constraint on the two lines, then ONE solve, and clears the selection: ", r2["ok"] and cons_calls.size() == 1 and cons_calls[0][1] == {"type": "parallel", "line1_id": sl[0], "line2_id": sl[1]} and fake.count("/solve-and-refresh") == 1 and s.selection.is_empty() and s.ghosts.is_empty())
+	print("SMOKE ...and it can be undone like any constraint: ", s.undo_label() == "parallel")
+	await s.select({"kind": "line", "id": sl[0]})
+	await s.select({"kind": "line", "id": sl[1]})
+	fake.calls.clear()
+	await s.apply_menu("equal_length")
+	cons_calls = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE Equal makes an equal_length constraint (line1 / line2): ", cons_calls.size() == 1 and cons_calls[0][1]["type"] == "equal_length" and cons_calls[0][1]["line1_id"] == sl[0])
+	await s.select({"kind": "line", "id": sl[0]})
+	fake.calls.clear()
+	await s.apply_menu("horizontal")
+	cons_calls = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE Horizontal on one line posts a horizontal constraint: ", cons_calls.size() == 1 and cons_calls[0][1] == {"type": "horizontal", "line_id": sl[0]})
+	var pa: String = s.points.keys()[0]
+	await s.select({"kind": "point", "id": pa})
+	await s.select({"kind": "line", "id": sl[1]})
+	fake.calls.clear()
+	await s.apply_menu("at_midpoint")
+	cons_calls = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE Midpoint on a point and a line posts at_midpoint: ", cons_calls.size() == 1 and cons_calls[0][1] == {"type": "at_midpoint", "point_id": pa, "line_id": sl[1]})
+	await s.select({"kind": "point", "id": pa})
+	fake.calls.clear()
+	await s.apply_menu("fix")
+	cons_calls = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE Fix posts a fixed constraint on the entity: ", cons_calls.size() == 1 and cons_calls[0][1] == {"type": "fixed", "entity_id": pa})
+	await s.select({"kind": "line", "id": sl[0]})
+	await s.select({"kind": "line", "id": sl[1]})
+	fake.converge = false
+	var conflicted: Dictionary = await s.apply_menu("collinear")
+	fake.converge = true
+	print("SMOKE a menu choice that cannot be solved with the rest is taken straight back out: ", not conflicted["ok"] and conflicted["message"].contains("conflicts") and fake.count("DELETE /sketch/sketches/sk1/constraints/") >= 1)
+	await s.select({"kind": "line", "id": sl[0]})
+	fake.calls.clear()
+	await s.apply_menu("construction")
+	var patches: Array = fake.calls.filter(func(c): return c[0].begins_with("PATCH "))
+	print("SMOKE Construction PATCHes the line's construction flag on, and undo PATCHes it back: ", patches.size() == 1 and patches[0][1] == {"construction": true} and s.undo_label() == "construction")
+	fake.calls.clear()
+	await s.undo()
+	patches = fake.calls.filter(func(c): return c[0].begins_with("PATCH "))
+	print("SMOKE ...undoing it puts the old flag back: ", patches.size() == 1 and patches[0][1] == {"construction": false})
+	await s.select({"kind": "line", "id": sl[0]})
+	fake.calls.clear()
+	var deleted: Dictionary = await s.apply_menu("delete")
+	print("SMOKE Delete removes the selected line through the backend and refreshes: ", deleted["ok"] and fake.count("DELETE /sketch/sketches/sk1/lines/" + sl[0]) == 1 and s.selection.is_empty() and not s.lines.has(sl[0]))
+
+	# with the origin
+	fake = Fake.new()
+	fake.origin = true
+	s = Session.new(Callable(fake, "handle"))
+	s.owner_part_id = "P"
+	await s.open_sketch({"fixed": "XY"})
+	s.set_tool("select")
+	await s.select({"kind": "point", "id": s.origin_id})
+	var ghost_before: Array = s.menu().map(func(o): return o["id"])
+	fake.calls.clear()
+	var no_delete: Dictionary = await s.delete_selection()
+	print("SMOKE the origin cannot be deleted (no menu option, and no call if forced): ", not ghost_before.has("delete") and not no_delete["ok"] and fake.count("DELETE") == 0)
+	s.set_tool("line")
+	await s.tap({"uv": Vector2(20, 0)})
+	await s.tap({"uv": Vector2(40, 0)})
+	var pts2: Array = s.points.keys().filter(func(id): return id != s.origin_id)
+	s.set_tool("select")
+	await s.select({"kind": "point", "id": s.origin_id})
+	await s.select({"kind": "point", "id": pts2[0]})
+	print("SMOKE the origin and a point offer Coincident and a Distance dimension measured from the origin: ", s.menu().map(func(o): return o["id"]).has("coincident") and s.menu().map(func(o): return o["id"]).has("dim:linear"))
+	fake.calls.clear()
+	await s.apply_menu("coincident")
+	var cc: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE ...Coincident constrains a point to the origin: ", cc.size() == 1 and cc[0][1] == {"type": "coincident", "point_a_id": s.origin_id, "point_b_id": pts2[0]})
 
 	# --- undo
 	await fresh("rectangle")

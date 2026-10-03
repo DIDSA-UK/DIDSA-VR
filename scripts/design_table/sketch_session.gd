@@ -25,8 +25,10 @@ signal changed ## the local model was refreshed from the backend
 signal status(text: String) ## something worth telling the user (progress, a refusal, an error)
 
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
+const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 
 const SKETCH := "/sketch/sketches/"
+const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
 const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1}
 const SELECT_NEEDED := {"horizontal": 1, "vertical": 1, "parallel": 2, "perpendicular": 2, "coincident": 2}
 const PARALLEL_COS := 0.9998 ## two lines closer than ~1.1 degrees to parallel are measured as a distance, not an angle
@@ -38,6 +40,7 @@ var feature_id := "" ## the sketch FEATURE (what an extrude names)
 var sketch_id := ""
 var plane_feature_id := ""
 var plane: Dictionary = {} ## {origin, x, y, n} in the part's frame, mm
+var origin_id := "" ## the sketch's real origin point (0, 0): fixed by the backend, snappable, constrainable, never deleted ("" on a backend that doesn't say)
 
 var tool := ""
 var pending: Array = [] ## taps so far for the current tool: [{uv, id}]
@@ -47,8 +50,8 @@ var busy := false
 var points := {} ## id -> Vector2 (sheet mm)
 var point_locked := {} ## id -> bool
 var lines := {} ## id -> {a, b, construction}
-var circles := {} ## id -> {c, p, k} (centre point, radius point, radius constraint id)
-var arcs := {} ## id -> {c, s, e, k}
+var circles := {} ## id -> {c, p, k, construction} (centre point, radius point, radius constraint id)
+var arcs := {} ## id -> {c, s, e, k, construction}
 var shapes := {} ## rectangle / polygon id -> {kind, point_ids}
 var constraints := {} ## id -> the backend's constraint dictionary
 var profile_status := ""
@@ -118,9 +121,18 @@ func open_sketch(spec: Dictionary) -> bool:
 	sketch_id = str(sketch["json"]["sketch_id"])
 	feature_id = str(sketch["json"]["id"])
 	_undo.clear()
+	# The backend makes the sketch's origin point lazily, the first time the sketch itself is read: read it, so the origin is a real point
+	# (snappable, constrainable, the end of a dimension) like in the flat app.
+	var described: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id, null)
+	if described["ok"] and described["json"] is Dictionary:
+		origin_id = str((described["json"] as Dictionary).get("origin_point_id", ""))
 	var refreshed := await refresh(true)
 	busy = false
 	return refreshed
+
+
+func is_origin(point_id: String) -> bool:
+	return origin_id != "" and point_id == origin_id
 
 
 func is_open() -> bool:
@@ -170,9 +182,9 @@ func _ingest_entities(json: Dictionary) -> void:
 			"line":
 				lines[id] = {"a": str(e["start_point_id"]), "b": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
 			"circle":
-				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", ""))}
+				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"arc":
-				arcs[id] = {"c": str(e["center_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "k": str(e.get("radius_constraint_id", ""))}
+				arcs[id] = {"c": str(e["center_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"rectangle":
 				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
 			"polygon":
@@ -446,6 +458,9 @@ func select(entity: Dictionary) -> Dictionary:
 		return {"ok": false, "done": false, "message": ""}
 	if tool == "dimension":
 		return _select_for_dimension(entity)
+	if tool == SELECT:
+		toggle_select(entity)
+		return {"ok": true, "done": false, "message": ""}
 	if not SELECT_NEEDED.has(tool):
 		return {"ok": false, "done": false, "message": ""}
 	var need := _selection_ok(entity)
@@ -516,6 +531,217 @@ func _apply_constraint(tool_id: String, picked: Array) -> Dictionary:
 		# It can't be satisfied together with the rest: take it straight back out rather than leave a broken sketch.
 		await undo()
 		return {"ok": false, "message": "That conflicts with the other constraints, so it wasn't added."}
+	return {"ok": true, "message": ""}
+
+
+
+# --- The Select tool: any number of entities, and a menu of what applies to them ---------------------------------
+
+func is_selected(entity: Dictionary) -> bool:
+	for e in selection:
+		if str(e["kind"]) == str(entity["kind"]) and str(e["id"]) == str(entity["id"]):
+			return true
+	return false
+
+
+func toggle_select(entity: Dictionary) -> void:
+	## One pick with the Select tool: adds the entity, or takes it out again if it was already selected. The dimension candidates
+	## (a line's length, two points' distance...) are recomputed for what is now selected.
+	if busy or entity.is_empty():
+		return
+	var e := {"kind": str(entity["kind"]), "id": str(entity["id"])}
+	var at := -1
+	for i in selection.size():
+		if str(selection[i]["kind"]) == e["kind"] and str(selection[i]["id"]) == e["id"]:
+			at = i
+	if at >= 0:
+		selection.remove_at(at)
+	else:
+		selection.append(e)
+	ghosts = _build_ghosts() if selection.size() <= 2 else []
+	changed.emit()
+
+
+func menu() -> Array:
+	## The contextual menu for the current selection (sketch_selection.gd).
+	return SketchSelection.options(selection, self, ghosts)
+
+
+func apply_menu(option_id: String) -> Dictionary:
+	## Does one menu option on the current selection. Returns {ok, message}.
+	if busy or selection.is_empty():
+		return {"ok": false, "message": ""}
+	match option_id:
+		"clear":
+			clear_selection()
+			return {"ok": true, "message": ""}
+		"delete":
+			return await delete_selection()
+		"construction":
+			return await toggle_construction()
+		"fix":
+			return await _constrain_selection("fix", _fix_bodies())
+	var bodies := _bodies_for(option_id)
+	if bodies.is_empty():
+		return {"ok": false, "message": "That doesn't fit what is selected."}
+	return await _constrain_selection(option_id, bodies)
+
+
+func _constrain_selection(label: String, bodies: Array) -> Dictionary:
+	busy = true
+	var calls: Array = []
+	for body in bodies:
+		var r := await _post(SKETCH + sketch_id + "/constraints", body)
+		if not r["ok"]:
+			for entry in calls: # take back the ones already made: a half-applied menu choice is worse than none
+				await api.call(int(entry[0]), str(entry[1]), null)
+			busy = false
+			var message := "Couldn't add that constraint: %s" % str(r["error"])
+			status.emit(message)
+			return {"ok": false, "message": message}
+		calls.append([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(r["json"]["id"])])
+	selection.clear()
+	ghosts.clear()
+	await _finish(label, calls, false)
+	busy = false
+	if not converged:
+		await undo()
+		var conflict := "That conflicts with the other constraints, so it wasn't added."
+		status.emit(conflict)
+		return {"ok": false, "message": conflict}
+	return {"ok": true, "message": ""}
+
+
+func _ids_of(kind: String) -> Array:
+	return selection.filter(func(e): return str(e["kind"]) == kind).map(func(e): return str(e["id"]))
+
+
+func _curve_ids() -> Array:
+	return selection.filter(func(e): return str(e["kind"]) in ["circle", "arc"]).map(func(e): return str(e["id"]))
+
+
+func _bodies_for(option_id: String) -> Array:
+	## The constraint request bodies one menu option makes for the selection (chained from the first entity for 3 or more).
+	var lines_sel := _ids_of("line")
+	var points_sel := _ids_of("point")
+	var curves := _curve_ids()
+	match option_id:
+		"horizontal", "vertical":
+			return lines_sel.map(func(id): return {"type": option_id, "line_id": id})
+		"parallel", "perpendicular", "equal_length", "collinear":
+			return _chain(lines_sel, func(a, b): return {"type": option_id, "line1_id": a, "line2_id": b})
+		"concentric", "equal_radius":
+			return _chain(curves, func(a, b): return {"type": option_id, "entity1_id": a, "entity2_id": b})
+		"coincident":
+			if points_sel.size() == 2 and points_sel[0] != points_sel[1]:
+				return [{"type": "coincident", "point_a_id": points_sel[0], "point_b_id": points_sel[1]}]
+		"point_on_line":
+			if points_sel.size() == 1 and lines_sel.size() == 1:
+				return [{"type": "point_on_line", "point_id": points_sel[0], "line_id": lines_sel[0]}]
+		"at_midpoint":
+			if points_sel.size() == 1 and lines_sel.size() == 1:
+				return [{"type": "at_midpoint", "point_id": points_sel[0], "line_id": lines_sel[0]}]
+		"point_on_curve":
+			if points_sel.size() == 1 and curves.size() == 1:
+				return [{"type": "point_on_circle", "point_id": points_sel[0], "circle_or_arc_id": curves[0]}]
+		"tangent":
+			if lines_sel.size() == 1 and curves.size() == 1:
+				return [{"type": "tangent", "circle_or_arc_id": curves[0], "line_id": lines_sel[0]}]
+			if curves.size() == 2 and arcs.has(curves[0]) and arcs.has(curves[1]):
+				var shared := SketchSelection.shared_end(arcs[curves[0]], arcs[curves[1]])
+				if shared != "":
+					return [{"type": "curve_tangent", "entity1_id": curves[0], "entity2_id": curves[1], "shared_point_id": shared}]
+	return []
+
+
+func _chain(ids: Array, make: Callable) -> Array:
+	var out: Array = []
+	for i in range(1, ids.size()):
+		if ids[0] != ids[i]:
+			out.append(make.call(ids[0], ids[i]))
+	return out
+
+
+func _fix_bodies() -> Array:
+	return selection.map(func(e): return {"type": "fixed", "entity_id": str(e["id"])})
+
+
+func delete_selection() -> Dictionary:
+	## Deletes the selected lines, circles, arcs and points (never the origin). The backend prunes the points nothing uses any more.
+	## There is no undo for it, as in the flat app's Delete: take care with the picks.
+	if busy:
+		return {"ok": false, "message": ""}
+	var paths: Array = []
+	for e in selection:
+		var id := str(e["id"])
+		match str(e["kind"]):
+			"line":
+				paths.append(SKETCH + sketch_id + "/lines/" + id)
+			"circle":
+				paths.append(SKETCH + sketch_id + "/circles/" + id)
+			"arc":
+				paths.append(SKETCH + sketch_id + "/arcs/" + id)
+	for e in selection: # points last: deleting a line may already have taken one
+		if str(e["kind"]) == "point" and not is_origin(str(e["id"])):
+			paths.append(SKETCH + sketch_id + "/points/" + str(e["id"]))
+	if paths.is_empty():
+		return {"ok": false, "message": "The origin can't be deleted."}
+	busy = true
+	var failed := ""
+	for path in paths:
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, path, null)
+		if not r["ok"]:
+			failed = str(r["error"])
+	selection.clear()
+	ghosts.clear()
+	var refreshed := await refresh(true)
+	busy = false
+	if failed != "":
+		var message := "Couldn't delete everything: %s" % failed
+		status.emit(message)
+		return {"ok": false, "message": message}
+	return {"ok": refreshed, "message": ""}
+
+
+func toggle_construction() -> Dictionary:
+	## Makes the selected lines, circles and arcs construction geometry (guides that are never part of the profile), or solid again
+	## if they all already are construction. Undoable.
+	if busy:
+		return {"ok": false, "message": ""}
+	var make_solid := SketchSelection.all_construction(selection, self)
+	var calls: Array = []
+	var requests: Array = []
+	for e in selection:
+		var id := str(e["id"])
+		var path := ""
+		var was := false
+		match str(e["kind"]):
+			"line":
+				path = SKETCH + sketch_id + "/lines/" + id
+				was = bool(lines.get(id, {}).get("construction", false))
+			"circle":
+				path = SKETCH + sketch_id + "/circles/" + id
+				was = bool(circles.get(id, {}).get("construction", false))
+			"arc":
+				path = SKETCH + sketch_id + "/arcs/" + id
+				was = bool(arcs.get(id, {}).get("construction", false))
+		if path != "":
+			requests.append([path, not make_solid])
+			calls.append([HTTPClient.METHOD_PATCH, path, {"construction": was}])
+	if requests.is_empty():
+		return {"ok": false, "message": "Pick a line, circle or arc."}
+	busy = true
+	for r in requests:
+		var answer: Dictionary = await api.call(HTTPClient.METHOD_PATCH, str(r[0]), {"construction": bool(r[1])})
+		if not answer["ok"]:
+			busy = false
+			var message := "Couldn't change that: %s" % str(answer["error"])
+			status.emit(message)
+			return {"ok": false, "message": message}
+	selection.clear()
+	ghosts.clear()
+	await _finish("construction", calls, true)
+	busy = false
 	return {"ok": true, "message": ""}
 
 
@@ -691,7 +917,7 @@ func undo() -> bool:
 	var was_busy := busy
 	busy = true
 	for entry in step["calls"]:
-		await api.call(int(entry[0]), str(entry[1]), null)
+		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
 	pending.clear()
 	selection.clear()
 	ghosts.clear()

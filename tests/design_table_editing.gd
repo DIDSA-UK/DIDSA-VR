@@ -93,6 +93,7 @@ func _initialize() -> void:
 	fake = Fake.new()
 	fake.occurrences = {owner_id: [{"id": "occ_box", "resolved_part_id": "PART_BOX"}, {"id": "occ_cyl", "resolved_part_id": "PART_CYL"}]}
 	fake.mesh_bytes = bytes
+	fake.origin = true
 	fake.plane_for = func(body: Dictionary) -> Dictionary:
 		var ref: Dictionary = body["face_refs"][0]["face_ref"]
 		var plane := SketchMath.plane_from_face_triangles(TopologyPick.face_triangles(table.table_copy, ref["body_id"], int(ref["index"])))
@@ -127,11 +128,28 @@ func _initialize() -> void:
 	var plane_call: Array = calls_to("/create-plane-features")[0]
 	print("SMOKE ...by making an offset_face plane on exactly the face that was lit: ", plane_call[1]["plane_type"] == "offset_face" and plane_call[1]["face_refs"][0]["face_ref"]["index"] == picked["index"] and plane_call[1]["face_refs"][0]["face_ref"]["body_id"] == picked["body_id"])
 	var plane: Dictionary = ed.session.plane
-	print("SMOKE ...and the part is turned so that face stands up at the sketch tilt: ", (table.pivot.basis * (plane["n"] as Vector3)).is_equal_approx(Basis(Vector3.RIGHT, deg_to_rad(table.sketch_tilt_degrees)) * Vector3.UP))
+	print("SMOKE ...and the part is turned so that face stands up at the sketch tilt: ", (table.pivot.basis * (plane["n"] as Vector3)).normalized().is_equal_approx(Basis(Vector3.RIGHT, deg_to_rad(table.sketch_tilt_degrees)) * Vector3.UP))
 	print("SMOKE ...the chosen face stays lit, the sheet is shown, the plane squares are put away: ", ed.highlight.pick_nodes().size() == 1 and ed.view != null and not ed.markers.visible)
 	print("SMOKE ...and the user is told what the tool does: ", table.status().length() > 0)
 
 	# --- the sheet: a snapped cursor, two pulls draw a rectangle
+	# --- a sketch opens ready to select, on a big sheet with a grid, and the origin is a snap point
+	print("SMOKE a sketch opens with the Select tool already on, shown pressed in the Sketch row: ", table.active_tool == "select" and ed.session.tool == "select" and table.ui.tool_button("select") != null and table.ui.tool_button("select").button_pressed)
+	print("SMOKE ...Select is the first slot of the Sketch row, and the other tools page behind More: ", table.ui.shown_tool_ids()[0] == "select" and table.ui.more_button() != null)
+	var world_size: Vector2 = ed.view.sheet_size * table.effective_scale()
+	print("SMOKE the sheet is a fixed window in the world, 0.8 x 0.4 m, whatever size the part is: ", world_size.is_equal_approx(table.sheet_window_m))
+	var step_world: float = ed.view.grid_step() * table.effective_scale()
+	print("SMOKE ...with a faint grid, 1-2-5 mm lines about 16 mm apart on screen: ", step_world >= 0.0159 and step_world < 0.0161 * 2.6 and is_equal_approx(ed.view.grid_step(), SketchMath.grid_step(0.016 / table.effective_scale())))
+	await aim_uv(ed.view.sheet_centre + Vector2(ed.view.sheet_size.x * 0.45, 0.0))
+	print("SMOKE the laser anywhere on the big sheet (90% of the way to its edge) is on the sheet: ", ed.hovering and ed._hover_uv != null)
+	await aim_uv(ed.view.sheet_centre + Vector2(ed.view.sheet_size.x * 0.6, 0.0))
+	print("SMOKE ...and past the edge it is not: ", not ed.hovering)
+	print("SMOKE the sketch's origin was read from the backend, a real point at (0, 0): ", ed.session.origin_id != "" and ed.session.points.get(ed.session.origin_id) == Vector2.ZERO)
+	table.manager.activate("line")
+	await aim_uv(Vector2(0.8, -0.6))
+	print("SMOKE with a drawing tool, aiming near the origin snaps the cursor to it ('origin', its point id): ", ed._snap["kind"] == "origin" and ed._snap["id"] == ed.session.origin_id and (ed._snap["uv"] as Vector2) == Vector2.ZERO)
+	table.manager.deactivate()
+
 	var centre_uv: Vector2 = ed.view.sheet_centre
 	table.manager.activate("rectangle")
 	await aim_uv(centre_uv + Vector2(-10, -10))
@@ -158,6 +176,92 @@ func _initialize() -> void:
 	await aim_uv(centre_uv + Vector2(-9, -9.5))
 	print("SMOKE with Snap off the cursor is free: ", ed._snap["kind"] == "free" and ed._snap["id"] == "")
 	table.snap_enabled = true
+
+	# --- Select: pick things with the laser, a menu of what applies, and the grips with a sketch open
+	table.manager.activate("select")
+	await aim_uv(centre_uv + Vector2(1, -10))
+	print("SMOKE with Select the laser finds the line under it: ", ed._hover_entity.get("kind") == "line")
+	await pull()
+	print("SMOKE ...the pull selects it and the menu appears in the options row (Length, Horizontal, Vertical, Fix, Construction): ", ed.session.selection.size() == 1 and ["dim:length", "horizontal", "vertical", "fix", "construction"].all(func(o): return table.ui.option_button(o) != null))
+	print("SMOKE ...the menu is longer than the row, so it shows five and More: ", table.ui.option_button("menu_more") != null and table.ui.option_button("delete") == null)
+	await ed.on_option("menu_more")
+	print("SMOKE ...More turns to the rest (Delete, Clear): ", table.ui.option_button("delete") != null and table.ui.option_button("clear") != null)
+	await aim_uv(centre_uv + Vector2(30, 30))
+	await pull()
+	print("SMOKE a pull on empty sheet lets go of the selection, and the menu goes: ", ed.session.selection.is_empty() and table.ui.option_button("horizontal") == null)
+	await aim_uv(centre_uv + Vector2(1, -10))
+	await pull()
+	print("SMOKE ...selecting again starts the menu on its first page: ", table.ui.option_button("horizontal") != null and table.ui.option_button("delete") == null)
+	await ed.on_option("construction")
+	var patched: Array = calls_to("PATCH /sketch/sketches/sk1/lines/")
+	print("SMOKE Construction makes the selected line construction geometry through the backend: ", patched.size() == 1 and patched[0][1] == {"construction": true} and ed.session.selection.is_empty())
+	await aim_uv(centre_uv + Vector2(1, -10))
+	await pull()
+	print("SMOKE ...and the menu then offers Solid for it: ", table.ui.option_button("construction") != null and table.ui.option_button("construction").text == "Solid")
+	await ed.on_option("construction")
+	print("SMOKE ...which puts it back: ", calls_to("PATCH /sketch/sketches/sk1/lines/").size() == 2 and calls_to("PATCH /sketch/sketches/sk1/lines/")[1][1] == {"construction": false})
+	await aim_uv(centre_uv + Vector2(-10, -10))
+	print("SMOKE a corner point under the laser wins over the lines that meet there: ", ed._hover_entity.get("kind") == "point")
+	await pull()
+	print("SMOKE ...selected, it offers Fix (a point alone); a pull on empty sheet clears the selection: ", ed.session.selection.size() == 1 and table.ui.option_button("fix") != null)
+	await aim_uv(centre_uv + Vector2(30, 30))
+	await pull()
+	print("SMOKE ...and the empty pull clears it: ", ed.session.selection.is_empty() and table.ui.option_button("fix") == null)
+
+	var plane_g: Dictionary = ed.session.plane
+	var rot_locked: Basis = table.sketch_rotation(plane_g)
+	table.apply_pose(Vector3(0.0, table.sketch_hover_height, 0.0), rot_locked, 1.0)
+	var far_world: Vector3 = table.table_copy.global_transform * SketchMath.from_sheet(ed.view.sheet_centre + Vector2(ed.view.sheet_size.x * 0.4, 0.0), plane_g)
+	print("SMOKE the far side of the big sheet is well away from the part's own bounding sphere: ", far_world.distance_to(table.pivot.global_position) > table.part_radius() + table.lift_reach)
+	l.global_position = far_world
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	print("SMOKE a grip anywhere on the sheet takes the part (with a sketch open the sheet is the thing to grab): ", table.manip.is_gripping())
+	l.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE ...and letting go leaves the sketch open: ", ed.session != null and table.seated != null)
+
+	var c1: Vector3 = table.pivot.position
+	l.global_position = table.to_global(c1 + Vector3(-0.10, 0.0, 0.0))
+	r.global_position = table.to_global(c1 + Vector3(0.10, 0.0, 0.0))
+	await physics_frame
+	l.button_pressed.emit("grip_click")
+	r.button_pressed.emit("grip_click")
+	await process_frame
+	await process_frame
+	print("SMOKE two hands on the part with a sketch open (Part: Locked): ", table.manip.grip_count() == 2 and table.sketch_locked())
+	r.global_position = table.to_global(c1 + Vector3(0.10, 0.0, -0.20)) # swing the line between the hands
+	await process_frame
+	await process_frame
+	print("SMOKE swinging the hands does not turn the part: the sketch keeps its tilt: ", table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
+	r.global_position = table.to_global(c1 + Vector3(0.10, 0.0, 0.0))
+	await process_frame
+	await process_frame
+	var s_before: float = table.user_scale
+	r.global_position = table.to_global(c1 + Vector3(0.10, 0.0, 0.0) + Vector3(0.6, 0.0, 0.0)) # four times the spread
+	await process_frame
+	await process_frame
+	print("SMOKE spreading them zooms the sketch (the sheet is on the part): well past the 3x everyday limit, up to 8x: ", table.user_scale > 3.2 and table.user_scale <= 8.0 + 0.0001 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
+	print("SMOKE ...the sheet stays a fixed 0.8 x 0.4 m window as it is zoomed (re-sized for the new scale, grid re-spaced): ", await settle(func() -> bool: return (ed.view.sheet_size * table.effective_scale()).is_equal_approx(table.sheet_window_m)))
+	table.pivot.position = Vector3(1.5, 0.3, 0.0) # carried far past the slab
+	r.button_released.emit("grip_click")
+	l.button_released.emit("grip_click")
+	await process_frame
+	print("SMOKE letting go far beyond the slab does NOT send the real part away while a sketch is open; it is held back over the slab: ", table.seated != null and ed.session != null and absf(table.pivot.position.x) <= table.slab_size.x * 0.5 + 0.001)
+	var basis_now: Basis = table.pivot.basis.orthonormalized()
+	table.manip.drive_input(Vector2(1.0, 0.0), false, false, 1.0)
+	print("SMOKE the stick does not spin or tip the part while it is locked: ", table.pivot.basis.orthonormalized().is_equal_approx(basis_now))
+	table.ui.lock_button().button_pressed = false
+	print("SMOKE Part: Free unlocks it: ", not table.part_locked and table.ui.lock_button().text == "Part: Free")
+	table.manip.drive_input(Vector2(1.0, 0.0), false, false, 1.0)
+	print("SMOKE ...and then the stick turns it again: ", not table.pivot.basis.orthonormalized().is_equal_approx(basis_now))
+	table.ui.lock_button().button_pressed = true
+	table.ui.fit_button().pressed.emit()
+	var tilt_ok: bool = table.pivot.basis.orthonormalized().is_equal_approx(rot_locked)
+	var bounds: Rect2 = ed.sketch_bounds()
+	var fitted_centre: Vector3 = table.pivot.position + table.pivot.basis * (table.table_copy.transform * SketchMath.from_sheet(bounds.get_center(), plane_g))
+	print("SMOKE Fit puts the tilt back, scales the sketch to fill the sheet and centres it over the slab: ", tilt_ok and fitted_centre.is_equal_approx(Vector3(0.0, table.sketch_hover_height, 0.0)) and table.user_scale >= 0.4 and table.user_scale <= 8.0)
+	table.manager.deactivate()
 
 	# --- the deck keeps the laser when the laser is on the deck
 	var count_before: int = fake.calls.size()
@@ -276,7 +380,7 @@ func _initialize() -> void:
 	var sketch_calls := calls_to("/features/sketch")
 	print("SMOKE the trigger opens a sketch on the plane BY NAME (no plane feature needed): ", on_plane and sketch_calls.back()[1] == {"plane": "XY"} and ed.chosen_plane == "XY" and ed.markers.chosen == "XY")
 	var tilt_basis := Basis(Vector3.RIGHT, deg_to_rad(60.0))
-	print("SMOKE ...and the part turns to stand that plane up at 60 degrees from the slab, x to the right, y away and up: ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP) and (table.pivot.basis * Vector3(1, 0, 0)).is_equal_approx(Vector3.RIGHT) and (table.pivot.basis * Vector3(0, 1, 0)).is_equal_approx(tilt_basis * Vector3(0, 0, -1)))
+	print("SMOKE ...and the part turns to stand that plane up at 60 degrees from the slab, x to the right, y away and up: ", (table.pivot.basis * Vector3(0, 0, 1)).normalized().is_equal_approx(tilt_basis * Vector3.UP) and (table.pivot.basis * Vector3(1, 0, 0)).normalized().is_equal_approx(Vector3.RIGHT) and (table.pivot.basis * Vector3(0, 1, 0)).normalized().is_equal_approx(tilt_basis * Vector3(0, 0, -1)))
 	print("SMOKE ...and floats high enough that the tilted sheet's lower edge clears the slab: ", table.pivot.position.y >= table.sketch_hover_height - 0.0001)
 
 	# --- the animation on sketch start: with motion on, the turn is a tween that ends exactly on the target

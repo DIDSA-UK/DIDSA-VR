@@ -16,6 +16,8 @@ signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
 signal undo_pressed
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
+signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the sketch plane tilted (grips only move and scale), Free also turns it
+signal fit_pressed ## "Fit": scale and move the part so the sketch fills the sheet
 signal return_pressed ## "To arena": the real part goes back where it came from
 signal close_requested
 signal feedback(event: String) ## "press" / "error": the host turns it into a haptic pulse and a sound
@@ -41,6 +43,8 @@ var _undo_button: Button
 var _close_button: Button
 var _reset_button: Button
 var _return_button: Button
+var _lock_button: Button
+var _fit_button: Button
 var _active_chip: Label
 var _fx: ColorRect
 var _cat_group := ButtonGroup.new()
@@ -118,6 +122,20 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		snap_toggled.emit(on))
 	bottom.add_child(_snap_button)
+	_lock_button = _utility("lock", "Part: Locked", true)
+	_lock_button.set_pressed_no_signal(true)
+	_lock_button.disabled = true
+	_lock_button.toggled.connect(func(on: bool) -> void:
+		_lock_button.text = "Part: Locked" if on else "Part: Free"
+		feedback.emit("press")
+		part_lock_toggled.emit(on))
+	bottom.add_child(_lock_button)
+	_fit_button = _utility("fit", "Fit", false)
+	_fit_button.disabled = true
+	_fit_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		fit_pressed.emit())
+	bottom.add_child(_fit_button)
 	_reset_button = _utility("recentre", "Reset", false)
 	_reset_button.disabled = true
 	_reset_button.pressed.connect(func() -> void:
@@ -311,6 +329,27 @@ func set_part_present(on: bool) -> void:
 		_reset_button.disabled = not on
 		_return_button.disabled = not on
 		activity.emit()
+
+
+func set_sketching(on: bool) -> void:
+	## Part: Locked / Free and Fit only mean something while a sketch is open.
+	if _lock_button.disabled == on:
+		_lock_button.disabled = not on
+		_fit_button.disabled = not on
+		activity.emit()
+
+
+func set_part_locked(on: bool) -> void:
+	_lock_button.set_pressed_no_signal(on)
+	_lock_button.text = "Part: Locked" if on else "Part: Free"
+
+
+func lock_button() -> Button:
+	return _lock_button
+
+
+func fit_button() -> Button:
+	return _fit_button
 
 
 func set_engaged(on: bool) -> void:

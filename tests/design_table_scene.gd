@@ -127,8 +127,8 @@ func _initialize() -> void:
 	# --- the deck: categories and tools, by real laser clicks
 	print("SMOKE three category buttons: ", ["Sketch", "Constrain", "Feature"].all(func(t): return find_button(func(b): return b.text == t) != null))
 	var shown: Array = table.ui.shown_tool_ids()
-	print("SMOKE Sketch is shown first with DIDSA-CAD's six drawing tools: ", shown == ["line", "rectangle", "circle", "arc", "polygon", "point"])
-	print("SMOKE ...and no More button, since six fit: ", table.ui.more_button() == null)
+	print("SMOKE Sketch is shown first, with Select and the first four drawing tools: ", shown == ["select", "line", "rectangle", "circle", "arc"])
+	print("SMOKE ...and a More button, since seven do not fit the row of six: ", table.ui.more_button() != null)
 	await aim_and_click(find_button(func(b): return b.text == "Constrain"))
 	print("SMOKE clicking Constrain swaps the tool row: ", table.ui.shown_tool_ids() == ["dimension", "horizontal", "vertical", "parallel", "perpendicular", "coincident"])
 	print("SMOKE ...without switching any tool on: ", table.active_tool == "")

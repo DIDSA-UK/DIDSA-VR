@@ -51,6 +51,7 @@ const TableBuild := preload("res://scripts/design_table/table_build.gd")
 const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
+const TablePose := preload("res://scripts/design_table/table_pose.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
 const TableTree := preload("res://scripts/design_table/table_tree_window.gd")
@@ -79,6 +80,7 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var open_drop: float = 0.40 ## metres below your eyes when summoned
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
 @export var sketch_tilt_degrees: float = 60.0 ## while a sketch is open the sketch plane stands this far up from the slab, top edge away, facing you (flat on the slab was awkward to draw on)
+@export var sheet_window_m := Vector2(0.80, 0.40) ## the sketch sheet's size in the WORLD, metres (wide by tall): a fixed window you draw in, however far the part is zoomed
 @export var sketch_hover_height: float = 0.26 ## metres: the least height the part floats at while it is tilted, so the sheet's lower edge clears the slab
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
@@ -104,6 +106,7 @@ var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the f
 var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
+var part_locked := true ## while a sketch is open: the part keeps the sketch tilt (two hands move and scale only, the stick leaves it alone); false = free to turn
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
 var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis is the part's orientation on the table
 var table_copy: MeshInstance3D = null ## what's edited; a child of pivot, in the part's own mm frame
@@ -189,6 +192,10 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	manip.engaged_changed.connect(set_engaged)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
 	ui.reset_pressed.connect(reset_pose)
+	ui.part_lock_toggled.connect(func(on: bool) -> void:
+		part_locked = on
+		set_status("The part keeps its tilt: two hands move and scale it." if on else "The part is free: two hands turn it, the stick spins it. Reset or Fit puts the tilt back."))
+	ui.fit_pressed.connect(fit_sketch)
 	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting
@@ -607,6 +614,36 @@ func release_grab(hand: Object) -> bool:
 func owns_stick(hand: Object) -> bool:
 	## True for the right hand while the table is engaged: its stick and A / B handle the part on the table, not a selected arena part or walking.
 	return _open and manip != null and manip.owns_stick(hand)
+
+
+func editing_sketch() -> bool:
+	## A sketch is open on the part on the table.
+	return editor != null and editor.session != null
+
+
+func sketch_locked() -> bool:
+	## The part's turn is locked to the sketch tilt: a sketch is open and "Part: Locked" is on.
+	return part_locked and editing_sketch()
+
+
+func max_user_scale() -> float:
+	## The biggest the part may be scaled to: higher while sketching (zooming into the sketch).
+	return TablePose.SKETCH_MAX_SCALE if editing_sketch() else TablePose.MAX_SCALE
+
+
+func fit_sketch() -> void:
+	## The Fit button: the part goes back to the sketch tilt, and is scaled and moved so the sketch (or, with nothing drawn yet, the part)
+	## fills most of the sheet window, in the middle of the slab.
+	if pivot == null or not editing_sketch() or editor.view == null:
+		return
+	var bounds: Rect2 = editor.sketch_bounds()
+	var scale: float = TablePose.fit_scale(bounds.size, sheet_window_m, 0.8, fit_scale, max_user_scale())
+	var rotation := sketch_rotation(editor.session.plane)
+	var basis := rotation.orthonormalized() * scale
+	var centre_in_pivot: Vector3 = table_copy.transform * SketchMath.from_sheet(bounds.get_center(), editor.session.plane)
+	_animate_pose(rotation, Vector3(0.0, sketch_hover_height, 0.0) - basis * centre_in_pivot, scale)
+	set_status("Sketch fitted to the sheet.")
+	UiFeedback.haptic(_right, "confirm")
 
 
 func part_radius() -> float:

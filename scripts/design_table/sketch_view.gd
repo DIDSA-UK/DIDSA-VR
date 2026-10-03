@@ -11,9 +11,11 @@ extends Node3D
 
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 
+const GRID_SHADER := preload("res://shaders/sketch_grid.gdshader")
 const LINE_WIDTH := 0.0035 ## world metres
 const UNDERLAY_WIDTH := 0.0075 ## the dark edge under every line, so it reads on a white part and on the dark slab alike
 const UNDERLAY := Color(0.02, 0.05, 0.10, 0.85)
+const ORIGIN_COLOUR := Color(1.0, 0.92, 0.45)
 const POINT_SIZE := 0.0045
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
@@ -22,10 +24,12 @@ const LABEL_FONT := 44
 
 var plane: Dictionary = {}
 var scale_m_per_mm := 0.003 ## the copy's scale: world metres per part mm
-var sheet_extent := 100.0 ## mm
+var sheet_size := Vector2(100.0, 100.0) ## mm, u by v: a fixed-size WINDOW in the world (the table re-sizes it as the part is zoomed), not tied to the part
 var sheet_centre := Vector2.ZERO ## sheet uv of the sheet's middle
+var grid_target_m := 0.016 ## the minor grid lines are about this far apart in the world
 
 var _sheet: MeshInstance3D
+var _sheet_material: ShaderMaterial
 var _geo: MeshInstance3D
 var _preview: MeshInstance3D
 var _cursor: MeshInstance3D
@@ -36,9 +40,9 @@ var _tokens: Resource
 var _geo_state := {}
 
 
-func setup(p_plane: Dictionary, p_extent: float, p_centre: Vector2, p_scale: float, tokens: Resource) -> void:
+func setup(p_plane: Dictionary, p_size: Vector2, p_centre: Vector2, p_scale: float, tokens: Resource) -> void:
 	plane = p_plane
-	sheet_extent = p_extent
+	sheet_size = p_size
 	sheet_centre = p_centre
 	scale_m_per_mm = maxf(p_scale, 0.000001)
 	_tokens = tokens
@@ -52,18 +56,18 @@ func setup(p_plane: Dictionary, p_extent: float, p_centre: Vector2, p_scale: flo
 	_sheet = MeshInstance3D.new()
 	_sheet.name = "Sheet"
 	var quad := QuadMesh.new()
-	quad.size = Vector2(sheet_extent, sheet_extent)
-	var sheet_material := StandardMaterial3D.new()
-	sheet_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	sheet_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	sheet_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.size = sheet_size
+	_sheet_material = ShaderMaterial.new()
+	_sheet_material.shader = GRID_SHADER
+	_sheet_material.render_priority = 0
 	var accent: Color = tokens.accent
-	sheet_material.albedo_color = Color(accent.r, accent.g, accent.b, 0.10)
-	sheet_material.render_priority = 0
-	quad.material = sheet_material
+	_sheet_material.set_shader_parameter("tint", Color(accent.r, accent.g, accent.b, 0.07))
+	_sheet_material.set_shader_parameter("line_color", accent.lightened(0.45))
+	quad.material = _sheet_material
 	_sheet.mesh = quad
 	_sheet.transform = Transform3D(Basis(plane["x"], plane["y"], plane["n"]), SketchMath.from_sheet(sheet_centre, plane))
 	add_child(_sheet)
+	_update_grid()
 
 	_geo = _new_mesh_node("Drawing")
 	_preview = _new_mesh_node("Preview")
@@ -86,6 +90,33 @@ func setup(p_plane: Dictionary, p_extent: float, p_centre: Vector2, p_scale: flo
 	_labels.name = "Labels"
 	add_child(_labels)
 	rebuild(null)
+
+
+func set_window(p_size: Vector2, p_scale: float) -> void:
+	## The part was scaled (or the sheet re-fitted): the window keeps its size in the world, so its size in mm and the grid's spacing
+	## change. The drawing itself is not touched; call rebuild() after for the border.
+	sheet_size = p_size
+	scale_m_per_mm = maxf(p_scale, 0.000001)
+	(_sheet.mesh as QuadMesh).size = sheet_size
+	_update_grid()
+
+
+func grid_step() -> float:
+	## The minor grid spacing now, mm.
+	return SketchMath.grid_step(grid_target_m / scale_m_per_mm)
+
+
+func _update_grid() -> void:
+	_sheet_material.set_shader_parameter("sheet_mm", sheet_size)
+	_sheet_material.set_shader_parameter("centre_mm", sheet_centre)
+	_sheet_material.set_shader_parameter("minor_mm", grid_step())
+	_sheet_material.set_shader_parameter("fade_mm", 0.05 / scale_m_per_mm)
+
+
+func contains(uv: Vector2) -> bool:
+	## True if a sheet position is on the sheet.
+	var half := sheet_size * 0.5
+	return absf(uv.x - sheet_centre.x) <= half.x and absf(uv.y - sheet_centre.y) <= half.y
 
 
 func _new_mesh_node(node_name: String) -> MeshInstance3D:
@@ -169,14 +200,9 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 	var text: Color = _tokens.accent.lightened(0.25) ## a bright core over a dark underlay
 	var dim: Color = _tokens.text_dim
 	var warn: Color = _tokens.warn
-	var half := sheet_extent * 0.5
-	var corners := [
-		sheet_centre + Vector2(-half, -half), sheet_centre + Vector2(half, -half),
-		sheet_centre + Vector2(half, half), sheet_centre + Vector2(-half, half)]
-	_polyline(verts, colors, corners, LINE_WIDTH * 0.6, Color(accent.r, accent.g, accent.b, 0.55), true, 0.5)
-	var axis := sheet_extent * 0.08
-	_ribbon(verts, colors, Vector2.ZERO, Vector2(axis, 0), LINE_WIDTH * 0.8, Color(1.0, 0.35, 0.35, 0.9), 0.7) # u axis
-	_ribbon(verts, colors, Vector2.ZERO, Vector2(0, axis), LINE_WIDTH * 0.8, Color(0.4, 0.95, 0.5, 0.9), 0.7) # v axis
+	var origin_mark := 0.05 / scale_m_per_mm ## the origin's cross reaches this far (about 5 cm of world) on each axis
+	_ribbon(verts, colors, Vector2.ZERO, Vector2(origin_mark, 0), LINE_WIDTH * 0.8, Color(1.0, 0.35, 0.35, 0.9), 0.7) # u axis
+	_ribbon(verts, colors, Vector2.ZERO, Vector2(0, origin_mark), LINE_WIDTH * 0.8, Color(0.4, 0.95, 0.5, 0.9), 0.7) # v axis
 
 	if session != null:
 		var selected := {}
@@ -196,7 +222,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			if not session.points.has(c["c"]) or not session.points.has(c["p"]):
 				continue
 			var key: String = "circle:" + id
-			var colour: Color = warn if (selected.has(key) or key == hovered) else text
+			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if c.get("construction", false) else text)
 			var centre: Vector2 = session.points[c["c"]]
 			var ring := circle_points(centre, centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS)
 			_polyline(verts, colors, ring, UNDERLAY_WIDTH, UNDERLAY, true, 0.8)
@@ -206,12 +232,19 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			if not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 				continue
 			var key: String = "arc:" + id
-			var colour: Color = warn if (selected.has(key) or key == hovered) else text
+			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if a.get("construction", false) else text)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
 			_polyline(verts, colors, sweep, UNDERLAY_WIDTH, UNDERLAY, false, 0.8)
 			_polyline(verts, colors, sweep, LINE_WIDTH, colour, false)
 		for id in session.points:
 			var key: String = "point:" + id
+			if session.is_origin(id):
+				# The sketch origin: a bigger, brighter marker than an ordinary point (it is where every dimension can start from).
+				var origin_colour: Color = warn if (selected.has(key) or key == hovered) else ORIGIN_COLOUR
+				_marker(verts, colors, session.points[id], POINT_SIZE * 3.2, UNDERLAY, 1.3)
+				_marker(verts, colors, session.points[id], POINT_SIZE * 2.4, origin_colour, 1.6)
+				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
+				continue
 			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if session.point_locked.get(id, false) else accent.lightened(0.3))
 			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
 			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
@@ -244,6 +277,7 @@ func set_cursor(uv: Variant, kind: String = "free") -> void:
 	match kind:
 		"point": colour = Color(0.45, 1.0, 0.6)
 		"vertex", "midpoint", "curve": colour = _tokens.accent
+		"origin": colour = ORIGIN_COLOUR
 		"hover": colour = _tokens.warn
 	_cursor_material.albedo_color = colour
 

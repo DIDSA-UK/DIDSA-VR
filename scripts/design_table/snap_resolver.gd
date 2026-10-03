@@ -3,7 +3,8 @@ extends RefCounted
 ## tree, so it is unit-tested on its own (tests/design_table_logic.gd).
 ##
 ## Order, like the flat sketcher's (client/lib/sketch/sketch_controller.dart, _pointIdAt):
-##   1. an EXISTING POINT within the radius -> reuse it (the entity then shares it, which is what makes shapes join);
+##   1. an EXISTING POINT within the radius -> reuse it (the entity then shares it, which is what makes shapes join). The sketch's ORIGIN is one
+##      of them (kind "origin"), so a line can start on it, a circle can be centred on it, and a dimension can start or end at it;
 ##   2. a VERTEX of the part that lies on the sheet's plane (the corners of the face you're sketching on);
 ##   3. a line's MIDPOINT;
 ##   4. the nearest spot ON a line, circle or arc (position only);
@@ -17,9 +18,9 @@ extends RefCounted
 
 const AXIS_DEGREES := 4.0
 
-enum Kind { FREE, POINT, VERTEX, MIDPOINT, CURVE }
+enum Kind { FREE, POINT, VERTEX, MIDPOINT, CURVE, ORIGIN }
 
-const NAMES := {Kind.FREE: "free", Kind.POINT: "point", Kind.VERTEX: "vertex", Kind.MIDPOINT: "midpoint", Kind.CURVE: "curve"}
+const NAMES := {Kind.FREE: "free", Kind.POINT: "point", Kind.VERTEX: "vertex", Kind.MIDPOINT: "midpoint", Kind.CURVE: "curve", Kind.ORIGIN: "origin"}
 
 
 static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null) -> Dictionary:
@@ -36,6 +37,8 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 			best = d
 			out = {"uv": session.points[id], "id": id, "kind": NAMES[Kind.POINT], "infer": ""}
 	if out["id"] != "":
+		if session.is_origin(str(out["id"])):
+			out["kind"] = NAMES[Kind.ORIGIN] # the sketch's own origin: a real point, shown as such
 		return out
 
 	best = radius

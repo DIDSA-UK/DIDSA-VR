@@ -71,6 +71,8 @@ func try_grab(hand: XRController3D) -> bool:
 	if not _table.is_open() or _table.seated == null or _table.pivot == null or _grips.has(hand) or _grips.size() >= 2:
 		return false
 	var touching: bool = hand.global_position.distance_to(_table.pivot.global_position) <= _table.part_radius() + _table.lift_reach
+	if not touching and _table.editor != null and _table.editor.sheet_reaches(hand.global_position):
+		touching = true # with a sketch open the whole sheet is the thing to grab, not only the part's own bounding sphere
 	if not touching:
 		# A second hand may join from anywhere over the table, so you don't have to find the part with both.
 		if _grips.is_empty() or not TableSeat.in_drop_zone(_table.to_local(hand.global_position), _table.slab_size, _table.drop_floor, _table.drop_ceiling):
@@ -132,7 +134,13 @@ func _finish() -> void:
 	if _table.seated == null or _table.pivot == null:
 		return
 	var centre: Vector3 = _table.pivot.position
-	if TableSeat.in_drop_zone(centre, _table.slab_size, _table.drop_floor, _table.drop_ceiling):
+	if _table.editing_sketch():
+		# A sketch is open on the part: letting go beyond the slab must not send the real part away (that would end the sketch), so it is
+		# held back over the slab.
+		centre = TablePose.clamp_to_zone(centre, _table.slab_size, MIN_HEIGHT, _table.drop_ceiling)
+		_table.pivot.position = centre
+		UiFeedback.haptic(_table._right, "confirm")
+	elif TableSeat.in_drop_zone(centre, _table.slab_size, _table.drop_floor, _table.drop_ceiling):
 		centre.y = maxf(centre.y, MIN_HEIGHT)
 		_table.pivot.position = centre
 		UiFeedback.haptic(_table._right, "confirm")
@@ -158,7 +166,7 @@ func process(delta: float) -> void:
 			_follow_one(delta)
 		2:
 			_follow_two(delta)
-	_set_carry_outside(not _grips.is_empty() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
+	_set_carry_outside(not _grips.is_empty() and not _table.editing_sketch() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
 	_update_engaged(delta)
 	if engaged:
 		var right: XRController3D = _table._right
@@ -184,7 +192,7 @@ func _follow_two(delta: float) -> void:
 	var right: Object = keys[1]
 	var l: Vector3 = _table.to_local(_steady(left, delta))
 	var r: Vector3 = _table.to_local(_steady(right, delta))
-	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale)
+	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale())
 	_table.apply_pose(step["centre"], step["rotation"], step["scale"])
 	_prev[left] = l
 	_prev[right] = r
@@ -197,7 +205,7 @@ func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
 	var right: XRController3D = _table._right
 	if bool(right.get_meta("ui_hover", false)):
 		return # the laser is on the tool deck: the stick is the deck's, not the part's
-	if stick.length() >= stick_deadzone:
+	if stick.length() >= stick_deadzone and not _table.sketch_locked(): # the sketch is tilted to face you: the stick must not spin or tip it away
 		_table.stop_pose_tween()
 		_table.apply_pose(_table.pivot.position, TablePose.stick_turn(_table.pivot.basis.orthonormalized(), stick, delta, rotate_speed_degrees), _table.user_scale)
 	var direction := 0.0

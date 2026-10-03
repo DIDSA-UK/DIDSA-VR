@@ -24,6 +24,7 @@ const ACCENT_INSPECT := Color(0.95, 0.50, 0.65) ## rose
 ## them for the tools that are built here (Slot, Ellipse, Ellipse Arc, Spline and
 ## Text come later, as further pages of the same row).
 const SKETCH_TOOLS := [
+	["select", "Select", "tool_select"],
 	["line", "Line", "tool_line"],
 	["rectangle", "Rectangle", "tool_rectangle"],
 	["circle", "Circle", "tool_circle"],
@@ -48,6 +49,7 @@ const FEATURE_TOOLS := [
 ]
 
 const HINTS := {
+	"select": "Pick points, lines and curves. Pick again to let go. Options for what you picked appear below.",
 	"line": "Point at the sheet and pull the trigger to place the start, then the end. Each end starts the next line.",
 	"rectangle": "Pick two opposite corners.",
 	"circle": "Pick the centre, then a point on the circle.",
