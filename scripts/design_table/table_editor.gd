@@ -203,6 +203,9 @@ func _reset() -> void:
 
 
 func _say_pick_plane() -> void:
+	if table.is_blank():
+		table.set_status("%s is empty. Aim at one of the three reference planes and pull the trigger to sketch on it." % table.seated.name)
+		return
 	table.set_status("Aim at a flat face or a reference plane and pull the trigger to sketch on it.")
 
 
@@ -739,15 +742,37 @@ func refresh_geometry() -> bool:
 		await mates_tool.refresh_mates(table._main.current_root_part_id())
 		captured = MateHealth.capture(nodes, mates_tool.mates)
 		table.add_mate_baseline(captured)
+	var was_blank: bool = table.is_blank()
 	if table._main.swap_part_mesh(nodes, fetched["bytes"]) == 0:
 		return false
 	table.update_mate_drift()
+	var size_before: Vector3 = table.table_copy.get_aabb().size
 	table.sync_copy_from_seated()
+	if was_blank != table.is_blank() or not table.table_copy.get_aabb().size.is_equal_approx(size_before):
+		_rebuild_markers() # the part changed size (or a new part got its first feature, or lost it): the plane squares were sized to the old shape
 	if highlight != null:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
 	geometry_changed.emit()
 	return true
+
+
+func _rebuild_markers() -> void:
+	## The three plane squares, sized to the part as it is now (they were built for the placeholder box of a new part).
+	if markers == null or not is_instance_valid(markers):
+		return
+	var was_visible: bool = markers.visible
+	var chosen_before: String = markers.chosen
+	markers.queue_free()
+	var copy: MeshInstance3D = table.table_copy
+	var aabb := copy.get_aabb()
+	markers = PlaneMarkers.new()
+	markers.name = "PlaneMarkers"
+	copy.add_child(markers)
+	markers.setup(aabb.size.length() * 1.25, aabb.get_center(), table.fit_scale)
+	markers.set_markers_visible(was_visible)
+	if chosen_before != "":
+		markers.set_chosen(chosen_before)
 
 
 func end_sketch() -> void:

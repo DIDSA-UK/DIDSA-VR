@@ -47,6 +47,8 @@ var _native_extras: Dictionary = {} ## top-level keys of the loaded native file 
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 var _settings := preload("res://scripts/app_settings.gd").new() ## project folder + last-picked scene — see app_settings.gd
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
+const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
+const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
@@ -998,6 +1000,15 @@ func _import_external_file_impl(path: String, source_format: String) -> void:
 	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
 
 	_set_status("Creating a part for %s..." % path.get_file())
+	# A clean document first: POST /parts only ever ADDS, so without this every import in one session piled another part onto
+	# the same document (the bug the flat app fixed with POST /document/new), and a later Save exported the whole pile. What is
+	# shown is replaced by the imported part anyway, so this matches what you see.
+	req.request(backend_url + API_PREFIX + "/new", headers, HTTPClient.METHOD_POST, "{}")
+	var cleared_result: Array = await req.request_completed
+	if _parse_import_response(cleared_result, "start a fresh document for %s" % path.get_file(), req) == null:
+		return
+	_native_extras.clear()
+	native_file_path = ""
 	req.request(backend_url + API_PREFIX + "/parts", headers, HTTPClient.METHOD_POST, JSON.stringify({"name": path.get_file().get_basename()}))
 	var create_result: Array = await req.request_completed
 	var part_json = _parse_import_response(create_result, "create a part for %s" % path.get_file(), req)
@@ -1159,6 +1170,76 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	return true
 
 
+# --- New assembly / new part -----------------------------------------------------------
+
+func new_assembly() -> bool:
+	## Files tab "New assembly": throws away what is loaded and starts an empty assembly (a fresh backend document with one empty
+	## root part, so the design table's New part has somewhere to put parts). Needs the backend: a bare local file has no document
+	## to start. True if it worked.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("New assembly needs a backend (see secrets.cfg.example).")
+		return false
+	if not _claim_load("New assembly"):
+		return false
+	var ok := await _new_assembly_impl()
+	_load_busy = false
+	return ok
+
+
+func _new_assembly_impl() -> bool:
+	_set_status("Starting a new assembly...")
+	var started: Dictionary = await NewDocument.new(Callable(design_table.api, "request")).start_assembly()
+	if not started["ok"]:
+		_set_status("Couldn't start a new assembly: %s" % started["error"])
+		return false
+	var root_id: String = started["root_id"]
+	var mesh_path := "/document/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [root_id, str(quality), str(include_hidden).to_lower()]
+	if tier != "":
+		mesh_path += "&tier=%s" % tier
+	var fetched: Dictionary = await design_table.api.fetch_bytes(mesh_path)
+	if not fetched["ok"]:
+		_set_status("The new assembly was made but its view failed: %s" % fetched["error"])
+		return false
+	var body: PackedByteArray = fetched["bytes"]
+	_resolved_part_id = root_id # before _show_model: it refreshes the mates state for the part it is showing
+	_native_extras.clear()
+	native_file_path = "" # a save from here is named "assembly-vr-..." rather than after the file that was open before
+	if not _show_model(body, "", spawn_scale):
+		return false
+	_set_status("New empty assembly. Open the design table and press New part.")
+	return true
+
+
+func refresh_assembly_tree() -> void:
+	## The assembly changed under the Assembly Tree window (a part was added or taken off): its list is reloaded the next time
+	## it is looked at, or now if it is open.
+	_assembly_tree_window.mark_stale()
+
+
+func add_blank_part(root_id: String, occurrence_id: String, local_pose: Transform3D) -> MeshInstance3D:
+	## The arena node for a part that has no geometry yet (the design table's New part). The backend's glb has no mesh for an
+	## empty part, so there is nothing to carry or seat; this stands in for it: a hidden-on-the-table placeholder box, tagged with
+	## the occurrence it belongs to exactly like a loaded node, so the table's edit flow finds it. `blank` says it still is
+	## only a placeholder: the first feature swaps the real mesh in (swap_part_mesh) and clears it.
+	var node := MeshInstance3D.new()
+	node.mesh = blank_mesh()
+	node.set_meta("occurrence_id", occurrence_id)
+	node.set_meta("owner_part_id", root_id)
+	node.set_meta("blank", true)
+	node.set_meta("new_part", true)
+	node.add_to_group("grabbable_parts")
+	assembly_root.add_child(node)
+	node.transform = local_pose
+	_part_count += 1
+	return node
+
+
+static func blank_mesh() -> BoxMesh:
+	var box := BoxMesh.new()
+	box.size = Vector3.ONE * BLANK_PART_SIZE_MM
+	return box
+
+
 # --- Saving ---------------------------------------------------------------------------
 # DIDSA-CAD's backend holds the document in memory only and the client owns the files, so edits made in VR (or by the
 # design table) exist nowhere on disk until this writes them. A SNAPSHOT of the whole session, in the same native format the
@@ -1269,12 +1350,14 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 			break
 	if template == null:
 		scene.free()
-		return 0
+		return _blank_out(nodes) # no geometry: only a part made on the table can be in that state
 	var updated := 0
 	for node in nodes:
 		if not is_instance_valid(node) or not (node is MeshInstance3D):
 			continue
 		var part := node as MeshInstance3D
+		if part.has_meta("blank"):
+			part.set_meta("blank", false) # a new part's placeholder is a real part from its first feature on
 		part.mesh = template.mesh
 		for key in ["face_ids", "body_ids", "topology"]:
 			if template.has_meta(key):
@@ -1293,6 +1376,30 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 	if updated > 0:
 		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
 		_measure_tool.clear_picks()
+	return updated
+
+
+func _blank_out(nodes: Array) -> int:
+	## The part's glb has no geometry. That is only expected for a part made with the table's New part (nothing drawn on it yet,
+	## or its first feature taken back): its node goes back to the placeholder box, flagged blank. Any other node is left alone.
+	var updated := 0
+	for node in nodes:
+		if not is_instance_valid(node) or not (node is MeshInstance3D) or not node.get_meta("new_part", false):
+			continue
+		var part := node as MeshInstance3D
+		if not part.get_meta("blank", false):
+			part.mesh = blank_mesh()
+			part.set_meta("blank", true)
+			for key in ["face_ids", "body_ids", "topology"]:
+				if part.has_meta(key):
+					part.remove_meta(key)
+			for child in part.get_children():
+				if child is StaticBody3D:
+					part.remove_child(child)
+					child.free()
+			if face_highlight != null:
+				face_highlight.invalidate(part)
+		updated += 1
 	return updated
 
 

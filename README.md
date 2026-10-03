@@ -409,7 +409,9 @@ live-synced.
     the arena** where you let go (at arena scale), or press **To arena** to put it back exactly
     where it came from. Edited parts get a warning badge, are no longer steered by their mates,
     and an **Enforce mates** button floats over one when it's put down — it turns off any mate
-    whose face the edit changed rather than solving it against the wrong face. **Files → Save as new file**
+    whose face the edit changed rather than solving it against the wrong face. **New part** (the **+**
+    in the tree's header, or the tablet's Table page) starts an empty part on the table to sketch on;
+    **Files → New assembly** (press twice) starts an empty assembly. **Files → Save as new file**
     writes the session as a `.didsa` the flat app opens. What's built, how it works, what the
     code said about the brief's six questions, performance numbers, and what isn't built:
     [`docs/design-table.md`](docs/design-table.md).

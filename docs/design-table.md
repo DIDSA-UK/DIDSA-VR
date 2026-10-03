@@ -12,7 +12,13 @@ This page is what was decided and built, what the code turned out to say, and wh
 
 1. **Summon it:** wrist tablet → **Assembly → Table → Summon table**. It appears in front of you, below eye level, leaning back like
    a drafting table. "Bring it to me" recalls it; the **X** on the deck (or Dismiss on the tablet) puts it away.
-2. **Put a part on it**, either way:
+2. **Put a part on it**, any of three ways:
+   * **New part** (the **+** in the tree window's header, or the tablet's Table page): an empty part, named Part 1, Part 2..., appears on
+     the table. Nothing is drawn yet, so the only things to pick are the three reference planes; pick one, sketch, extrude. The part is
+     placed on the assembly (to your right and a little further off) the moment it is made, so when it comes off the table it is
+     where it will stay. If the table already holds a part, that one goes back where it came from first; if no assembly is loaded,
+     an empty one is started first. A part that never got a feature is **discarded** (its placement is removed) when it leaves the table or
+     the table closes, rather than left as an invisible empty part. Taking its first feature back (Undo) turns it blank again.
    * **carry** a part (grip) over the slab and let go — the part in the arena stays where it was, hidden, and a copy appears on
      the table, scaled to fit and floating above the slab; or
    * in the **tree** at the table's left, press **Table** on a part's row (no carrying). **Bring** on a row moves that part to a
@@ -200,6 +206,8 @@ and the glb `quality` the table fetches (0.5).
   (origin planes, plane features, sketches) is not built; the tree shows the assembly.
 * **Dragging a row out of the tree** onto the table or into the world: the laser freezes the pointer while the trigger is held
   (`laser_surface.gd`), so a drag would need its own gesture. Rows have buttons instead.
+* **New part makes a child part only.** It is always a part placed on the root assembly; drawing directly on the root's own content, or
+  placing a new part inside a sub-assembly, is not offered. It is also named automatically (renaming is not built).
 * **Sub-assemblies:** the table edits one *part*. An assembly of other parts is refused with a message.
 * **Persisted dirty flags**, and a bulk "enforce" or mate-health endpoint on the backend (DIDSA-CAD roadmap's reference-drift idea). The
   client-side check above covers planar faces well and others loosely.
@@ -219,3 +227,24 @@ Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane ma
 session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver). Rendering and timing:
 `design_table_render`, `design_table_perf`. See `tests/README.md` for what each line should say, and `docs/status.md` "How this has been
 worked on" for standing up a throwaway backend.
+
+## Starting from nothing: New assembly and New part
+
+* **New assembly** (wrist tablet > Files > **New assembly**, pressed twice within four seconds because it discards what is loaded): `POST
+  /document/new` (a fresh, empty backend document) then one empty root part named Assembly, shown as an empty arena. Save first if you want
+  the old one. It needs the backend (a bare local `.glb` has no document to start). STEP / STL / OBJ import now does the same
+  `POST /document/new` first, so each import is a clean document; before, every import piled another part onto the same document and a
+  later Save exported the pile.
+* **New part**: `POST /document/parts` then `POST /document/parts/{root}/occurrences` with a client-made id (`occ_` + 16 random bytes), the new
+  part as `resolved_part_id`, its name and its pose in the assembly's own millimetres (`new_document.gd`). The backend's glb gives an empty
+  part no mesh at all (a mesh-less node), so there is nothing in the arena to seat; `Main.add_blank_part()` makes a hidden placeholder
+  node tagged with the occurrence (flagged `blank` and `new_part`) and the table seats that through the normal path. While blank the copy
+  is not drawn and has no collider (it only stands in for a 100 mm size and carries the plane squares and the sheet). The first feature's mesh
+  replaces the placeholder (`swap_part_mesh`), the plane squares are rebuilt to fit, and the copy gets its collider; taking the feature back
+  (an empty glb again) restores the placeholder (`_blank_out`).
+* **Flat app compatibility.** The document is the backend's own, so nothing VR-specific is stored. `Document.add_part` makes the FIRST part
+  created the root (what a saved file and the flat app open), which is why a new assembly creates the root first and every new part is a child
+  occurrence of it. A saved session with more than one part is the flat app's "whole-session bundle", opened by a direct `import_native`; the
+  occurrences carry `resolved_part_id` (not `external_ref`), exactly as Add component's already do. `tests/e2e_new_part.gd` checks the
+  exported file (root first, the child with its sketch and extrude, one occurrence) and imports it back. **Not checked:** opening a VR-saved
+  file in the flat app's own UI (no Flutter toolchain in the sandbox): worth doing once by hand.

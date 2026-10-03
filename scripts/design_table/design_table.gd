@@ -46,6 +46,8 @@ const TableUI := preload("res://scripts/design_table/table_ui.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const TableManip := preload("res://scripts/design_table/table_manip.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
+const NewDocument := preload("res://scripts/design_table/new_document.gd")
+const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
@@ -134,6 +136,7 @@ var _leave_cue := false ## drawn: the frame turns amber because letting go here 
 var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table when it was put there (what Reset goes back to before a sketch plane is chosen)
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
+var _new_part_busy := false
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node, mates_tool: Node = null) -> void:
@@ -540,11 +543,7 @@ func seat(part: MeshInstance3D) -> bool:
 	table_copy.scale = Vector3.ONE * scale
 	pivot.add_child(table_copy)
 	table_copy.position = TableSeat.copy_offset(aabb, scale, Basis.IDENTITY) # the middle of its bounds at the pivot; the pivot turns both
-	table_copy.create_trimesh_collision()
-	for child in table_copy.get_children():
-		if child is StaticBody3D:
-			(child as StaticBody3D).collision_layer = TABLE_LAYER
-			(child as StaticBody3D).collision_mask = 0
+	_give_copy_collider()
 	set_status("Editing %s." % part.name)
 	ui.set_part_present(true)
 	poke_render()
@@ -552,6 +551,26 @@ func seat(part: MeshInstance3D) -> bool:
 	part_seated.emit(part)
 	editor.on_seated() # finds which part this is, then opens plane picking (a coroutine: not waited for)
 	return true
+
+
+func is_blank() -> bool:
+	## The part on the table has no geometry yet (a New part nobody has drawn on): there is a placeholder to size things by,
+	## but nothing to see or pick, only the reference planes to sketch on.
+	return seated != null and bool(seated.get_meta("blank", false))
+
+
+func _give_copy_collider() -> void:
+	## The copy's collider on the table's own layer (so the laser can pick its faces) and, for a blank part, no collider and
+	## no drawing of the placeholder box: the copy still stands in for its size and carries the plane squares and the sheet
+	## (its children keep their own layers), but a fake cube is never shown or picked.
+	table_copy.layers = 0 if is_blank() else 1
+	if is_blank():
+		return
+	table_copy.create_trimesh_collision()
+	for child in table_copy.get_children():
+		if child is StaticBody3D:
+			(child as StaticBody3D).collision_layer = TABLE_LAYER
+			(child as StaticBody3D).collision_mask = 0
 
 
 func try_grab(hand: XRController3D) -> bool:
@@ -608,6 +627,9 @@ func send_to_arena(world_centre: Vector3) -> void:
 	## the middle of its bounds at `world_centre`, as an ordinary move (undoable, saved, its mates flagged if it was edited).
 	if seated == null:
 		return
+	if is_blank():
+		_discard_blank()
+		return
 	var node := seated
 	if _mates_tool != null and (_mates_tool.is_constrained(node) or _mates_tool.is_locked(node)):
 		return_to_arena() # held by its mates: free placement would break them, so it goes back where it came from
@@ -632,7 +654,10 @@ func return_to_arena() -> void:
 	if seated == null:
 		return
 	var name_text := seated.name
+	var was_blank := is_blank()
 	return_part()
+	if was_blank:
+		return # a part nothing was drawn on is discarded, and return_part said so
 	set_status("%s is back where it came from." % name_text)
 	UiFeedback.haptic(_right, "confirm")
 
@@ -640,6 +665,9 @@ func return_to_arena() -> void:
 func return_part() -> void:
 	## The table is closing (or the model was replaced): the arena node comes back untouched.
 	if seated == null:
+		return
+	if is_blank():
+		_discard_blank() # nothing was drawn on it: there is nothing to give back
 		return
 	var node := seated
 	if is_instance_valid(node):
@@ -649,6 +677,86 @@ func return_part() -> void:
 	_clear_seat()
 	if is_instance_valid(node):
 		part_put_down(node) # edited and handed back: its mates need redoing
+
+
+func _discard_blank() -> void:
+	## A new part that never got any geometry leaves the table: it is taken off the assembly again rather than left behind as an
+	## empty, invisible placed part (the part itself stays in the backend's document, unreferenced).
+	var node := seated
+	var name_text := node.name
+	var root_id := str(node.get_meta("owner_part_id", ""))
+	var occurrence_id := str(node.get_meta("occurrence_id", ""))
+	_clear_seat()
+	node.remove_from_group("grabbable_parts")
+	node.queue_free()
+	set_status("%s had nothing drawn on it, so it was discarded." % name_text)
+	if root_id != "" and occurrence_id != "":
+		NewDocument.new(Callable(api, "request")).remove_occurrence(root_id, occurrence_id) # queued behind any call still in flight
+		_refresh_trees()
+
+
+func _refresh_trees() -> void:
+	tree.mark_stale()
+	_main.refresh_assembly_tree()
+
+
+func new_part() -> void:
+	## "New part" (the tree's + and the tablet's Table page): starts an empty part on the table, ready to be sketched on. The table
+	## opens if it is closed, a part already on it goes back where it came from, and with no assembly loaded yet an empty one is
+	## started first. Named "Part N". The part is placed on the assembly in front of you (so it is where it will be when it comes
+	## off the table); until it has a feature it has no mesh, and nothing in the arena shows it.
+	if _new_part_busy:
+		return
+	_new_part_busy = true
+	await _new_part_impl()
+	_new_part_busy = false
+
+
+func _new_part_impl() -> void:
+	if not api.is_configured():
+		if not _open:
+			open()
+		set_status("New part needs the DIDSA-CAD backend, and none is configured.")
+		return
+	if not _open:
+		open()
+	if seated != null:
+		var leaving := seated.name
+		return_part()
+		set_status("%s went back where it came from." % leaving)
+	if _main.current_root_part_id() == "":
+		if not await _main.new_assembly():
+			return # new_assembly said why
+	var root_id: String = _main.current_root_part_id()
+	var doc := NewDocument.new(Callable(api, "request"))
+	var part_name: String = await doc.next_part_name(root_id)
+	var local_pose := _new_part_pose()
+	var added: Dictionary = await doc.add_part(root_id, part_name, MatesToolScript.pose_to_json(local_pose))
+	if not added["ok"]:
+		set_status(str(added["error"]))
+		UiFeedback.haptic(_right, "error")
+		return
+	if not _open or _main.current_root_part_id() != root_id:
+		return # the table was put away, or the model replaced, while the backend was working
+	var node: MeshInstance3D = _main.add_blank_part(root_id, str(added["occurrence_id"]), local_pose)
+	node.name = part_name
+	_refresh_trees()
+	if not seat(node):
+		node.remove_from_group("grabbable_parts")
+		node.queue_free()
+		set_status("Couldn't put %s on the table." % part_name)
+
+
+func _new_part_pose() -> Transform3D:
+	## Where a new part sits in the arena: to the right of the table and a little further off, in the assembly's own frame
+	## (millimetres, the frame the backend stores an occurrence's transform in), turned the way the assembly is.
+	var forward := -_camera.global_transform.basis.z
+	forward.y = 0.0
+	forward = Vector3.FORWARD if forward.length() < 0.001 else forward.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	var spot := _camera.global_position + forward * 0.8 + right * 0.55 + Vector3(0.0, -0.2, 0.0)
+	var root: Node3D = _main.assembly_root
+	return Transform3D(Basis.IDENTITY, root.global_transform.affine_inverse() * spot)
 
 
 func on_model_replaced() -> void:
@@ -810,11 +918,7 @@ func sync_copy_from_seated() -> void:
 		if child is StaticBody3D:
 			table_copy.remove_child(child)
 			child.free()
-	table_copy.create_trimesh_collision()
-	for child in table_copy.get_children():
-		if child is StaticBody3D:
-			(child as StaticBody3D).collision_layer = TABLE_LAYER
-			(child as StaticBody3D).collision_mask = 0
+	_give_copy_collider()
 	var aabb := table_copy.get_aabb()
 	var refit := TableSeat.fit_scale(aabb, fit_radius)
 	if refit > 0.0:
