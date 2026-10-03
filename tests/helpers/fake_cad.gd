@@ -24,6 +24,7 @@ var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
 var origin_id := ""
+var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
@@ -113,7 +114,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		if origin_id == "":
 			origin_id = next_id("pt")
 			points[origin_id] = Vector2.ZERO
-		return _ok({"id": path.get_file(), "plane": null, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
+		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
 	if path.ends_with("/points") and verb == "POST":

@@ -69,6 +69,7 @@ var _hover_face: Dictionary = {}
 var _sheet_vertices: Array = []
 var _last_view_key := ""
 var _orient_tween: Tween = null
+var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
 var _menu_key := ""
 var _menu_page := 0 ## which page of the Select tool's menu is showing
 var _window_scale := 0.0 ## the effective scale the sheet was last sized for
@@ -415,6 +416,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 			set_state("pick_plane")
 		return false
 	session = new_session
+	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
 	_light_chosen_plane()
 	_build_view()
@@ -427,6 +429,86 @@ func begin_sketch(spec: Dictionary) -> bool:
 		table.manager.activate(SELECT_TOOL) # a sketch opens ready to pick things; choose a drawing tool to draw
 	table.set_status(_sketch_hint())
 	return true
+
+
+func reopen_sketch(feature_id: String) -> bool:
+	## Opens a sketch the part already has, from its row in the Build tree: reads its entities, turns the part to stand its plane up like a
+	## new sketch, and carries on in Select. Editing it changes the part as soon as Done is pressed (anything built on the sketch follows).
+	if state == "opening" or table.table_copy == null or part_id == "" or session != null:
+		if session != null:
+			table.set_status("Finish the open sketch first (Done), then open another.")
+		return false
+	var row: Dictionary = table.build.row(feature_id)
+	if row.is_empty() or str(row.get("type", "")) != "sketch" or str(row.get("sketch_id", "")) == "":
+		return false
+	set_state("opening")
+	table.set_status("Opening the sketch...")
+	var described: Dictionary = await _call(HTTPClient.METHOD_GET, "/sketch/sketches/%s" % str(row["sketch_id"]), null)
+	if not described["ok"] or not (described["json"] is Dictionary):
+		set_state("pick_plane")
+		table.set_status("Couldn't read that sketch: %s" % str(described["error"]))
+		return false
+	var info: Dictionary = described["json"]
+	var plane: Dictionary = {}
+	chosen_plane = ""
+	chosen_face = {}
+	if info.get("plane") is String:
+		plane = SketchMath.fixed_basis(str(info["plane"]))
+		chosen_plane = str(info["plane"])
+	elif row.get("plane_feature_id") != null:
+		var plane_row: Dictionary = table.build.row(str(row["plane_feature_id"]))
+		plane = SketchMath.basis_from_plane_response(plane_row)
+		var refs: Array = plane_row.get("face_refs", [])
+		if not refs.is_empty() and refs[0] is Dictionary:
+			var ref: Dictionary = (refs[0] as Dictionary).get("face_ref", refs[0])
+			chosen_face = {"body_id": str(ref.get("body_id", "")), "index": int(ref.get("index", 0))}
+	if plane.is_empty() or bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
+		chosen_plane = ""
+		chosen_face = {}
+		set_state("pick_plane")
+		table.set_status("That sketch is flipped or turned in the flat app, or its plane can't be found, so it can't be opened here yet.")
+		return false
+	var new_session := SketchSession.new(Callable(self, "_call"))
+	new_session.owner_part_id = part_id
+	new_session.status.connect(func(text: String) -> void: table.set_status(text))
+	var ok: bool = await new_session.reopen(row, plane)
+	if not ok or table.table_copy == null:
+		chosen_plane = ""
+		chosen_face = {}
+		if state == "opening":
+			set_state("pick_plane")
+		return false
+	session = new_session
+	_opened_revision = session.revision
+	session.changed.connect(_on_session_changed)
+	_light_chosen_plane()
+	_build_view()
+	table.orient_to_plane(session.plane)
+	set_state("sketch")
+	_sync_deck()
+	table.manager.activate(SELECT_TOOL)
+	table.set_status("Sketch open. Select things to change them, draw more, then press Done.")
+	return true
+
+
+func finish_sketch() -> void:
+	## The deck's Done: leaves the open sketch. If it was changed the part is rebuilt (everything built on the sketch follows) and its
+	## mates are flagged like any edit; an untouched sketch just closes.
+	if session == null:
+		return
+	var changed_it: bool = session.revision > _opened_revision
+	if table.active_tool != "":
+		table.manager.deactivate()
+	end_sketch()
+	if not changed_it or api == null:
+		return
+	table.set_status("Rebuilding the part...")
+	var refreshed: bool = await refresh_geometry()
+	if refreshed:
+		table.notify_edited(part_id, _edited_nodes)
+		table.set_status("Sketch updated; the part is rebuilt.")
+	else:
+		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Done again.")
 
 
 func _light_chosen_plane() -> void:

@@ -196,6 +196,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 		part_locked = on
 		set_status("The part keeps its tilt: two hands move and scale it." if on else "The part is free: two hands turn it, the stick spins it. Reset or Fit puts the tilt back."))
 	ui.fit_pressed.connect(fit_sketch)
+	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
 	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting

@@ -40,6 +40,7 @@ var feature_id := "" ## the sketch FEATURE (what an extrude names)
 var sketch_id := ""
 var plane_feature_id := ""
 var plane: Dictionary = {} ## {origin, x, y, n} in the part's frame, mm
+var revision := 0 ## counts solves: 1 right after opening, more once anything changed (the editor refreshes the part when a sketch is left with edits)
 var origin_id := "" ## the sketch's real origin point (0, 0): fixed by the backend, snappable, constrainable, never deleted ("" on a backend that doesn't say)
 
 var tool := ""
@@ -131,6 +132,27 @@ func open_sketch(spec: Dictionary) -> bool:
 	return refreshed
 
 
+func reopen(sketch_feature: Dictionary, p_plane: Dictionary) -> bool:
+	## Opens a sketch the part ALREADY has (a row of the Build tree) instead of making a new one: `sketch_feature` is the backend's feature
+	## row ({id, sketch_id, plane_feature_id}), `p_plane` the plane's basis in the part's frame. Reads its points and entities, nothing is made.
+	if owner_part_id.is_empty() or str(sketch_feature.get("sketch_id", "")).is_empty() or p_plane.is_empty():
+		status.emit("That sketch can't be opened here.")
+		return false
+	busy = true
+	plane = p_plane
+	sketch_id = str(sketch_feature["sketch_id"])
+	feature_id = str(sketch_feature.get("id", ""))
+	var on_plane = sketch_feature.get("plane_feature_id")
+	plane_feature_id = str(on_plane) if on_plane != null else ""
+	_undo.clear()
+	var described: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id, null)
+	if described["ok"] and described["json"] is Dictionary:
+		origin_id = str((described["json"] as Dictionary).get("origin_point_id", ""))
+	var refreshed := await refresh(true)
+	busy = false
+	return refreshed
+
+
 func is_origin(point_id: String) -> bool:
 	return origin_id != "" and point_id == origin_id
 
@@ -157,6 +179,7 @@ func refresh(with_entities: bool = true) -> bool:
 
 
 func _ingest_state(json: Dictionary) -> void:
+	revision += 1
 	points.clear()
 	point_locked.clear()
 	for p in json.get("points", []):

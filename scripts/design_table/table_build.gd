@@ -227,12 +227,16 @@ func _show(entities: Array) -> void:
 # --- Edit values ----------------------------------------------------------------------------
 
 func can_edit(feature_id: String) -> bool:
-	return BuildTree.EDITABLE.has(str(row(feature_id).get("type", "")))
+	var type := str(row(feature_id).get("type", ""))
+	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "")
 
 
 func edit_selected() -> void:
 	var f := row(selected_id)
 	if f.is_empty() or not can_edit(selected_id):
+		return
+	if str(f.get("type", "")) == "sketch":
+		await _table.editor.reopen_sketch(selected_id) # a sketch is edited on the sheet, not with a number
 		return
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
 

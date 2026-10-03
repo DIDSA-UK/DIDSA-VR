@@ -23,6 +23,12 @@ func frames(n: int = 3) -> void:
 		await process_frame
 
 
+func pick_line_toggle_construction(sess) -> void:
+	sess.set_tool("select")
+	await sess.select({"kind": "line", "id": "lnA"})
+	await sess.apply_menu("construction")
+
+
 func settle(pred: Callable, n := 200) -> bool:
 	for i in n:
 		if pred.call():
@@ -141,10 +147,43 @@ func _initialize() -> void:
 	print("SMOKE selecting the fillet lights its edge instead: ", table.build.selected_id == "fil_box" and table.editor.highlight.set_nodes().size() == 1 and find_button(table.tree._build_rows, "Edit") != null)
 	row_button("Sketch 1").pressed.emit()
 	await frames(2)
-	print("SMOKE a sketch on a reference plane says so (editing an existing sketch is not built) and has no Edit: ", table.status().contains("reference plane") and find_button(table.tree._build_rows, "Edit").disabled)
+	print("SMOKE a sketch on a reference plane says so, and its Edit now opens the sketch: ", table.status().contains("reference plane") and not find_button(table.tree._build_rows, "Edit").disabled)
+
+	# --- reopening the part's existing sketch (G7): its entities are read, the part turns to it, Select is on, Done closes it
+	fake.sketch_plane = "XY"
+	fake.origin = true
+	fake.points = {"pA": Vector2(0, 0), "pB": Vector2(40, 0), "pC": Vector2(40, 30)}
+	fake.entities = [{"type": "line", "id": "lnA", "start_point_id": "pA", "end_point_id": "pB", "construction": false}, {"type": "line", "id": "lnB", "start_point_id": "pB", "end_point_id": "pC", "construction": false}]
+	fake.calls.clear()
+	find_button(table.tree._build_rows, "Edit").pressed.emit()
+	var reopened: bool = await settle(func() -> bool: return table.editor.state == "sketch" and table.editor.session != null and table.editor.session.lines.size() == 2)
+	print("SMOKE Edit on a sketch row opens THAT sketch: its own id is read (nothing is made), its two lines and points arrive: ", reopened and table.editor.session.sketch_id == "s1" and table.editor.session.feature_id == "sk_box" and calls_to("POST /document/parts/PART_BOX/features/sketch").is_empty() and table.editor.session.lines.size() == 2)
+	print("SMOKE ...the part stands the sketch's plane up at the tilt, the sketch's origin is read, and Select is on: ", table.pivot.basis.orthonormalized().is_equal_approx(table.sketch_rotation(table.editor.session.plane)) and table.editor.session.origin_id != "" and table.active_tool == "select" and table.ui.done_button() != null and not table.ui.done_button().disabled)
+	var glb_fetches: int = calls_to("assembly-mesh.glb").size()
+	table.ui.done_button().pressed.emit()
+	await frames(3)
+	print("SMOKE Done on an untouched sketch just closes it (no rebuild, nothing flagged): ", table.editor.session == null and table.editor.state == "pick_plane" and calls_to("assembly-mesh.glb").size() == glb_fetches and table.ui.done_button().disabled)
+	find_button(table.tree._build_rows, "Edit").pressed.emit()
+	await settle(func() -> bool: return table.editor.session != null and table.editor.session.lines.size() == 2)
+	var sess = table.editor.session
+	await pick_line_toggle_construction(sess)
+	glb_fetches = calls_to("assembly-mesh.glb").size()
+	var edited_parts: Array = []
+	table.part_edited.connect(func(id: String) -> void: edited_parts.append(id))
+	table.ui.done_button().pressed.emit()
+	await settle(func() -> bool: return table.editor.session == null and calls_to("assembly-mesh.glb").size() > glb_fetches)
+	print("SMOKE Done after a change rebuilds the part from the new sketch (the part's own glb is fetched) and flags its mates like any edit: ", calls_to("assembly-mesh.glb").size() > glb_fetches and edited_parts == ["PART_BOX"])
+	fake.points.clear()
+	fake.entities.clear()
+	fake.sketch_plane = null
+	row_button("Sketch 1").pressed.emit()
+	await frames(2)
+	table.build.select("sk_box")
+	await frames(2)
+
 
 	# --- an older backend: the glb ignores hidden / rollback, so Hide and Roll back are switched off and the tree says why
-	print("SMOKE the backend was asked once whether it can hide and roll back, and said yes: ", table.build.view_filters_ok and calls_to("GET /openapi.json").size() == 1)
+	print("SMOKE the backend was asked once whether it can hide and roll back, and said yes: ", table.build.view_filters_ok and table.build._probed)
 	fake.view_filters = false
 	table.build._probed = false
 	await table.build.probe_backend()

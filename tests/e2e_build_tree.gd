@@ -92,6 +92,25 @@ func _initialize() -> void:
 	await wait_for(func() -> bool: return absf(node.get_aabb().size.z - 12.0) < 0.5 and float(b.features[1]["end_distance"]) == 12.0)
 	print("SMOKE Undo puts the 12 back (mesh and tree): ", absf(node.get_aabb().size.z - 12.0) < 0.5 and float(b.features[1]["end_distance"]) == 12.0)
 
+	# --- reopen the sketch, change it, Done: the extrude and the fillet built on it follow (G7)
+	b.select(sketch_id)
+	var x_before: float = node.get_aabb().size.x
+	var reopened_ok: bool = await ed.reopen_sketch(sketch_id)
+	var sess = ed.session
+	print("SMOKE Edit on the sketch row reopens the real sketch with its rectangle (4 lines) and its origin: ", reopened_ok and sess != null and sess.lines.size() >= 4 and sess.shapes.size() == 1 and sess.origin_id != "" and ed.state == "sketch" and table.active_tool == "select")
+	var bottom: String = ""
+	for id in sess.lines:
+		var l: Dictionary = sess.lines[id]
+		if absf(sess.points[l["a"]].y - sess.points[l["b"]].y) < 0.001 and bottom == "":
+			bottom = id
+	sess.set_tool("dimension")
+	await sess.select({"kind": "line", "id": bottom})
+	var dimmed: Dictionary = await sess.confirm_ghost("length", 90.0)
+	table.ui.done_button().pressed.emit()
+	var followed: bool = await wait_for(func() -> bool: return ed.session == null and absf(node.get_aabb().size.x - 90.0) < 0.7)
+	print("SMOKE a 90 mm length typed on the reopened sketch, then Done: the part is rebuilt from it on the backend and the mesh is 90 wide (was %s): " % x_before, dimmed["ok"] and followed, " ", node.get_aabb().size.x)
+	print("SMOKE ...the extrude and fillet are still there, built on the changed sketch: ", b.features.size() == 3 and b.features.map(func(f): return f["type"]) == ["sketch", "extrude", "fillet"])
+
 	# --- Hide: the table's copy only
 	b.select(extrude_id)
 	await b.toggle_hidden_selected()
