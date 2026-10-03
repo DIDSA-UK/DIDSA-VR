@@ -41,6 +41,10 @@ const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
+const TableTree := preload("res://scripts/design_table/table_tree_window.gd")
+const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
+const EnforceButton := preload("res://scripts/design_table/enforce_button.gd")
+const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
@@ -57,9 +61,9 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var pixels_per_metre: float = 2667.0 ## the same physical text size as the wrist tablet
 @export var deck_lean_degrees: float = 30.0 ## how far the deck is tipped up from flat, towards you
 @export var deck_gap := 0.05 ## metres between the slab's front edge and the deck's top edge
-@export var lean_degrees: float = 10.0 ## the whole console leans back a little: its front edge is lower than its back edge
+@export var lean_degrees: float = 22.0 ## the whole console leans back like a drafting table: its front edge is lower than its back edge, so the slab and the sketch sheet face you rather than lying nearly edge-on
 @export var open_distance: float = 0.70 ## metres in front of you when summoned
-@export var open_drop: float = 0.45 ## metres below your eyes when summoned
+@export var open_drop: float = 0.40 ## metres below your eyes when summoned
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
@@ -79,6 +83,10 @@ var handle ## PanelHandle on the slab's front edge
 var snap_enabled := true
 var api ## cad_api.gd: the serial line to the backend
 var editor ## table_editor.gd: the editing session on the seated part
+var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
+var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
+var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
+var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
@@ -109,6 +117,7 @@ var _status := ""
 var _seat_local_basis := Basis.IDENTITY ## the arena node's own basis (relative to its parent) when it was seated
 var _seat_pose := Transform3D.IDENTITY ## its world transform when it was seated: what undo goes back to
 var _last_drop_ok := false
+var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 
 
@@ -136,6 +145,17 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	editor.name = "Editor"
 	add_child(editor)
 	editor.setup(self, api)
+	tree = TableTree.new()
+	tree.name = "Tree"
+	add_child(tree)
+	tree.setup_for_table(self, left, right, camera, main)
+	enforce_button = EnforceButton.new()
+	enforce_button.name = "EnforceMates"
+	main.add_child(enforce_button) # a sibling, not a child: it must stay visible when the table is put away
+	enforce_button.setup(right, camera)
+	enforce_button.pressed_enforce.connect(enforce_mates)
+	if mates_tool != null:
+		mates_tool.enforce_finished.connect(_on_enforce_finished)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting
@@ -154,7 +174,8 @@ func open() -> void:
 	surface.arm()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	poke_render()
-	set_status("Carry a part over the table and let go to edit it.")
+	tree.open()
+	set_status("Carry a part over the table and let go, or pick one in the tree, to edit it.")
 	UiFeedback.play("open", self)
 	opened.emit()
 
@@ -164,6 +185,8 @@ func close() -> void:
 		return
 	return_part() # the real node comes back exactly where it was
 	manager.deactivate()
+	if tree.is_open():
+		tree.close()
 	_open = false
 	visible = false
 	surface.release_all()
@@ -520,10 +543,15 @@ func return_part() -> void:
 		if node.has_meta("on_table"):
 			node.remove_meta("on_table")
 	_clear_seat()
+	if is_instance_valid(node):
+		part_put_down(node) # edited and handed back: its mates need redoing
 
 
 func on_model_replaced() -> void:
 	## main.gd is about to free every arena node: forget the seated one without touching it.
+	enforce_button.hide_button()
+	mate_drift.clear() # a reload reads every mate fresh from the backend
+	mate_baseline.clear()
 	_clear_seat()
 
 
@@ -545,6 +573,59 @@ func _clear_seat() -> void:
 
 func configure_backend(url: String, key: String) -> void:
 	api.configure(url, key)
+	tree.configure_backend(url, key)
+
+
+func node_for_occurrence(occurrence_id: String) -> Node3D:
+	## The arena node showing this placed occurrence, if there is one that can be taken (visible, not already on a table).
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if node is MeshInstance3D and node.has_meta("occurrence_id") and str(node.get_meta("occurrence_id")) == occurrence_id \
+				and node.visible and not node.has_meta("on_table") and not node.get_meta("held", false):
+			return node
+	return null
+
+
+func seat_node(node: Node3D) -> String:
+	## Puts an arena part on the table without carrying it there (the tree's "Table"). Returns a message for the status line.
+	if not _open:
+		return "Open the table first."
+	if seated != null:
+		return "The table already holds %s. Lift it off first." % seated.name
+	if not (node is MeshInstance3D) or str(node.get_meta("owner_part_id", "")) == "":
+		return "%s has no part behind it to edit (a local file, not the backend)." % node.name
+	return "On the table." if seat(node as MeshInstance3D) else "Couldn't put that on the table."
+
+
+func bring_part(node: Node3D) -> String:
+	## Moves an arena part to a spot in front of you (the tree's "Bring"): an ordinary move, undoable, saved like any other.
+	if _mates_tool != null and (_mates_tool.is_constrained(node) or _mates_tool.is_locked(node)):
+		return "%s is held by its mates. Relax all mates first." % node.name
+	var forward := -_camera.global_transform.basis.z
+	forward.y = 0.0
+	forward = Vector3.FORWARD if forward.length() < 0.001 else forward.normalized()
+	var spot := _camera.global_position + forward * 0.55 + Vector3(0.0, -0.25, 0.0)
+	var before := node.global_transform
+	var centre: Vector3 = node.global_transform * (node as MeshInstance3D).get_aabb().get_center()
+	node.global_position += spot - centre
+	var after := node.global_transform
+	var stack = _main.command_stack
+	if stack != null:
+		stack.push("bring %s" % node.name,
+			func() -> void:
+				if is_instance_valid(node):
+					node.global_transform = before
+					_persist(node),
+			func() -> void:
+				if is_instance_valid(node):
+					node.global_transform = after
+					_persist(node))
+	_persist(node)
+	return "Brought %s to you." % node.name
+
+
+func _persist(node: Node3D) -> void:
+	if _mates_tool != null:
+		_mates_tool.persist_pose(node)
 
 
 func orient_to_plane(plane: Dictionary) -> void:
@@ -595,6 +676,83 @@ func sync_copy_from_seated() -> void:
 	poke_render()
 
 
-func notify_edited(edited_part_id: String) -> void:
-	## A feature was added or taken back on this part.
+func notify_edited(edited_part_id: String, nodes: Array = []) -> void:
+	## A feature was added or taken back on this part: every arena instance of it (they share one definition) has stale
+	## mates now. They are flagged, and the Enforce button follows the one on the table.
+	for node in nodes:
+		DirtyMates.mark(node)
+	if seated != null:
+		DirtyMates.mark(seated)
 	part_edited.emit(edited_part_id)
+
+
+func part_put_down(part: Node3D) -> void:
+	## controller.gd calls this when a hand lets go of a part in the arena: a part with stale mates gets the Enforce button.
+	if DirtyMates.is_dirty(part):
+		enforce_button.show_for(part)
+
+
+func add_mate_baseline(captured: Array) -> void:
+	## Remembers what mates' faces looked like before an edit — once per reference: the FIRST sight is the baseline, so a later edit
+	## (or an undo that brings the old shape back) is compared with how the mate was made, not with the previous edit.
+	for entry in captured:
+		var known := false
+		for existing in mate_baseline:
+			if existing["mate_id"] == entry["mate_id"] and existing["occurrence_id"] == entry["occurrence_id"] and existing["index"] == entry["index"] and existing["body_id"] == entry["body_id"]:
+				known = true
+				break
+		if not known:
+			mate_baseline.append(entry)
+
+
+func update_mate_drift() -> void:
+	## After the part's mesh changed: which mates now name a different face than when they were made. Replaces the last answer, so
+	## undoing an edit that brings the faces back also clears the warning.
+	var arena := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D)
+	var drifted := MateHealth.drifted(mate_baseline, arena)
+	mate_drift.clear()
+	for d in drifted:
+		var list: Array = mate_drift.get(str(d["mate_id"]), [])
+		list.append(d)
+		mate_drift[str(d["mate_id"])] = list
+	if not mate_drift.is_empty():
+		set_status("%d mate(s) now point at different faces than before the edit." % mate_drift.size())
+
+
+func enforce_mates() -> void:
+	## The Enforce mates button: re-solves every mate of the assembly. A mate whose face the edit changed is SUPPRESSED first, not solved:
+	## the backend would accept it and join whatever faces now have those numbers. The flags are cleared only if all the rest could be met.
+	if _mates_tool == null:
+		return
+	var owner_id: String = _main.current_root_part_id()
+	if owner_id == "":
+		enforce_button.set_message("There is no assembly loaded to enforce.")
+		return
+	enforce_button.set_busy(true)
+	var suppressed := 0
+	for mate_id in mate_drift.keys():
+		var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/mates/%s" % [owner_id, mate_id], {"suppressed": true})
+		if r["ok"]:
+			suppressed += 1
+	mate_drift.clear()
+	mate_baseline.clear() # the mates are consistent again after this: the next edit starts a new baseline
+	_last_suppressed = suppressed
+	await _mates_tool.enforce_all(owner_id)
+
+
+func _on_enforce_finished(result: Dictionary) -> void:
+	enforce_button.set_busy(false)
+	var suppressed := _last_suppressed
+	_last_suppressed = 0
+	if bool(result.get("ok", false)):
+		var cleared := DirtyMates.clear_all(get_tree())
+		if suppressed > 0:
+			var text := "%d mate(s) turned off: the edit changed the face they were made on. Remake them from Assembly > Mates." % suppressed
+			enforce_button.set_message(text)
+			enforce_button.hide_after(8.0) # long enough to read; the badges are gone, so this is the only place it's said
+			set_status(text)
+		else:
+			enforce_button.hide_button()
+			set_status("Mates enforced.%s" % ("" if cleared == 0 else " %d part(s) up to date." % cleared))
+	else:
+		enforce_button.set_message("Couldn't satisfy every mate: %s" % "; ".join(result.get("problems", [])))

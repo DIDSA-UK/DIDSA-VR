@@ -51,6 +51,8 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"id": next_id("feat")})
 	if verb == "DELETE" and path.contains("/features/"):
 		return _ok(null)
+	if verb == "PATCH" and path.contains("/mates/"):
+		return _ok({})
 	if path.ends_with("/create-plane-features"):
 		if plane_for.is_valid():
 			var answer: Dictionary = plane_for.call(body)

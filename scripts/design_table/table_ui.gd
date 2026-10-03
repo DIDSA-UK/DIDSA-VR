@@ -121,10 +121,11 @@ func _build_shell() -> void:
 func _utility(icon_name: String, text: String, toggle: bool) -> Button:
 	var b := Button.new()
 	b.icon = UiIcons.texture(icon_name, 32)
-	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER if text == "" else HORIZONTAL_ALIGNMENT_LEFT
 	b.text = text
 	b.toggle_mode = toggle
 	b.custom_minimum_size = Vector2(64 if text == "" else 150, 56)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER # one row tall like the other buttons, not stretched to the status line
 	return b
 
 

@@ -49,6 +49,7 @@ extends Node
 
 signal picks_changed()
 signal mates_changed()
+signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
 
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
@@ -286,9 +287,10 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	return {"ok": true, "error": ""}
 
 
-func enforce_all(owner_part_id: String) -> void:
+func enforce_all(owner_part_id: String) -> Dictionary:
 	## Solves every non-grounded occurrence any of this Part's own Mates
-	## reference, and reports the outcome on the tablet.
+	## reference, and reports the outcome on the tablet. Returns {ok, solved, problems}
+	## (ok = every mate was satisfied) and emits enforce_finished with the same.
 	await refresh_state(owner_part_id)
 	var solved := 0
 	var problems: Array[String] = []
@@ -304,6 +306,9 @@ func enforce_all(owner_part_id: String) -> void:
 		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
 	else:
 		_report("Couldn't satisfy every mate: %s" % "; ".join(problems))
+	var outcome := {"ok": problems.is_empty(), "solved": solved, "problems": problems}
+	enforce_finished.emit(outcome)
+	return outcome
 
 
 func set_relaxed(on: bool) -> void:
@@ -363,13 +368,19 @@ func is_mated(part: Node3D) -> bool:
 func is_locked(part: Node3D) -> bool:
 	## Grounded + mated + enforced: it's the anchor its mates are solved
 	## against, so it can't be moved on its own.
-	return not relaxed and is_fixed(part) and is_mated(part)
+	return not relaxed and not _mates_dirty(part) and is_fixed(part) and is_mated(part)
 
 
 func is_constrained(part: Node3D) -> bool:
 	## Mated, free to move, and mates are enforced: its motion is steered by a
 	## live solve (constrain_drag()).
-	return not relaxed and is_managed(part) and is_mated(part) and not is_fixed(part)
+	return not relaxed and not _mates_dirty(part) and is_managed(part) and is_mated(part) and not is_fixed(part)
+
+
+func _mates_dirty(part: Node3D) -> bool:
+	## The design table flagged this part's mates as stale (its geometry was edited, so the faces they reference may be gone or
+	## different): until "Enforce mates", the part moves freely instead of being steered by them, and is no anchor.
+	return is_instance_valid(part) and bool(part.get_meta("mates_dirty", false))
 
 
 func has_drag(part: Node3D) -> bool:

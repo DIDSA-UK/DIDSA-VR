@@ -43,6 +43,7 @@ var status_text: String = "" ## what _set_status() last said — console-only no
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
+var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 var _settings := preload("res://scripts/app_settings.gd").new() ## project folder + last-picked scene — see app_settings.gd
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
@@ -671,6 +672,7 @@ func _begin_import() -> void:
 		_set_status("File has no document.root_part_id and no part_id_override was given.")
 		return
 	_resolved_part_id = root_part_id
+	_remember_native_extras(parsed)
 
 	_set_status("Importing %s (part %s) into the backend..." % [native_file_path.get_file(), _resolved_part_id])
 	_import_started_ms = Time.get_ticks_msec()
@@ -851,6 +853,7 @@ func _open_native_file_impl(path: String) -> void:
 	var parsed = _read_native_json(path)
 	if parsed == null:
 		return
+	var raw_text := FileAccess.get_file_as_string(path) # sent AS IS: re-serialising `parsed` would turn every integer into a float
 	var document_dict: Dictionary = parsed.get("document", {})
 	var root_part_id: String = str(document_dict.get("root_part_id", ""))
 	if root_part_id.is_empty():
@@ -861,12 +864,13 @@ func _open_native_file_impl(path: String) -> void:
 	add_child(req)
 	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
 	_set_status("Importing %s (part %s)..." % [path.get_file(), root_part_id])
-	req.request("%s%s/import/native" % [backend_url, API_PREFIX], headers, HTTPClient.METHOD_POST, JSON.stringify(parsed))
+	req.request("%s%s/import/native" % [backend_url, API_PREFIX], headers, HTTPClient.METHOD_POST, raw_text)
 	var import_result: Array = await req.request_completed
 	if _parse_import_response(import_result, "import %s" % path.get_file(), req) == null:
 		return
 
 	_resolved_part_id = root_part_id
+	_remember_native_extras(parsed)
 	_set_status("Imported. Fetching assembly mesh...")
 	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
 		backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()
@@ -922,7 +926,7 @@ func _add_component_file_impl(path: String) -> void:
 	_set_status("Adding %s to the assembly..." % path.get_file())
 	req.request(
 		"%s%s/parts/%s/add-component" % [backend_url, API_PREFIX, _resolved_part_id], headers,
-		HTTPClient.METHOD_POST, JSON.stringify({"component": parsed})
+		HTTPClient.METHOD_POST, '{"component": %s}' % FileAccess.get_file_as_string(path) # the file's own text: re-serialising `parsed` would turn every integer into a float
 	)
 	var add_result: Array = await req.request_completed
 	if _parse_import_response(add_result, "add %s to the assembly" % path.get_file(), req) == null:
@@ -1121,6 +1125,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
+	design_table.tree.mark_stale() # the table's own copy of the tree, for the same reason
 	_assembly_tree_window.mark_stale() # the Occurrence tree it's shown is about to point at parts that no longer exist — see that script's own mark_stale()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
@@ -1152,6 +1157,94 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
 	_mates_tool.refresh_state(_resolved_part_id)
 	return true
+
+
+# --- Saving ---------------------------------------------------------------------------
+# DIDSA-CAD's backend holds the document in memory only and the client owns the files, so edits made in VR (or by the
+# design table) exist nowhere on disk until this writes them. A SNAPSHOT of the whole session, in the same native format the
+# flat app saves: its "bundle" shape (every Part in one file), which the flat app opens directly.
+
+const _SNAPSHOT_SCHEMA_VERSION := 1
+
+func _remember_native_extras(parsed: Dictionary) -> void:
+	_native_extras.clear()
+	for key in parsed:
+		if key != "schema_version" and key != "document" and key != "sketches":
+			_native_extras[key] = parsed[key]
+
+
+func snapshot_path() -> String:
+	## Where a snapshot is written: next to the Settings project folder if one is set, else user://models (which the Files tab
+	## also scans, so it can be opened again), under a name that never overwrites the file the session came from.
+	var dir := _settings.project_folder if not _settings.project_folder.is_empty() else "user://models"
+	if not DirAccess.dir_exists_absolute(dir):
+		DirAccess.make_dir_recursive_absolute(dir)
+	var base := native_file_path.get_file().get_basename() if not native_file_path.is_empty() else "assembly"
+	var stamp := Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "-")
+	return dir.path_join("%s-vr-%s.didsa" % [base, stamp])
+
+
+func native_extras_to_add(exported: Dictionary) -> Dictionary:
+	## The flat app's extra top-level keys from the file this session was opened from (the backend drops them on import) that
+	## a save should write back, so saving from VR doesn't lose its hidden-feature or section state. Never a key the export
+	## itself has.
+	var out := {}
+	for key in _native_extras:
+		if not exported.has(key):
+			out[key] = _native_extras[key]
+	return out
+
+
+static func append_to_json_object(text: String, extras: Dictionary) -> String:
+	## `text` (a JSON object, exactly as the backend wrote it) with `extras` added as further top-level keys. Done on the TEXT,
+	## not by parsing and re-writing: Godot reads every JSON number as a float and would write `0` back as `0.0`, which the
+	## backend refuses for the integer fields in sketches and mate references. "" if `text` isn't an object.
+	var trimmed := text.strip_edges()
+	if extras.is_empty():
+		return trimmed
+	if not trimmed.ends_with("}"):
+		return ""
+	var body := trimmed.substr(0, trimmed.length() - 1).strip_edges()
+	var pieces: PackedStringArray = []
+	for key in extras:
+		pieces.append("%s: %s" % [JSON.stringify(str(key)), JSON.stringify(extras[key])])
+	return "%s%s%s}" % [body, "" if body.ends_with("{") else ", ", ", ".join(pieces)]
+
+
+func save_native_snapshot(path: String = "") -> String:
+	## Writes the whole session (GET /document/export/native, no part_id) to a .didsa file. Returns the path written, or "" with
+	## the reason in the status line. Coroutine.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("Saving needs a backend (see secrets.cfg.example).")
+		return ""
+	var target := path if not path.is_empty() else snapshot_path()
+	var req := HTTPRequest.new()
+	add_child(req)
+	_set_status("Saving...")
+	req.request("%s%s/export/native" % [backend_url, API_PREFIX], ["X-API-Key: %s" % api_key], HTTPClient.METHOD_GET)
+	var result: Array = await req.request_completed
+	req.queue_free()
+	if result[0] != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
+		_set_status("Couldn't save: %s" % _http_error_text(int(result[1]), int(result[0]), result[3]))
+		return ""
+	var text: String = (result[3] as PackedByteArray).get_string_from_utf8()
+	var parsed = JSON.parse_string(text)
+	if not (parsed is Dictionary) or int(parsed.get("schema_version", 0)) != _SNAPSHOT_SCHEMA_VERSION:
+		_set_status("Couldn't save: the backend sent something that isn't a native file.")
+		return ""
+	var out_text := append_to_json_object(text, native_extras_to_add(parsed))
+	if out_text == "":
+		_set_status("Couldn't save: the backend's file wasn't in the shape expected.")
+		return ""
+	var file := FileAccess.open(target, FileAccess.WRITE)
+	if file == null:
+		_set_status("Couldn't write %s (error %d)." % [target, FileAccess.get_open_error()])
+		return ""
+	file.store_string(out_text)
+	file.close()
+	_native_root_id_cache.erase(target)
+	_set_status("Saved %s." % target.get_file())
+	return target
 
 
 func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:

@@ -499,6 +499,8 @@ func _try_release() -> void:
 		if table.try_seat_released(part, _held_start_transform):
 			return # let go over the design table: the table took it, and the part's pose in the assembly is unchanged
 	_push_move_command(part, _held_start_transform)
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		table.part_put_down(part) # a part whose mates went stale in an edit gets the Enforce mates button here
 
 
 func _update_held_part(delta: float) -> void:

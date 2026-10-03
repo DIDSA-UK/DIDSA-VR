@@ -213,4 +213,41 @@ func _initialize() -> void:
 	# --- lifting returns the real node, edited, to the arena
 	table.close()
 	print("SMOKE closing the table returns the edited part to the arena: ", node.visible and table.seated == null and node.get_aabb().size.z > before_a + 4.0)
+	print("SMOKE ...and its instances carry the stale-mates flag, with the Enforce button over the one handed back: ", nodes.all(func(n): return n.get_meta("mates_dirty", false)) and table.enforce_button.is_showing())
+
+	# --- save: a native file the flat app can open, with its extra keys kept, that round-trips
+	main.backend_url = str(cfg.get_value("backend", "url"))
+	main.api_key = str(cfg.get_value("backend", "api_key"))
+	main._native_extras = {"hidden_feature_ids": ["flat-app-state"], "section_planes": []}
+	var saved_path: String = await main.save_native_snapshot("user://e2e_snapshot.didsa")
+	print("SMOKE the session is saved as a native file: ", saved_path == "user://e2e_snapshot.didsa" and FileAccess.file_exists(saved_path))
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(saved_path)) if saved_path != "" else null
+	var saved_ok: bool = saved is Dictionary
+	print("SMOKE ...in the flat app's format (schema 1, a root part, both parts): ", saved_ok and int(saved["schema_version"]) == 1 and saved["document"]["root_part_id"] == asm_id and saved["document"]["parts"].size() == 2)
+	print("SMOKE ...keeping the flat app's own extra keys: ", saved_ok and saved.get("hidden_feature_ids") == ["flat-app-state"])
+	var saved_features: Array = []
+	if saved_ok:
+		for p in saved["document"]["parts"]:
+			if p["id"] == plate_id:
+				saved_features = p["features"].map(func(f): return f["type"])
+	print("SMOKE ...with the edits made on the table in it: ", saved_features.count("extrude") == 3 and saved_features.count("sketch") == 3 and saved_features.count("create_plane") == 2 and saved_features.count("fillet") == 0, " ", saved_features)
+	var occurrence_count: int = 0
+	if saved_ok:
+		for p in saved["document"]["parts"]:
+			if p["id"] == asm_id:
+				occurrence_count = p["occurrences"].size()
+	print("SMOKE ...and the assembly's two placed instances: ", occurrence_count == 2)
+	await main.open_native_file(saved_path) # VR's own Open path: it must send the file's text as it is, not re-written with floats for integers
+	var reopened: Array = get_nodes_in_group("grabbable_parts")
+	print("SMOKE opening the saved file in VR loads the edited assembly (both instances): ", main.status_text.begins_with("Opened") and reopened.size() == 2, " ", main.status_text)
+	var reexport: Dictionary = await req(HTTPClient.METHOD_GET, "/document/export/native?part_id=%s" % plate_id)
+	var again_types: Array = []
+	if reexport["ok"]:
+		again_types = reexport["json"]["document"]["parts"][0]["features"].map(func(f): return f["type"])
+	print("SMOKE ...with the same features on the part (the file round-trips through the backend): ", again_types == saved_features, " ", again_types)
+	var grown := true
+	for n in reopened:
+		grown = grown and n.get_aabb().size.z > before_a + 4.0
+	print("SMOKE ...and the reopened parts have the edited shape: ", grown)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://e2e_snapshot.didsa"))
 	quit()

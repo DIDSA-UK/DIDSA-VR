@@ -2430,3 +2430,46 @@ Measured on a Quest 3 (flat 2D debug APK, headset worn 180 s): one local-retract
 ## 2026-10-02 - Constrained drag S9 (VR half): docs follow the CAD cleanup
 
 DIDSA-CAD S9 (PR #276) removed the v0 `transform` / `free_twists` aliases from `mate-motion` and moved `quality.jump` / `max_step` into the screw chart; DIDSA-CAD F1b made the anchor the weighted-nearest pose. VR needed no code change (it never read the aliases; `tests/e2e_mates_motion.gd` already asserts that). Updated: `docs/backend-api-notes.md` (aliases gone, screw-chart `jump`/`max_step`, nearest-point anchors, the optional `constraint_model` / `reference` / `include_constraint_model` fields VR ignores, and why VR does not run the local retraction), `docs/constrained-drag-rollout.md` (S9 happened), and one comment in `scripts/mates_tool.gd`. **Ran:** `tests/run_all.sh` (Godot 4.7.2 headless, clean) and `tests/e2e_mates_motion.gd` against a throwaway local backend built from DIDSA-CAD `main` after S9 + F1b (PR #278 merge, b9f4290): every SMOKE line `true`, the 60-frame drag cost 6 requests, group follow, atomic commit and the `converged:false` hold all pass. **Not run:** a headset, a PCVR session.
+
+## 2026-10-03 — Milestone 2: the design table (built; headless- and real-backend-confirmed, not yet on a headset)
+
+Full write-up: [`docs/design-table.md`](design-table.md). The brief it started from is saved as `docs/design-table-brief.md`.
+
+**What was built** (all in `scripts/design_table/` unless noted): a summonable console (slab, grab handle, deck, tree) reached from
+Assembly → Table on the wrist tablet; putting a part on it by carrying it over the slab or from the tree, as a scaled **copy** (the
+arena node stays put, hidden) that lifts back out at arena scale; plane picking on flat faces and the three reference planes; the
+sketch sheet and Line / Rectangle / Circle / Arc / Polygon / Point; snapping with a toggle; the constraint tools; Dimension with values
+typed on the existing numeric pad; Extrude (boss / cut / flip / depth), Fillet, Chamfer, with a fresh mesh put on the table copy and on
+every placed instance of the part; Undo; stale-mates flags, badges and the **Enforce mates** button; Files → Save as new file. Shared
+picking moved to `scripts/laser_pick.gd`; `FaceHighlight` gained `invalidate()` and a multi-edge set; `Main` gained `swap_part_mesh()`,
+`save_native_snapshot()`.
+
+**Things the code taught us that the brief didn't know** (each cost an hour if you hit it blind):
+- A glb node's `owner_part_id` is the **assembly that holds the occurrence**, not the part it shows; the part is `resolved_part_id` on
+  the owner's occurrences. The table looks it up (and refuses an assembly of parts).
+- The backend names a mate's faces by **index**, and an edit **renumbers** them: a boss on a plate's top turned the mated "top" and
+  "bottom" into the two side faces, and Enforce mates then "succeeded" while the stack stayed apart. The client now records what each
+  mate's face looked like before the first edit, compares after every change (so Undo clears it), and Enforce **suppresses** a mate whose
+  face changed instead of solving it. `mate_health.gd`; verified against the real solver in `tests/e2e_design_table_mates.gd`.
+- **Godot reads every JSON number as a float.** Re-serialising a native file writes `rotation_quarter_turns: 0.0`, which the backend
+  accepts and then crashes on when it renders. `open_native_file` and `add_component_file` did this (a latent bug for any file with
+  sketches); they now send the file's own text, and saving writes the backend's own text with the flat app's extra keys appended.
+- A mated part with enforced mates is steered by a live solve while carried, so it can't be carried to the table; relax mates, or use the
+  tree's Table button. A part with stale mates is deliberately not steered.
+- The backend's sketch `solve-and-refresh` points are the truth: the first real length dimension rescales the whole sketch about its first
+  point, so nothing drawn stays where it was tapped.
+
+**Tests added:** `design_table_logic`, `design_table_scene`, `sketch_session` (with `tests/helpers/fake_cad.gd`), `design_table_editing`,
+`design_table_tree`, `design_table_mates`, `design_table_save`, `mate_health` (all in `run_all.sh`); local-only `e2e_design_table` and
+`e2e_design_table_mates` (real backend, real solver); `design_table_render` (Xvfb PNGs) and `design_table_perf` (script timing).
+The full headless suite and the existing real-backend e2e tests (`e2e_add_component`, `_mates`, `_measure`, `_assembly_tree`, `_colour`,
+`_section`, `_backend`, `_edges`) pass.
+
+**Quest 2:** still nothing measured anywhere. What exists is `tests/design_table_perf.gd`: the table costs about 0.06 ms of script per
+frame with the laser on a part and 0.13-0.17 ms with it on a 150-entity sketch on a desktop (x3.7 for a Quest 3 = 0.2-0.6 ms of the 1.5 ms
+rule), and redrawing that big a sketch takes ~5.5 ms (only when it changes). Rendering cost is unmeasured.
+
+**Untested paths (add to the list above):** everything on a real headset (laser on the sheet, snap radius, label hit radius, console size
+and tilt, the carry-over-and-let-go gesture, the lift, the Enforce button's placement); Quest 2 at all; a sketch of more than a few dozen
+entities on a headset (redraw hitch); a mated assembly more than one level deep (only the top-level mates are checked and enforced); Save
+on a Quest (the write location, `user://models`, is assumed to be writable and visible to the Files tab).

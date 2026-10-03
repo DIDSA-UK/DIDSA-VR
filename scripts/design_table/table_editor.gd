@@ -29,6 +29,7 @@ const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
+const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
@@ -63,6 +64,7 @@ var _hover_face: Dictionary = {}
 var _sheet_vertices: Array = []
 var _last_view_key := ""
 var _orient_tween: Tween = null
+var _edited_nodes: Array = [] ## the arena nodes the last refresh updated: every instance of the part
 
 
 func setup(p_table, p_api) -> void:
@@ -710,7 +712,7 @@ func apply_feature() -> void:
 		highlight.set_set(table.table_copy, [])
 	UiFeedback.haptic(table._right, "confirm")
 	table.set_status(("%s done." % tool.capitalize()) if refreshed else "Done, but the new shape couldn't be fetched.")
-	table.notify_edited(part_id)
+	table.notify_edited(part_id, _edited_nodes)
 	_update_options()
 
 
@@ -728,8 +730,18 @@ func refresh_geometry() -> bool:
 	var nodes := await arena_nodes_of(part_id)
 	if table.seated != null and not nodes.has(table.seated):
 		nodes.append(table.seated)
+	_edited_nodes = nodes
+	# Which face does each mate of the assembly name on this part? Recorded BEFORE the new mesh goes in: after an edit the backend's face
+	# indices are renumbered, and a mate can end up joining different faces without any error (mate_health.gd).
+	var captured: Array = []
+	var mates_tool = table._mates_tool
+	if mates_tool != null and table._main.current_root_part_id() != "":
+		await mates_tool.refresh_mates(table._main.current_root_part_id())
+		captured = MateHealth.capture(nodes, mates_tool.mates)
+		table.add_mate_baseline(captured)
 	if table._main.swap_part_mesh(nodes, fetched["bytes"]) == 0:
 		return false
+	table.update_mate_drift()
 	table.sync_copy_from_seated()
 	if highlight != null:
 		highlight.invalidate(table.table_copy)
@@ -779,6 +791,6 @@ func undo() -> void:
 		table.set_status("Couldn't take that back: %s" % str(result["error"]))
 		return
 	await refresh_geometry()
-	table.notify_edited(part_id)
+	table.notify_edited(part_id, _edited_nodes)
 	table.ui.set_undo_enabled(can_undo())
 	table.set_status("Took the last feature back.")

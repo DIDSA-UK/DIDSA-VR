@@ -12,6 +12,8 @@ extends Node3D
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 
 const LINE_WIDTH := 0.0035 ## world metres
+const UNDERLAY_WIDTH := 0.0075 ## the dark edge under every line, so it reads on a white part and on the dark slab alike
+const UNDERLAY := Color(0.02, 0.05, 0.10, 0.85)
 const POINT_SIZE := 0.0045
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
@@ -164,7 +166,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var accent: Color = _tokens.accent
-	var text: Color = _tokens.text
+	var text: Color = _tokens.accent.lightened(0.25) ## a bright core over a dark underlay
 	var dim: Color = _tokens.text_dim
 	var warn: Color = _tokens.warn
 	var half := sheet_extent * 0.5
@@ -187,6 +189,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				continue
 			var key: String = "line:" + id
 			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if l.get("construction", false) else text)
+			_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], UNDERLAY_WIDTH, UNDERLAY, 0.8)
 			_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], LINE_WIDTH, colour)
 		for id in session.circles:
 			var c: Dictionary = session.circles[id]
@@ -195,18 +198,23 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var key: String = "circle:" + id
 			var colour: Color = warn if (selected.has(key) or key == hovered) else text
 			var centre: Vector2 = session.points[c["c"]]
-			_polyline(verts, colors, circle_points(centre, centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS), LINE_WIDTH, colour, true)
+			var ring := circle_points(centre, centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS)
+			_polyline(verts, colors, ring, UNDERLAY_WIDTH, UNDERLAY, true, 0.8)
+			_polyline(verts, colors, ring, LINE_WIDTH, colour, true)
 		for id in session.arcs:
 			var a: Dictionary = session.arcs[id]
 			if not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 				continue
 			var key: String = "arc:" + id
 			var colour: Color = warn if (selected.has(key) or key == hovered) else text
-			_polyline(verts, colors, arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32), LINE_WIDTH, colour, false)
+			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
+			_polyline(verts, colors, sweep, UNDERLAY_WIDTH, UNDERLAY, false, 0.8)
+			_polyline(verts, colors, sweep, LINE_WIDTH, colour, false)
 		for id in session.points:
 			var key: String = "point:" + id
 			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if session.point_locked.get(id, false) else accent.lightened(0.3))
-			_marker(verts, colors, session.points[id], POINT_SIZE, colour)
+			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
+			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
 	_set_surface(_geo, verts, colors)
 	_rebuild_dimension_labels(session)
 

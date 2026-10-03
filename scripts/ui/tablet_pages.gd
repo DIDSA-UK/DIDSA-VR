@@ -772,6 +772,11 @@ func _build_files_page() -> Control:
 	_files_count_label = Label.new()
 	page.add_child(_files_count_label)
 	page.add_child(_button("Refresh list", _rescan_files))
+	page.add_child(_hint("Save writes the whole session, including edits made on the design table, as a new .didsa file the flat app can open. It never overwrites the file you opened.", true))
+	page.add_child(_button("Save as new file", func() -> void:
+		var saved: String = await _main.save_native_snapshot()
+		if saved != "":
+			_rescan_files()))
 	return page
 
 

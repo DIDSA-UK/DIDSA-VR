@@ -107,7 +107,7 @@ func _initialize() -> void:
 	print("SMOKE pressing it opens the table: ", table.is_open() and table.visible)
 	var ahead: Vector3 = table.global_position - cam.global_position
 	print("SMOKE it opens in front of you, below eye level: ", ahead.z < -0.5 and absf(ahead.x) < 0.1 and ahead.y < -0.3 and ahead.y > -0.6)
-	print("SMOKE ...facing you (its +Z towards the camera) and leaning back a little: ", table.global_transform.basis.z.z > 0.9 and table.global_transform.basis.y.y < 1.0 and table.global_transform.basis.y.y > 0.95)
+	print("SMOKE ...facing you (its +Z towards the camera) and leaning back a little: ", table.global_transform.basis.z.z > 0.85 and table.global_transform.basis.y.y < 0.97 and table.global_transform.basis.y.y > 0.85)
 	print("SMOKE the table starts empty: ", table.seated == null and table.pivot == null)
 
 	# --- the deck: categories and tools, by real laser clicks

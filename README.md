@@ -10,7 +10,8 @@ Assembly Tree, Calculator, Image Viewer and Browser windows are all built
 (Chrome's own built-in PDF viewer, confirmed working through the same
 mechanism — see docs/status.md), so only "DIDSA-CAD as a flat window"
 remains unattempted. Milestone 2 (design table / in-VR part modelling)
-hasn't been started. Still plain Godot 4 core (no `godot-xr-tools`, no
+is built (see item 17 and [`docs/design-table.md`](docs/design-table.md)) in the same
+"headless- and real-backend-confirmed, not yet on a real headset" sense. Still plain Godot 4 core (no `godot-xr-tools`, no
 addons) — the Browser window's one exception to that is documented in
 item 15 below (a separate server-side relay, not a Godot dependency).
 
@@ -389,6 +390,25 @@ live-synced.
     (`user://settings.cfg`, via the Settings cogwheel's own project-folder
     setting — see item 7).
 
+17. **Design table** (milestone 2). Wrist tablet → **Assembly → Table → Summon table** puts a
+    tilted console in front of you: a slab with the part floating above it, a grab handle on its
+    front edge (grip it to move and turn the whole console), the assembly tree at its left and a
+    tool deck in front. **Carry a part (grip) over the slab and let go** — or press **Table** on a
+    part in the tree — to edit it (a mated part needs **Relax all mates** first if you carry it).
+    The arena's own part is left alone and hidden; a scaled copy floats above the slab. **Aim at a
+    flat face or one of the three reference planes and pull the trigger** to sketch on it (the part
+    turns to lie flat). Then **Sketch** (Line, Rectangle, Circle, Arc, Polygon, Point), **Constrain**
+    (Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident) and **Feature** (Extrude,
+    Fillet, Chamfer) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
+    dimension values are **typed on the numeric pad**, and a finished feature appears on the table
+    and on every other placed copy of that part. **Grip the part on the table to lift it back
+    out** at arena scale. Edited parts get a warning badge, are no longer steered by their mates,
+    and an **Enforce mates** button floats over one when it's put down — it turns off any mate
+    whose face the edit changed rather than solving it against the wrong face. **Files → Save as new file**
+    writes the session as a `.didsa` the flat app opens. What's built, how it works, what the
+    code said about the brief's six questions, performance numbers, and what isn't built:
+    [`docs/design-table.md`](docs/design-table.md).
+
 ## 1. Drop in a real assembly
 
 Export or copy a saved assembly file — a `.DIDSAprt`/`.didsa` file whose
@@ -601,6 +621,21 @@ dependencies (a bind-mounted real Chromium binary confirmed exactly which
 dependency is missing without confirming apt can supply it here), the
 arm64 Raspberry Pi target, and — as with every other window — a real
 headset.
+
+## What "done" looks like for milestone 2
+
+- **Built, and confirmed against a real backend and the real solver** (`tests/e2e_design_table.gd`,
+  `tests/e2e_design_table_mates.gd`; the rest headless): the console and its deck; seating, lifting and
+  closing; looking up the part behind a placed occurrence; sketching on a real face and on the reference
+  planes; Line / Rectangle / Circle / Arc / Polygon / Point; snapping; typed dimensions; the constraint
+  tools; Extrude (boss and cut), Fillet, Chamfer with a fresh mesh on every placed copy; Undo; the assembly
+  tree with Table and Bring; stale-mates flags with the Enforce button (and detecting that an edit renumbered
+  the faces a mate names); saving a session as a native file and reopening it.
+- **Not confirmed on a headset** — the feel of the laser on the sheet, the size and tilt of the console, the snap
+  and pick radii. Rendered once in software (`tests/design_table_render.gd`).
+- **Not built:** most of the flat app's sketch and feature tools, the Modify and Inspect categories, editing
+  an existing sketch, dragging rows out of the tree, sub-assemblies on the table, a feature preview, and anything
+  Quest 2 specific (nothing about Quest 2 has been measured). The full list is in `docs/design-table.md`.
 
 ## Known gaps this project doesn't solve yet
 

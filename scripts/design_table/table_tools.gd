@@ -60,7 +60,7 @@ const HINTS := {
 	"parallel": "Pick two lines.",
 	"perpendicular": "Pick two lines.",
 	"coincident": "Pick two points, or a point and a line or circle.",
-	"extrude": "Close a sketch, set Boss or Cut and the depth, then Apply.",
+	"extrude": "Draw a closed shape, set Boss or Cut and the depth, then Apply.",
 	"fillet": "Pick edges on the part, set the radius, then Apply.",
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
 }
