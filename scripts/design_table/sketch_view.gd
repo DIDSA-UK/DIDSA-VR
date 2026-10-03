@@ -12,15 +12,29 @@ extends Node3D
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 
 const GRID_SHADER := preload("res://shaders/sketch_grid.gdshader")
-const LINE_WIDTH := 0.0035 ## world metres
-const UNDERLAY_WIDTH := 0.0075 ## the dark edge under every line, so it reads on a white part and on the dark slab alike
+const DimensionLayout := preload("res://scripts/design_table/dimension_layout.gd")
+
+const LINE_WIDTH := 0.0035 ## world metres: the rubber band, the cursor ring and the sheet's marks
+const OBJECT_WIDTH := 0.0042 ## the visible outline of the sketch: the heaviest line, as on a drawing
+const CONSTRUCTION_WIDTH := 0.0020 ## construction geometry: thin, in a chain (long dash, short dash) pattern
+const DIM_WIDTH := 0.0016 ## dimension lines, extension lines, leaders: thinner still
+const UNDERLAY_WIDTH := 0.0075 ## the dark edge under an object line, so it reads on a white part and on the dark slab alike
 const UNDERLAY := Color(0.02, 0.05, 0.10, 0.85)
+const THIN_UNDERLAY := Color(0.02, 0.05, 0.10, 0.55)
+const CHAIN := [0.013, 0.004, 0.0035, 0.004] ## world metres: dash, gap, dot, gap
+const ARROW_LENGTH := 0.011
+const DIM_OFFSET := 0.030 ## how far a dimension line stands off the geometry
+const DIM_GAP := 0.004 ## the small gap between the geometry and an extension line
+const DIM_OVERSHOOT := 0.006
+const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
+const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
+const DIM_COLOUR := Color(0.55, 0.88, 1.0)
 const ORIGIN_COLOUR := Color(1.0, 0.92, 0.45)
-const POINT_SIZE := 0.0045
+const POINT_SIZE := 0.0036
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
 const LABEL_PIXEL := 0.00035 ## world metres per label pixel
-const LABEL_FONT := 44
+const LABEL_FONT := 40
 
 var plane: Dictionary = {}
 var scale_m_per_mm := 0.003 ## the copy's scale: world metres per part mm
@@ -34,7 +48,9 @@ var _geo: MeshInstance3D
 var _preview: MeshInstance3D
 var _cursor: MeshInstance3D
 var _cursor_material: StandardMaterial3D
+var _dims: MeshInstance3D
 var _labels: Node3D
+var _ghost_text_uv := {} ## ghost key -> where its text sits on the drawing (what pointing at it means)
 var _line_material: StandardMaterial3D
 var _tokens: Resource
 var _geo_state := {}
@@ -70,6 +86,7 @@ func setup(p_plane: Dictionary, p_size: Vector2, p_centre: Vector2, p_scale: flo
 	_update_grid()
 
 	_geo = _new_mesh_node("Drawing")
+	_dims = _new_mesh_node("Dimensions")
 	_preview = _new_mesh_node("Preview")
 	_cursor = MeshInstance3D.new()
 	_cursor.name = "Cursor"
@@ -166,6 +183,65 @@ func _marker(verts: PackedVector3Array, colors: PackedColorArray, uv: Vector2, s
 		colors.append(colour)
 
 
+func _dashed(verts: PackedVector3Array, colors: PackedColorArray, pts: Array, width_world: float, colour: Color, closed: bool, lift: float = 1.0) -> void:
+	## A polyline drawn in the chain pattern (CHAIN): the construction-line style. The pattern runs on across the polyline's joints.
+	var path := pts.duplicate()
+	if closed and pts.size() > 2:
+		path.append(pts[0])
+	var k := 1.0 / scale_m_per_mm
+	var idx := 0
+	var left: float = float(CHAIN[0]) * k
+	for i in path.size() - 1:
+		var a: Vector2 = path[i]
+		var b: Vector2 = path[i + 1]
+		var seg := a.distance_to(b)
+		if seg < 0.000001:
+			continue
+		var dir := (b - a) / seg
+		var pos := 0.0
+		while pos < seg:
+			var step := minf(left, seg - pos)
+			if idx % 2 == 0:
+				_ribbon(verts, colors, a + dir * pos, a + dir * (pos + step), width_world, colour, lift)
+			pos += step
+			left -= step
+			if left <= 0.000000001:
+				idx = (idx + 1) % CHAIN.size()
+				left = float(CHAIN[idx]) * k
+
+
+func _arrow(verts: PackedVector3Array, colors: PackedColorArray, tip: Vector2, dir: Vector2, colour: Color, lift: float = 1.2) -> void:
+	## A filled arrowhead with its tip at `tip`, pointing along `dir`.
+	var length := ARROW_LENGTH / scale_m_per_mm
+	var d := dir.normalized()
+	var base := tip - d * length
+	var side := Vector2(-d.y, d.x) * length * 0.26
+	verts.append_array([local_point(tip, lift), local_point(base + side, lift), local_point(base - side, lift)])
+	for i in 3:
+		colors.append(colour)
+
+
+func _stroke(verts: PackedVector3Array, colors: PackedColorArray, pts: Array, closed: bool, construction: bool, colour: Color, emphasised: bool) -> void:
+	## One piece of the sketch's own geometry: an object line (heavy, solid, on a dark edge) or a construction line (thin, chain pattern).
+	if construction:
+		_dashed(verts, colors, pts, CONSTRUCTION_WIDTH * (1.6 if emphasised else 1.0), colour, closed, 1.0)
+	else:
+		var w := OBJECT_WIDTH * (1.35 if emphasised else 1.0)
+		_polyline(verts, colors, pts, w + (UNDERLAY_WIDTH - LINE_WIDTH), UNDERLAY, closed, 0.8)
+		_polyline(verts, colors, pts, w, colour, closed)
+
+
+func _draw_dimension(verts: PackedVector3Array, colors: PackedColorArray, layout: Dictionary, colour: Color) -> void:
+	for seg in layout["segments"]:
+		_ribbon(verts, colors, seg[0], seg[1], DIM_WIDTH + 0.0014, THIN_UNDERLAY, 0.9)
+		_ribbon(verts, colors, seg[0], seg[1], DIM_WIDTH, colour, 1.1)
+	for arc in layout["arcs"]:
+		_polyline(verts, colors, arc, DIM_WIDTH + 0.0014, THIN_UNDERLAY, false, 0.9)
+		_polyline(verts, colors, arc, DIM_WIDTH, colour, false, 1.1)
+	for ar in layout["arrows"]:
+		_arrow(verts, colors, ar[0], ar[1], colour, 1.2)
+
+
 static func circle_points(centre: Vector2, radius: float, segments: int) -> Array:
 	var out: Array = []
 	for i in segments:
@@ -208,13 +284,12 @@ static func arc_points(centre: Vector2, start: Vector2, end: Vector2, segments: 
 # --- The drawing ---------------------------------------------------------------------
 
 func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
-	## The sheet's border and axes, then every entity of the session. `highlight` is a list of {kind, id} (the
-	## picked entities); `hover` the one under the laser.
+	## The origin's axes, then every entity of the session drawn as a drawing draws it: object lines heavy and solid, construction lines thin
+	## and chained, a centre mark on every circle, and the sketch's dimensions with their extension lines, arrows and text. `highlight` is a list
+	## of {kind, id} (the picked entities); `hover` the one under the laser.
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var accent: Color = _tokens.accent
-	var text: Color = _tokens.accent.lightened(0.25) ## a bright core over a dark underlay
-	var dim: Color = _tokens.text_dim
 	var warn: Color = _tokens.warn
 	var origin_mark := 0.05 / scale_m_per_mm ## the origin's cross reaches this far (about 5 cm of world) on each axis
 	_ribbon(verts, colors, Vector2.ZERO, Vector2(origin_mark, 0), LINE_WIDTH * 0.8, Color(1.0, 0.35, 0.35, 0.9), 0.7) # u axis
@@ -230,28 +305,39 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			if not session.points.has(l["a"]) or not session.points.has(l["b"]):
 				continue
 			var key: String = "line:" + id
-			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if l.get("construction", false) else text)
-			_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], UNDERLAY_WIDTH, UNDERLAY, 0.8)
-			_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], LINE_WIDTH, colour)
+			var lit: bool = selected.has(key) or key == hovered
+			var construction: bool = l.get("construction", false)
+			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
+			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, lit)
 		for id in session.circles:
 			var c: Dictionary = session.circles[id]
 			if not session.points.has(c["c"]) or not session.points.has(c["p"]):
 				continue
 			var key: String = "circle:" + id
-			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if c.get("construction", false) else text)
+			var lit: bool = selected.has(key) or key == hovered
+			var construction: bool = c.get("construction", false)
+			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
 			var centre: Vector2 = session.points[c["c"]]
-			var ring := circle_points(centre, centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS)
-			_polyline(verts, colors, ring, UNDERLAY_WIDTH, UNDERLAY, true, 0.8)
-			_polyline(verts, colors, ring, LINE_WIDTH, colour, true)
+			var radius := centre.distance_to(session.points[c["p"]])
+			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, lit)
+			# the centre mark: a pair of chain lines crossing at the centre and reaching a little past the circle
+			var reach := radius + 0.007 / scale_m_per_mm
+			_dashed(verts, colors, [centre + Vector2(-reach, 0), centre + Vector2(reach, 0)], CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, false, 0.9)
+			_dashed(verts, colors, [centre + Vector2(0, -reach), centre + Vector2(0, reach)], CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, false, 0.9)
 		for id in session.arcs:
 			var a: Dictionary = session.arcs[id]
 			if not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 				continue
 			var key: String = "arc:" + id
-			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if a.get("construction", false) else text)
+			var lit: bool = selected.has(key) or key == hovered
+			var construction: bool = a.get("construction", false)
+			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
-			_polyline(verts, colors, sweep, UNDERLAY_WIDTH, UNDERLAY, false, 0.8)
-			_polyline(verts, colors, sweep, LINE_WIDTH, colour, false)
+			_stroke(verts, colors, sweep, false, construction, colour, lit)
+			var arm := 0.005 / scale_m_per_mm # an arc's centre is marked with a small cross
+			var ac: Vector2 = session.points[a["c"]]
+			_ribbon(verts, colors, ac + Vector2(-arm, 0), ac + Vector2(arm, 0), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
+			_ribbon(verts, colors, ac + Vector2(0, -arm), ac + Vector2(0, arm), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
 		for id in session.points:
 			var key: String = "point:" + id
 			if session.is_origin(id):
@@ -261,11 +347,11 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_marker(verts, colors, session.points[id], POINT_SIZE * 2.4, origin_colour, 1.6)
 				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
 				continue
-			var colour: Color = warn if (selected.has(key) or key == hovered) else (dim if session.point_locked.get(id, false) else accent.lightened(0.3))
+			var colour: Color = warn if (selected.has(key) or key == hovered) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3))
 			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
 			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
 	_set_surface(_geo, verts, colors)
-	_rebuild_dimension_labels(session)
+	_rebuild_dimensions(session)
 
 
 func _set_surface(node: MeshInstance3D, verts: PackedVector3Array, colors: PackedColorArray) -> void:
@@ -344,49 +430,106 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 	_set_surface(_preview, verts, colors)
 
 
-# --- Dimension labels ---------------------------------------------------------------------
-
-var _ghost_keys: Array = []
-
-
-func show_ghosts(ghosts: Array) -> void:
-	## Candidate dimensions for the picked entities, floating on the sheet where you point to type a value.
-	_ghost_keys = ghosts.map(func(g): return g["key"])
-	_rebuild_dimension_labels(_last_session, ghosts)
-
+# --- Dimensions ---------------------------------------------------------------------------
 
 var _last_session = null
 
 
-func _rebuild_dimension_labels(session, ghosts: Array = []) -> void:
+func _dim_params(session) -> Dictionary:
+	## The sizes and the "which side is outside" a dimension is laid out with, for the zoom the part has now.
+	var k := 1.0 / scale_m_per_mm
+	var text_h := float(LABEL_FONT) * LABEL_PIXEL * k
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	var obstacles: Array = []
+	var segments: Array = []
+	var interiors: Array = []
+	if session != null:
+		for lid in session.lines:
+			var ln: Dictionary = session.lines[lid]
+			if session.points.has(ln["a"]) and session.points.has(ln["b"]):
+				segments.append([session.points[ln["a"]], session.points[ln["b"]]])
+		for cid in session.circles:
+			var cc: Dictionary = session.circles[cid]
+			if session.points.has(cc["c"]) and session.points.has(cc["p"]):
+				var ring_pts := circle_points(session.points[cc["c"]], session.points[cc["c"]].distance_to(session.points[cc["p"]]), 16)
+				for i in ring_pts.size():
+					segments.append([ring_pts[i], ring_pts[(i + 1) % ring_pts.size()]])
+		for sid in session.shapes:
+			var ring: Array = []
+			for pid in session.shapes[sid].get("point_ids", []):
+				if session.points.has(str(pid)):
+					ring.append(session.points[str(pid)])
+			if ring.size() >= 3:
+				interiors.append(ring)
+		for id in session.points:
+			lo = lo.min(session.points[id])
+			hi = hi.max(session.points[id])
+			obstacles.append(session.points[id])
+	var centroid := (lo + hi) * 0.5 if lo.x != INF else Vector2.ZERO
+	return {"offset": DIM_OFFSET * k, "arrow": ARROW_LENGTH * k, "gap": DIM_GAP * k, "over": DIM_OVERSHOOT * k, "centroid": centroid, "obstacles": obstacles, "obstacle_segments": segments, "interiors": interiors, "text_h": text_h, "text_w": text_h * 0.6}
+
+
+func _layout_for(spec: Dictionary, text: String, session) -> Dictionary:
+	var params := _dim_params(session)
+	params["text_w"] = float(params["text_h"]) * 0.6 * float(maxi(text.length(), 1))
+	return DimensionLayout.layout(spec, params)
+
+
+func _rebuild_dimensions(session, ghosts: Array = []) -> void:
+	## The drawn dimensions: each existing one in the dimension colour, each candidate for the picked entities (ghosts) in the warning colour,
+	## both with extension lines, a dimension line, arrowheads and the value written along the line.
 	_last_session = session
 	for child in _labels.get_children():
 		_labels.remove_child(child)
 		child.queue_free()
+	_ghost_text_uv.clear()
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
 	if session != null:
-		for id in session.constraints:
-			var c: Dictionary = session.constraints[id]
-			if str(c.get("type", "")) == "distance" and not bool(c.get("provisional", false)) and session.points.has(str(c.get("point_a_id", ""))) and session.points.has(str(c.get("point_b_id", ""))):
-				var mid: Vector2 = (session.points[c["point_a_id"]] + session.points[c["point_b_id"]]) * 0.5
-				_label(mid, "%.2f" % float(c["distance"]), _tokens.accent.lightened(0.2), false)
+		for item in session.dimension_items():
+			var layout := _layout_for(item["spec"], str(item["text"]), session)
+			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
+				continue
+			_draw_dimension(verts, colors, layout, DIM_COLOUR)
+			_label_on_sheet(str(item["text"]), layout, DIM_COLOUR)
 	for g in ghosts:
-		_label(g["uv"], "%s %.2f %s" % [g["label"], float(g["value"]), g["unit"]], _tokens.warn, true)
+		var spec: Dictionary = g.get("spec", {})
+		if spec.is_empty():
+			continue
+		var kind := "radius" if g["key"] == "radius" else ("diameter" if g["key"] == "diameter" else ("angle" if g["key"] == "angle" else "linear"))
+		var text: String = session.dimension_text(kind, float(g["value"])) if session != null else str(g["value"])
+		var layout := _layout_for(spec, text, session)
+		_draw_dimension(verts, colors, layout, _tokens.warn)
+		_label_on_sheet(text, layout, _tokens.warn)
+		_ghost_text_uv[str(g["key"])] = layout["text_uv"]
+	_set_surface(_dims, verts, colors)
 
 
-func _label(uv: Vector2, text: String, colour: Color, boxed: bool) -> void:
+func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> void:
+	## The value, lying IN the sketch plane along its dimension line (upright: left to right or bottom to top), not a sign turned to face you.
 	var label := Label3D.new()
 	label.text = text
 	label.font_size = LABEL_FONT
 	label.pixel_size = LABEL_PIXEL / scale_m_per_mm
 	label.modulate = colour
-	label.outline_size = 10
+	label.outline_size = 12
 	label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.double_sided = true
+	label.shaded = false
 	label.no_depth_test = true
 	label.render_priority = 5
-	label.position = local_point(uv, 3.0)
-	label.set_meta("boxed", boxed)
+	var angle: float = float(layout["text_angle"])
+	var right := (plane["x"] as Vector3) * cos(angle) + (plane["y"] as Vector3) * sin(angle)
+	var up := (plane["x"] as Vector3) * -sin(angle) + (plane["y"] as Vector3) * cos(angle)
+	label.transform = Transform3D(Basis(right, up, plane["n"] as Vector3), local_point(layout["text_uv"], 3.0))
 	_labels.add_child(label)
+
+
+func show_ghosts(ghosts: Array) -> void:
+	## Candidate dimensions for the picked entities, drawn on the sheet where you point at the value to type it.
+	_rebuild_dimensions(_last_session, ghosts)
 
 
 func ghost_near(ghosts: Array, uv: Vector2, radius: float) -> String:
@@ -394,7 +537,7 @@ func ghost_near(ghosts: Array, uv: Vector2, radius: float) -> String:
 	var best := ""
 	var best_d := radius
 	for g in ghosts:
-		var d: float = uv.distance_to(g["uv"])
+		var d: float = uv.distance_to(_ghost_text_uv.get(str(g["key"]), g["uv"]))
 		if d <= best_d:
 			best_d = d
 			best = g["key"]

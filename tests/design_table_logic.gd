@@ -8,6 +8,7 @@ extends SceneTree
 const Pager := preload("res://scripts/design_table/tool_pager.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
+const DimLayout := preload("res://scripts/design_table/dimension_layout.gd")
 const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
@@ -31,6 +32,14 @@ class SnapModel extends RefCounted:
 
 	func is_origin(id: String) -> bool:
 		return origin_id != "" and id == origin_id
+
+
+func _arrow_ok(view) -> bool:
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	view._arrow(verts, colors, Vector2(10, 5), Vector2(0, 1), Color.WHITE)
+	var length: float = view.ARROW_LENGTH / view.scale_m_per_mm
+	return verts.size() == 3 and colors.size() == 3 and Vector2(verts[0].x, verts[0].y).is_equal_approx(Vector2(10, 5)) and absf(verts[1].y - (5.0 - length)) < 0.001 and absf(verts[2].y - (5.0 - length)) < 0.001 and absf(verts[1].x - verts[2].x) > 0.1
 
 
 func _near(a: Vector3, b: Vector3, eps := 0.0001) -> bool:
@@ -221,6 +230,52 @@ func _initialize() -> void:
 	var slot_xs: Array = slot_pts.map(func(p): return p.x)
 	var slot_ys: Array = slot_pts.map(func(p): return p.y)
 	print("SMOKE a slot's outline is two half circles round the end centres: 18 points, spanning x from -6 to 46 and y from -6 to 6: ", slot_pts.size() == 18 and is_equal_approx(slot_xs.min(), -6.0) and is_equal_approx(slot_xs.max(), 46.0) and is_equal_approx(slot_ys.min(), -6.0) and is_equal_approx(slot_ys.max(), 6.0) and SketchView.slot_outline(Vector2.ZERO, Vector2.ZERO, 5.0, 8).is_empty())
+
+
+	# --- dimensions laid out like a drawing (dimension_layout.gd)
+	var dp := {"offset": 10.0, "arrow": 3.0, "gap": 1.0, "over": 2.0, "centroid": Vector2(40, 20), "text_h": 4.0, "text_w": 8.0}
+	var d_h := DimLayout.layout({"kind": "horizontal", "a": Vector2(0, 0), "b": Vector2(80, 0)}, dp)
+	var d_h_line: Array = (d_h["segments"] as Array).filter(func(sg): return is_equal_approx(sg[0].y, sg[1].y) and absf(sg[0].x - sg[1].x) > 50.0)
+	print("SMOKE a horizontal dimension: extension lines drop from both points (a gap off the geometry, an overshoot past the line), the dimension line runs between them 10 mm out, arrowheads sit on the extension lines pointing outward, the text is level above the middle: ", d_h["segments"].size() == 3 and d_h_line.size() == 1 and is_equal_approx(d_h_line[0][0].y, -10.0) and d_h["arrows"].size() == 2 and d_h["arrows"][0][0] == Vector2(0, -10) and d_h["arrows"][0][1] == Vector2(-1, 0) and d_h["arrows"][1][0] == Vector2(80, -10) and d_h["arrows"][1][1] == Vector2(1, 0) and is_equal_approx(d_h["text_angle"], 0.0) and absf(d_h["text_uv"].x - 40.0) < 0.001 and d_h["text_uv"].y > -10.0 and (d_h["segments"][0][0] as Vector2).is_equal_approx(Vector2(0, -1)) and (d_h["segments"][0][1] as Vector2).is_equal_approx(Vector2(0, -12)))
+	var d_v := DimLayout.layout({"kind": "vertical", "a": Vector2(0, 0), "b": Vector2(0, 50)}, dp)
+	print("SMOKE a vertical dimension goes to the outside (left, away from the middle of the sketch) with its text turned to read from the bottom up: ", is_equal_approx(d_v["arrows"][0][0].x, -10.0) and is_equal_approx(d_v["text_angle"], PI * 0.5) and (d_v["text_up"] as Vector2).is_equal_approx(Vector2(-1, 0)))
+	var d_a := DimLayout.layout({"kind": "linear", "a": Vector2(0, 0), "b": Vector2(30, 40)}, {"offset": 10.0, "arrow": 3.0, "gap": 1.0, "over": 2.0, "centroid": Vector2(0, 40), "text_h": 4.0, "text_w": 8.0})
+	var d_a_line: Array = (d_a["segments"] as Array).filter(func(sg): return absf((sg[1] - sg[0]).length() - 50.0) < 0.01)
+	print("SMOKE an aligned dimension runs parallel to its line, offset 10 mm to the outside, the text turned along it: ", d_a_line.size() == 1 and absf(absf((d_a_line[0][1] - d_a_line[0][0]).normalized().dot(Vector2(0.6, 0.8))) - 1.0) < 0.001 and absf(absf(d_a["text_angle"]) - atan2(40.0, 30.0)) < 0.001)
+	var d_t := DimLayout.layout({"kind": "horizontal", "a": Vector2(0, 0), "b": Vector2(5, 0)}, dp)
+	print("SMOKE a dimension too short to hold its arrows puts them OUTSIDE, pointing in, with short tails: ", d_t["arrows"][0][1] == Vector2(1, 0) and d_t["arrows"][1][1] == Vector2(-1, 0) and d_t["segments"].size() == 5)
+	var d_r := DimLayout.layout({"kind": "radius", "c": Vector2(10, 10), "r": 20.0, "u": Vector2(1, 1)}, dp)
+	var tip: Vector2 = d_r["arrows"][0][0]
+	print("SMOKE a radius is a leader from the centre out through the circle with the arrow tip ON the circle and the text beyond its end: ", d_r["arrows"].size() == 1 and absf(tip.distance_to(Vector2(10, 10)) - 20.0) < 0.001 and (d_r["arrows"][0][1] as Vector2).is_equal_approx(Vector2(1, 1).normalized()) and (d_r["text_uv"] as Vector2).distance_to(Vector2(10, 10)) > 20.0 + 3.0 * 2.5)
+	var d_d := DimLayout.layout({"kind": "diameter", "c": Vector2(0, 0), "r": 15.0, "u": Vector2(1, 0)}, dp)
+	print("SMOKE a diameter is a line through the centre with an arrow at each end on the circle, pointing outward: ", d_d["arrows"].size() == 2 and d_d["arrows"][0][0] == Vector2(-15, 0) and d_d["arrows"][1][0] == Vector2(15, 0) and d_d["arrows"][0][1] == Vector2(-1, 0))
+	var d_n := DimLayout.layout({"kind": "angle", "apex": Vector2(0, 0), "d1": Vector2(1, 0), "d2": Vector2(0, 1), "r": 20.0}, dp)
+	var n_pts: Array = d_n["arcs"][0]
+	print("SMOKE an angle is an arc of the given radius from one line to the other about the apex (the short way), arrowheads at both ends, extension lines out to it, the value written level: ", n_pts.size() >= 6 and (n_pts[0] as Vector2).is_equal_approx(Vector2(20, 0)) and (n_pts[n_pts.size() - 1] as Vector2).distance_to(Vector2(0, 20)) < 0.001 and d_n["arrows"].size() == 2 and d_n["segments"].size() == 2 and is_equal_approx(d_n["text_angle"], 0.0))
+	print("SMOKE text is always upright: directions fold into (-90, 90] degrees: ", is_equal_approx(DimLayout.upright(PI), 0.0) and is_equal_approx(DimLayout.upright(-PI * 0.75), PI * 0.25) and is_equal_approx(DimLayout.upright(PI * 0.5), PI * 0.5) and is_equal_approx(DimLayout.upright(-PI * 0.5), PI * 0.5) and is_equal_approx(DimLayout.upright(0.3), 0.3))
+	var shape_params := {"offset": 10.0, "arrow": 3.0, "gap": 1.0, "over": 2.0, "centroid": Vector2(-50, 20), "interiors": [[Vector2(0, 0), Vector2(80, 0), Vector2(80, 60), Vector2(0, 60)]], "text_h": 4.0, "text_w": 8.0}
+	var d_out := DimLayout.layout({"kind": "vertical", "a": Vector2(80, 0), "b": Vector2(80, 60)}, shape_params)
+	print("SMOKE a dimension of a shape's edge goes OUTSIDE that shape even when the middle of the sketch is on the other side of it: ", is_equal_approx(d_out["arrows"][0][0].x, 90.0))
+	var d_room := DimLayout.layout({"kind": "horizontal", "a": Vector2(0, 0), "b": Vector2(40, 0)}, {"offset": 10.0, "arrow": 3.0, "gap": 1.0, "over": 2.0, "centroid": Vector2(20, -30), "obstacle_segments": [[Vector2(-5, -12), Vector2(50, -12)]], "text_h": 4.0, "text_w": 8.0})
+	print("SMOKE ...and it takes the side with room: a line of the sketch 12 mm below pushes it above, though the middle of the sketch is below: ", is_equal_approx(d_room["arrows"][0][0].y, 10.0))
+
+	# --- the chain pattern of construction lines and the arrowheads, in the view
+	var view := SketchView.new()
+	var dash_verts := PackedVector3Array()
+	var dash_colors := PackedColorArray()
+	view.plane = {"origin": Vector3.ZERO, "x": Vector3(1, 0, 0), "y": Vector3(0, 1, 0), "n": Vector3(0, 0, 1)}
+	view.scale_m_per_mm = 0.01
+	view._dashed(dash_verts, dash_colors, [Vector2(0, 0), Vector2(400, 0)], 0.002, Color.WHITE, false)
+	var solid_verts := PackedVector3Array()
+	var solid_colors := PackedColorArray()
+	view._ribbon(solid_verts, solid_colors, Vector2(0, 0), Vector2(400, 0), 0.002, Color.WHITE)
+	var covered := 0.0
+	var pieces: int = dash_verts.size() / 6
+	for i in pieces:
+		covered += absf(dash_verts[i * 6 + 1].x - dash_verts[i * 6].x)
+	print("SMOKE a construction line is drawn in a CHAIN (long dash, gap, dot, gap), not solid: many pieces, about two thirds of the length covered: ", pieces >= 20 and solid_verts.size() == 6 and covered > 400.0 * 0.55 and covered < 400.0 * 0.8)
+	print("SMOKE an arrowhead is a filled triangle with its tip where it is told, pointing the way it is told: ", _arrow_ok(view))
+	view.free()
 
 	# --- the Select tool's menu (sketch_selection.gd), mirroring the flat app's availableConstraintOptions
 	var model := SnapModel.new()

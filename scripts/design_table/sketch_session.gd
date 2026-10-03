@@ -211,7 +211,7 @@ func _ingest_entities(json: Dictionary) -> void:
 			"rectangle":
 				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
 			"polygon":
-				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", [])}
+				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", [])}
 			"slot":
 				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
 
@@ -835,14 +835,14 @@ func _build_ghosts() -> Array:
 				if points.has(pts[0]) and points.has(pts[1]):
 					var d: float = points[pts[0]].distance_to(points[pts[1]])
 					out.append(_ghost("length", "Length", "mm", d, (points[pts[0]] + points[pts[1]]) * 0.5,
-						_distance_apply(pts[0], pts[1], "linear")))
+						_distance_apply(pts[0], pts[1], "linear"), {"kind": "linear", "a": points[pts[0]], "b": points[pts[1]]}))
 			"circle", "arc":
 				var c: Dictionary = circles.get(first["id"], arcs.get(first["id"], {}))
 				var rim: String = c.get("p", c.get("s", ""))
 				if points.has(c.get("c", "")) and points.has(rim) and str(c.get("k", "")) != "":
 					var r: float = points[c["c"]].distance_to(points[rim])
-					out.append(_ghost("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}))
-					out.append(_ghost("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}))
+					out.append(_ghost("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}, circle_spec("radius", str(first["id"]))))
+					out.append(_ghost("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}, circle_spec("diameter", str(first["id"]))))
 		return out
 	var second: Dictionary = selection[1]
 	if first["kind"] == "point" and second["kind"] == "point":
@@ -851,9 +851,9 @@ func _build_ghosts() -> Array:
 		if a != b and points.has(a) and points.has(b):
 			var pa: Vector2 = points[a]
 			var pb: Vector2 = points[b]
-			out.append(_ghost("linear", "Distance", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(a, b, "linear")))
-			out.append(_ghost("horizontal", "Horizontal", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(a, b, "horizontal")))
-			out.append(_ghost("vertical", "Vertical", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(a, b, "vertical")))
+			out.append(_ghost("linear", "Distance", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(a, b, "linear"), {"kind": "linear", "a": pa, "b": pb}))
+			out.append(_ghost("horizontal", "Horizontal", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(a, b, "horizontal"), {"kind": "horizontal", "a": pa, "b": pb}))
+			out.append(_ghost("vertical", "Vertical", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(a, b, "vertical"), {"kind": "vertical", "a": pa, "b": pb}))
 	elif first["kind"] == "line" and second["kind"] == "line" and first["id"] != second["id"]:
 		var l1 := _line_points(first["id"])
 		var l2 := _line_points(second["id"])
@@ -863,10 +863,10 @@ func _build_ghosts() -> Array:
 			var mid: Vector2 = (points[l1[0]] + points[l1[1]] + points[l2[0]] + points[l2[1]]) * 0.25
 			if absf(d1.dot(d2)) >= PARALLEL_COS:
 				var dist: float = absf((points[l2[0]] - points[l1[0]]).cross(d1))
-				out.append(_ghost("line_distance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "distance"}))
+				out.append(_ghost("line_distance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "distance"}, perp_spec(str(l1[0]), str(second["id"]))))
 			else:
 				var ang := rad_to_deg(acos(clampf(d1.dot(d2), -1.0, 1.0)))
-				out.append(_ghost("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "angle_degrees"}))
+				out.append(_ghost("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "angle_degrees"}, angle_spec(str(first["id"]), str(second["id"]))))
 	elif (first["kind"] == "point" and second["kind"] == "line") or (first["kind"] == "line" and second["kind"] == "point"):
 		var pt: String = first["id"] if first["kind"] == "point" else second["id"]
 		var ln: String = first["id"] if first["kind"] == "line" else second["id"]
@@ -874,12 +874,131 @@ func _build_ghosts() -> Array:
 		if points.has(pt) and points.has(lp[0]) and points.has(lp[1]):
 			var closest: Vector2 = Geometry2D.get_closest_point_to_segment(points[pt], points[lp[0]], points[lp[1]])
 			var dist2: float = points[pt].distance_to(closest)
-			out.append(_ghost("point_line", "Distance", "mm", dist2, (points[pt] + closest) * 0.5, {"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}))
+			out.append(_ghost("point_line", "Distance", "mm", dist2, (points[pt] + closest) * 0.5, {"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}, perp_spec(pt, ln)))
 	return out
 
 
-func _ghost(key: String, label: String, unit: String, value: float, uv: Vector2, apply: Dictionary) -> Dictionary:
-	return {"key": key, "label": label, "unit": unit, "value": value, "uv": uv, "apply": apply}
+func _ghost(key: String, label: String, unit: String, value: float, uv: Vector2, apply: Dictionary, spec: Dictionary = {}) -> Dictionary:
+	return {"key": key, "label": label, "unit": unit, "value": value, "uv": uv, "apply": apply, "spec": spec}
+
+
+static func format_value(value: float) -> String:
+	## A dimension's number as a drawing writes it: two decimals, trailing zeros dropped (40, 12.5, 0.13).
+	var text := "%.2f" % value
+	if text.contains("."):
+		text = text.rstrip("0").rstrip(".")
+	return text
+
+
+func dimension_text(kind: String, value: float) -> String:
+	match kind:
+		"radius":
+			return "R" + format_value(value)
+		"diameter":
+			return "\u2300" + format_value(value)
+		"angle":
+			return format_value(value) + "\u00b0"
+	return format_value(value)
+
+
+func circle_spec(kind: String, id: String) -> Dictionary:
+	## The layout spec of a circle's or arc's radius / diameter: its centre, radius and the direction its radius point lies in.
+	var c: Dictionary = circles.get(id, arcs.get(id, {}))
+	var rim: String = c.get("p", c.get("s", ""))
+	if not points.has(c.get("c", "")) or not points.has(rim):
+		return {}
+	var centre: Vector2 = points[c["c"]]
+	var rim_pt: Vector2 = points[rim]
+	var u := rim_pt - centre
+	var r := u.length()
+	if r < 0.0001:
+		u = Vector2(1, 0)
+	elif absf(u.x) < r * 0.2 or absf(u.y) < r * 0.2:
+		# The radius point lies along an axis, where the centre mark already is: a leader or a diameter line is drawn at an angle instead (radius up and to the
+		# right, diameter up and to the left), as on a drawing, so it does not run along the centre line.
+		u = Vector2.from_angle(deg_to_rad(40.0 if kind == "radius" else 140.0))
+	return {"kind": kind, "c": centre, "r": r, "u": u}
+
+
+func angle_spec(l1: String, l2: String) -> Dictionary:
+	## The layout spec of the angle between two lines: the point they meet at, a direction along each (away from it) and an arc radius.
+	var p1 := _line_points(l1)
+	var p2 := _line_points(l2)
+	if not points.has(p1[0]) or not points.has(p1[1]) or not points.has(p2[0]) or not points.has(p2[1]):
+		return {}
+	var a0: Vector2 = points[p1[0]]
+	var a1: Vector2 = points[p1[1]]
+	var b0: Vector2 = points[p2[0]]
+	var b1: Vector2 = points[p2[1]]
+	var apex: Variant = Geometry2D.line_intersects_line(a0, a1 - a0, b0, b1 - b0)
+	if apex == null:
+		return {}
+	var point: Vector2 = apex
+	var far_a: Vector2 = a1 if a1.distance_to(point) >= a0.distance_to(point) else a0
+	var far_b: Vector2 = b1 if b1.distance_to(point) >= b0.distance_to(point) else b0
+	var d1 := far_a - point
+	var d2 := far_b - point
+	if d1.length() < 0.0001 or d2.length() < 0.0001:
+		return {}
+	return {"kind": "angle", "apex": point, "d1": d1.normalized(), "d2": d2.normalized(), "r": minf(d1.length(), d2.length()) * 0.6}
+
+
+func perp_spec(point_id: String, line_id: String) -> Dictionary:
+	var lp := _line_points(line_id)
+	if not points.has(point_id) or not points.has(lp[0]) or not points.has(lp[1]):
+		return {}
+	var p: Vector2 = points[point_id]
+	var foot := Geometry2D.get_closest_point_to_segment(p, points[lp[0]], points[lp[1]])
+	return {"kind": "perp", "a": p, "b": foot}
+
+
+func _is_internal_angle(c: Dictionary) -> bool:
+	## A polygon holds its corners with an angle between each pair of its own (construction) centre-to-corner lines: part of the shape,
+	## not a dimension anyone typed, so it is not drawn.
+	for id in shapes:
+		var radial: Array = shapes[id].get("radial_line_ids", [])
+		if radial.has(str(c.get("line1_id", ""))) and radial.has(str(c.get("line2_id", ""))):
+			return true
+	return false
+
+
+func dimension_items() -> Array:
+	## What the sketch's existing (typed, not provisional) dimensions look like: [{id, spec, text}], for sketch_view.gd to draw as a drawing
+	## draws them. A circle's / arc's own size dimension is a radius; a distance between two points is linear, horizontal or vertical.
+	var out: Array = []
+	var radius_of := {}
+	for id in circles:
+		radius_of[str(circles[id].get("k", ""))] = ["circle", id]
+	for id in arcs:
+		radius_of[str(arcs[id].get("k", ""))] = ["arc", id]
+	for id in constraints:
+		var c: Dictionary = constraints[id]
+		var type := str(c.get("type", ""))
+		if type == "distance" and not bool(c.get("provisional", false)) and float(c.get("distance", 0.0)) > 0.005: # (a zero distance is a shape's own structure, e.g. a circle's cardinal points)
+			if radius_of.has(str(id)):
+				var which: Array = radius_of[str(id)]
+				var rspec := circle_spec("radius", str(which[1]))
+				if not rspec.is_empty():
+					out.append({"id": id, "spec": rspec, "text": dimension_text("radius", float(c["distance"]))})
+			elif points.has(str(c.get("point_a_id", ""))) and points.has(str(c.get("point_b_id", ""))):
+				var kind := str(c.get("orientation", "linear"))
+				out.append({"id": id, "spec": {"kind": kind, "a": points[c["point_a_id"]], "b": points[c["point_b_id"]]}, "text": dimension_text("linear", float(c["distance"]))})
+		elif type == "point_line_distance":
+			var pspec := perp_spec(str(c.get("point_id", "")), str(c.get("line_id", "")))
+			if not pspec.is_empty():
+				out.append({"id": id, "spec": pspec, "text": dimension_text("linear", float(c.get("distance", 0.0)))})
+		elif type == "line_distance":
+			var lp := _line_points(str(c.get("line1_id", "")))
+			var mid_id := str(lp[0])
+			if points.has(mid_id):
+				var lspec := perp_spec(mid_id, str(c.get("line2_id", "")))
+				if not lspec.is_empty():
+					out.append({"id": id, "spec": lspec, "text": dimension_text("linear", float(c.get("distance", 0.0)))})
+		elif type == "angle" and not _is_internal_angle(c):
+			var aspec := angle_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")))
+			if not aspec.is_empty():
+				out.append({"id": id, "spec": aspec, "text": dimension_text("angle", float(c.get("angle_degrees", 0.0)))})
+	return out
 
 
 func _distance_apply(a: String, b: String, orientation: String) -> Dictionary:

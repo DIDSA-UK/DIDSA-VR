@@ -289,9 +289,9 @@ func _initialize() -> void:
 	await aim_uv(bottom_mid)
 	await pull()
 	var ghosted: bool = await settle(func() -> bool: return not ed.session.ghosts.is_empty())
-	print("SMOKE Dimension offers the picked line's length, floating on the sheet: ", ghosted and ed.session.ghosts[0]["key"] == "length" and ed.view.label_texts().any(func(t): return t.contains("Length")))
+	print("SMOKE Dimension offers the picked line's length, floating on the sheet: ", ghosted and ed.session.ghosts[0]["key"] == "length" and ed.view.label_texts().has(ed.session.format_value(float(ed.session.ghosts[0]["value"]))))
 	var ghost: Dictionary = ed.session.ghosts[0]
-	await aim_uv(ghost["uv"])
+	await aim_uv(ed.view._ghost_text_uv[ghost["key"]]) # the value's text, which sits off the geometry on the dimension line
 	await pull()
 	var pad_open: bool = await settle(func() -> bool: return main._keyboard.is_open())
 	print("SMOKE pointing at the label opens the numeric pad, pre-filled with the value: ", pad_open and main._keyboard._text == "%.2f" % float(ghost["value"]))
@@ -300,6 +300,9 @@ func _initialize() -> void:
 	await ed.dimension_typed("length", "25")
 	var dimension_call: Array = calls_to("/constraints").back()
 	print("SMOKE a typed 25 reaches the backend as a distance of 25: ", calls_to("/constraints").size() == dims_before + 1 and dimension_call[1]["type"] == "distance" and dimension_call[1]["distance"] == 25.0)
+	await settle(func() -> bool: return ed.view.label_texts().has("25"))
+	var dim_label: Label3D = ed.view._labels.get_children().filter(func(l): return (l as Label3D).text == "25")[0]
+	print("SMOKE the typed dimension is drawn as a dimension: its value, written in the sketch plane (not a sign turned to face you), with graphics (extension lines, a dimension line, arrowheads) beside it: ", dim_label.billboard == BaseMaterial3D.BILLBOARD_DISABLED and (dim_label.transform.basis.z as Vector3).is_equal_approx(ed.session.plane["n"]) and ed.view._dims.mesh != null and ed.view._dims.mesh.get_surface_count() == 1)
 	print("SMOKE ...a typed word does not: ", true if (await ed.dimension_typed("length", "abc")) == null and table.status() == "That isn't a number." else false)
 
 	# --- the options row

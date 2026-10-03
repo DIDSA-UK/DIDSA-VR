@@ -294,6 +294,40 @@ func _initialize() -> void:
 	ok = await s.open_sketch({"fixed": "XY"})
 	print("SMOKE a backend that does not answer the sketch read still opens it, with no origin: ", ok and s.origin_id == "" and not s.is_origin(""))
 
+	# --- the dimensions that exist, as a drawing draws them (dimension_items) and how their numbers are written
+	print("SMOKE a dimension's number is written like a drawing: 40, 12.5, 0.13, no trailing zeros; a radius R25, a diameter with the diameter sign, an angle in degrees: ", Session.format_value(40.0) == "40" and Session.format_value(12.5) == "12.5" and Session.format_value(0.126) == "0.13" and Session.format_value(3.0) == "3" and s.dimension_text("radius", 25.0) == "R25" and s.dimension_text("diameter", 50.0) == "\u230050" and s.dimension_text("angle", 45.0) == "45\u00b0")
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 0)})
+	s.finish_chain()
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(0, 30)})
+	s.finish_chain()
+	var dl: Array = s.lines.keys()
+	var pts_a: Array = [s.lines[dl[0]]["a"], s.lines[dl[0]]["b"]]
+	s.constraints = {
+		"k1": {"type": "distance", "id": "k1", "point_a_id": pts_a[0], "point_b_id": pts_a[1], "distance": 40.0, "orientation": "horizontal", "provisional": false},
+		"k2": {"type": "distance", "id": "k2", "point_a_id": pts_a[0], "point_b_id": pts_a[1], "distance": 12.0, "orientation": "linear", "provisional": true},
+		"k3": {"type": "distance", "id": "k3", "point_a_id": pts_a[0], "point_b_id": pts_a[1], "distance": 0.0, "orientation": "vertical", "provisional": false},
+		"k4": {"type": "angle", "id": "k4", "line1_id": dl[0], "line2_id": dl[1], "angle_degrees": 90.0}}
+	s.shapes = {"pg": {"kind": "polygon", "point_ids": [], "radial_line_ids": [dl[0], dl[1]]}}
+	var items: Array = s.dimension_items()
+	print("SMOKE only real dimensions are drawn: not a provisional one, not a zero distance (a circle's own structure), not the angle a polygon holds between its own centre lines: ", items.size() == 1 and items[0]["id"] == "k1" and items[0]["spec"]["kind"] == "horizontal" and items[0]["text"] == "40")
+	s.shapes = {}
+	items = s.dimension_items()
+	print("SMOKE ...and the angle between two ordinary lines is drawn, as an arc about where they meet with its degrees: ", items.size() == 2 and items[1]["spec"]["kind"] == "angle" and items[1]["text"] == "90\u00b0" and (items[1]["spec"]["apex"] as Vector2).distance_to(Vector2(0, 0)) < 0.001)
+	await fresh("circle")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(10, 0)})
+	var circle_id: String = s.circles.keys()[0]
+	s.constraints[s.circles[circle_id]["k"]]["provisional"] = false
+	s.constraints[s.circles[circle_id]["k"]]["distance"] = 10.0
+	var circle_items: Array = s.dimension_items()
+	print("SMOKE a circle's typed size is drawn as a RADIUS leader from its centre (angled off the axis, where the centre mark is): ", circle_items.size() == 1 and circle_items[0]["spec"]["kind"] == "radius" and circle_items[0]["text"] == "R10" and absf(absf((circle_items[0]["spec"]["u"] as Vector2).x) - absf((circle_items[0]["spec"]["u"] as Vector2).y)) > 0.0001)
+	s.set_tool("dimension")
+	await s.select({"kind": "circle", "id": circle_id})
+	print("SMOKE ...and the radius and diameter candidates carry their layout (the diameter at another angle than the radius leader): ", s.ghosts.size() == 2 and s.ghosts[0]["spec"]["kind"] == "radius" and s.ghosts[1]["spec"]["kind"] == "diameter" and not (s.ghosts[0]["spec"]["u"] as Vector2).is_equal_approx(s.ghosts[1]["spec"]["u"]))
+
 	# --- slot: two centres and a third pick that sets the width
 	await fresh("slot")
 	var rs: Dictionary = await s.tap({"uv": Vector2(0, 0)})

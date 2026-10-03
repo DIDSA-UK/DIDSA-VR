@@ -37,6 +37,14 @@ This page is what was decided and built, what the code turned out to say, and wh
    * **The origin** is the backend's real origin point (read when the sketch opens; the backend makes it lazily). It is drawn as a bigger
      yellow marker and **snaps** like any point (kind "origin"): a line can start on it, a circle can be centred on it, a point can be made
      coincident to it, and a dimension can start or end at it. It can be selected and constrained but never deleted.
+   * **How it is drawn** (`sketch_view.gd`, `dimension_layout.gd`), like an engineering drawing: the sketch's own geometry is a **heavy solid object line**; **construction
+     lines** (a polygon's centre-to-corner lines, a rectangle's diagonals, a slot's centre line, anything made construction) are **thin and in a chain pattern** (long dash,
+     gap, dot, gap); every circle has a **centre mark** (chain lines crossing at its centre); a typed **dimension** is drawn with **extension lines** (a small gap off the
+     geometry, a little overshoot past the dimension line), a thin **dimension line** standing off the geometry on the side with room (outside the shape, not through other
+     lines), **filled arrowheads** (outside, pointing in, when the dimension is too short to hold them), and its value written along the line, upright, **in the sketch plane**
+     (not a sign turned to face you): 80 and 100 for a width and a height, a leader with **R25** for a radius, a line through the centre with the diameter sign for a diameter,
+     an arc with arrowheads and **45 degrees** for an angle. The candidates offered for what you have selected are drawn the same way in yellow; point at the value to type it.
+     A polygon's own corner angles and a circle's own structural constraints are not drawn as dimensions. `tests/sketch_style_render.gd` renders it to a PNG for a look.
    * **Select** (first slot of the Sketch row, on by default): pull on a point, line, circle or arc to select it (a point beats a line it is
      on); pull on a selected one's label area or empty sheet to let go (empty clears everything). Any number can be selected. The **options
      row shows a menu of what applies**, ported from the flat app's selection matrix (`sketch_selection.gd`): one line: its Length (a

@@ -2562,3 +2562,13 @@ IDs, what was done and what is left is **`docs/design-table-gaps.md`**; the beha
   vertical + perpendicular on the same lines) can make later solves report non-convergence, which the session answers by taking the new constraint back out.
 * **Not done:** sub-assemblies (G14 / G16), carrying a mated part (G15), Pattern / Sweep / Loft / booleans / Ellipse, Spline, Text, Trim, Offset, a feature preview, redo, the Planes /
   Surfaces / Curves tree sections. **Not verified:** all of it in a headset; the open numbers are listed in `docs/design-table-gaps.md`.
+
+### 2026-10-03 (later night, again) — Sketches look like engineering drawings
+
+John pointed out that the yellow dimension text in a screenshot did not resemble a drawing dimension, and that construction lines (a polygon's, perhaps others') looked solid.
+Both were true: dimensions were a bare billboard label on the geometry with no leaders, arrows or extension lines, and construction lines (flagged by the backend on a polygon's
+centre-to-corner lines, a rectangle's diagonals, a slot's centre line) were only a dimmer colour. Now: object lines heavy and solid, construction lines thin and in a chain pattern,
+a centre mark on every circle, and dimensions drawn with extension lines, a dimension line on the side with room (`dimension_layout.gd`, pure, unit-tested), arrowheads, and the value
+lying along the line in the sketch plane; radius leaders, diameter lines and angle arcs; the candidate dimensions use the same graphics in yellow. A polygon's own corner angles and
+a circle's own structural constraints (zero distances) are no longer drawn as dimensions. Checked in a software render (`tests/sketch_style_render.gd`), not in a headset: text size,
+line weights and arrow size are in world metres and are the numbers to tune after one look (`LABEL_FONT`, `OBJECT_WIDTH`, `ARROW_LENGTH`, `DIM_OFFSET` in `sketch_view.gd`).
