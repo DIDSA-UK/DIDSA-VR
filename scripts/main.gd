@@ -114,7 +114,10 @@ func _ready() -> void:
 	_add_design_table()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
-	command_stack.changed.connect(mark_dirty)
+	design_table.apply_settings(_settings) # the table's remembered size, zoom limit and what happens to a part sent back
+	command_stack.changed.connect(mark_dirty) # only entries that change the document (a part's pose) fire it, not hide / navigate
+	_mates_tool.document_changed.connect(mark_dirty)
+	_colour_tool.document_changed.connect(mark_dirty)
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
@@ -204,6 +207,10 @@ func _add_view_modes() -> void:
 	view_modes.name = "ViewModes"
 	add_child(view_modes)
 	view_modes.setup(self, _settings.view_render_mode)
+
+
+func app_settings() -> RefCounted:
+	return _settings
 
 
 func save_view_mode(mode: int) -> void:

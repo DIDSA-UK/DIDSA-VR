@@ -145,6 +145,7 @@ func _on_released(action_name: String) -> void:
 		dragging = -1
 		_refresh_look()
 		layout()
+		_table.remember_layout()
 
 
 # --- Looks --------------------------------------------------------------------------------

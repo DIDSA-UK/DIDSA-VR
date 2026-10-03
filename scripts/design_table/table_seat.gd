@@ -31,11 +31,12 @@ static func in_drop_zone(local_point: Vector3, slab_size: Vector2, floor_y: floa
 		and local_point.y >= floor_y and local_point.y <= ceiling_y
 
 
-static func lift_transform(parent_basis: Basis, original_local_basis: Basis, aabb: AABB, copy_centre_world: Vector3) -> Transform3D:
+static func lift_transform(parent_basis: Basis, original_local_basis: Basis, aabb: AABB, copy_centre_world: Vector3, extra_turn: Basis = Basis.IDENTITY) -> Transform3D:
 	## The world transform a part gets when it's lifted off: its ORIGINAL orientation and
 	## the arena's CURRENT scale (parent_basis carries assembly_root's scale, so a model
 	## resized while the part sat on the table still lifts back at the right size), placed so
-	## the middle of its bounds is where the middle of the table copy was.
-	var basis := parent_basis * original_local_basis
+	## the middle of its bounds is where the middle of the table copy was. `extra_turn` (a rotation in the world frame) is applied on top
+	## when the user chose to keep the turn the part was given on the table.
+	var basis := extra_turn * parent_basis * original_local_basis # extra_turn: a world rotation (the turn the part was given on the table, if it is kept)
 	var origin := copy_centre_world - basis * aabb.get_center()
 	return Transform3D(basis, origin)

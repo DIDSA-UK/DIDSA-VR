@@ -106,6 +106,10 @@ var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the f
 var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
+var keep_turn_on_return := false ## a part sent back to the arena keeps the turn it has on the table (default: its original orientation)
+var max_scale_setting := 3.0 ## the biggest everyday scale of the part on the table (Settings; a sketch always allows more)
+const DECK_MIN_WIDTH := 0.60 ## metres: the tool deck is as wide as the slab, between these two
+const DECK_MAX_WIDTH := 1.00
 var part_locked := true ## while a sketch is open: the part keeps the sketch tilt (two hands move and scale only, the stick leaves it alone); false = free to turn
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
 var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis is the part's orientation on the table
@@ -382,6 +386,38 @@ func _build_deck() -> void:
 	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 
 
+func deck_width_for(slab_width: float) -> float:
+	## The tool deck is as wide as the slab it sits in front of, never narrower than the original 0.6 m or wider than 1 m: a wider slab
+	## gives the buttons (Part: Locked, Fit, Done, Reset...) more room.
+	return clampf(slab_width, DECK_MIN_WIDTH, DECK_MAX_WIDTH)
+
+
+func _apply_deck_width() -> void:
+	var width := deck_width_for(slab_size.x)
+	if is_equal_approx(width, tools_size.x) or _viewport == null:
+		return
+	tools_size.x = width
+	var viewport_size := Vector2i((tools_size * pixels_per_metre).round())
+	_viewport.size = viewport_size
+	ui.size = Vector2(viewport_size)
+	(_deck_quad.mesh as QuadMesh).size = tools_size
+	surface.panel_size = tools_size
+
+
+func apply_settings(settings) -> void:
+	## main.gd, once everything exists: what the user chose last time.
+	keep_turn_on_return = settings.table_keep_turn
+	max_scale_setting = settings.table_max_scale
+	var saved: Vector2 = settings.table_slab_size
+	if saved != Vector2.ZERO:
+		set_slab_size(saved.clamp(resizer.min_size, resizer.max_size))
+
+
+func remember_layout() -> void:
+	## The slab was dragged to its size: remembered for next time.
+	_main.app_settings().set_table_slab_size(slab_size)
+
+
 func _layout_deck() -> void:
 	## The deck's top edge starts deck_gap in front of the slab's front edge, just under it (moves with the slab when it is resized).
 	var lean := deg_to_rad(90.0 - deck_lean_degrees)
@@ -396,6 +432,7 @@ func set_slab_size(new_size: Vector2) -> void:
 	(_slab.mesh as PlaneMesh).size = new_size
 	_style_materials()
 	handle.layout(new_size)
+	_apply_deck_width()
 	_layout_deck()
 	var dock_x := -(new_size.x * 0.5 + 0.20)
 	tree.position.x += dock_x - tree.dock_position.x # keeps wherever the tree has been carried to, relative to the slab's left edge
@@ -629,7 +666,7 @@ func sketch_locked() -> bool:
 
 func max_user_scale() -> float:
 	## The biggest the part may be scaled to: higher while sketching (zooming into the sketch).
-	return TablePose.SKETCH_MAX_SCALE if editing_sketch() else TablePose.MAX_SCALE
+	return maxf(TablePose.SKETCH_MAX_SCALE, max_scale_setting) if editing_sketch() else max_scale_setting
 
 
 func fit_sketch() -> void:
@@ -681,7 +718,8 @@ func set_leave_cue(on: bool) -> void:
 
 
 func send_to_arena(world_centre: Vector3) -> void:
-	## The part was let go of beyond the slab: the real node comes back at the arena's scale, in its original orientation, with
+	## The part was let go of beyond the slab: the real node comes back at the arena's scale, in its original orientation (or, with
+	## "keep turn" on, the turn it was given on the table), with
 	## the middle of its bounds at `world_centre`, as an ordinary move (undoable, saved, its mates flagged if it was edited).
 	if seated == null:
 		return
@@ -694,7 +732,12 @@ func send_to_arena(world_centre: Vector3) -> void:
 		set_status("%s is held by its mates, so it went back where it came from." % node.name)
 		return
 	var before := _seat_pose
-	var after := TableSeat.lift_transform((node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), world_centre)
+	var turn := Basis.IDENTITY
+	if keep_turn_on_return and pivot != null:
+		# The turn the part was given on the table (a rotation in the console frame), carried over to the world frame.
+		var delta := pivot.basis.orthonormalized() * _seat_pivot_basis.inverse()
+		turn = (global_transform.basis.orthonormalized() * delta * global_transform.basis.orthonormalized().inverse()).orthonormalized()
+	var after := TableSeat.lift_transform((node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), world_centre, turn)
 	node.global_transform = after
 	node.visible = true
 	node.remove_meta("on_table")
@@ -902,7 +945,8 @@ func _push_move(label: String, node: Node3D, before: Transform3D, after: Transfo
 		func() -> void:
 			if is_instance_valid(node):
 				node.global_transform = after
-				_persist(node))
+				_persist(node),
+		true)
 
 
 func _persist(node: Node3D) -> void:

@@ -23,6 +23,8 @@ extends Node
 ## Mates tool's create/delete: a backend-committed action, not a purely
 ## local, instant transform.
 
+signal document_changed() ## a colour was set: what a save would write is different
+
 const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
@@ -62,6 +64,7 @@ func set_color(part: Node3D, hex: String) -> Dictionary:
 	)
 	_busy = false
 	if result["ok"]:
+		document_changed.emit()
 		_apply_local_color(part, hex)
 	return {"ok": result["ok"], "error": result["error"]}
 
@@ -98,6 +101,7 @@ func set_group_color(part: Node3D, hex: String) -> Dictionary:
 			continue
 		var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, occ_id], {"color": hex})
 		if result["ok"]:
+			document_changed.emit()
 			succeeded_ids[occ_id] = true
 		else:
 			last_error = result["error"]

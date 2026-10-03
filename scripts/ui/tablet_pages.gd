@@ -756,7 +756,17 @@ func _build_table_page() -> Control:
 		if _design_table.is_open():
 			_design_table.recall()))
 	page.add_child(_button("New part", func() -> void: _design_table.new_part(), &"ButtonAccent"))
-	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it. If a part is mated, Relax all mates first."))
+	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it (or one hand with the left stick pressed to turn it with your wrist). If a part is mated, Relax all mates first."))
+	var settings = _main.app_settings() if _main != null else null
+	if settings != null:
+		page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
+			_design_table.keep_turn_on_return = i == 1
+			settings.set_table_keep_turn(i == 1)))
+		var limits := [2.0, 3.0, 5.0, 8.0]
+		var current := limits.find(settings.table_max_scale)
+		page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
+			_design_table.max_scale_setting = limits[i]
+			settings.set_table_max_scale(limits[i])))
 	return page
 
 
