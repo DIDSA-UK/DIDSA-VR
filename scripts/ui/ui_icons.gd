@@ -58,6 +58,7 @@ const _ICONS := {
 	"tool_circle": '<circle cx="24" cy="24" r="16"/><path d="M24 24V24.5"/>',
 	"tool_arc": '<path d="M8 36A20 20 0 0 1 40 36"/><path d="M8 36V36.5M40 36V36.5M24 36V36.5"/>',
 	"tool_polygon": '<path d="M24 6L41 18L35 38H13L7 18Z"/>',
+	"tool_slot": '<path d="M14 14H34A10 10 0 0 1 34 34H14A10 10 0 0 1 14 14Z"/><path d="M14 24H34" stroke-dasharray="3 3"/>',
 	"tool_select": '<path d="M10 6L10 36L19 28L25 42L31 39L25 26L37 26Z"/>',
 	"tool_point": '<circle cx="24" cy="24" r="4"/><path d="M24 7V14M24 34V41M7 24H14M34 24H41"/>',
 	"tool_dimension": '<path d="M8 34H40"/><path d="M8 28V40M40 28V40"/><path d="M14 14H34"/>',

@@ -38,7 +38,7 @@ const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
-const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point"]
+const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]

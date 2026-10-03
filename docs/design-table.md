@@ -45,6 +45,7 @@ This page is what was decided and built, what the code turned out to say, and wh
      Collinear, Distance or Angle; three or more lines: Equal, Collinear; two or more circles / arcs: Concentric, Equal radius (two arcs
      sharing an end: Tangent); a line and a circle: Tangent; anything: **Fix**, **Construction / Solid** (lines, circles, arcs), **Delete**
      (not the origin; not undoable, as in the flat app) and **Clear**. A menu longer than the six-button row shows five and **More**.
+   * **Slot:** pick the two end centres, then a third point; its distance from the line between them is the slot's half width.
    * **Snap** (on the deck, on by default) snaps to existing points, the part's own corners on that plane, line midpoints, spots on a
      line or circle, and pulls a line within 4° of horizontal/vertical onto the axis (adding the constraint). Off: the cursor is free.
    * **Dimension:** pick a line (length), a circle or arc (radius, diameter), two points (distance, horizontal, vertical), two
@@ -114,7 +115,7 @@ speed dial, constraint ribbon and feature picker); a category with more than six
 
 | Category | Tools now | Not built yet (the flat app has them) |
 |---|---|---|
-| **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point (seven, so the row shows five and More) | Slot, Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
+| **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot (eight, so the row shows five and More, then three) | Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
 | **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident (the rest, Equal, Collinear, Concentric, Equal radius, Tangent, Fix, are in Select's menu) | |
 | **Feature** | Extrude, Revolve, Fillet, Chamfer, Shell, Mirror | Sweep, Loft, Plane, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
 

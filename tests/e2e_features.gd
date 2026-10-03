@@ -111,4 +111,22 @@ func _initialize() -> void:
 	await ed.undo()
 	var back: bool = await wait_for(func() -> bool: return absf(node.get_aabb().size.x - width_before) < 0.5)
 	print("SMOKE Undo takes the mirror back: ", back)
+
+	# --- Slot: two centres and a width, then an extrude (the real backend's slot is a closed profile)
+	await table.new_part()
+	await wait_for(func() -> bool: return ed.state == "pick_plane" and table.seated != null and table.seated != node)
+	var slot_node: MeshInstance3D = table.seated
+	await ed.begin_sketch({"fixed": "XY"})
+	table.manager.activate("slot")
+	await ed.session.tap({"uv": Vector2(0, 0)})
+	await ed.session.tap({"uv": Vector2(40, 0)})
+	await ed.session.tap({"uv": Vector2(20, 6)})
+	print("SMOKE a slot (centres 40 mm apart, half width 6) is a closed profile on the real backend: ", ed.session.shapes.size() == 1 and ed.session.profile_ok())
+	table.manager.activate("extrude")
+	ed.options["boss"] = true
+	ed.options["depth"] = 10.0
+	await ed.apply_feature()
+	await wait_for(func() -> bool: return not table.is_blank())
+	var slot_size := slot_node.get_aabb().size
+	print("SMOKE ...extruded 10 mm it is a 52 x 12 x 10 solid: ", absf(slot_size.x - 52.0) < 0.5 and absf(slot_size.y - 12.0) < 0.5 and absf(slot_size.z - 10.0) < 0.5, " ", slot_size)
 	quit()

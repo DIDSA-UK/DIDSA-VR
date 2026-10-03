@@ -31,6 +31,7 @@ const SKETCH_TOOLS := [
 	["arc", "Arc", "tool_arc"],
 	["polygon", "Polygon", "tool_polygon"],
 	["point", "Point", "tool_point"],
+	["slot", "Slot", "tool_slot"],
 ]
 ## DIDSA-CAD's ribbon constraint chips plus its Dimensions tool.
 const CONSTRAIN_TOOLS := [
@@ -59,6 +60,7 @@ const HINTS := {
 	"arc": "Pick the centre, the start, then the end (counter-clockwise).",
 	"polygon": "Pick the centre, then the first corner. Sides are set below.",
 	"point": "Pull the trigger to place a point.",
+	"slot": "Pick the two end centres, then a point as far from the centre line as the slot's half width.",
 	"dimension": "Pick a line, a circle, or two points, then pick the value to type it.",
 	"horizontal": "Pick a line to make it horizontal.",
 	"vertical": "Pick a line to make it vertical.",

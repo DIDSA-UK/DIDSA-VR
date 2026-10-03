@@ -7,6 +7,7 @@ extends SceneTree
 
 const Pager := preload("res://scripts/design_table/tool_pager.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
+const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
@@ -63,8 +64,8 @@ func _initialize() -> void:
 		for t in c.tools:
 			ids.append(t.id)
 	print("SMOKE categories are Sketch, Constrain, Feature: ", reg.categories().map(func(c): return c.label) == ["Sketch", "Constrain", "Feature"])
-	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point"])
-	print("SMOKE only Sketch is over the six-slot row (seven tools, so it pages: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
+	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point", "slot"])
+	print("SMOKE only Sketch is over the six-slot row (eight tools, so it pages: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
 	print("SMOKE five category slots are enough: ", reg.categories().size() <= 5)
 	print("SMOKE every tool is a mode tool with a hint: ", reg.mode_tools().size() == ids.size() and ids.all(func(i): return reg.tool_def(i).hint != ""))
 	mgr.activate("line")
@@ -210,6 +211,16 @@ func _initialize() -> void:
 	var zoomed := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.5, 0, 0), Vector3(0.5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)
 	print("SMOKE while sketching, hands five times as far apart zoom to 5x (the cap is 8x; ordinarily 3x): ", is_equal_approx(zoomed["scale"], 5.0) and TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)["scale"] == TablePose.SKETCH_MAX_SCALE)
 	print("SMOKE Fit scales a 100 x 50 mm sketch to fill 80% of a 0.8 x 0.4 m window (3.2 mm per mm at fit 0.003 is 1.07x), clamped to the cap: ", is_equal_approx(TablePose.fit_scale(Vector2(100, 50), Vector2(0.8, 0.4), 0.8, 0.003, 8.0), 0.0064 / 0.003) and TablePose.fit_scale(Vector2(1, 1), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == 8.0 and TablePose.fit_scale(Vector2(10000, 10000), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == TablePose.MIN_SCALE)
+
+	var outline: Array = SketchView.slot_outline(Vector2(0, 0), Vector2(40, 0), 6.0, 8)
+	var xs: Array = outline.map(func(p): return p.x)
+	var ys: Array = outline.map(func(p): return p.y)
+	print("SMOKE a slot's outline is two half circles round the end centres: 18 points, spanning x from -6 to 46 and y from -6 to 6: ", outline.size() == 18 and is_equal_approx(xs.min(), -6.0) and is_equal_approx(xs.max(), 46.0) and is_equal_approx(ys.min(), -6.0) and is_equal_approx(ys.max(), 6.0) and SketchView.slot_outline(Vector2.ZERO, Vector2.ZERO, 5.0, 8).is_empty())
+
+	var slot_pts: Array = SketchView.slot_outline(Vector2(0, 0), Vector2(40, 0), 6.0, 8)
+	var slot_xs: Array = slot_pts.map(func(p): return p.x)
+	var slot_ys: Array = slot_pts.map(func(p): return p.y)
+	print("SMOKE a slot's outline is two half circles round the end centres: 18 points, spanning x from -6 to 46 and y from -6 to 6: ", slot_pts.size() == 18 and is_equal_approx(slot_xs.min(), -6.0) and is_equal_approx(slot_xs.max(), 46.0) and is_equal_approx(slot_ys.min(), -6.0) and is_equal_approx(slot_ys.max(), 6.0) and SketchView.slot_outline(Vector2.ZERO, Vector2.ZERO, 5.0, 8).is_empty())
 
 	# --- the Select tool's menu (sketch_selection.gd), mirroring the flat app's availableConstraintOptions
 	var model := SnapModel.new()

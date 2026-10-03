@@ -294,6 +294,22 @@ func _initialize() -> void:
 	ok = await s.open_sketch({"fixed": "XY"})
 	print("SMOKE a backend that does not answer the sketch read still opens it, with no origin: ", ok and s.origin_id == "" and not s.is_origin(""))
 
+	# --- slot: two centres and a third pick that sets the width
+	await fresh("slot")
+	var rs: Dictionary = await s.tap({"uv": Vector2(0, 0)})
+	rs = await s.tap({"uv": Vector2(40, 0)})
+	print("SMOKE the first two taps of a slot only remember the centres: ", not rs["done"] and fake.calls.is_empty())
+	rs = await s.tap({"uv": Vector2(20, 7)})
+	var slot_calls: Array = fake.calls.filter(func(c): return c[0].ends_with("/slots"))
+	print("SMOKE the third makes the two centre points, then the slot with the third pick's distance from the centre line as its radius (7), then ONE solve and an export: ", rs["done"] and fake.count("/points") == 2 and slot_calls.size() == 1 and absf(slot_calls[0][1]["radius"] - 7.0) < 0.001 and fake.count("/solve-and-refresh") == 1 and s.shapes.size() == 1 and s.profile_ok())
+	print("SMOKE ...and the undo for it deletes the slot: ", s.undo_label() == "slot")
+	await fresh("slot")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(40, 0)})
+	fake.calls.clear()
+	rs = await s.tap({"uv": Vector2(20, 0)})
+	print("SMOKE a third pick ON the centre line (no width) is refused and takes its new points back out: ", not rs["ok"] and fake.count("/slots") == 0 and fake.count("DELETE /sketch/sketches/sk1/points/") == 2 and rs["message"].contains("width"))
+
 	# --- the Select tool and its contextual menu
 	await fresh("line")
 	await s.tap({"uv": Vector2(0, 0)})

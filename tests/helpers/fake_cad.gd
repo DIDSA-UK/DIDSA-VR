@@ -162,6 +162,10 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var k := next_id("k")
 		entities.append({"type": "arc", "id": id, "center_point_id": body["center_point_id"], "start_point_id": body["start_point_id"], "end_point_id": end_id, "radius_constraint_id": k})
 		return _ok({"id": id})
+	if path.ends_with("/slots"):
+		var id := next_id("sl")
+		entities.append({"type": "slot", "id": id, "center1_point_id": body["center1_point_id"], "center2_point_id": body["center2_point_id"], "radius": body["radius"]})
+		return _ok({"id": id})
 	if path.ends_with("/polygons"):
 		var id := next_id("pg")
 		entities.append({"type": "polygon", "id": id, "center_point_id": body["center_point_id"], "vertex_point_ids": [body["first_vertex_point_id"]]})
@@ -186,7 +190,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var plist: Array = []
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": false})
-		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon"])
+		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
 		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}})
 	if path.ends_with("/export"):
 		return _ok({"entities": entities})

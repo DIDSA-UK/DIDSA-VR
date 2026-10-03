@@ -2554,11 +2554,11 @@ IDs, what was done and what is left is **`docs/design-table-gaps.md`**; the beha
   grips with the sketch rules (locked tilt, release holds the part, the whole sheet is the grab zone, 8x, Part: Locked / Free, Fit); a **point on each slab corner**.
 * **Work loss:** a dirty flag and a "save first" warning; VR's **own `X-Document-Session`** (a behaviour change: VR and the flat app no longer share a backend's
   document, they exchange files); saves say where they went; Hide / Roll back switch off on an older backend; stale-mate flags are saved (`vr_stale_mates`).
-* **Editing:** an existing sketch reopens from the Build tree (Edit) with a **Done** button that rebuilds the part; **Revolve, Shell and Mirror**; rename a part; a
+* **Editing:** an existing sketch reopens from the Build tree (Edit) with a **Done** button that rebuilds the part; **Revolve, Shell and Mirror** and a **Slot** sketch tool; rename a part; a
   part with no solids goes blank; a turned-off mate can be **remade** on the equivalent face.
 * **Table handling:** slab size remembered, deck width follows the slab, zoom limit and send-back orientation are settings, one-hand wrist turn (left stick modifier).
 * **Tests:** new `view_modes`, `work_loss`, `table_handling` (in `run_all.sh`), and local-only `e2e_sketch_select`, `e2e_revolve`, `e2e_features`; `e2e_build_tree` and
   `e2e_design_table_mates` extended. The sketch tests found nothing wrong in the backend; one thing worth knowing: a sketch with redundant constraints (horizontal +
   vertical + perpendicular on the same lines) can make later solves report non-convergence, which the session answers by taking the new constraint back out.
-* **Not done:** sub-assemblies (G14 / G16), carrying a mated part (G15), Pattern / Sweep / Loft / booleans / more sketch tools, a feature preview, redo, the Planes /
+* **Not done:** sub-assemblies (G14 / G16), carrying a mated part (G15), Pattern / Sweep / Loft / booleans / Ellipse, Spline, Text, Trim, Offset, a feature preview, redo, the Planes /
   Surfaces / Curves tree sections. **Not verified:** all of it in a headset; the open numbers are listed in `docs/design-table-gaps.md`.

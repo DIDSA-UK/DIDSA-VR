@@ -29,7 +29,7 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 
 const SKETCH := "/sketch/sketches/"
 const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
-const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1}
+const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3}
 const SELECT_NEEDED := {"horizontal": 1, "vertical": 1, "parallel": 2, "perpendicular": 2, "coincident": 2}
 const PARALLEL_COS := 0.9998 ## two lines closer than ~1.1 degrees to parallel are measured as a distance, not an angle
 const AXIS_SNAP_DEGREES := 4.0 ## a line within this of horizontal / vertical is made exactly so
@@ -212,6 +212,8 @@ func _ingest_entities(json: Dictionary) -> void:
 				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
 			"polygon":
 				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", [])}
+			"slot":
+				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
 
 
 func profile_ok() -> bool:
@@ -260,6 +262,7 @@ func tap(pick: Dictionary) -> Dictionary:
 		"circle": result = await _make_circle(taps)
 		"arc": result = await _make_arc(taps)
 		"polygon": result = await _make_polygon(taps)
+		"slot": result = await _make_slot(taps)
 		_: result = {"ok": false, "message": ""}
 	busy = false
 	if not result["ok"] and str(result["message"]) != "":
@@ -388,6 +391,27 @@ func _make_arc(taps: Array) -> Dictionary:
 		await _cleanup(created)
 		return {"ok": false, "message": "Couldn't make the arc: %s" % str(r["error"])}
 	return await _finish("arc", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/arcs/" + str(r["json"]["id"])]])
+
+
+func _make_slot(taps: Array) -> Dictionary:
+	## Two end centres and a third pick whose distance from the line between them is the slot's half width.
+	var created: Array = []
+	var a := await _point(taps[0], created)
+	var b := await _point(taps[1], created)
+	if a == "" or b == "" or a == b:
+		await _cleanup(created)
+		return {"ok": false, "message": "A slot needs two different end centres."}
+	var pa: Vector2 = points.get(a, taps[0]["uv"])
+	var pb: Vector2 = points.get(b, taps[1]["uv"])
+	var width := (taps[2]["uv"] as Vector2).distance_to(Geometry2D.get_closest_point_to_segment(taps[2]["uv"], pa, pb))
+	if width < 0.01:
+		await _cleanup(created)
+		return {"ok": false, "message": "Pick the third point away from the line between the centres: that sets the width."}
+	var r := await _post(SKETCH + sketch_id + "/slots", {"center1_point_id": a, "center2_point_id": b, "radius": width})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make the slot: %s" % str(r["error"])}
+	return await _finish("slot", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/slots/" + str(r["json"]["id"])]])
 
 
 func _make_polygon(taps: Array) -> Dictionary:

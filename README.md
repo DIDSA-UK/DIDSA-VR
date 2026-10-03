@@ -397,9 +397,9 @@ live-synced.
     part in the tree — to edit it (a mated part needs **Relax all mates** first if you carry it).
     The arena's own part is left alone and hidden; a scaled copy floats above the slab. **Aim at a
     flat face or one of the three reference planes and pull the trigger** to sketch on it (the part
-    turns to lie flat). Then **Sketch** (Line, Rectangle, Circle, Arc, Polygon, Point), **Constrain**
+    turns to lie flat). Then **Sketch** (Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot), **Constrain**
     (Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident) and **Feature** (Extrude,
-    Fillet, Chamfer) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
+    Revolve, Fillet, Chamfer, Shell, Mirror) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
     dimension values are **typed on the numeric pad**, and a finished feature appears on the table
     and on every other placed copy of that part. **Grip the part on the table to move it, grip it
     with both hands to turn and scale it** (independent of the world); the right stick spins it

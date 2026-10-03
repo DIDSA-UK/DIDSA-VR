@@ -174,6 +174,22 @@ static func circle_points(centre: Vector2, radius: float, segments: int) -> Arra
 	return out
 
 
+static func slot_outline(a: Vector2, b: Vector2, radius: float, arc_segments: int) -> Array:
+	## The closed outline of a slot: two straight sides and a half circle round each end centre.
+	var out: Array = []
+	var along := (b - a)
+	if along.length() < 0.00001 or radius < 0.00001:
+		return out
+	var base := along.angle()
+	for i in arc_segments + 1: # the half circle round b, from one side to the other
+		var t := base - PI * 0.5 + PI * float(i) / float(arc_segments)
+		out.append(b + Vector2(cos(t), sin(t)) * radius)
+	for i in arc_segments + 1: # and round a
+		var t2 := base + PI * 0.5 + PI * float(i) / float(arc_segments)
+		out.append(a + Vector2(cos(t2), sin(t2)) * radius)
+	return out
+
+
 static func arc_points(centre: Vector2, start: Vector2, end: Vector2, segments: int) -> Array:
 	## Counter-clockwise from start to end, on the circle through start (the backend's arcs).
 	var r := centre.distance_to(start)
@@ -309,6 +325,14 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 					var end := first + (dir.normalized() * r if dir.length() > 0.0001 else Vector2(r, 0))
 					_polyline(verts, colors, arc_points(first, start, end, 32), LINE_WIDTH, colour, false, 1.2)
 					_ribbon(verts, colors, first, start, LINE_WIDTH * 0.5, colour, 1.2)
+			"slot":
+				if taps.size() == 1:
+					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
+				else:
+					var second: Vector2 = taps[1]
+					var width: float = c.distance_to(Geometry2D.get_closest_point_to_segment(c, first, second))
+					_polyline(verts, colors, slot_outline(first, second, width, 16), LINE_WIDTH, colour, true, 1.2)
+					_ribbon(verts, colors, first, second, LINE_WIDTH * 0.5, colour, 1.2)
 			"polygon":
 				var r2 := first.distance_to(c)
 				var a0 := (c - first).angle()

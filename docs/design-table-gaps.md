@@ -52,7 +52,7 @@ up with the part under it (snapping to part vertices, sketching on a face, extru
 | ID | Gap | How it was closed | Status |
 |---|---|---|---|
 | G7 | An existing sketch could not be reopened. | Build tree > a sketch row > **Edit** reopens it (entities and origin read, nothing made); **Done** rebuilds the part so what is built on it follows. Against the real backend a dimension change reached the extrude and fillet. A sketch the flat app **flipped or turned** is refused. | Closed (with that exception). |
-| G8 | Only 6 sketch tools, 6 constraints, Extrude / Fillet / Chamfer; no preview, no redo. | **Revolve, Shell and Mirror** added (against the real backend), the rest of the constraints are in Select's menu. Not built: Sweep, Loft, Pattern, booleans, direct edit, Slot / Ellipse / Spline / Text / Trim / Offset, a preview before Apply, redo. | **Partly closed.** |
+| G8 | Only 6 sketch tools, 6 constraints, Extrude / Fillet / Chamfer; no preview, no redo. | **Revolve, Shell and Mirror** and the **Slot** sketch tool added (against the real backend), the rest of the constraints are in Select's menu. Not built: Sweep, Loft, Pattern, booleans, direct edit, Ellipse / Spline / Text / Trim / Offset, a preview before Apply, redo. | **Partly closed.** |
 | G9 | Cascade delete cannot be undone. | As in the flat app; the "Sure?" step names what goes. | Accepted. |
 | G10 | A normal part that loses all its geometry keeps its last mesh in the arena. | It goes blank like a new part. | Closed. |
 | G11 | The Build tree has no Planes / Surfaces / Curves sections; Edit covers only extrude / fillet / chamfer. | Edit now also covers revolve angle, shell wall and (on a sketch) reopens it. Sections are not built (planes are rows in the feature list). | **Partly closed.** |
