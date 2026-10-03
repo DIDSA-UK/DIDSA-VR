@@ -196,7 +196,7 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE gripping the part on the table holds the COPY, not the real part: ", table.manip.is_gripping() and l.held_node == null and table.seated == body and not body.visible and body.has_meta("on_table"))
 	print("SMOKE ...the hand is marked so the world is not also dragged: ", l.get_meta("table_part_held", false) and not main._two_hand._hand_free_ignoring_button(l))
-	print("SMOKE ...and the table is engaged: chip on the deck and the frame glowing: ", table.manip.engaged and table.ui.chip_visible() and table._engaged and table._frame_material.emission_enabled)
+	print("SMOKE ...and the table is engaged: chip on the deck and the frame glowing: ", table.manip.engaged and table.ui.chip_visible() and table._engaged and float(table._frame_material.get_shader_parameter("glow")) > 0.5)
 	l.global_position = pivot_world + Vector3(0.05, 0.0, 0.0) + table.global_transform.basis * Vector3(0.10, 0.04, 0.0)
 	await process_frame
 	await process_frame
@@ -336,6 +336,46 @@ func _initialize() -> void:
 	r.global_position = Vector3(1.0, 1.5, 1.0)
 	r.rotation = Vector3.ZERO
 	await process_frame
+
+	# --- the glass slab, and dragging its corners to resize it (the same gesture as the floating windows)
+	var glass_mat: ShaderMaterial = table._frame_material
+	print("SMOKE the slab is a glass pane: rounded corners and a rim, a clear middle: ", table._slab.mesh is PlaneMesh and glass_mat.shader.resource_path.ends_with("table_glass.gdshader") and float(glass_mat.get_shader_parameter("radius")) > 0.02 and float(glass_mat.get_shader_parameter("border_width")) > 0.003 and (glass_mat.get_shader_parameter("fill_color") as Color).a < 0.5)
+	print("SMOKE ...with a resize bracket at each corner, hugging the rounded corner: ", table.resizer._holders.size() == 4 and table.resizer._holders[3].position.is_equal_approx(Vector3(0.3, 0.003, 0.2)) and table.resizer._holders[0].scale.x < 0.0)
+	var saved_xf: Transform3D = table.global_transform
+	var up: Vector3 = table.global_transform.basis.y.normalized()
+	var aim_world := func(target: Vector3) -> void:
+		r.global_transform = Transform3D(Basis.looking_at(-up, table.global_transform.basis.z), target + up * 0.5)
+		for i in 3:
+			await process_frame
+	var aim_at := func(local: Vector3) -> void:
+		await aim_world.call(table.to_global(local))
+	await aim_at.call(Vector3(0.0, 0.0, 0.0)) # on the glass itself: not a corner
+	print("SMOKE aiming at the middle of the glass is not a corner: ", table.resizer.hover == -1 and not r.get_meta("ui_hover", false))
+	await aim_at.call(Vector3(0.35, 0.0, 0.25)) # just outside the front-right corner
+	print("SMOKE aiming just outside a corner lights its bracket and claims the laser (so a trigger never selects a part): ", table.resizer.hover == 3 and r.get_meta("ui_hover", false) and float(r.get_meta("ui_hit_distance", -1.0)) > 0.0 and table.resizer._materials[3].albedo_color.is_equal_approx(table.tokens.accent))
+	var back_left_before: Vector3 = table.to_global(Vector3(-0.3, 0.0, -0.2))
+	var drag_to: Vector3 = table.to_global(Vector3(0.6, 0.0, 0.35)) # a world point: the console moves as it is dragged
+	var deck_z_before: float = table._deck.position.z
+	r.button_pressed.emit("trigger_click")
+	await process_frame
+	print("SMOKE the trigger starts a drag of that corner: ", table.resizer.dragging == 3)
+	await aim_world.call(drag_to)
+	print("SMOKE dragging the corner out resizes the slab, the opposite corner staying put: ", table.slab_size.is_equal_approx(Vector2(0.9, 0.55)) and table.to_global(Vector3(-0.45, 0.0, -0.275)).distance_to(back_left_before) < 0.003)
+	print("SMOKE ...the glass, the handle on the front edge, the deck in front of it and the tree at the left all follow: ", ((table._slab.mesh as PlaneMesh).size).is_equal_approx(Vector2(0.9, 0.55)) and table.handle.node.position.is_equal_approx(Vector3(0.0, -0.275 - table.handle.drop_distance, 0.01)) and absf(table._deck.position.z - (deck_z_before + 0.075)) < 0.001 and table.tree.dock_position.x < -0.6 and table.resizer._holders[3].position.is_equal_approx(Vector3(0.45, 0.003, 0.275)))
+	print("SMOKE ...and drop zone and the part's place follow too: ", TableSeat.in_drop_zone(Vector3(0.5, 0.2, 0.3), table.slab_size, table.drop_floor, table.drop_ceiling) and not TableSeat.in_drop_zone(Vector3(0.5, 0.2, 0.3), Vector2(0.6, 0.4), table.drop_floor, table.drop_ceiling))
+	await aim_at.call(Vector3(5.0, 0.0, 5.0))
+	print("SMOKE the size is clamped (at most 1.4 x 1.0 m): ", table.slab_size.is_equal_approx(Vector2(1.4, 1.0)))
+	await aim_at.call(Vector3(-5.0, 0.0, -5.0))
+	print("SMOKE ...and at least 0.5 x 0.3 m: ", table.slab_size.is_equal_approx(Vector2(0.5, 0.3)))
+	r.button_released.emit("trigger_click")
+	await process_frame
+	print("SMOKE letting go ends the drag: ", table.resizer.dragging == -1)
+	table.set_slab_size(Vector2(0.6, 0.4))
+	table.global_transform = saved_xf
+	r.global_transform = Transform3D(Basis.IDENTITY, Vector3(1.0, 1.5, 1.0))
+	for i in 3:
+		await process_frame
+	print("SMOKE the laser away from the table lets go of the claim: ", not r.get_meta("ui_hover", false))
 
 	# --- no backend identity: not editable
 	var local := part(Vector3(30, 30, 30), Vector3(0, 100, 0), "")

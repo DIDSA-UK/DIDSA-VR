@@ -61,7 +61,10 @@ This page is what was decided and built, what the code turned out to say, and wh
    * Closing the table does the same as To arena.
 9. **Edited parts have stale mates.** Every instance of an edited part gets a **warning badge** and stops being steered by its mates.
    When one is put down (or handed back), an **Enforce mates** button floats over it. See below.
-10. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open.
+10. **Resize the slab:** it is a pane of glass (rounded corners, a rim that glows when the table is engaged) with a bracket hugging each
+    corner, like the floating windows'. Aim at one (it brightens and the laser stops on it), hold the trigger and drag: the opposite corner stays put and the
+    deck, handle and tree follow. 0.5 x 0.3 m to 1.4 x 1.0 m. The part keeps its place relative to the slab's middle.
+11. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open.
 
 ## The deck
 
@@ -94,6 +97,7 @@ There is no AI category: the repo has no hook for it.
 | Piece | Where | What it does |
 |---|---|---|
 | Console | `design_table.gd` | Slab, deck, handle, theme, seating, sending the part back, Reset, the Enforce plumbing. Joins the `design_tables` and `diegetic_panels` groups so `controller.gd` asks it about seating, gripping the part and its handle. |
+| Glass slab, resize | `shaders/table_glass.gdshader`, `table_resize.gd` | The slab is one flat plane drawn by a signed-distance shader (rounded corners, rim and glow in metres, so it stays crisp at any size; `slab_radius`, `slab_border`). `table_resize.gd` is the window-style corner drag: arc brackets, hover claims `ui_hover`, opposite corner fixed; `design_table.gd`'s `set_slab_size()` re-lays out the handle, deck and tree. The handle's halo is told the panel is see-through (`PanelHandle.set_hollow`). |
 | Handling the part | `table_manip.gd`, `table_pose.gd` | Grips (one hand moves, two turn and scale), the right stick and A / B, the "engaged" rule and its tell. `table_pose.gd` is pure maths in the console's own frame (two-hand step, stick turn, nudge, clamps) so it is unit-tested. Gripping sets a `table_part_held` meta on the hand, which `two_hand_model.gd` reads so the grip doesn't also drag the world; `controller.gd` hands the table its grips first (`_try_grab_table`, `_try_release`) and asks it who owns the stick (`is_manipulating`). |
 | Deck UI | `table_ui.gd` | Category row, paged tool row, an options row, status line with the TABLE ACTIVE chip, Snap / Reset / To arena / Undo / Close. Pure 2D `Control`s in the shared theme (`ButtonRail`, per-category accent, `FxOverlay`), so it also runs in a plain window. |
 | Tool data | `table_tools.gd`, `tool_pager.gd` | Uses the wrist tablet's own `TabletRegistry` + `ToolManager`: one active tool across categories. |

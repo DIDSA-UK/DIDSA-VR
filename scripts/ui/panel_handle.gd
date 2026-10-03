@@ -108,6 +108,12 @@ func layout(panel_size: Vector2) -> void:
 		_halo_material.set_shader_parameter("inner", panel_size / outer)
 
 
+func set_hollow(on: bool) -> void:
+	## A see-through panel (the design table's glass slab): the halo then glows only AROUND it, not over its middle.
+	if _halo_material:
+		_halo_material.set_shader_parameter("hollow", on)
+
+
 func _build_halo() -> void:
 	_halo = MeshInstance3D.new()
 	_halo.mesh = QuadMesh.new()

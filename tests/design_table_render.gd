@@ -110,6 +110,14 @@ func _initialize() -> void:
 		await create_timer(0.3).timeout
 		root.get_texture().get_image().save_png(dir.path_join("table_5_engaged.png"))
 
+	# the glass slab dragged bigger, a corner bracket lit
+	if dir != "":
+		table.set_engaged(false)
+		table.set_slab_size(Vector2(0.85, 0.55))
+		table.resizer._set_hover(3)
+		await create_timer(0.4).timeout
+		root.get_texture().get_image().save_png(dir.path_join("table_6_glass_resized.png"))
+
 	var lit := 0
 	for y in range(0, shot2.get_height(), 8):
 		for x in range(0, shot2.get_width(), 8):

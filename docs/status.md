@@ -2501,3 +2501,14 @@ engagement is **automatic with a clear tell**, and leaving is **carry it off the
 
 **Not confirmed:** all of it on a headset. In particular the engaged threshold, the 90 deg/s stick rate and the A / B speed are guesses,
 and whether a second grip "anywhere over the table" is picked up the way a person expects.
+
+### 2026-10-03 (later still) — Milestone 2: glass slab with rounded corners, a border and drag-to-resize corners
+
+John asked for the table to be glass with radii on the corners, a border, and a variable size with drag corners as the windows have.
+- The slab (was an opaque box with four frame bars) is now one flat pane drawn by `shaders/table_glass.gdshader`: rounded corners
+  (`slab_radius` 4.5 cm), a rim (`slab_border` 6 mm) and a soft inner glow from a signed-distance rounded box in metres, a clear middle with a faint sheen.
+  The rim is the engaged / amber tell from before (shader `glow` and `border_color`).
+- `table_resize.gd`: four arc-and-arm brackets hugging the rounded corners, hover claims the laser, trigger-drag resizes with the opposite corner fixed
+  (the console's origin follows, as a window's does), clamped 0.5 x 0.3 .. 1.4 x 1.0 m. `design_table.gd: set_slab_size()` moves the handle, deck and tree.
+- Because the slab is see-through now, the handle's halo (`ui_halo.gdshader`) gained a `hollow` switch so it glows around the slab, not over it.
+- Not done: the deck stays 0.6 m wide whatever the slab's size; the size is not remembered between sessions. Not seen on a headset (rendered once in software).

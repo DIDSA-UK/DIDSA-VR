@@ -9,6 +9,7 @@ render_mode unshaded, blend_add, depth_draw_never, cull_disabled;
 uniform vec4 glow_color : source_color = vec4(0.31, 0.77, 1.0, 1.0);
 uniform float intensity = 0.5;
 uniform vec2 inner = vec2(0.8, 0.8); // the panel's half-extent as a fraction of this quad's
+uniform bool hollow = false; // the panel is see-through (the design table's glass slab): leave its own area clear
 
 void fragment() {
 	vec2 p = abs(UV - vec2(0.5)) * 2.0; // 0 in the centre, 1 at the quad's edge
@@ -17,4 +18,7 @@ void fragment() {
 	a = a * a;
 	ALBEDO = glow_color.rgb;
 	ALPHA = clamp(a * intensity, 0.0, 1.0);
+	if (hollow && d <= 0.0) {
+		ALPHA = 0.0;
+	}
 }

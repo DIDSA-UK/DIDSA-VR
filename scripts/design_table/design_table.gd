@@ -45,6 +45,8 @@ const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const TableUI := preload("res://scripts/design_table/table_ui.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const TableManip := preload("res://scripts/design_table/table_manip.gd")
+const TableResize := preload("res://scripts/design_table/table_resize.gd")
+const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
@@ -63,7 +65,8 @@ const TABLE_LAYER := 1 << 10 ## physics layer of the table copy's collider (the 
 const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids", "topology"]
 
 @export var slab_size := Vector2(0.60, 0.40) ## metres, x by z
-@export var slab_thickness := 0.015
+@export var slab_radius := 0.045 ## metres: the glass slab's rounded corners
+@export var slab_border := 0.006 ## metres: the rim round the glass
 @export var tools_size := Vector2(0.60, 0.15) ## the tool deck, metres
 @export var pixels_per_metre: float = 2667.0 ## the same physical text size as the wrist tablet
 @export var deck_lean_degrees: float = 30.0 ## how far the deck is tipped up from flat, towards you
@@ -114,9 +117,9 @@ var _deck: Node3D
 var _deck_quad: MeshInstance3D
 var _handle_frame: Node3D
 var _handle_local := Transform3D.IDENTITY
+var resizer ## table_resize.gd: the corner brackets that drag the slab to a new size
 var _slab: MeshInstance3D
-var _slab_material: StandardMaterial3D
-var _frame_material: StandardMaterial3D
+var _frame_material: ShaderMaterial ## the glass slab's: rounded rim, glow
 var _ring: MeshInstance3D
 var _ring_material: StandardMaterial3D
 var _seen_revision := 0
@@ -168,6 +171,8 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	enforce_button.pressed_enforce.connect(enforce_mates)
 	if mates_tool != null:
 		mates_tool.enforce_finished.connect(_on_enforce_finished)
+	resizer = TableResize.new()
+	resizer.setup(self)
 	manip = TableManip.new()
 	manip.setup(self)
 	manip.engaged_changed.connect(set_engaged)
@@ -202,6 +207,7 @@ func close() -> void:
 		return
 	return_part() # the real node comes back exactly where it was
 	manager.deactivate()
+	resizer.cancel()
 	if tree.is_open():
 		tree.close()
 	_open = false
@@ -266,34 +272,20 @@ func tool_deactivated(tool_id: String) -> void:
 # --- Building ------------------------------------------------------------------------
 
 func _build_slab() -> void:
+	## A pane of glass in the console's XZ plane (its top is the console's y = 0): rounded corners, a rim, a soft inner glow,
+	## a clear middle. All drawn by one shader from the slab's size in metres, so it stays crisp however it is resized.
 	_slab = MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(slab_size.x, slab_thickness, slab_size.y)
-	_slab_material = StandardMaterial3D.new()
-	_slab_material.roughness = 0.55
-	_slab_material.metallic = 0.1
-	box.material = _slab_material
-	_slab.mesh = box
-	_slab.position = Vector3(0.0, -slab_thickness * 0.5, 0.0) # its top face is the console's y = 0
+	_slab.name = "Slab"
+	var plane := PlaneMesh.new()
+	plane.size = slab_size
+	_frame_material = ShaderMaterial.new()
+	_frame_material.shader = GLASS_SHADER
+	_frame_material.render_priority = -1 # under the part's ring and the resize brackets
+	plane.material = _frame_material
+	_slab.mesh = plane
+	_slab.position = Vector3(0.0, -0.001, 0.0)
+	_slab.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_slab)
-
-	# A thin accent frame round the slab's top edge, and a ring under the part: where it floats.
-	_frame_material = StandardMaterial3D.new()
-	_frame_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var t := 0.006
-	for spec in [
-		{"size": Vector3(slab_size.x, t, t), "pos": Vector3(0, 0, slab_size.y * 0.5 - t * 0.5)},
-		{"size": Vector3(slab_size.x, t, t), "pos": Vector3(0, 0, -slab_size.y * 0.5 + t * 0.5)},
-		{"size": Vector3(t, t, slab_size.y), "pos": Vector3(slab_size.x * 0.5 - t * 0.5, 0, 0)},
-		{"size": Vector3(t, t, slab_size.y), "pos": Vector3(-slab_size.x * 0.5 + t * 0.5, 0, 0)},
-	]:
-		var bar := MeshInstance3D.new()
-		var bar_mesh := BoxMesh.new()
-		bar_mesh.size = spec["size"]
-		bar_mesh.material = _frame_material
-		bar.mesh = bar_mesh
-		bar.position = spec["pos"]
-		add_child(bar)
 	_ring = MeshInstance3D.new()
 	var ring_mesh := TorusMesh.new()
 	ring_mesh.inner_radius = fit_radius - 0.004
@@ -301,6 +293,7 @@ func _build_slab() -> void:
 	ring_mesh.rings = 48
 	_ring_material = StandardMaterial3D.new()
 	_ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_ring_material.render_priority = 1
 	_ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ring_mesh.material = _ring_material
 	_ring.mesh = ring_mesh
@@ -312,13 +305,15 @@ func _build_slab() -> void:
 
 func _style_materials() -> void:
 	## Colours from the live UI theme: re-run when the theme changes.
-	_slab_material.albedo_color = tokens.bg_raised
 	var ring: Color = tokens.accent
-	var frame: Color = tokens.warn if _leave_cue else (ring.lightened(0.55) if _engaged else ring)
-	_frame_material.albedo_color = frame
-	_frame_material.emission_enabled = _engaged or _leave_cue
-	_frame_material.emission = frame
-	_frame_material.emission_energy_multiplier = 1.6
+	var rim: Color = tokens.warn if _leave_cue else (ring.lightened(0.45) if _engaged else ring)
+	var fill: Color = tokens.bg_panel
+	_frame_material.set_shader_parameter("size", slab_size)
+	_frame_material.set_shader_parameter("radius", slab_radius)
+	_frame_material.set_shader_parameter("border_width", slab_border)
+	_frame_material.set_shader_parameter("fill_color", Color(fill.r, fill.g, fill.b, 0.30))
+	_frame_material.set_shader_parameter("border_color", rim)
+	_frame_material.set_shader_parameter("glow", 1.0 if (_engaged or _leave_cue) else 0.0)
 	_ring_material.albedo_color = Color(ring.r, ring.g, ring.b, 0.85 if (_last_drop_ok or _engaged) else 0.30)
 
 
@@ -339,10 +334,7 @@ func _build_deck() -> void:
 	_deck = Node3D.new()
 	add_child(_deck)
 	_deck.rotation_degrees = Vector3(-(90.0 - deck_lean_degrees), 0.0, 0.0) # the quad faces +Z; this lays it down, tipped up towards you
-	var lean := deg_to_rad(90.0 - deck_lean_degrees)
-	# The deck's top edge starts deck_gap in front of the slab's front edge, just under it.
-	var top_edge := Vector3(0.0, -0.01, slab_size.y * 0.5 + deck_gap)
-	_deck.position = top_edge + Vector3(0.0, -cos(lean) * tools_size.y * 0.5, sin(lean) * tools_size.y * 0.5) # its middle is half the deck's height down the slope from the top edge
+	_layout_deck()
 	_deck_quad = MeshInstance3D.new()
 	var mesh := QuadMesh.new()
 	mesh.size = tools_size
@@ -371,6 +363,28 @@ func _build_deck() -> void:
 	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 
 
+func _layout_deck() -> void:
+	## The deck's top edge starts deck_gap in front of the slab's front edge, just under it (moves with the slab when it is resized).
+	var lean := deg_to_rad(90.0 - deck_lean_degrees)
+	var top_edge := Vector3(0.0, -0.01, slab_size.y * 0.5 + deck_gap)
+	_deck.position = top_edge + Vector3(0.0, -cos(lean) * tools_size.y * 0.5, sin(lean) * tools_size.y * 0.5) # its middle is half the deck's height down the slope from the top edge
+
+
+func set_slab_size(new_size: Vector2) -> void:
+	## The slab was dragged to a new size (table_resize.gd): the glass, the handle on its front edge, the deck in front of it and
+	## the tree at its left follow. The part keeps its place relative to the slab's middle.
+	slab_size = new_size
+	(_slab.mesh as PlaneMesh).size = new_size
+	_style_materials()
+	handle.layout(new_size)
+	_layout_deck()
+	var dock_x := -(new_size.x * 0.5 + 0.20)
+	tree.position.x += dock_x - tree.dock_position.x # keeps wherever the tree has been carried to, relative to the slab's left edge
+	tree.dock_position.x = dock_x
+	resizer.layout()
+	poke_render()
+
+
 func _build_handle() -> void:
 	# The handle works in a "panel" frame whose +Z is the slab's normal and whose lower edge
 	# is the slab's front edge, so the stock pill and halo land on the front edge and glow
@@ -385,6 +399,7 @@ func _build_handle() -> void:
 	handle.camera = _camera
 	handle.laser_reach = 0.0 # near grab only: a distance carry would stand the console upright and face it at you
 	handle.build(slab_size)
+	handle.set_hollow(true) # the slab is glass: the halo glows round it, not over it
 
 
 func handle_in_reach(hand: Node3D) -> bool:
@@ -402,6 +417,7 @@ func _process(delta: float) -> void:
 		_seen_revision = UiThemes.revision
 		_style_materials()
 		handle.set_colours(tokens.text_dim, tokens.accent)
+		resizer.restyle()
 		poke_render()
 	if not _open:
 		return
@@ -413,6 +429,7 @@ func _process(delta: float) -> void:
 		poke_render()
 		return
 	surface.process(delta, true)
+	resizer.process()
 	_update_drop_ring()
 	manip.process(delta)
 	_gate_rendering(delta)
