@@ -78,6 +78,8 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var open_distance: float = 0.70 ## metres in front of you when summoned
 @export var open_drop: float = 0.40 ## metres below your eyes when summoned
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
+@export var sketch_tilt_degrees: float = 60.0 ## while a sketch is open the sketch plane stands this far up from the slab, top edge away, facing you (flat on the slab was awkward to draw on)
+@export var sketch_hover_height: float = 0.26 ## metres: the least height the part floats at while it is tilted, so the sheet's lower edge clears the slab
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
 @export var drop_floor: float = -0.05 ## drop zone, metres above the slab
@@ -139,6 +141,7 @@ var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table w
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 var _new_part_busy := false
+var _view_empty := false ## the Build tree has hidden / rolled back everything: the copy shows nothing
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node, mates_tool: Node = null) -> void:
@@ -568,7 +571,8 @@ func _give_copy_collider() -> void:
 	## The copy's collider on the table's own layer (so the laser can pick its faces) and, for a blank part, no collider and
 	## no drawing of the placeholder box: the copy still stands in for its size and carries the plane squares and the sheet
 	## (its children keep their own layers), but a fake cube is never shown or picked.
-	table_copy.layers = 0 if is_blank() else 1
+	_view_empty = false
+	apply_view_mode()
 	if is_blank():
 		return
 	table_copy.create_trimesh_collision()
@@ -576,6 +580,17 @@ func _give_copy_collider() -> void:
 		if child is StaticBody3D:
 			(child as StaticBody3D).collision_layer = TABLE_LAYER
 			(child as StaticBody3D).collision_mask = 0
+
+
+func apply_view_mode() -> void:
+	## The copy in the current view mode (view_modes.gd): its faces drawn or not (never for a blank part, or when the Build tree has hidden
+	## everything), its edges built and shown or not (never for those two either: the placeholder box has no edges worth showing).
+	if table_copy == null:
+		return
+	var nothing_to_draw := is_blank() or _view_empty
+	table_copy.set_meta("no_edges", nothing_to_draw)
+	_main.view_modes.apply_to(table_copy)
+	table_copy.layers = 1 if (not nothing_to_draw and _main.view_modes.shows_faces()) else 0
 
 
 func try_grab(hand: XRController3D) -> bool:
@@ -858,11 +873,19 @@ func _persist(node: Node3D) -> void:
 
 
 func orient_to_plane(plane: Dictionary) -> void:
-	## Turns the part on the table so the sketch plane lies flat, x to the right, y away from you. Where it is and how big it
-	## is stay as the user left them.
+	## Turns the part on the table so the sketch plane stands tilted up towards you (sketch_rotation), x to the right, y away. Where
+	## it is (never lower than sketch_hover_height) and how big it is stay as the user left them.
 	if pivot == null:
 		return
-	_animate_pose(SketchMath.orient_to_table(plane), pivot.position, user_scale)
+	var at := pivot.position
+	at.y = maxf(at.y, sketch_hover_height)
+	_animate_pose(sketch_rotation(plane), at, user_scale)
+
+
+func sketch_rotation(plane: Dictionary) -> Basis:
+	## How the part is turned while a sketch on `plane` is open: the plane lies flat on the slab (x right, y away, normal up), then
+	## tips up about the slab's x axis by sketch_tilt_degrees so its top edge goes away and its face comes towards you.
+	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt_degrees)) * SketchMath.orient_to_table(plane)
 
 
 func reset_pose() -> void:
@@ -873,9 +896,9 @@ func reset_pose() -> void:
 	var rotation := _seat_pivot_basis
 	var text := "Back where it started."
 	if editor != null and editor.session != null and not (editor.session.plane as Dictionary).is_empty():
-		rotation = SketchMath.orient_to_table(editor.session.plane)
+		rotation = sketch_rotation(editor.session.plane)
 		text = "Back to the sketch plane."
-	_animate_pose(rotation, Vector3(0.0, hover_height, 0.0), 1.0)
+	_animate_pose(rotation, Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0), 1.0)
 	set_status(text)
 	UiFeedback.haptic(_right, "confirm")
 
@@ -952,7 +975,8 @@ func show_filtered_view(glb_bytes: PackedByteArray) -> bool:
 		if key in ["face_ids", "body_ids", "topology"] and table_copy.has_meta(key):
 			table_copy.remove_meta(key)
 	if parsed["mesh"] == null:
-		table_copy.layers = 0
+		_view_empty = true
+		apply_view_mode()
 	else:
 		table_copy.mesh = parsed["mesh"]
 		for key in (parsed["metas"] as Dictionary):

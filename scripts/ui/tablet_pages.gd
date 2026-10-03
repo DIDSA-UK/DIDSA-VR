@@ -107,6 +107,8 @@ func register(reg) -> void:
 		"help": "Jump to a preset scale about the model's centre. Fit to view brings the whole model in front of you; Home returns it to where it loaded. For an exact value, click the right thumbstick."})
 	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
 		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
+	reg.add_tool("view", "display", "Display", "visibility", _build_display_page, {
+		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
 	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
 		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
 		"hint": "Point at a part and pull the right trigger to hide it.",
@@ -371,6 +373,23 @@ func _build_visibility_page() -> Control:
 	page.add_child(_button("Reverse visibility", func() -> void: _main.reverse_visibility()))
 	page.add_child(_button("Isolate selected", func() -> void: _main.isolate_selected()))
 	page.add_child(_hint("To hide parts by pointing at them, use Shoot hide."))
+	return page
+
+
+func _build_display_page() -> Control:
+	var page := _page()
+	if _main == null or _main.get("view_modes") == null:
+		page.add_child(_hint("Display modes aren't available here."))
+		return page
+	page.add_child(_hint("How models are drawn. Edges are the part's real CAD edges, so they need a model made by the backend; a bare local file shows its sharp edges instead."))
+	var group := ButtonGroup.new()
+	var modes = _main.view_modes
+	for i in modes.NAMES.size():
+		var b := _button(modes.NAMES[i], func() -> void: modes.set_mode(i))
+		b.toggle_mode = true
+		b.button_group = group
+		b.set_pressed_no_signal(modes.mode == i)
+		page.add_child(b)
 	return page
 
 

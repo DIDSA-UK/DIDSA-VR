@@ -73,6 +73,7 @@ var _download_started_ms := 0
 var _parse_started_ms := 0
 var _load_summary := ""
 var _part_count := 0
+var view_modes ## view_modes.gd: Shaded / Shaded + edges / Wireframe
 
 # All endpoints below live under the backend's "/document" router prefix —
 # see backend/app/document/router.py's `router = APIRouter(prefix="/document", ...)`.
@@ -96,6 +97,7 @@ func _ready() -> void:
 	_add_face_highlight()
 	_add_colour_tool()
 	_add_section_tool()
+	_add_view_modes() # after the section tool: its edge shader uses the section clip's global uniforms
 	_add_assembly_tree_window()
 	_add_calculator_window()
 	_add_image_viewer_window()
@@ -185,6 +187,17 @@ func _add_section_tool() -> void:
 	add_child(sections)
 	sections.setup(command_stack)
 	_section_tool = sections
+
+
+func _add_view_modes() -> void:
+	view_modes = preload("res://scripts/view_modes.gd").new()
+	view_modes.name = "ViewModes"
+	add_child(view_modes)
+	view_modes.setup(self, _settings.view_render_mode)
+
+
+func save_view_mode(mode: int) -> void:
+	_settings.set_view_render_mode(mode)
 
 
 func _add_assembly_tree_window() -> void:
@@ -1167,6 +1180,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Which of these are grounded / mated (for is_locked()/constrained motion).
 	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
 	_mates_tool.refresh_state(_resolved_part_id)
+	view_modes.apply_all() # the saved view mode (edges / wireframe) for the parts that were just loaded
 	return true
 
 
@@ -1387,6 +1401,7 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		part.create_trimesh_collision()
 		if face_highlight != null:
 			face_highlight.invalidate(part)
+		view_modes.apply_to(part) # the new shape's edges
 		updated += 1
 	if updated > 0:
 		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
@@ -1432,6 +1447,7 @@ func _blank_out(nodes: Array) -> int:
 					child.free()
 			if face_highlight != null:
 				face_highlight.invalidate(part)
+			view_modes.apply_to(part)
 		updated += 1
 	return updated
 

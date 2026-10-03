@@ -127,7 +127,7 @@ func _initialize() -> void:
 	var plane_call: Array = calls_to("/create-plane-features")[0]
 	print("SMOKE ...by making an offset_face plane on exactly the face that was lit: ", plane_call[1]["plane_type"] == "offset_face" and plane_call[1]["face_refs"][0]["face_ref"]["index"] == picked["index"] and plane_call[1]["face_refs"][0]["face_ref"]["body_id"] == picked["body_id"])
 	var plane: Dictionary = ed.session.plane
-	print("SMOKE ...and the part is turned so that face lies flat on the table: ", (table.pivot.basis * (plane["n"] as Vector3)).is_equal_approx(Vector3.UP))
+	print("SMOKE ...and the part is turned so that face stands up at the sketch tilt: ", (table.pivot.basis * (plane["n"] as Vector3)).is_equal_approx(Basis(Vector3.RIGHT, deg_to_rad(table.sketch_tilt_degrees)) * Vector3.UP))
 	print("SMOKE ...the chosen face stays lit, the sheet is shown, the plane squares are put away: ", ed.highlight.pick_nodes().size() == 1 and ed.view != null and not ed.markers.visible)
 	print("SMOKE ...and the user is told what the tool does: ", table.status().length() > 0)
 
@@ -275,7 +275,31 @@ func _initialize() -> void:
 	var on_plane: bool = await settle(func() -> bool: return ed.state == "sketch")
 	var sketch_calls := calls_to("/features/sketch")
 	print("SMOKE the trigger opens a sketch on the plane BY NAME (no plane feature needed): ", on_plane and sketch_calls.back()[1] == {"plane": "XY"} and ed.chosen_plane == "XY" and ed.markers.chosen == "XY")
-	print("SMOKE ...and the part turns to lay that plane flat: ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(Vector3.UP))
+	var tilt_basis := Basis(Vector3.RIGHT, deg_to_rad(60.0))
+	print("SMOKE ...and the part turns to stand that plane up at 60 degrees from the slab, x to the right, y away and up: ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP) and (table.pivot.basis * Vector3(1, 0, 0)).is_equal_approx(Vector3.RIGHT) and (table.pivot.basis * Vector3(0, 1, 0)).is_equal_approx(tilt_basis * Vector3(0, 0, -1)))
+	print("SMOKE ...and floats high enough that the tilted sheet's lower edge clears the slab: ", table.pivot.position.y >= table.sketch_hover_height - 0.0001)
+
+	# --- the animation on sketch start: with motion on, the turn is a tween that ends exactly on the target
+	UiFeedback.reduce_motion = false
+	table.apply_pose(Vector3(0, table.hover_height, 0), Basis.IDENTITY, 1.0)
+	table.orient_to_plane(xy)
+	await process_frame
+	await process_frame
+	var mid_up: Vector3 = (table.pivot.basis * Vector3(0, 0, 1)).normalized()
+	print("SMOKE with motion on the turn is gradual: a frame or two in, the part is neither at its start nor at its tilted end: ", not mid_up.is_equal_approx(Vector3(0, 0, 1)) and not mid_up.is_equal_approx(tilt_basis * Vector3.UP))
+	var arrived: bool = false
+	for i in 120:
+		await process_frame
+		if (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP):
+			arrived = true
+			break
+	print("SMOKE ...and it ends exactly on the tilted pose, the sheet and the picker following the live transform: ", arrived and ed.view != null and ed.view.get_parent() == table.table_copy)
+	UiFeedback.reduce_motion = true
+	table.apply_pose(Vector3(0, table.hover_height, 0), Basis.IDENTITY, 1.0)
+	table.orient_to_plane(xy)
+	print("SMOKE with Reduce motion on, the turn is instant: ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP))
+	table.reset_pose()
+	print("SMOKE Reset while a sketch is open goes back to the tilted sketch pose (not flat): ", (table.pivot.basis * Vector3(0, 0, 1)).is_equal_approx(tilt_basis * Vector3.UP) and is_equal_approx(table.user_scale, 1.0))
 
 	# --- lifting while editing, and the part closing it all down
 	table.close()

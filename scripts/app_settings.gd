@@ -18,6 +18,7 @@ var ui_theme: String = "Navy" ## one of ui_themes.gd's ORDER
 var fx_enabled: bool = true ## shader effects (the glass overlay, button glow)
 var sound_enabled: bool = true
 var sound_volume: float = 0.7
+var view_render_mode: int = 0 ## 0 shaded, 1 shaded + edges, 2 wireframe (view_modes.gd): like the flat app's view_render_mode
 var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 
 
@@ -30,6 +31,7 @@ func load_from_disk() -> void:
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
 	ui_theme = str(config.get_value("appearance", "theme", ui_theme))
+	view_render_mode = clampi(int(config.get_value("appearance", "view_render_mode", view_render_mode)), 0, 2)
 	fx_enabled = bool(config.get_value("appearance", "effects", fx_enabled))
 	sound_enabled = bool(config.get_value("comfort", "sound_enabled", sound_enabled))
 	sound_volume = clampf(float(config.get_value("comfort", "sound_volume", sound_volume)), 0.0, 1.0)
@@ -42,6 +44,7 @@ func save_to_disk() -> void:
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
 	config.set_value("appearance", "theme", ui_theme)
+	config.set_value("appearance", "view_render_mode", view_render_mode)
 	config.set_value("appearance", "effects", fx_enabled)
 	config.set_value("comfort", "sound_enabled", sound_enabled)
 	config.set_value("comfort", "sound_volume", sound_volume)
@@ -57,6 +60,11 @@ func set_project_folder(path: String) -> void:
 
 func set_reduce_motion(on: bool) -> void:
 	reduce_motion = on
+	save_to_disk()
+
+
+func set_view_render_mode(mode: int) -> void:
+	view_render_mode = clampi(mode, 0, 2)
 	save_to_disk()
 
 
