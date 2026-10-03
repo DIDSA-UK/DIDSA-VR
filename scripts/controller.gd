@@ -323,6 +323,14 @@ func _try_grab() -> void:
 	if section_tool and section_tool.try_grab(self, grab_reach):
 		return # gizmo grabbed instead — see section_tool.gd's own docstring for why this is checked first
 
+	# A part sitting on the design table: gripping its copy lifts the real part back out (design_table.gd).
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		var lifted: Dictionary = table.try_lift(self)
+		if not lifted.is_empty():
+			_set_grab_hover(null)
+			_begin_hold(lifted["node"], lifted["start"])
+			return
+
 	# Deliberately ignores selected_node so grip never feels tied to the laser-select state.
 	var target := _find_grab_target()
 	if target and mates_tool and mates_tool.is_locked(target):
@@ -333,16 +341,22 @@ func _try_grab() -> void:
 		return
 	if target:
 		_set_grab_hover(null)
-		target.set_meta("held", true)
-		_held_start_transform = target.global_transform
-		# Its pose relative to this hand right now, kept exactly where you took
-		# hold of it: turning your hand turns the part about that spot. Stays
-		# under assembly_root rather than reparenting to the hand, since
-		# _update_held_part() drives its transform explicitly every frame (so
-		# steadiness — see below — can filter the hand's position first).
-		_grab_offset = global_transform.affine_inverse() * target.global_transform
-		_grab_filter.reset(global_position)
-		held_node = target
+		_begin_hold(target, target.global_transform)
+
+
+func _begin_hold(target: Node3D, start_transform: Transform3D) -> void:
+	## Starts carrying `target`. `start_transform` is the pose undo returns it to: where it was
+	## when picked up, or for a part lifted off the design table, where it was before it went on.
+	target.set_meta("held", true)
+	_held_start_transform = start_transform
+	# Its pose relative to this hand right now, kept exactly where you took
+	# hold of it: turning your hand turns the part about that spot. Stays
+	# under assembly_root rather than reparenting to the hand, since
+	# _update_held_part() drives its transform explicitly every frame (so
+	# steadiness — see below — can filter the hand's position first).
+	_grab_offset = global_transform.affine_inverse() * target.global_transform
+	_grab_filter.reset(global_position)
+	held_node = target
 
 
 func _update_panel_hover() -> void:
@@ -480,6 +494,9 @@ func _try_release() -> void:
 	held_node = null
 	if mates_tool and mates_tool.end_drag(part):
 		return # constrained part: mates_tool.gd finishes the last solve and records the undo step
+	for table in get_tree().get_nodes_in_group("design_tables"):
+		if table.try_seat_released(part, _held_start_transform):
+			return # let go over the design table: the table took it, and the part's pose in the assembly is unchanged
 	_push_move_command(part, _held_start_transform)
 
 

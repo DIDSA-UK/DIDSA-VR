@@ -62,6 +62,7 @@ var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
 var _browser_window: Node
+var design_table: Node ## milestone 2: the design table — see scripts/design_table/design_table.gd
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
 var _import_started_ms := 0
@@ -96,6 +97,7 @@ func _ready() -> void:
 	_add_calculator_window()
 	_add_image_viewer_window()
 	_add_browser_window()
+	_add_design_table()
 	_add_wrist_tablet()
 	_add_popup_keyboard()
 	$XROrigin3D/LeftController.command_stack = command_stack
@@ -280,10 +282,19 @@ func open_window_count(kind: String) -> int:
 	return n
 
 
+func _add_design_table() -> void:
+	## Milestone 2: the summonable design table — see design_table.gd's own docstring.
+	var table := preload("res://scripts/design_table/design_table.gd").new()
+	table.name = "DesignTable"
+	add_child(table)
+	table.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, self, _mates_tool)
+	design_table = table
+
+
 func _add_wrist_tablet() -> void:
 	var tablet: Node = preload("res://scripts/ui/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window, design_table)
 	_tablet = tablet
 
 
@@ -347,8 +358,14 @@ func show_all_parts() -> void:
 	_set_all_visibility(true, "show all")
 
 
+func _arena_parts() -> Array:
+	## The arena's parts, not counting the one sitting on the design table (hidden on purpose,
+	## and not for hide / show / isolate to bring back).
+	return get_tree().get_nodes_in_group("grabbable_parts").filter(func(p: Node) -> bool: return not p.has_meta("on_table"))
+
+
 func reverse_visibility() -> void:
-	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	var parts := _arena_parts()
 	if parts.is_empty():
 		return
 	var before := {}
@@ -363,7 +380,7 @@ func isolate_selected() -> void:
 	var target := current_selected_part()
 	if target == null:
 		return
-	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	var parts := _arena_parts()
 	var before := {}
 	for p in parts:
 		before[p] = p.visible
@@ -396,7 +413,7 @@ func select_part_by_occurrence_id(occurrence_id: String) -> bool:
 
 
 func _set_all_visibility(vis: bool, label: String) -> void:
-	var parts := get_tree().get_nodes_in_group("grabbable_parts")
+	var parts := _arena_parts()
 	if parts.is_empty():
 		return
 	var before := {}
@@ -1100,6 +1117,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
 	command_stack.clear()
+	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
 	_assembly_tree_window.mark_stale() # the Occurrence tree it's shown is about to point at parts that no longer exist — see that script's own mark_stale()

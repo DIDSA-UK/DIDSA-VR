@@ -52,6 +52,8 @@ var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
 var _browser_window: Node
+var _design_table: Node
+var _table_button: Button
 var _dragging: Callable = Callable()
 
 var _scale_label: Label
@@ -90,6 +92,7 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 	_calculator_window = ctx.get("calculator_window")
 	_image_viewer_window = ctx.get("image_viewer_window")
 	_browser_window = ctx.get("browser_window")
+	_design_table = ctx.get("design_table")
 	_dragging = ctx.get("dragging", Callable())
 
 
@@ -124,6 +127,10 @@ func register(reg) -> void:
 		"status": _measure_status, "list": _measure_rows, "list_empty": "No measurements yet.",
 		"help": "Switch the tool on, then pick a vertex, edge or face. A second pick compares the two; a third starts again. Results show beside the tablet."})
 
+	reg.add_tool("assembly", "table", "Table", "table", _build_table_page, {
+		"status": _table_status,
+		"help": "Summon the design table in front of you. Carry a part over it with grip and let go to edit it there; grip the part on the table to lift it back out. Mated parts: Relax all mates first, or they stay steered by their mates."})
+
 	reg.add_category("windows", "Windows", "windows", ACCENT_WINDOWS)
 	reg.add_tool("windows", "windows", "Windows", "windows", _build_windows_page, {
 		"help": "Open floating windows. Each opens in front of you with its own close button, grab handle and resize corners."})
@@ -147,6 +154,8 @@ func refresh() -> void:
 		var labels: Array = _mates_tool.picked_labels()
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
+	if _table_button and _design_table:
+		_table_button.text = "Dismiss table" if _design_table.is_open() else "Summon table"
 	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
 	if _measure_picks_label and _measure_tool:
 		var m: Array = _measure_tool.picked_labels()
@@ -707,6 +716,34 @@ static func _fmt_vec_unit(v: Array, unit: String) -> String:
 	for x in v:
 		parts.append(_fmt_num(x))
 	return "%s %s" % [", ".join(parts), unit]
+
+
+# --- Table -----------------------------------------------------------------------------
+
+func _build_table_page() -> Control:
+	var page := _page()
+	if _design_table == null:
+		page.add_child(_hint("The design table isn't available here."))
+		return page
+	_table_button = _button("Dismiss table" if _design_table.is_open() else "Summon table", _toggle_table, &"ButtonAccent")
+	page.add_child(_table_button)
+	page.add_child(_button("Bring it to me", func() -> void:
+		if _design_table.is_open():
+			_design_table.recall()))
+	page.add_child(_hint("Carry a part over the table with grip and let go to edit it there. Grip the part on the table to lift it back out. If the part is mated, Relax all mates first."))
+	return page
+
+
+func _toggle_table() -> void:
+	if _design_table:
+		_design_table.toggle()
+		refresh()
+
+
+func _table_status() -> String:
+	if _design_table == null:
+		return ""
+	return str(_design_table.status()) if _design_table.is_open() else "The table is put away. Summon it to edit a part."
 
 
 # --- Windows ---------------------------------------------------------------------------
