@@ -47,6 +47,7 @@ const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const TableManip := preload("res://scripts/design_table/table_manip.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
 const NewDocument := preload("res://scripts/design_table/new_document.gd")
+const TableBuild := preload("res://scripts/design_table/table_build.gd")
 const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
@@ -106,6 +107,7 @@ var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis
 var table_copy: MeshInstance3D = null ## what's edited; a child of pivot, in the part's own mm frame
 var fit_scale := 0.0 ## metres per mm of the part at its fitted size
 var user_scale := 1.0 ## how much bigger / smaller than fitted the part has been made with two hands (the pivot carries it; fit_scale does not change)
+var build ## table_build.gd: the Build tree of the part on the table (the tree window's Build tab is its view)
 var manip ## table_manip.gd: gripping, turning, scaling and nudging the part, and whether the table is engaged
 
 var _left: XRController3D
@@ -174,6 +176,9 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	enforce_button.pressed_enforce.connect(enforce_mates)
 	if mates_tool != null:
 		mates_tool.enforce_finished.connect(_on_enforce_finished)
+	build = TableBuild.new()
+	build.setup(self)
+	tree.attach_build(build)
 	resizer = TableResize.new()
 	resizer.setup(self)
 	manip = TableManip.new()
@@ -784,6 +789,8 @@ func _clear_seat() -> void:
 	seated = null
 	fit_scale = 0.0
 	user_scale = 1.0
+	if build != null:
+		build.clear() # after the seat is gone: the tree window sees an empty table and goes back to Parts
 
 
 # --- Editing support (table_editor.gd) ----------------------------------------------------------
@@ -926,6 +933,33 @@ func sync_copy_from_seated() -> void:
 		table_copy.scale = Vector3.ONE * fit_scale
 		table_copy.position = TableSeat.copy_offset(aabb, fit_scale, Basis.IDENTITY)
 	poke_render()
+
+
+func show_filtered_view(glb_bytes: PackedByteArray) -> bool:
+	## The table's COPY shows the part as the Build tree has it (a hidden feature's body left out, or rolled back to an earlier
+	## feature): this mesh goes on the copy only, in the place and at the size the whole part has, so nothing jumps. If nothing is
+	## left to show the copy is not drawn and has no collider. The arena's nodes are never given it.
+	if table_copy == null:
+		return false
+	var parsed: Dictionary = _main.mesh_from_glb(glb_bytes)
+	if not parsed["ok"]:
+		return false
+	for child in table_copy.get_children():
+		if child is StaticBody3D:
+			table_copy.remove_child(child)
+			child.free()
+	for key in COPIED_METAS:
+		if key in ["face_ids", "body_ids", "topology"] and table_copy.has_meta(key):
+			table_copy.remove_meta(key)
+	if parsed["mesh"] == null:
+		table_copy.layers = 0
+	else:
+		table_copy.mesh = parsed["mesh"]
+		for key in (parsed["metas"] as Dictionary):
+			table_copy.set_meta(key, parsed["metas"][key])
+		_give_copy_collider()
+	poke_render()
+	return true
 
 
 func notify_edited(edited_part_id: String, nodes: Array = []) -> void:

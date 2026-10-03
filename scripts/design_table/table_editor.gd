@@ -20,6 +20,7 @@ extends Node
 
 signal state_changed(state: String)
 signal geometry_changed ## the part's mesh was replaced after an edit
+signal view_changed ## only what the table's copy shows changed (Hide / Show, rollback): the part itself did not
 
 const LaserPick := preload("res://scripts/laser_pick.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
@@ -52,7 +53,7 @@ var part_id := "" ## the PART DEFINITION being edited (every instance of it chan
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
 var chosen_plane := "" ## "XY" | "XZ" | "YZ" when it's on a reference plane
 var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
-var feature_stack: Array = [] ## ids of the features made here, newest last: what Undo takes back after the sketch is spent
+var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
 var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0}
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
 
@@ -181,6 +182,7 @@ func _reset() -> void:
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	session = null
+	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
 	markers = null
 	if highlight != null and is_instance_valid(highlight):
@@ -686,6 +688,10 @@ func extrude_distances() -> Array:
 func apply_feature() -> void:
 	if table.table_copy == null or api == null:
 		return
+	if table.build.is_rolled_back_any():
+		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
+		UiFeedback.haptic(table._right, "error")
+		return
 	var tool: String = table.active_tool
 	var result: Dictionary
 	table.set_status("Working...")
@@ -723,11 +729,55 @@ func _edge_refs() -> Array:
 	return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))
 
 
+func glb_path(filtered: bool) -> String:
+	## The part's own assembly-mesh.glb; `filtered` adds the Build tree's Hide / Show and rollback sets (DIDSA-CAD, 2026-10-03).
+	var path := "/document/parts/%s/assembly-mesh.glb?quality=0.5" % part_id
+	if filtered:
+		for id in table.build.hidden_ids():
+			path += "&hidden_feature_ids=%s" % str(id).uri_encode()
+		for id in table.build.rollback_excluded():
+			path += "&rollback_excluded_feature_ids=%s" % str(id).uri_encode()
+	return path
+
+
+func view_is_filtered() -> bool:
+	return not table.build.hidden_ids().is_empty() or not table.build.rollback_excluded().is_empty()
+
+
+func refresh_view() -> void:
+	## The Build tree hid, showed, rolled back or rolled forward something: the table's COPY is shown (or no longer) with that
+	## applied. The arena's real part is not touched. With nothing hidden or rolled back the copy goes back to the whole part.
+	if api == null or table.table_copy == null:
+		return
+	if not view_is_filtered():
+		table.sync_copy_from_seated()
+	else:
+		var fetched: Dictionary = await api.fetch_bytes(glb_path(true))
+		if not fetched["ok"] or table.table_copy == null:
+			table.set_status("Couldn't update the picture: %s" % str(fetched["error"]))
+			return
+		table.show_filtered_view(fetched["bytes"])
+	if highlight != null and table.table_copy != null:
+		highlight.invalidate(table.table_copy)
+	edges.clear()
+	view_changed.emit()
+
+
+func forget_features(ids: Array) -> void:
+	## Features were deleted behind the editor's back (the Build tree's cascade): Undo must not try to take them back again.
+	feature_stack = feature_stack.filter(func(entry) -> bool:
+		var entry_id: String = str(entry["id"]) if entry is Dictionary else str(entry)
+		return not ids.has(entry_id))
+	if session != null and ids.has(session.feature_id):
+		end_sketch() # the sketch it was drawing on is gone
+	table.ui.set_undo_enabled(can_undo())
+
+
 func refresh_geometry() -> bool:
 	## Fetches the part's new mesh and puts it on the table AND on every arena instance of the part.
 	if api == null or table.table_copy == null:
 		return false
-	var fetched: Dictionary = await api.fetch_bytes("/document/parts/%s/assembly-mesh.glb?quality=0.5" % part_id)
+	var fetched: Dictionary = await api.fetch_bytes(glb_path(false))
 	if not fetched["ok"] or table.table_copy == null:
 		return false
 	var nodes := await arena_nodes_of(part_id)
@@ -750,6 +800,8 @@ func refresh_geometry() -> bool:
 	table.sync_copy_from_seated()
 	if was_blank != table.is_blank() or not table.table_copy.get_aabb().size.is_equal_approx(size_before):
 		_rebuild_markers() # the part changed size (or a new part got its first feature, or lost it): the plane squares were sized to the old shape
+	if view_is_filtered():
+		await refresh_view() # the table's copy shows the part with the Build tree's hidden / rolled-back features applied
 	if highlight != null:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
@@ -809,13 +861,17 @@ func undo() -> void:
 		return
 	if feature_stack.is_empty() or api == null:
 		return
-	var id: String = feature_stack.pop_back()
-	var result: Dictionary = await features.delete_feature(part_id, id)
+	var entry = feature_stack.pop_back()
+	var result: Dictionary
+	if entry is Dictionary:
+		result = await features.update_feature(part_id, str(entry["type"]), str(entry["id"]), entry["payload"])
+	else:
+		result = await features.delete_feature(part_id, str(entry))
 	if not result["ok"]:
-		feature_stack.append(id)
+		feature_stack.append(entry)
 		table.set_status("Couldn't take that back: %s" % str(result["error"]))
 		return
 	await refresh_geometry()
 	table.notify_edited(part_id, _edited_nodes)
 	table.ui.set_undo_enabled(can_undo())
-	table.set_status("Took the last feature back.")
+	table.set_status("Put the old value back." if entry is Dictionary else "Took the last feature back.")

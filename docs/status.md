@@ -2525,3 +2525,18 @@ re-import in the flat app's bundle shape and "importing twice leaves one part").
 
 **Not confirmed:** on a headset (the + is an icon-only button in the tree header; whether it is discoverable enough); opening a VR-saved file in
 the flat app's own UI. **Not built:** renaming a part, a part inside a sub-assembly, drawing on the root's own content.
+
+### 2026-10-03 (night) — Milestone 2: the table's tree is the part's Build tree
+
+John pointed out the tree beside the table was the assembly tree again; it should be the part's build tree, like the flat app's part design lens. Built:
+the docked window has **Build | Parts** tabs (Parts = the old assembly list, kept for choosing a part); **Build** lists the part on the table's features in
+order (`GET .../features`), named per type and count, with select-and-light-up, **Edit** (PATCH of an extrude's depth / fillet radius / chamfer distance, taken
+back by Undo), **Delete** with cascade (two presses, names what goes), **Hide / Show** and **Roll back / forward** that change only the table's copy. Code:
+`build_tree.gd` (pure), `table_build.gd` (state and actions), `table_tree_window.gd` (the view), `Main.mesh_from_glb` / `hidden_feature_ids`, the editor's
+second filtered fetch and `Table.show_filtered_view`. **DIDSA-CAD changed** (branch `ccr-a6221403-yu10pq`): `assembly-mesh.glb` takes
+`hidden_feature_ids` and `rollback_excluded_feature_ids` for the requested part; the real backend must be updated for hide / rollback to work (the rest works on
+today's). Tests: `design_table_build_tree` (fake backend, in `run_all.sh`), `e2e_build_tree` (real backend with the CAD change: tree, edit and undo, hide, save,
+roll back, cascade), pytest in DIDSA-CAD. Fixed on the way: the editor kept a stale `part_id` after the part left the table.
+
+**Not confirmed:** headset feel (row and button size, the action strip in a 0.30 m window). **Not built:** reopening an existing sketch to change it, the
+flat app's Planes / Surfaces / Curves sections, undo of a cascade delete.

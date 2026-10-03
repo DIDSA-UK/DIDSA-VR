@@ -114,7 +114,7 @@ There is no AI category: the repo has no hook for it.
 | Plane maths | `sketch_math.gd`, `table_seat.gd` | Pure: fixed-plane bases (XZ's x is −X, as the backend), turning any plane flat on the table, ray→sheet, fit scale. |
 | Backend line | `cad_api.gd`, `part_features.gd` | A serial HTTP queue (one request in flight, in order) and thin Extrude / Fillet / Chamfer / delete calls. |
 | Stale mates | `dirty_mates.gd`, `mate_health.gd`, `enforce_button.gd` | See below. |
-| Tree | `table_tree_window.gd` | The existing Assembly Tree window docked at the slab, with Table and Bring on each row. |
+| Tree (two tabs) | `table_tree_window.gd`, `table_build.gd`, `build_tree.gd` | The window docked at the slab's left has **Build | Parts** tabs. **Build** is the part on the table's own build tree (see "The Build tree" below); **Parts** is the assembly list (the existing Assembly Tree window) with Table and Bring on each row. `table_build.gd` holds the Build tab's state and actions, the window is only its view; `build_tree.gd` is pure (names, summaries, edit payloads, cascade preview). |
 | Shared picking | `scripts/laser_pick.gd` | The ray loop and "what would a pick take here", now used by `controller.gd` (select, hide, Mates, Measure) and the table. |
 
 **A copy, not a reparent.** The arena's parts sit under a scaled root (`assembly_root`) whose frame the mates tool, pose saving, hide
@@ -202,8 +202,9 @@ and the glb `quality` the table fetches (0.5).
 ## Not built / known gaps
 
 * The tool list above (Revolve, the rest of Sketch / Constrain / Feature, Modify, Inspect, AI).
-* **Editing an existing sketch**, or showing the part's existing sketches: v1 starts a new sketch on each pick. The tree's feature mode
-  (origin planes, plane features, sketches) is not built; the tree shows the assembly.
+* **Editing an existing sketch**: v1 starts a new sketch on each pick. The Build tree lists a part's sketches and lights the plane one is on,
+  but cannot reopen it to change its entities. The flat app's separate Planes / Surfaces / Curves sections are not built (planes are rows in
+  the feature list; surfaces and curves are not shown).
 * **Dragging a row out of the tree** onto the table or into the world: the laser freezes the pointer while the trigger is held
   (`laser_surface.gd`), so a drag would need its own gesture. Rows have buttons instead.
 * **New part makes a child part only.** It is always a part placed on the root assembly; drawing directly on the root's own content, or
@@ -248,3 +249,23 @@ worked on" for standing up a throwaway backend.
   occurrences carry `resolved_part_id` (not `external_ref`), exactly as Add component's already do. `tests/e2e_new_part.gd` checks the
   exported file (root first, the child with its sketch and extrude, one occurrence) and imports it back. **Not checked:** opening a VR-saved
   file in the flat app's own UI (no Flutter toolchain in the sandbox): worth doing once by hand.
+
+## The Build tree
+
+The tree beside the table is the part's **build tree**, the same list the flat app shows in its part design lens (`feature_tree_panel.dart`): every
+feature that made the part on the table, in order, named by type and count ("Sketch 1", "Extrude 1", "Fillet 1"), with a second line (a sketch's
+plane, "Boss 12 mm", "R 2 mm, 1 edge(s)") and the part's bodies underneath. It opens on the **Build** tab as soon as a part goes on the table and goes
+back to **Parts** (the assembly list, for choosing a part) when the table empties. It is read from `GET /document/parts/{id}/features` whenever the
+part changes. Tap a row to select it; a strip under it offers:
+
+* **Select and light up:** an extrude lights the faces of the body it made, a fillet / chamfer its edges, a plane (or a sketch on a plane feature)
+  its faces; a sketch on a reference plane just says so.
+* **Edit** (extrude, fillet, chamfer): the numeric pad opens on the current depth / radius / distance; the value goes to the backend as a PATCH (any
+  feature, not only the last) and the part updates on the table and in the arena. The table's **Undo** puts the old value back.
+* **Delete:** two presses ("Sure? Deleting Sketch 1 also removes Extrude 1, Fillet 1"); the backend's cascade deletes the feature, everything built
+  on it and the sketches they owned. Not undoable (as in the flat app).
+* **Hide / Show** and **Roll back / Roll forward:** change **only the table's copy**. The arena's real part always shows everything. Hide leaves a
+  feature's body out of the picture (everything is still computed from the real history); Roll back to a row skips every later feature; adding a
+  feature is refused while rolled back. Both reach the backend as the `hidden_feature_ids` / `rollback_excluded_feature_ids` query params of
+  `assembly-mesh.glb`, which **needed a DIDSA-CAD change (2026-10-03)**: an older backend ignores them and shows no hiding. Hidden ids are the flat
+  app's `hidden_feature_ids` file extra: a save writes them, a file that carries them shows them hidden. Rollback is not saved, like the flat app's.

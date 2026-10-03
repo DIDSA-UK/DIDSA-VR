@@ -41,6 +41,11 @@ func _initialize() -> void:
 		return {"origin": [pl["origin"].x, pl["origin"].y, pl["origin"].z], "normal": [pl["n"].x, pl["n"].y, pl["n"].z],
 			"x_axis": [pl["x"].x, pl["x"].y, pl["x"].z], "y_axis": [pl["y"].x, pl["y"].y, pl["y"].z]}
 	table.editor.api = fake
+	fake.feature_rows = {"PART_BOX": [
+		{"type": "sketch", "id": "sk_box", "plane_feature_id": null, "has_lost_reference": false},
+		{"type": "extrude", "id": "body_box", "sketch_feature_id": "sk_box", "extrude_type": "boss", "start_distance": 0.0, "end_distance": 12.0, "target_body_ids": []},
+		{"type": "fillet", "id": "fil_box", "edge_refs": [{"body_id": "body_box", "index": 0}], "radius": 2.0},
+	]}
 
 	table.tree._tree = [{"id": "", "name": "Pump_Assy", "named": true, "resolved_part_id": owner_id, "expanded": true, "children": [
 		{"id": "occ_box", "name": "Housing", "named": true, "resolved_part_id": "PART_BOX", "children": null, "expanded": false},
@@ -63,6 +68,20 @@ func _initialize() -> void:
 	var shot1 := root.get_texture().get_image()
 	if dir != "":
 		shot1.save_png(dir.path_join("table_1_pick_plane.png"))
+
+	# the Build tab of the tree beside the table, an extrude selected (its action strip under it)
+	if dir != "":
+		await table.build.reload()
+		table.build.select("body_box")
+		await create_timer(0.5).timeout
+		root.get_texture().get_image().save_png(dir.path_join("table_7_build_tree.png"))
+		var tree_pos: Vector3 = table.tree.global_position
+		eye.global_position = tree_pos + table.tree.global_transform.basis.z * 0.6
+		eye.look_at(tree_pos)
+		await create_timer(0.5).timeout
+		root.get_texture().get_image().save_png(dir.path_join("table_8_build_tree_close.png"))
+		eye.global_position = cam.global_position + Vector3(0.0, 0.0, 0.1)
+		eye.look_at(table.global_position + Vector3(0.0, 0.12, 0.0))
 
 	# a face picked: the part turns flat, a rectangle and a circle drawn
 	var tris_face := {}

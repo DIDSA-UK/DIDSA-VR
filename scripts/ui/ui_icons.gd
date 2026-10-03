@@ -71,6 +71,7 @@ const _ICONS := {
 	"tool_chamfer": '<path d="M8 8V28L20 40H40"/>',
 	"tool_more": '<path d="M11 24V24.5M24 24V24.5M37 24V24.5"/>',
 	"snap": '<path d="M10 8V26a14 14 0 0 0 28 0V8H28V26a4 4 0 0 1-8 0V8Z"/><path d="M10 14H20M28 14H38"/>',
+	"feat_plane": '<path d="M8 32L20 14H42L30 32Z"/><path d="M24 36V42"/>',
 	"plus": '<path d="M24 10V38M10 24H38"/>',
 	"recentre": '<circle cx="24" cy="24" r="9"/><circle cx="24" cy="24" r="2"/><path d="M24 5V13M24 35V43M5 24H13M35 24H43"/>',
 	"to_arena": '<path d="M24 31V8"/><path d="M15 17L24 8L33 17"/><path d="M8 34V40H40V34"/>',
