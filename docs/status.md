@@ -2573,15 +2573,15 @@ lying along the line in the sketch plane; radius leaders, diameter lines and ang
 a circle's own structural constraints (zero distances) are no longer drawn as dimensions. Checked in a software render (`tests/sketch_style_render.gd`), not in a headset: text size,
 line weights and arrow size are in world metres and are the numbers to tune after one look (`LABEL_FONT`, `OBJECT_WIDTH`, `ARROW_LENGTH`, `DIM_OFFSET` in `sketch_view.gd`).
 
-### 2026-10-04 — The sketch canvas pans and zooms inside its window
+### 2026-10-04 — The sketch window is fixed; the part and its sketch pan and zoom under it
 
-John asked for the canvas to pan and zoom within the canvas sub-window, so one part can hold a huge sketch or a tiny one. That reverses an earlier call (the sheet was rigid with the part, and
-zooming scaled the part, so every sketch was at the part's scale). Now the sheet window stays a fixed 0.8 x 0.4 m rectangle in the part's plane, and the sketch is drawn on a **canvas**
-inside it with its own pan and zoom (`sketch_view.gd`: one canvas node carries the transform, so a pan is one transform and two shader uniforms; only a zoom rebuilds the drawing). With
-**Part: Locked** one grip pans the canvas (the spot you grabbed stays under the hand) and two hands zoom it about their midpoint, from a window about a millimetre wide to about 80 m; the part
-does not move, turn or scale. The drawing is clipped to the window by a small line shader (`sketch_lines.gdshader`), the grid and the corner readout (grid spacing, "on the part" or "canvas xN the
-part") follow the canvas, snap / pick / label sizes are world sizes. **Fit** zooms the canvas to the sketch; a new **1:1** button puts it back on the part. Sketch coordinates stay true millimetres,
-so the canvas lines up with the part only while registered (its zoom equals the part's, its middle is the window's); off the part the part's own corners stop being snap targets. Part: Free gives the
-grips back to the part. Tests: pure canvas maths in `design_table_logic.gd`, the grips / clamps / Fit / 1:1 / laser mapping in `design_table_editing.gd`, two extra pictures in
-`sketch_style_render.gd` (zoomed in with the clip at the window edge, zoomed right out). `e2e_new_part.gd` had been failing since the unsaved-changes warning (G1) and now clears the dirty flag before
-the second New assembly. Not verified in a headset: how the grips feel (pan gain is 1:1 with the hand, zoom gain 1), where the clip edge looks right, and whether labels that vanish at the window edge need a nicer fade.
+John asked for the canvas to pan and zoom within the canvas sub-window, and then pointed out that the model geometry has to move and zoom with it: sketches are dimensioned to and from
+existing edges and vertices. A first attempt gave the sketch its own pan and zoom, independent of the part; that broke exactly that registration (the part's corners stopped being snap
+targets) and was replaced the same day. Now the sketch stays a child of the part (sketch mm = part mm, always), and the **sketch window** is the thing that is fixed: a 0.8 x 0.4 m
+rectangle in the sketch plane anchored in the console when the sketch opens (`window_anchor`), which the part slides and scales under. With Part: Locked one grip slides the part along the
+plane (`pin_sketch_plane` takes any off-plane movement back out), two hands zoom it about their midpoint (1/50 to 200x while sketching), nothing turns. `sketch_view.gd` is told each frame which
+sketch spot is at the window's middle and the part's scale (`set_frame`), re-sizes and re-grids the window, and clips the drawing to it with `sketch_lines.gdshader`; only a change of scale rebuilds the
+drawing. Fit slides and zooms the part so the sketch fills the window. Not done: clipping the part's own mesh to the window (zoomed right in it fills the room), see `docs/design-table-gaps.md`.
+Tests in `design_table_editing.gd` (the window stays put while the part slides / zooms, in-plane only, no turn, A / B cannot lift it off the plane, Fit, Free, Reset) and `design_table_logic.gd`; pictures
+from `sketch_style_render.gd`. `e2e_new_part.gd` had been failing since the unsaved-changes warning (G1) and now clears the dirty flag before the second New assembly. Not verified in a headset: how the
+grips feel.

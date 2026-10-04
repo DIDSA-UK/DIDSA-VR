@@ -80,7 +80,6 @@ const _ICONS := {
 	"recentre": '<circle cx="24" cy="24" r="9"/><circle cx="24" cy="24" r="2"/><path d="M24 5V13M24 35V43M5 24H13M35 24H43"/>',
 	"to_arena": '<path d="M24 31V8"/><path d="M15 17L24 8L33 17"/><path d="M8 34V40H40V34"/>',
 	"lock": '<rect x="10" y="22" width="28" height="20" rx="3"/><path d="M16 22V15a8 8 0 0 1 16 0V22"/>',
-	"register": '<rect x="8" y="8" width="32" height="32" rx="2"/><path d="M8 24H18M30 24H40M24 8V18M24 30V40"/>',
 	"fit": '<path d="M7 17V7H17M31 7H41V17M41 31V41H31M17 41H7V31"/><rect x="17" y="17" width="14" height="14" rx="1"/>',
 	"enforce": '<path d="M10 25L20 35L38 13"/><circle cx="24" cy="24" r="20"/>',
 	# environment scenes

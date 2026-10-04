@@ -169,12 +169,11 @@ func process(delta: float) -> void:
 			_prev.erase(hand)
 	if _grips.is_empty() and _prev.size() > 0:
 		_prev.clear()
-	var on_canvas: bool = _table.sketch_locked() and _table.editor != null and _table.editor.view != null
 	match _grips.size():
 		1:
-			_pan_canvas(delta) if on_canvas else _follow_one(delta)
+			_follow_one(delta)
 		2:
-			_zoom_canvas(delta) if on_canvas else _follow_two(delta)
+			_follow_two(delta)
 	_set_carry_outside(not _grips.is_empty() and not _table.editing_sketch() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
 	_update_engaged(delta)
 	if engaged:
@@ -209,6 +208,7 @@ func _follow_one(delta: float) -> void:
 		_table.apply_pose(_table.pivot.position, (turn * _table.pivot.basis.orthonormalized()).orthonormalized(), _table.user_scale)
 	_prev_basis[hand] = now_basis
 	_table.pivot.position = local + (_grips[hand]["offset"] as Vector3)
+	_table.pin_sketch_plane()
 	_prev[hand] = local
 
 
@@ -218,45 +218,11 @@ func _follow_two(delta: float) -> void:
 	var right: Object = keys[1]
 	var l: Vector3 = _table.to_local(_steady(left, delta))
 	var r: Vector3 = _table.to_local(_steady(right, delta))
-	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale())
+	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale(), _table.min_user_scale())
 	_table.apply_pose(step["centre"], step["rotation"], step["scale"])
+	_table.pin_sketch_plane()
 	_prev[left] = l
 	_prev[right] = r
-
-
-func _pan_canvas(delta: float) -> void:
-	## One hand on the canvas: the sketch follows the hand across the sheet, so the spot you grabbed stays under it.
-	var hand: Object = _grips.keys()[0]
-	var local: Vector3 = _table.to_local(_steady(hand, delta))
-	var editor = _table.editor
-	var now_uv: Vector2 = editor.plane_uv_at(_table.to_global(local))
-	var was_uv: Vector2 = editor.plane_uv_at(_table.to_global(_prev.get(hand, local)))
-	var view = editor.view
-	editor.canvas_pan_to(view.sheet_centre - (now_uv - was_uv) / view.canvas_k())
-	_prev[hand] = local
-
-
-func _zoom_canvas(delta: float) -> void:
-	## Two hands on the canvas: it zooms as they spread or close, keeping the spot between them under the midpoint (which also pans it).
-	var keys := _grips.keys()
-	var l: Vector3 = _table.to_local(_steady(keys[0], delta))
-	var r: Vector3 = _table.to_local(_steady(keys[1], delta))
-	var prev_l: Vector3 = _prev.get(keys[0], l)
-	var prev_r: Vector3 = _prev.get(keys[1], r)
-	var editor = _table.editor
-	var view = editor.view
-	var prev_len := prev_l.distance_to(prev_r)
-	var len := l.distance_to(r)
-	var was_mid: Vector2 = editor.plane_uv_at(_table.to_global((prev_l + prev_r) * 0.5))
-	var mid: Vector2 = editor.plane_uv_at(_table.to_global((l + r) * 0.5))
-	var scale: float = view.canvas_scale
-	if prev_len >= 0.02 and len >= 0.02:
-		scale = clampf(scale * pow(len / prev_len, TablePose.SPREAD_GAIN), view.MIN_CANVAS_SCALE, view.MAX_CANVAS_SCALE)
-	var held: Vector2 = view.sheet_centre + (was_mid - view.window_centre) / view.canvas_k() # the sketch spot that was under the midpoint
-	var new_k: float = scale / view.scale_m_per_mm
-	editor.canvas_set(scale, held - (mid - view.window_centre) / new_k)
-	_prev[keys[0]] = l
-	_prev[keys[1]] = r
 
 
 func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
@@ -284,6 +250,7 @@ func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
 			moved = TablePose.clamp_to_zone(moved, _table.slab_size, MIN_HEIGHT, _table.drop_ceiling) # a nudge never walks it off the table
 		var shift: Vector3 = moved - _table.pivot.position
 		_table.pivot.position = moved
+		_table.pin_sketch_plane()
 		for hand in _grips:
 			_grips[hand]["offset"] = (_grips[hand]["offset"] as Vector3) + shift # a held part keeps the hold you have on it
 

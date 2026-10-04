@@ -33,7 +33,7 @@ This page is what was decided and built, what the code turned out to say, and wh
 4. **Sketch.** A sketch opens with **Select** already on (see below); pick a category on the deck, then a tool to draw. The laser meets the
    sheet; pull the trigger to place points. The **sheet** is a fixed window in the world, **0.8 x 0.4 m** (`sheet_window_m`) however big the
    part is, with a faint **grid** (1-2-5 mm lines about 16 mm apart on screen, re-spaced as you zoom; the red u axis and green v axis through
-   the origin; faded at the edge). The sketch is drawn on a **canvas** inside that window, with its own pan and zoom, so **one grip on the sheet pans the canvas and two hands zoom it** (below), and one part can hold a huge sketch or a tiny one. A line in the window's corner says the grid spacing and whether the canvas is **on the part** or how many times bigger or smaller than the part it is drawn.
+   the origin; faded at the edge). The window is fixed in the world; the part and its sketch slide and scale together **under** it (**one grip slides the part, two hands zoom it**, below), so the part's edges and corners always line up with the sketch, and the same part can take a huge sketch or a tiny one. A line in the window's corner gives the grid spacing.
    * **The origin** is the backend's real origin point (read when the sketch opens; the backend makes it lazily). It is drawn as a bigger
      yellow marker and **snaps** like any point (kind "origin"): a line can start on it, a circle can be centred on it, a point can be made
      coincident to it, and a dimension can start or end at it. It can be selected and constrained but never deleted.
@@ -82,18 +82,16 @@ This page is what was decided and built, what the code turned out to say, and wh
      over the table. Letting go of one hand carries on one-handed without a jump.
    * **One hand can turn it too, behind a modifier:** grip with the **left** hand and press the left stick: the part turns with your wrist, about your
      hand. (The right stick click is the world-scale pad, so the right hand has no such modifier.)
-   * **With a sketch open** the grips drive the **sketch canvas** instead of the part (**Part: Locked** on the deck, the default): one hand on the sheet
-     **pans** the canvas (the spot you grabbed stays under your hand), two hands **zoom** it about the point between them, from a window about a millimetre
-     wide to about 80 m. The part keeps its pose and its tilt, the stick does not spin or tip it, letting go beyond the slab holds the part back over the slab
-     (that would end the sketch), and a grip anywhere on the sheet, not only near the part, takes it. The drawing is clipped to the sheet window. **Fit** zooms
-     and pans the canvas so the sketch fills most of the window; **1:1** puts the canvas back on the part (the part's own scale and place), which is also the
-     only time the part's own corners snap, because only then are they where the part shows them. **Part: Free** gives the grips and the stick back to the
-     part (move, turn, scale); the canvas then keeps its own zoom.
+   * **With a sketch open** the sketch **window** stays where it is and the grips slide the part under it (**Part: Locked** on the deck, the default): one
+     hand on the sheet **slides** the part (and its sketch) along the sketch plane, two hands **zoom** it about the point between them, from 1/50 to 200x. The part
+     keeps its tilt, the stick does not spin or tip it, letting go beyond the slab holds the part back over the slab (that would end the sketch), and a grip
+     anywhere on the sheet, not only near the part, takes it. The drawing is clipped to the window. **Fit** slides and zooms the part so the sketch fills most
+     of the window. **Part: Free** gives the grips and the stick their ordinary part handling (move, turn, scale anywhere).
    * The **right stick** spins it about the slab's up axis (left/right) and tips it (up/down); **A** pulls it nearer to your hand
      and **B** pushes it farther, never off the slab or through it.
    * **Reset** (deck) puts it back in the middle of the slab at its fitted size, with the sketch plane flat (or the way it went on, before
      a plane is chosen).
-   The sketch sheet window, plane squares and drawing are children of the part, so they move and turn with it (the window keeps its size in the world; the canvas keeps its own zoom).
+   The sketch, plane squares and drawing are children of the part, so they move, turn and scale with it (the sketch window alone stays put).
    **How you know the table has the controls:** it is automatic, with no button. The table is **engaged** while a hand grips the part or
    the right laser is on the part or its sketch sheet (not on the deck). Then the slab's frame **glows brighter**, a **TABLE ACTIVE** chip
    shows on the deck, and the right hand gets a small haptic tick as it comes and goes (a quarter-second of grace so it doesn't flicker
@@ -155,7 +153,7 @@ There is no AI category: the repo has no hook for it.
 | Tool data | `table_tools.gd`, `tool_pager.gd` | Uses the wrist tablet's own `TabletRegistry` + `ToolManager`: one active tool across categories. |
 | Editing session | `table_editor.gd` | The state machine (pick plane → sketch → features), the laser hover and the shared `ui_hover` claim, tool routing, the options row, applying features, refreshing geometry, undo. |
 | Sketch logic | `sketch_session.gd` | No scene: the backend sketch, the local copy of it, each tool's calls, selection, dimension candidates, undo. Takes an `api` Callable, so tests give it a fake. |
-| Sketch drawing | `sketch_view.gd`, `plane_markers.gd` | The sheet window and, under one canvas node (its transform is the pan and zoom), entities as constant-width ribbons clipped by `sketch_lines.gdshader` (bright core over a dark edge so they read on a white part and on the slab), cursor, rubber band, dimension labels; the three plane squares. Built only when the sketch changes. |
+| Sketch drawing | `sketch_view.gd`, `plane_markers.gd` | The sheet window and, in the sketch plane's own frame, entities as constant-width ribbons clipped by `sketch_lines.gdshader` (bright core over a dark edge so they read on a white part and on the slab), cursor, rubber band, dimension labels; the three plane squares. Built only when the sketch changes. |
 | Snapping | `snap_resolver.gd` | Pure. |
 | Plane maths | `sketch_math.gd`, `table_seat.gd` | Pure: fixed-plane bases (XZ's x is −X, as the backend), turning any plane flat on the table, ray→sheet, fit scale. |
 | Backend line | `cad_api.gd`, `part_features.gd` | A serial HTTP queue (one request in flight, in order) and thin Extrude / Fillet / Chamfer / delete calls. |
@@ -168,7 +166,7 @@ and section all assume. Rescaling or reparenting a node onto the table would bre
 arena node (untouched) and shows a scaled **copy** (own collider on a private physics layer, not in `grabbable_parts`, so no arena tool
 ever sees it). The copy is what you edit; the real node comes back when the part leaves the table. The user's own scale lives on the copy's **pivot**
 (not the copy), so the sketch sheet, plane squares and drawing, which are children of the copy, follow it; the snap, pick and label
-radii use the canvas's zoom (`view.canvas_scale`; `effective_scale()` is the part's own). Hide-all / show-all / reverse / isolate skip the node that's
+radii use the part's scale (`effective_scale()`). Hide-all / show-all / reverse / isolate skip the node that's
 on the table.
 
 **One request at a time.** The backend's single in-memory document races under overlapping calls and a sketch's calls build on each

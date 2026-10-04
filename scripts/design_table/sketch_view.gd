@@ -2,25 +2,20 @@ extends Node3D
 ## What a sketch looks like on the design table: a translucent SHEET lying in the sketch plane, the sketch's points, lines,
 ## circles and arcs drawn on it, the snap cursor, a rubber-band preview of the shape being drawn, and the dimension labels.
 ##
-## It is a child of the table's copy of the part, so the WINDOW (the sheet's rectangle) is in the part's own frame and follows the
-## copy when it's moved or turned; its size is fixed in the world (window_m), however the part is scaled.
+## It is a child of the table's copy of the part, so the sketch is in the PART's own frame and moves, zooms and turns WITH the part:
+## the part's edges and corners and the sketch always line up, which is what dimensioning to existing geometry needs. What does not
+## move with the part is the WINDOW: a rectangle fixed in the world (window_m, on the table), in the sketch plane. Pan and zoom move
+## and scale the part (and with it the sketch) under that window, so the window is a viewport, and the drawing is clipped to it by
+## the line shader. The table tells this view every frame where the window is on the plane (set_frame: the sketch uv at the window's
+## middle) and how big the part is (world metres per sketch mm); only a change of scale rebuilds the drawing (widths are chosen in
+## world metres), a pan is one pair of shader uniforms.
 ##
-## The sketch is drawn on a CANVAS inside that window: a view of the sketch plane with its own pan (sheet_centre, the sketch's
-## uv at the window's middle) and zoom (canvas_scale, world metres per sketch mm), independent of the part's own scale, so one part
-## can hold a huge sketch or a tiny one. Everything drawn lives under one node (_canvas) whose transform is that pan and zoom, so
-## panning costs one transform and one pair of shader uniforms; only a zoom rebuilds the geometry (widths are chosen in world
-## metres and divided by canvas_scale), and the drawing is clipped to the window by the line shader. The canvas lines up with the
-## part beneath it only when registered(): canvas_scale equals the part's scale and the centre is the window's own middle.
-##
-## Coordinates in and out of the drawing are the sketch's (u, v) in mm. Plane coordinates (to_canvas / from_canvas) are where the
-## same spot is on the part's plane: sketch_math.gd's from_sheet() puts those in the part's frame.
+## Coordinates in and out of the drawing are the sketch's (u, v) in mm: sketch_math.gd's from_sheet() puts them in the part's frame.
 
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 
 const GRID_SHADER := preload("res://shaders/sketch_grid.gdshader")
 const LINE_SHADER := preload("res://shaders/sketch_lines.gdshader")
-const MIN_CANVAS_SCALE := 0.00001 ## world metres per sketch mm: the window then spans 80 m of sketch
-const MAX_CANVAS_SCALE := 0.8 ## ...and at the other end about a millimetre
 const DimensionLayout := preload("res://scripts/design_table/dimension_layout.gd")
 
 const LINE_WIDTH := 0.0035 ## world metres: the rubber band, the cursor ring and the sheet's marks
@@ -46,12 +41,10 @@ const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
 
 var plane: Dictionary = {}
-var scale_m_per_mm := 0.003 ## the copy's scale: world metres per part mm
 var window_m := Vector2(0.8, 0.4) ## the window's size in the world, metres: fixed
-var window_centre := Vector2.ZERO ## where the window's middle is on the part's plane (plane uv, part mm): fixed
-var canvas_scale := 0.003 ## the canvas's zoom: world metres per SKETCH mm
-var sheet_size := Vector2(100.0, 100.0) ## the window's size in SKETCH mm, u by v: window_m / canvas_scale
-var sheet_centre := Vector2.ZERO ## the sketch uv at the window's middle: the canvas's pan
+var canvas_scale := 0.003 ## the part's scale: world metres per sketch (= part) mm
+var sheet_size := Vector2(100.0, 100.0) ## the window's size in sketch mm, u by v: window_m / canvas_scale
+var sheet_centre := Vector2.ZERO ## the sketch uv at the window's middle: where the part is under the window
 var grid_target_m := 0.016 ## the minor grid lines are about this far apart in the world
 
 var _canvas: Node3D
@@ -72,13 +65,11 @@ var _tokens: Resource
 var _geo_state := {}
 
 
-func setup(p_plane: Dictionary, p_window_m: Vector2, p_window_centre: Vector2, p_part_scale: float, p_canvas_scale: float, p_canvas_centre: Vector2, tokens: Resource) -> void:
+func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale: float, tokens: Resource) -> void:
 	plane = p_plane
 	window_m = p_window_m
-	window_centre = p_window_centre
-	scale_m_per_mm = maxf(p_part_scale, 0.000001)
-	canvas_scale = clampf(p_canvas_scale, MIN_CANVAS_SCALE, MAX_CANVAS_SCALE)
-	sheet_centre = p_canvas_centre
+	canvas_scale = maxf(p_scale, 0.000001)
+	sheet_centre = p_centre
 	sheet_size = window_m / canvas_scale
 	_tokens = tokens
 	_line_material = ShaderMaterial.new()
@@ -88,7 +79,7 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_window_centre: Vector2, p
 	_sheet = MeshInstance3D.new()
 	_sheet.name = "Sheet"
 	var quad := QuadMesh.new()
-	quad.size = window_m / scale_m_per_mm
+	quad.size = sheet_size
 	_sheet_material = ShaderMaterial.new()
 	_sheet_material.shader = GRID_SHADER
 	_sheet_material.render_priority = 0
@@ -97,11 +88,12 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_window_centre: Vector2, p
 	_sheet_material.set_shader_parameter("line_color", accent.lightened(0.45))
 	quad.material = _sheet_material
 	_sheet.mesh = quad
-	_sheet.transform = Transform3D(Basis(plane["x"], plane["y"], plane["n"]), SketchMath.from_sheet(window_centre, plane))
 	add_child(_sheet)
 
+	# everything drawn is in sketch uv (u, v, height off the sheet), and this node is the sketch plane's own frame
 	_canvas = Node3D.new()
 	_canvas.name = "Canvas"
+	_canvas.transform = Transform3D(Basis(plane["x"], plane["y"], plane["n"]), plane["origin"])
 	add_child(_canvas)
 	_geo = _new_mesh_node("Drawing")
 	_dims = _new_mesh_node("Dimensions")
@@ -135,63 +127,26 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_window_centre: Vector2, p
 	_readout.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
 	_readout.modulate = Color(accent.lightened(0.5), 0.9)
 	add_child(_readout)
-	_apply_canvas()
+	_apply_frame()
 	rebuild(null)
 
 
-func set_part_scale(p_scale: float) -> void:
-	## The part was scaled: the window keeps its size in the world, so only its size in part mm changes. The drawing is not touched.
-	scale_m_per_mm = maxf(p_scale, 0.000001)
-	(_sheet.mesh as QuadMesh).size = window_m / scale_m_per_mm
-	_apply_canvas()
-
-
-func set_canvas(p_scale: float, p_centre: Vector2) -> bool:
-	## Pans and zooms the canvas. True if the zoom changed (the drawing's line widths and labels are sized for it, so the caller rebuilds).
-	var zoomed := not is_equal_approx(canvas_scale, clampf(p_scale, MIN_CANVAS_SCALE, MAX_CANVAS_SCALE))
-	canvas_scale = clampf(p_scale, MIN_CANVAS_SCALE, MAX_CANVAS_SCALE)
+func set_frame(p_scale: float, p_centre: Vector2) -> bool:
+	## The part was moved or scaled under the window: `p_centre` is the sketch uv now at the window's middle, `p_scale` the part's
+	## world metres per mm. True if the scale changed (line widths and labels are sized for it, so the caller rebuilds the drawing).
+	var scale := maxf(p_scale, 0.000001)
+	var zoomed := not is_equal_approx(canvas_scale, scale)
+	canvas_scale = scale
 	sheet_centre = p_centre
 	sheet_size = window_m / canvas_scale
-	_apply_canvas()
+	_apply_frame()
 	return zoomed
 
 
-func register() -> void:
-	## The canvas back onto the part: the part's own scale, the window's middle at the part's spot.
-	set_canvas(scale_m_per_mm, window_centre)
-
-
-func registered() -> bool:
-	## True while the canvas lines up with the part under it (within about a millimetre of world), so the part's own corners are valid snap targets.
-	return absf(canvas_scale / scale_m_per_mm - 1.0) < 0.01 and sheet_centre.distance_to(window_centre) < 0.001 / canvas_scale
-
-
-func canvas_k() -> float:
-	## Part mm per sketch mm: how much the canvas magnifies the plane beyond the part's own scale.
-	return canvas_scale / scale_m_per_mm
-
-
-func to_canvas(plane_uv: Vector2) -> Vector2:
-	## A spot on the part's plane (part mm) -> the sketch uv drawn there.
-	return sheet_centre + (plane_uv - window_centre) / canvas_k()
-
-
-func from_canvas(uv: Vector2) -> Vector2:
-	## A sketch uv -> where it is drawn on the part's plane (part mm).
-	return window_centre + (uv - sheet_centre) * canvas_k()
-
-
-func window_contains(plane_uv: Vector2) -> bool:
-	## True if a spot on the part's plane is inside the window.
-	var half := window_m / scale_m_per_mm * 0.5
-	return absf(plane_uv.x - window_centre.x) <= half.x and absf(plane_uv.y - window_centre.y) <= half.y
-
-
-func _apply_canvas() -> void:
-	## The canvas node carries the pan and zoom: sketch uv (and a height off the sheet) -> the part's frame.
-	var k := canvas_k()
-	var basis := Basis(plane["x"], plane["y"], plane["n"])
-	_canvas.transform = Transform3D(basis * k, SketchMath.from_sheet(window_centre, plane) - basis * Vector3(sheet_centre.x, sheet_centre.y, 0.0) * k)
+func _apply_frame() -> void:
+	if not (_sheet.mesh as QuadMesh).size.is_equal_approx(sheet_size):
+		(_sheet.mesh as QuadMesh).size = sheet_size
+	_sheet.transform = Transform3D(Basis(plane["x"], plane["y"], plane["n"]), SketchMath.from_sheet(sheet_centre, plane))
 	_line_material.set_shader_parameter("clip_centre", sheet_centre)
 	_line_material.set_shader_parameter("clip_half", sheet_size * 0.5)
 	_ring.inner_radius = 0.006 / canvas_scale
@@ -203,12 +158,11 @@ func _apply_canvas() -> void:
 
 
 func _update_readout() -> void:
-	## The line in the window's corner that says what the canvas is: the grid spacing and how it sits against the part.
-	var step := grid_step()
-	var text := "Grid %s  ·  %s" % [format_length(step), "on the part" if registered() else ("canvas ×%s the part" % _compact(canvas_k()))]
-	var half := window_m / scale_m_per_mm * 0.5
-	_readout.pixel_size = LABEL_PIXEL * 0.85 / scale_m_per_mm
-	_readout.position = SketchMath.from_sheet(window_centre + Vector2(-half.x * 0.97, -half.y * 0.9), plane) + (plane["n"] as Vector3) * (LIFT * 3.0 / scale_m_per_mm)
+	## The line in the window's corner that says the grid spacing.
+	var text := "Grid %s" % format_length(grid_step())
+	var half := sheet_size * 0.5
+	_readout.pixel_size = LABEL_PIXEL * 0.85 / canvas_scale
+	_readout.position = SketchMath.from_sheet(sheet_centre + Vector2(-half.x * 0.97, -half.y * 0.9), plane) + (plane["n"] as Vector3) * (LIFT * 3.0 / canvas_scale)
 	_readout.basis = Basis(plane["x"], plane["y"], plane["n"])
 	if text != _readout_text:
 		_readout_text = text
@@ -236,7 +190,7 @@ static func _compact(v: float) -> String:
 
 
 func grid_step() -> float:
-	## The minor grid spacing now, sketch mm.
+	## The minor grid spacing now, mm.
 	return SketchMath.grid_step(grid_target_m / canvas_scale)
 
 

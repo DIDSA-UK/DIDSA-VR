@@ -58,7 +58,7 @@ func aim_uv(uv: Vector2) -> void:
 	## Aims the laser at a sheet position from above the sheet.
 	var copy: Node3D = table.table_copy
 	var plane: Dictionary = ed.session.plane
-	var world: Vector3 = copy.global_transform * SketchMath.from_sheet(ed.view.from_canvas(uv), plane)
+	var world: Vector3 = copy.global_transform * SketchMath.from_sheet(uv, plane)
 	var normal: Vector3 = (copy.global_transform.basis * (plane["n"] as Vector3)).normalized()
 	await aim(world + normal * 0.45 + Vector3(0, 0, 0.12), world)
 
@@ -211,7 +211,9 @@ func _initialize() -> void:
 	var plane_g: Dictionary = ed.session.plane
 	var rot_locked: Basis = table.sketch_rotation(plane_g)
 	table.apply_pose(Vector3(0.0, table.sketch_hover_height, 0.0), rot_locked, 1.0)
-	var far_world: Vector3 = table.table_copy.global_transform * SketchMath.from_sheet(ed.view.from_canvas(ed.view.sheet_centre + Vector2(ed.view.sheet_size.x * 0.4, 0.0)), plane_g)
+	table.window_anchor = Vector3(0.0, table.sketch_hover_height, 0.0)
+	table.pin_sketch_plane()
+	var far_world: Vector3 = table.table_copy.global_transform * SketchMath.from_sheet(ed.view.sheet_centre + Vector2(ed.view.sheet_size.x * 0.4, 0.0), plane_g)
 	print("SMOKE the far side of the big sheet is well away from the part's own bounding sphere: ", far_world.distance_to(table.pivot.global_position) > table.part_radius() + table.lift_reach)
 	l.global_position = far_world
 	await physics_frame
@@ -221,118 +223,86 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE ...and letting go leaves the sketch open: ", ed.session != null and table.seated != null)
 
-	# --- the canvas pans and zooms INSIDE the window; the part keeps its pose
-	var pivot_before: Vector3 = table.pivot.position
-	var canvas_scale_0: float = ed.view.canvas_scale
-	print("SMOKE the canvas starts on the part (registered: the part's own scale, the window's middle) and the corner line says so: ", ed.view.registered() and is_equal_approx(canvas_scale_0, table.effective_scale()) and ed.view.readout_text().ends_with("on the part"))
+	# --- the part (and its sketch) pans and zooms UNDER a sketch window that stays where it is in the world
+	await frames(3)
+	var anchor_world: Vector3 = table.to_global(table.window_anchor)
+	print("SMOKE the sketch window sits on the sketch plane at the anchor, and the sheet is drawn there: ", absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.001 and ed.view._sheet.global_position.distance_to(anchor_world) < 0.002)
 	var c1: Vector3 = table.pivot.position
-	l.global_position = table.to_global(c1 + Vector3(0.0, 0.0, 0.0))
+	var centre_start: Vector2 = ed.view.sheet_centre
+	l.global_position = table.to_global(c1)
 	await physics_frame
 	l.button_pressed.emit("grip_click")
 	await process_frame
-	var under_start: Vector2 = ed.view.to_canvas(ed.plane_uv_at(l.global_position)) # the sketch spot under the hand when it took hold
-	var centre_start: Vector2 = ed.view.sheet_centre
-	l.global_position = table.to_global(c1 + Vector3(0.12, 0.0, 0.0))
+	var spot: Vector2 = ed.plane_uv_at(l.global_position) # the sketch spot under the hand when it took hold
+	l.global_position = table.to_global(c1 + Vector3(0.12, 0.05, 0.0)) # across, and a little off the plane
 	await frames(20)
-	var under_now: Vector2 = ed.view.to_canvas(ed.plane_uv_at(l.global_position))
-	print("SMOKE one hand on the sheet (Part: Locked) pans the CANVAS: the sketch spot that was under the hand stays under it: ", ed.view.sheet_centre.distance_to(centre_start) > 1.0 and under_now.distance_to(under_start) < 0.05)
-	print("SMOKE ...the part itself does not move, turn or scale, and the canvas keeps its zoom: ", table.pivot.position.is_equal_approx(pivot_before) and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked) and is_equal_approx(table.user_scale, 1.0) and is_equal_approx(ed.view.canvas_scale, canvas_scale_0))
-	print("SMOKE ...and the canvas is then off the part, which the corner line says (so the part's own corners stop being snap targets): ", not ed.view.registered() and ed.view.readout_text().contains("canvas"))
+	print("SMOKE one hand on the sheet (Part: Locked) slides the PART under the window: the sketch spot that was under the hand stays under it: ", ed.plane_uv_at(l.global_position).distance_to(spot) < 0.15 * 0.3 / table.effective_scale() * 0.01 + 0.5 and ed.view.sheet_centre.distance_to(centre_start) > 1.0)
+	print("SMOKE ...in the plane only (the off-plane part of the hand's movement is not followed), with no turn and no scale: ", absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.002 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked) and is_equal_approx(table.user_scale, 1.0))
+	print("SMOKE ...the window itself did not move: the sheet is still where it was in the world, now over a different spot of the sketch: ", ed.view._sheet.global_position.distance_to(anchor_world) < 0.002)
 	l.button_released.emit("grip_click")
 	await process_frame
 
-	var pan_centre: Vector2 = ed.view.sheet_centre
 	var c2: Vector3 = table.pivot.position
 	l.global_position = table.to_global(c2 + Vector3(-0.10, 0.0, 0.0))
 	r.global_position = table.to_global(c2 + Vector3(0.10, 0.0, 0.0))
 	await physics_frame
 	l.button_pressed.emit("grip_click")
 	r.button_pressed.emit("grip_click")
-	await process_frame
-	await process_frame
+	await frames(3)
 	print("SMOKE two hands on the sheet with a sketch open (Part: Locked): ", table.manip.grip_count() == 2 and table.sketch_locked())
-	var mid_world: Vector3 = (l.global_position + r.global_position) * 0.5
-	var under_mid: Vector2 = ed.view.to_canvas(ed.plane_uv_at(mid_world))
 	r.global_position = table.to_global(c2 + Vector3(0.10, 0.0, -0.20)) # swing the line between the hands
 	await frames(20)
 	print("SMOKE swinging the hands turns nothing: the part keeps its tilt: ", table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
 	r.global_position = table.to_global(c2 + Vector3(0.10, 0.0, 0.0))
 	await frames(20)
-	var zoom_before: float = ed.view.canvas_scale
-	var mid_before: Vector2 = ed.view.to_canvas(ed.plane_uv_at((l.global_position + r.global_position) * 0.5))
+	var scale_before: float = table.user_scale
+	var mid_spot: Vector2 = ed.plane_uv_at((l.global_position + r.global_position) * 0.5)
 	r.global_position = table.to_global(c2 + Vector3(0.10, 0.0, 0.0) + Vector3(0.2, 0.0, 0.0)) # twice the spread
 	await frames(20)
-	var zoom_after: float = ed.view.canvas_scale
-	var mid_after: Vector2 = ed.view.to_canvas(ed.plane_uv_at((l.global_position + r.global_position) * 0.5))
-	print("SMOKE spreading the hands zooms the CANVAS about the spot between them (bigger by the spread, here 2x): ", absf(zoom_after / zoom_before - 2.0) < 0.05 and mid_after.distance_to(mid_before) < 0.05)
-	print("SMOKE ...and the part is not scaled (so a huge or a tiny sketch can sit on the same part), the window stays 0.8 x 0.4 m of world: ", is_equal_approx(table.user_scale, 1.0) and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked) and (ed.view.sheet_size * ed.view.canvas_scale).is_equal_approx(table.sheet_window_m))
-	print("SMOKE ...the grid is re-spaced for the new zoom and the drawing is rebuilt at it (line widths are world sizes): ", is_equal_approx(ed.view.grid_step(), SketchMath.grid_step(0.016 / ed.view.canvas_scale)) and await settle(func() -> bool: return not ed._canvas_stale))
+	print("SMOKE spreading the hands zooms the PART about the spot between them, here 2x: ", absf(table.user_scale / scale_before - 2.0) < 0.05)
+	print("SMOKE ...the sketch zooms with it, so the part's edges and the sketch still line up (the sketch is the part's child), and the window stays 0.8 x 0.4 m of world: ", (ed.view.sheet_size * table.effective_scale()).is_equal_approx(table.sheet_window_m) and is_equal_approx(ed.view.canvas_scale, table.effective_scale()))
+	print("SMOKE ...still in the plane, still not turned, and the window did not move: ", absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.002 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked.orthonormalized()) and ed.view._sheet.global_position.distance_to(anchor_world) < 0.002)
+	print("SMOKE ...the grid is re-spaced for the new zoom and the drawing is rebuilt at it (line widths are world sizes): ", is_equal_approx(ed.view.grid_step(), SketchMath.grid_step(0.016 / table.effective_scale())) and await settle(func() -> bool: return not ed._canvas_stale))
 	var clip_half: Vector2 = (ed.view._line_material as ShaderMaterial).get_shader_parameter("clip_half")
 	var clip_centre: Vector2 = (ed.view._line_material as ShaderMaterial).get_shader_parameter("clip_centre")
 	print("SMOKE ...and the drawing is clipped to the window (the line shader's rectangle is the window in sketch mm): ", clip_half.is_equal_approx(ed.view.sheet_size * 0.5) and clip_centre.is_equal_approx(ed.view.sheet_centre))
 	r.button_released.emit("grip_click")
 	l.button_released.emit("grip_click")
 	await process_frame
+	table.manip.drive_input(Vector2.ZERO, true, false, 0.5) # A pulls the part towards the hand
+	print("SMOKE A / B cannot pull a locked sketch off its plane: ", absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.002)
 
-	# a small and a huge canvas on the same part
-	ed.canvas_set(0.4, Vector2.ZERO)
-	var tiny_ok: bool = is_equal_approx(ed.view.sheet_size.x, table.sheet_window_m.x / 0.4)
-	ed.canvas_set(100.0, Vector2.ZERO)
-	var top_ok: bool = is_equal_approx(ed.view.canvas_scale, ed.view.MAX_CANVAS_SCALE)
-	ed.canvas_set(0.0000001, Vector2.ZERO)
-	var bottom_ok: bool = is_equal_approx(ed.view.canvas_scale, ed.view.MIN_CANVAS_SCALE)
-	print("SMOKE the canvas can zoom to a window about 2 mm wide (a tiny sketch) and out to tens of metres (a huge one), and no further: ", tiny_ok and top_ok and bottom_ok and ed.view.sheet_size.x > 50000.0)
-	var far_uv := Vector2(5000.0, 0.0)
-	ed.canvas_set(0.0005, far_uv)
-	await settle(func() -> bool: return not ed._canvas_stale)
-	print("SMOKE panned to a spot far from the origin the window is centred there and the origin's label-free cross is out of view: ", ed.view.sheet_centre.is_equal_approx(far_uv) and not ed.view.contains(Vector2.ZERO) and ed.view.contains(far_uv))
-	await aim_uv(far_uv + Vector2(5, 5))
-	print("SMOKE ...and the laser maps through the canvas: aimed at a spot on the sheet it reads the sketch spot drawn there (5 mm, 5 mm off the middle of a 0.5 mm/m canvas): ", ed.hovering and (ed._hover_uv as Vector2).distance_to(far_uv + Vector2(5, 5)) < 0.01)
-	print("SMOKE ...the snap reach is a size in the world, so zoomed out it covers many sketch mm: ", is_equal_approx(ed.SNAP_RADIUS / ed.view.canvas_scale, 24.0))
-	ed.canvas_set(0.0005, Vector2.ZERO)
-	await settle(func() -> bool: return not ed._canvas_stale)
-	table.manager.activate("line")
-	await aim_uv(Vector2(0.4, -0.3))
-	print("SMOKE with the canvas off the part, aiming near the origin still snaps to it (it is the sketch's own point) but the part's corners are not offered: ", ed._snap["kind"] == "origin" and not ed.view.registered())
-	table.manager.deactivate()
-
+	# --- Fit slides and zooms the part so the sketch fills the window
 	table.ui.fit_button().pressed.emit()
+	await frames(60)
 	var bounds: Rect2 = ed.sketch_bounds()
 	var fit_scale_w: float = minf(table.sheet_window_m.x * 0.8 / bounds.size.x, table.sheet_window_m.y * 0.8 / bounds.size.y)
-	print("SMOKE Fit pans and zooms the CANVAS so the sketch fills most of the window (the part stays as it was): ", is_equal_approx(ed.view.canvas_scale, fit_scale_w) and ed.view.sheet_centre.is_equal_approx(bounds.get_center()) and table.pivot.position.is_equal_approx(pivot_before) and is_equal_approx(table.user_scale, 1.0))
-	table.ui.register_button().pressed.emit()
-	print("SMOKE 1:1 puts the canvas back on the part: its scale, the window's own middle, the corner line says so: ", ed.view.registered() and ed.view.sheet_centre.is_equal_approx(ed.view.window_centre) and is_equal_approx(ed.view.canvas_scale, table.effective_scale()) and ed.view.readout_text().ends_with("on the part"))
+	print("SMOKE Fit zooms the part so the sketch fills most of the window, and slides it so the sketch is in the middle: ", absf(table.effective_scale() / fit_scale_w - 1.0) < 0.03 and ed.view.sheet_centre.distance_to(bounds.get_center()) < 1.0 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
 
 	# --- Part: Free hands the grips to the part again
 	table.ui.lock_button().button_pressed = false
 	print("SMOKE Part: Free unlocks it: ", not table.part_locked and not table.sketch_locked() and table.ui.lock_button().text == "Part: Free")
-	var centre_free: Vector2 = ed.view.sheet_centre
 	var c3: Vector3 = table.pivot.position
 	l.global_position = table.to_global(c3)
 	await physics_frame
 	l.button_pressed.emit("grip_click")
 	await process_frame
-	l.global_position = table.to_global(c3 + Vector3(0.10, 0.0, 0.0))
-	await process_frame
-	await process_frame
-	print("SMOKE ...then one hand moves the PART (and the canvas goes with it, unchanged): ", table.pivot.position.distance_to(c3) > 0.05 and ed.view.sheet_centre.is_equal_approx(centre_free))
+	l.global_position = table.to_global(c3 + Vector3(0.10, 0.2, 0.0))
+	await frames(20)
+	print("SMOKE ...then one hand moves the part anywhere, off the plane too: ", table.pivot.position.distance_to(c3) > 0.05 and absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) > 0.01)
 	table.pivot.position = Vector3(1.5, 0.3, 0.0) # carried far past the slab
 	l.button_released.emit("grip_click")
 	await process_frame
 	print("SMOKE letting go far beyond the slab does NOT send the real part away while a sketch is open; it is held back over the slab: ", table.seated != null and ed.session != null and absf(table.pivot.position.x) <= table.slab_size.x * 0.5 + 0.001)
 	var basis_now: Basis = table.pivot.basis.orthonormalized()
 	r.global_position = Vector3(5.0, 5.0, 5.0) # the laser off the sheet, so the stick is the table's
-	await process_frame
-	await process_frame
+	await frames(2)
 	table.manip.drive_input(Vector2(1.0, 0.0), false, false, 1.0)
 	print("SMOKE ...and the stick turns it again: ", not table.pivot.basis.orthonormalized().is_equal_approx(basis_now))
-	table.apply_pose(Vector3(0.0, table.sketch_hover_height, 0.0), rot_locked, 1.7) # scaled by hand, canvas untouched
-	await process_frame
-	await process_frame
-	print("SMOKE scaling the part leaves the canvas's zoom alone (the window keeps its world size; the canvas is then off the part until 1:1): ", is_equal_approx(ed.view.canvas_scale, canvas_scale_0) and not ed.view.registered() and is_equal_approx(ed.view.window_m.x, table.sheet_window_m.x))
-	table.apply_pose(Vector3(0.0, table.sketch_hover_height, 0.0), rot_locked, 1.0)
 	table.ui.lock_button().button_pressed = true
-	table.ui.register_button().pressed.emit()
+	table.reset_pose()
+	await frames(60)
+	print("SMOKE Reset puts the sketch tilt back and the window back on the plane at the part's middle: ", table.pivot.basis.orthonormalized().is_equal_approx(rot_locked) and is_equal_approx(table.user_scale, 1.0) and absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.002)
 	table.manager.deactivate()
 
 	# --- the deck keeps the laser when the laser is on the deck
