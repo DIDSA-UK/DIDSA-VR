@@ -23,6 +23,12 @@ func frames(n: int = 3) -> void:
 		await process_frame
 
 
+func pick_line_toggle_construction(sess) -> void:
+	sess.set_tool("select")
+	await sess.select({"kind": "line", "id": "lnA"})
+	await sess.apply_menu("construction")
+
+
 func settle(pred: Callable, n := 200) -> bool:
 	for i in n:
 		if pred.call():
@@ -114,6 +120,10 @@ func _initialize() -> void:
 	print("SMOKE ...with a short second line: ", BuildTree.summary(rows_pure, 0) == "on a reference plane" and BuildTree.summary(rows_pure, 1) == "Boss 12 mm" and BuildTree.summary(rows_pure, 2) == "R 2 mm, 1 edge(s)")
 	print("SMOKE an extrude's edit keeps its start and direction, a fillet's replaces its radius: ", BuildTree.edit_payload(rows_pure[1], 20.0) == {"start_distance": 0.0, "end_distance": 20.0} and BuildTree.edit_payload({"type": "extrude", "start_distance": 0.0, "end_distance": -5.0}, 8.0) == {"start_distance": 0.0, "end_distance": -8.0} and BuildTree.edit_payload(rows_pure[2], 3.0) == {"radius": 3.0})
 	print("SMOKE a cascade preview names what is built on the feature (the sketch takes the extrude and the fillet): ", BuildTree.dependents(rows_pure, "sk_box") == ["body_box", "fil_box"] and BuildTree.dependents(rows_pure, "fil_box").is_empty())
+	var more_rows := [{"type": "revolve", "id": "rv", "sketch_feature_id": "sk_box", "angle": 270.0, "mode": "cut"}, {"type": "shell", "id": "sh", "body_id": "rv", "faces_to_remove": [{"body_id": "rv", "shape_type": "face", "index": 1}], "thickness": 1.5}, {"type": "mirror", "id": "mi", "source_body_ids": ["sh"], "mirror_plane": {"fixed_plane": "YZ"}}]
+	print("SMOKE revolve, shell and mirror have one-line summaries (a cut revolve with its angle, a wall with the faces opened, the plane mirrored across): ", BuildTree.summary(more_rows, 0) == "Cut 270 deg" and BuildTree.summary(more_rows, 1) == "1.5 mm, 1 face(s) open" and BuildTree.summary(more_rows, 2) == "across YZ plane")
+	print("SMOKE ...revolve and shell are editable (angle, wall) with the right PATCH, mirror is not: ", BuildTree.EDITABLE.has("revolve") and BuildTree.EDITABLE.has("shell") and not BuildTree.EDITABLE.has("mirror") and BuildTree.value_of(more_rows[0]) == 270.0 and BuildTree.edit_payload(more_rows[0], 90.0) == {"angle": 90.0} and BuildTree.edit_payload(more_rows[1], 3.0) == {"thickness": 3.0} and BuildTree.value_title("revolve") == "Angle (deg)" and BuildTree.value_title("shell") == "Thickness (mm)")
+	print("SMOKE ...a cascade through them: deleting the sketch takes the revolve, the shell on its body and the mirror of the shell: ", BuildTree.dependents([rows_pure[0], more_rows[0], more_rows[1], more_rows[2]], "sk_box") == ["rv", "sh", "mi"])
 	print("SMOKE rolling back to a row skips every later one: ", BuildTree.rolled_back_ids(rows_pure, 0) == ["body_box", "fil_box"] and BuildTree.rolled_back_ids(rows_pure, 2).is_empty())
 
 	# --- the window: two tabs, opens on Build when a part is seated
@@ -131,6 +141,21 @@ func _initialize() -> void:
 	table.tree.show_tab("build")
 	print("SMOKE ...the stick scrolls whichever pane shows: ", table.tree.scroll_target == table.tree._build_scroll)
 
+	# --- rename the part (G16): the Build tab's Rename opens the full keyboard; confirming renames the part and every instance
+	var rename_btn: Button = table.tree._rename_button
+	print("SMOKE the Build tab has a Rename button while a part is on the table: ", rename_btn != null and rename_btn.visible)
+	rename_btn.pressed.emit()
+	await frames(2)
+	print("SMOKE ...it opens the FULL keyboard on the current name: ", main._keyboard.is_open() and main._keyboard.current_mode() == "full")
+	main._keyboard.close()
+	fake.calls.clear()
+	var renamed: bool = await table.rename_part_to("  Bracket  ")
+	var patched_name: Array = calls_to("PATCH /document/parts/PART_BOX")
+	print("SMOKE a confirmed name is trimmed and sent as a PATCH of the PART (so every placed instance follows): ", renamed and patched_name.size() == 1 and patched_name[0][1] == {"name": "Bracket"})
+	print("SMOKE ...the arena node takes the name, the title and the status say so, and the document counts as unsaved: ", str(box.name).begins_with("Bracket") and table.tree._build_title.text.begins_with("Bracket") and table.status() == "Renamed to Bracket." and main.document_dirty)
+	fake.calls.clear()
+	print("SMOKE an empty name or the same name sends nothing: ", not (await table.rename_part_to("   ")) and (await table.rename_part_to("Bracket")) and calls_to("PATCH").is_empty())
+
 	# --- select and light up
 	row_button("Extrude 1").pressed.emit()
 	await frames(2)
@@ -141,7 +166,59 @@ func _initialize() -> void:
 	print("SMOKE selecting the fillet lights its edge instead: ", table.build.selected_id == "fil_box" and table.editor.highlight.set_nodes().size() == 1 and find_button(table.tree._build_rows, "Edit") != null)
 	row_button("Sketch 1").pressed.emit()
 	await frames(2)
-	print("SMOKE a sketch on a reference plane says so (editing an existing sketch is not built) and has no Edit: ", table.status().contains("reference plane") and find_button(table.tree._build_rows, "Edit").disabled)
+	print("SMOKE a sketch on a reference plane says so, and its Edit now opens the sketch: ", table.status().contains("reference plane") and not find_button(table.tree._build_rows, "Edit").disabled)
+
+	# --- reopening the part's existing sketch (G7): its entities are read, the part turns to it, Select is on, Done closes it
+	fake.sketch_plane = "XY"
+	fake.origin = true
+	fake.points = {"pA": Vector2(0, 0), "pB": Vector2(40, 0), "pC": Vector2(40, 30)}
+	fake.entities = [{"type": "line", "id": "lnA", "start_point_id": "pA", "end_point_id": "pB", "construction": false}, {"type": "line", "id": "lnB", "start_point_id": "pB", "end_point_id": "pC", "construction": false}]
+	fake.calls.clear()
+	find_button(table.tree._build_rows, "Edit").pressed.emit()
+	var reopened: bool = await settle(func() -> bool: return table.editor.state == "sketch" and table.editor.session != null and table.editor.session.lines.size() == 2)
+	print("SMOKE Edit on a sketch row opens THAT sketch: its own id is read (nothing is made), its two lines and points arrive: ", reopened and table.editor.session.sketch_id == "s1" and table.editor.session.feature_id == "sk_box" and calls_to("POST /document/parts/PART_BOX/features/sketch").is_empty() and table.editor.session.lines.size() == 2)
+	print("SMOKE ...the part stands the sketch's plane up at the tilt, the sketch's origin is read, and Select is on: ", table.pivot.basis.orthonormalized().is_equal_approx(table.sketch_rotation(table.editor.session.plane)) and table.editor.session.origin_id != "" and table.active_tool == "select" and table.ui.done_button() != null and not table.ui.done_button().disabled)
+	var glb_fetches: int = calls_to("assembly-mesh.glb").size()
+	table.ui.done_button().pressed.emit()
+	await frames(3)
+	print("SMOKE Done on an untouched sketch just closes it (no rebuild, nothing flagged): ", table.editor.session == null and table.editor.state == "pick_plane" and calls_to("assembly-mesh.glb").size() == glb_fetches and table.ui.done_button().disabled)
+	find_button(table.tree._build_rows, "Edit").pressed.emit()
+	await settle(func() -> bool: return table.editor.session != null and table.editor.session.lines.size() == 2)
+	var sess = table.editor.session
+	await pick_line_toggle_construction(sess)
+	glb_fetches = calls_to("assembly-mesh.glb").size()
+	var edited_parts: Array = []
+	table.part_edited.connect(func(id: String) -> void: edited_parts.append(id))
+	table.ui.done_button().pressed.emit()
+	await settle(func() -> bool: return table.editor.session == null and calls_to("assembly-mesh.glb").size() > glb_fetches)
+	print("SMOKE Done after a change rebuilds the part from the new sketch (the part's own glb is fetched) and flags its mates like any edit: ", calls_to("assembly-mesh.glb").size() > glb_fetches and edited_parts == ["PART_BOX"])
+	fake.points.clear()
+	fake.entities.clear()
+	fake.sketch_plane = null
+	row_button("Sketch 1").pressed.emit()
+	await frames(2)
+	table.build.select("sk_box")
+	await frames(2)
+
+
+	# --- an older backend: the glb ignores hidden / rollback, so Hide and Roll back are switched off and the tree says why
+	print("SMOKE the backend was asked once whether it can hide and roll back, and said yes: ", table.build.view_filters_ok and table.build._probed)
+	fake.view_filters = false
+	table.build._probed = false
+	await table.build.probe_backend()
+	row_button("Extrude 1").pressed.emit()
+	await frames(2)
+	var hide_btn: Button = find_button(table.tree._build_rows, "Hide")
+	var back_btn: Button = find_button(table.tree._build_rows, "Roll back")
+	print("SMOKE an older backend switches Hide and Roll back off, with a note saying why: ", not table.build.view_filters_ok and hide_btn != null and hide_btn.disabled and back_btn.disabled and table.tree._build_rows.find_children("*", "Label", true, false).any(func(l): return l.text.contains("older than DIDSA-CAD 2026-10-03")))
+	var calls_before: int = fake.calls.size()
+	await table.build.toggle_hidden_selected()
+	await table.build.toggle_rollback_selected()
+	print("SMOKE ...and pressing them anyway does nothing (no glb fetch, nothing hidden): ", fake.calls.size() == calls_before and table.build.hidden_ids().is_empty() and table.build.rollback_to == "")
+	fake.view_filters = true
+	table.build.view_filters_ok = true
+	table.build.changed.emit()
+	await frames(2)
 
 	# --- Edit values
 	row_button("Extrude 1").pressed.emit()
@@ -239,4 +316,14 @@ func _initialize() -> void:
 	table.return_to_arena()
 	await frames(3)
 	print("SMOKE when the part leaves the table the tree goes back to Parts and the Build state is empty: ", table.tree.current_tab() == "parts" and table.build.features.is_empty() and table.build.selected_id == "" and table.build.rollback_to == "")
+	# --- a normal part that loses every solid goes blank, like a new one (it used to keep its last shape in the arena)
+	table.seat(box)
+	await settle(func() -> bool: return table.editor.part_id == "PART_BOX" and table.editor.state == "pick_plane")
+	var had_mesh: bool = box.mesh != null and not box.get_meta("blank", false)
+	fake.mesh_bytes = empty_glb()
+	await table.editor.refresh_geometry()
+	print("SMOKE a normal part whose last solid is gone becomes the blank placeholder in the arena and on the table: ", had_mesh and box.get_meta("blank", false) and table.is_blank() and not box.has_meta("topology"))
+	fake.mesh_bytes = box_bytes
+	await table.editor.refresh_geometry()
+	print("SMOKE ...and a feature put back (undo, or a new one) makes it a real part again: ", not box.get_meta("blank", false) and not table.is_blank() and box.has_meta("topology"))
 	quit()

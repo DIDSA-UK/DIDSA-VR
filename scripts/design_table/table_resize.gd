@@ -14,6 +14,7 @@ const INSET := 0.008 ## metres the hit zone reaches back inside the slab's edge
 const GAP := 0.012 ## metres between the glass and the bracket
 const ARM := 0.05 ## the straight arms either side of the arc
 const THICKNESS := 0.010
+const DOT_RADIUS := 0.010 ## metres: the point at each corner, big enough to find against the curved glass edge
 const LIFT := 0.003 ## metres above the slab's plane
 
 var min_size := Vector2(0.50, 0.30) ## metres, x by z
@@ -25,6 +26,7 @@ var dragging := -1
 var _table ## design_table.gd
 var _holders: Array[Node3D] = []
 var _materials: Array[StandardMaterial3D] = []
+var _dot_materials: Array[StandardMaterial3D] = [] ## the small point at each corner of the slab's rectangle: what you aim at
 var _idle := Color(0.82, 0.85, 0.9, 0.55)
 var _hot := Color(0.35, 0.85, 1.0, 1.0)
 
@@ -143,6 +145,7 @@ func _on_released(action_name: String) -> void:
 		dragging = -1
 		_refresh_look()
 		layout()
+		_table.remember_layout()
 
 
 # --- Looks --------------------------------------------------------------------------------
@@ -157,7 +160,10 @@ func _set_hover(index: int) -> void:
 
 func _refresh_look() -> void:
 	for i in _materials.size():
-		_materials[i].albedo_color = _hot if (i == hover or i == dragging) else _idle
+		var hot := i == hover or i == dragging
+		_materials[i].albedo_color = _hot if hot else _idle
+		if i < _dot_materials.size():
+			_dot_materials[i].albedo_color = Color.WHITE if hot else _hot.lightened(0.15)
 
 
 func _build() -> void:
@@ -174,6 +180,21 @@ func _build() -> void:
 		instance.mesh = mesh
 		instance.material_override = material
 		holder.add_child(instance)
+		# The corner point: the slab's rounded corner leaves nothing at the rectangle's corner to aim at, so a small bright dot sits there.
+		var dot_material := StandardMaterial3D.new()
+		dot_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		dot_material.render_priority = 3
+		var sphere := SphereMesh.new()
+		sphere.radius = DOT_RADIUS
+		sphere.height = DOT_RADIUS * 2.0
+		sphere.radial_segments = 16
+		sphere.rings = 8
+		sphere.material = dot_material
+		var dot := MeshInstance3D.new()
+		dot.name = "CornerDot"
+		dot.mesh = sphere
+		holder.add_child(dot)
+		_dot_materials.append(dot_material)
 		_table.add_child(holder)
 		_holders.append(holder)
 		_materials.append(material)

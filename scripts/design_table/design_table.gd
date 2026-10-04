@@ -51,6 +51,7 @@ const TableBuild := preload("res://scripts/design_table/table_build.gd")
 const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
+const TablePose := preload("res://scripts/design_table/table_pose.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
 const TableTree := preload("res://scripts/design_table/table_tree_window.gd")
@@ -78,6 +79,9 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var open_distance: float = 0.70 ## metres in front of you when summoned
 @export var open_drop: float = 0.40 ## metres below your eyes when summoned
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
+@export var sketch_tilt_degrees: float = 60.0 ## while a sketch is open the sketch plane stands this far up from the slab, top edge away, facing you (flat on the slab was awkward to draw on)
+@export var sheet_window_m := Vector2(0.80, 0.40) ## the sketch sheet's size in the WORLD, metres (wide by tall): a fixed window you draw in, however far the part is zoomed
+@export var sketch_hover_height: float = 0.26 ## metres: the least height the part floats at while it is tilted, so the sheet's lower edge clears the slab
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
 @export var drop_floor: float = -0.05 ## drop zone, metres above the slab
@@ -99,9 +103,15 @@ var editor ## table_editor.gd: the editing session on the seated part
 var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
 var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
 var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
+var remake_plan: Array = [] ## the mates Enforce turned off that can be remade on the equivalent face (mate_health.gd remake_plan), offered on the button after it
 var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
+var keep_turn_on_return := false ## a part sent back to the arena keeps the turn it has on the table (default: its original orientation)
+var max_scale_setting := 3.0 ## the biggest everyday scale of the part on the table (Settings; a sketch always allows more)
+const DECK_MIN_WIDTH := 0.60 ## metres: the tool deck is as wide as the slab, between these two
+const DECK_MAX_WIDTH := 1.00
+var part_locked := true ## while a sketch is open: the part keeps the sketch tilt (two hands move and scale only, the stick leaves it alone); false = free to turn
 var seated: MeshInstance3D = null ## the arena's own node that is on the table (hidden meanwhile)
 var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis is the part's orientation on the table
 var table_copy: MeshInstance3D = null ## what's edited; a child of pivot, in the part's own mm frame
@@ -139,6 +149,7 @@ var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table w
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 var _new_part_busy := false
+var _view_empty := false ## the Build tree has hidden / rolled back everything: the copy shows nothing
 
 
 func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node, mates_tool: Node = null) -> void:
@@ -173,7 +184,11 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	enforce_button.name = "EnforceMates"
 	main.add_child(enforce_button) # a sibling, not a child: it must stay visible when the table is put away
 	enforce_button.setup(right, camera)
-	enforce_button.pressed_enforce.connect(enforce_mates)
+	enforce_button.pressed_enforce.connect(func() -> void:
+		if remake_plan.is_empty():
+			await enforce_mates()
+		else:
+			await remake_mates())
 	if mates_tool != null:
 		mates_tool.enforce_finished.connect(_on_enforce_finished)
 	build = TableBuild.new()
@@ -186,6 +201,11 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	manip.engaged_changed.connect(set_engaged)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
 	ui.reset_pressed.connect(reset_pose)
+	ui.part_lock_toggled.connect(func(on: bool) -> void:
+		part_locked = on
+		set_status("The part keeps its tilt: two hands move and scale it." if on else "The part is free: two hands turn it, the stick spins it. Reset or Fit puts the tilt back."))
+	ui.fit_pressed.connect(fit_sketch)
+	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
 	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	add_to_group("design_tables") # controller.gd asks every table about seating / lifting
@@ -371,6 +391,38 @@ func _build_deck() -> void:
 	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 
 
+func deck_width_for(slab_width: float) -> float:
+	## The tool deck is as wide as the slab it sits in front of, never narrower than the original 0.6 m or wider than 1 m: a wider slab
+	## gives the buttons (Part: Locked, Fit, Done, Reset...) more room.
+	return clampf(slab_width, DECK_MIN_WIDTH, DECK_MAX_WIDTH)
+
+
+func _apply_deck_width() -> void:
+	var width := deck_width_for(slab_size.x)
+	if is_equal_approx(width, tools_size.x) or _viewport == null:
+		return
+	tools_size.x = width
+	var viewport_size := Vector2i((tools_size * pixels_per_metre).round())
+	_viewport.size = viewport_size
+	ui.size = Vector2(viewport_size)
+	(_deck_quad.mesh as QuadMesh).size = tools_size
+	surface.panel_size = tools_size
+
+
+func apply_settings(settings) -> void:
+	## main.gd, once everything exists: what the user chose last time.
+	keep_turn_on_return = settings.table_keep_turn
+	max_scale_setting = settings.table_max_scale
+	var saved: Vector2 = settings.table_slab_size
+	if saved != Vector2.ZERO:
+		set_slab_size(saved.clamp(resizer.min_size, resizer.max_size))
+
+
+func remember_layout() -> void:
+	## The slab was dragged to its size: remembered for next time.
+	_main.app_settings().set_table_slab_size(slab_size)
+
+
 func _layout_deck() -> void:
 	## The deck's top edge starts deck_gap in front of the slab's front edge, just under it (moves with the slab when it is resized).
 	var lean := deg_to_rad(90.0 - deck_lean_degrees)
@@ -385,6 +437,7 @@ func set_slab_size(new_size: Vector2) -> void:
 	(_slab.mesh as PlaneMesh).size = new_size
 	_style_materials()
 	handle.layout(new_size)
+	_apply_deck_width()
 	_layout_deck()
 	var dock_x := -(new_size.x * 0.5 + 0.20)
 	tree.position.x += dock_x - tree.dock_position.x # keeps wherever the tree has been carried to, relative to the slab's left edge
@@ -568,7 +621,8 @@ func _give_copy_collider() -> void:
 	## The copy's collider on the table's own layer (so the laser can pick its faces) and, for a blank part, no collider and
 	## no drawing of the placeholder box: the copy still stands in for its size and carries the plane squares and the sheet
 	## (its children keep their own layers), but a fake cube is never shown or picked.
-	table_copy.layers = 0 if is_blank() else 1
+	_view_empty = false
+	apply_view_mode()
 	if is_blank():
 		return
 	table_copy.create_trimesh_collision()
@@ -576,6 +630,17 @@ func _give_copy_collider() -> void:
 		if child is StaticBody3D:
 			(child as StaticBody3D).collision_layer = TABLE_LAYER
 			(child as StaticBody3D).collision_mask = 0
+
+
+func apply_view_mode() -> void:
+	## The copy in the current view mode (view_modes.gd): its faces drawn or not (never for a blank part, or when the Build tree has hidden
+	## everything), its edges built and shown or not (never for those two either: the placeholder box has no edges worth showing).
+	if table_copy == null:
+		return
+	var nothing_to_draw := is_blank() or _view_empty
+	table_copy.set_meta("no_edges", nothing_to_draw)
+	_main.view_modes.apply_to(table_copy)
+	table_copy.layers = 1 if (not nothing_to_draw and _main.view_modes.shows_faces()) else 0
 
 
 func try_grab(hand: XRController3D) -> bool:
@@ -592,6 +657,36 @@ func release_grab(hand: Object) -> bool:
 func owns_stick(hand: Object) -> bool:
 	## True for the right hand while the table is engaged: its stick and A / B handle the part on the table, not a selected arena part or walking.
 	return _open and manip != null and manip.owns_stick(hand)
+
+
+func editing_sketch() -> bool:
+	## A sketch is open on the part on the table.
+	return editor != null and editor.session != null
+
+
+func sketch_locked() -> bool:
+	## The part's turn is locked to the sketch tilt: a sketch is open and "Part: Locked" is on.
+	return part_locked and editing_sketch()
+
+
+func max_user_scale() -> float:
+	## The biggest the part may be scaled to: higher while sketching (zooming into the sketch).
+	return maxf(TablePose.SKETCH_MAX_SCALE, max_scale_setting) if editing_sketch() else max_scale_setting
+
+
+func fit_sketch() -> void:
+	## The Fit button: the part goes back to the sketch tilt, and is scaled and moved so the sketch (or, with nothing drawn yet, the part)
+	## fills most of the sheet window, in the middle of the slab.
+	if pivot == null or not editing_sketch() or editor.view == null:
+		return
+	var bounds: Rect2 = editor.sketch_bounds()
+	var scale: float = TablePose.fit_scale(bounds.size, sheet_window_m, 0.8, fit_scale, max_user_scale())
+	var rotation := sketch_rotation(editor.session.plane)
+	var basis := rotation.orthonormalized() * scale
+	var centre_in_pivot: Vector3 = table_copy.transform * SketchMath.from_sheet(bounds.get_center(), editor.session.plane)
+	_animate_pose(rotation, Vector3(0.0, sketch_hover_height, 0.0) - basis * centre_in_pivot, scale)
+	set_status("Sketch fitted to the sheet.")
+	UiFeedback.haptic(_right, "confirm")
 
 
 func part_radius() -> float:
@@ -628,7 +723,8 @@ func set_leave_cue(on: bool) -> void:
 
 
 func send_to_arena(world_centre: Vector3) -> void:
-	## The part was let go of beyond the slab: the real node comes back at the arena's scale, in its original orientation, with
+	## The part was let go of beyond the slab: the real node comes back at the arena's scale, in its original orientation (or, with
+	## "keep turn" on, the turn it was given on the table), with
 	## the middle of its bounds at `world_centre`, as an ordinary move (undoable, saved, its mates flagged if it was edited).
 	if seated == null:
 		return
@@ -641,7 +737,12 @@ func send_to_arena(world_centre: Vector3) -> void:
 		set_status("%s is held by its mates, so it went back where it came from." % node.name)
 		return
 	var before := _seat_pose
-	var after := TableSeat.lift_transform((node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), world_centre)
+	var turn := Basis.IDENTITY
+	if keep_turn_on_return and pivot != null:
+		# The turn the part was given on the table (a rotation in the console frame), carried over to the world frame.
+		var delta := pivot.basis.orthonormalized() * _seat_pivot_basis.inverse()
+		turn = (global_transform.basis.orthonormalized() * delta * global_transform.basis.orthonormalized().inverse()).orthonormalized()
+	var after := TableSeat.lift_transform((node.get_parent() as Node3D).global_transform.basis, _seat_local_basis, node.get_aabb(), world_centre, turn)
 	node.global_transform = after
 	node.visible = true
 	node.remove_meta("on_table")
@@ -703,6 +804,39 @@ func _discard_blank() -> void:
 func _refresh_trees() -> void:
 	tree.mark_stale()
 	_main.refresh_assembly_tree()
+
+
+func rename_part() -> void:
+	## The Build tab's Rename: the full keyboard opens on the part's name; confirming renames the PART (every placed instance of it).
+	if seated == null or editor.part_id == "":
+		return
+	var node := seated
+	_main.open_keyboard_for(str(node.name), func(text: String) -> void: await rename_part_to(text), {"mode": "full", "title": "Part name", "confirm_label": "Rename"})
+
+
+func rename_part_to(new_name: String) -> bool:
+	## PATCH /document/parts/{id} {name}; the arena nodes that show the part take the name too, and the trees reload.
+	var clean := new_name.strip_edges()
+	if seated == null or editor.part_id == "" or clean == "":
+		return false
+	if clean == str(seated.name):
+		return true
+	var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s" % editor.part_id, {"name": clean})
+	if not r["ok"]:
+		set_status("Couldn't rename it: %s" % str(r["error"]))
+		UiFeedback.haptic(_right, "error")
+		return false
+	var nodes: Array = await editor.arena_nodes_of(editor.part_id)
+	if seated != null and not nodes.has(seated):
+		nodes.append(seated)
+	for node in nodes:
+		if is_instance_valid(node):
+			node.name = clean
+	_main.mark_dirty()
+	_refresh_trees()
+	build.changed.emit()
+	set_status("Renamed to %s." % clean)
+	return true
 
 
 func new_part() -> void:
@@ -849,7 +983,8 @@ func _push_move(label: String, node: Node3D, before: Transform3D, after: Transfo
 		func() -> void:
 			if is_instance_valid(node):
 				node.global_transform = after
-				_persist(node))
+				_persist(node),
+		true)
 
 
 func _persist(node: Node3D) -> void:
@@ -858,11 +993,19 @@ func _persist(node: Node3D) -> void:
 
 
 func orient_to_plane(plane: Dictionary) -> void:
-	## Turns the part on the table so the sketch plane lies flat, x to the right, y away from you. Where it is and how big it
-	## is stay as the user left them.
+	## Turns the part on the table so the sketch plane stands tilted up towards you (sketch_rotation), x to the right, y away. Where
+	## it is (never lower than sketch_hover_height) and how big it is stay as the user left them.
 	if pivot == null:
 		return
-	_animate_pose(SketchMath.orient_to_table(plane), pivot.position, user_scale)
+	var at := pivot.position
+	at.y = maxf(at.y, sketch_hover_height)
+	_animate_pose(sketch_rotation(plane), at, user_scale)
+
+
+func sketch_rotation(plane: Dictionary) -> Basis:
+	## How the part is turned while a sketch on `plane` is open: the plane lies flat on the slab (x right, y away, normal up), then
+	## tips up about the slab's x axis by sketch_tilt_degrees so its top edge goes away and its face comes towards you.
+	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt_degrees)) * SketchMath.orient_to_table(plane)
 
 
 func reset_pose() -> void:
@@ -873,9 +1016,9 @@ func reset_pose() -> void:
 	var rotation := _seat_pivot_basis
 	var text := "Back where it started."
 	if editor != null and editor.session != null and not (editor.session.plane as Dictionary).is_empty():
-		rotation = SketchMath.orient_to_table(editor.session.plane)
+		rotation = sketch_rotation(editor.session.plane)
 		text = "Back to the sketch plane."
-	_animate_pose(rotation, Vector3(0.0, hover_height, 0.0), 1.0)
+	_animate_pose(rotation, Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0), 1.0)
 	set_status(text)
 	UiFeedback.haptic(_right, "confirm")
 
@@ -952,7 +1095,8 @@ func show_filtered_view(glb_bytes: PackedByteArray) -> bool:
 		if key in ["face_ids", "body_ids", "topology"] and table_copy.has_meta(key):
 			table_copy.remove_meta(key)
 	if parsed["mesh"] == null:
-		table_copy.layers = 0
+		_view_empty = true
+		apply_view_mode()
 	else:
 		table_copy.mesh = parsed["mesh"]
 		for key in (parsed["metas"] as Dictionary):
@@ -969,6 +1113,7 @@ func notify_edited(edited_part_id: String, nodes: Array = []) -> void:
 		DirtyMates.mark(node)
 	if seated != null:
 		DirtyMates.mark(seated)
+	_main.mark_dirty()
 	part_edited.emit(edited_part_id)
 
 
@@ -1016,6 +1161,8 @@ func enforce_mates() -> void:
 		return
 	enforce_button.set_busy(true)
 	var suppressed := 0
+	var arena_nodes := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D)
+	remake_plan = MateHealth.remake_plan(_mates_tool.mates, MateHealth.flatten_drift(mate_drift), mate_baseline, arena_nodes)
 	for mate_id in mate_drift.keys():
 		var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/mates/%s" % [owner_id, mate_id], {"suppressed": true})
 		if r["ok"]:
@@ -1026,13 +1173,49 @@ func enforce_mates() -> void:
 	await _mates_tool.enforce_all(owner_id)
 
 
+func remake_mates() -> void:
+	## The offer after Enforce: each turned-off mate whose face has an equivalent in the new shape is made again on that face (a new mate with
+	## the same type and value; DIDSA-CAD never changes what a mate references) and the old one is deleted, then everything is solved again.
+	var plan := remake_plan.duplicate(true)
+	remake_plan.clear()
+	var owner_id: String = _main.current_root_part_id()
+	if _mates_tool == null or owner_id == "" or plan.is_empty():
+		return
+	enforce_button.set_busy(true)
+	var made := 0
+	var failed := 0
+	for entry in plan:
+		var body := {"type": entry["type"], "references": entry["references"], "flipped": entry["flipped"], "allow_rotation": entry["allow_rotation"]}
+		if entry["value"] != null:
+			body["value"] = entry["value"]
+		var created: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/mates" % owner_id, body)
+		if created["ok"]:
+			await api.request(HTTPClient.METHOD_DELETE, "/document/parts/%s/mates/%s" % [owner_id, entry["mate_id"]], null)
+			made += 1
+		else:
+			failed += 1
+	_main.mark_dirty()
+	await _mates_tool.refresh_mates(owner_id)
+	var text := "%d mate(s) remade on the equivalent face.%s" % [made, "" if failed == 0 else " %d could not be (the backend refused): remake them from Assembly > Mates." % failed]
+	enforce_button.reset_label()
+	await _mates_tool.enforce_all(owner_id)
+	enforce_button.set_message(text)
+	enforce_button.set_busy(false)
+	enforce_button.hide_after(8.0)
+	set_status(text)
+
+
 func _on_enforce_finished(result: Dictionary) -> void:
 	enforce_button.set_busy(false)
 	var suppressed := _last_suppressed
 	_last_suppressed = 0
 	if bool(result.get("ok", false)):
 		var cleared := DirtyMates.clear_all(get_tree())
-		if suppressed > 0:
+		if suppressed > 0 and not remake_plan.is_empty():
+			var offer_text := "%d mate(s) turned off: the edit changed the face they were made on. %d can be remade on the face that is now the same one." % [suppressed, remake_plan.size()]
+			enforce_button.offer("Remake %d mate(s)" % remake_plan.size(), offer_text)
+			set_status(offer_text)
+		elif suppressed > 0:
 			var text := "%d mate(s) turned off: the edit changed the face they were made on. Remake them from Assembly > Mates." % suppressed
 			enforce_button.set_message(text)
 			enforce_button.hide_after(8.0) # long enough to read; the badges are gone, so this is the only place it's said

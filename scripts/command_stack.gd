@@ -14,13 +14,19 @@ extends RefCounted
 ## A fresh push clears the redo stack, same as any standard undo/redo history:
 ## once you've done something new, "redo" no longer means anything.
 
+signal changed ## an entry that CHANGES THE DOCUMENT (persists = true: a part move, a solve) was pushed, undone or redone: what a save would write is different now
+
 var _undo_stack: Array[Dictionary] = []
 var _redo_stack: Array[Dictionary] = []
 
 
-func push(label: String, undo: Callable, redo: Callable) -> void:
-	_undo_stack.append({"label": label, "undo": undo, "redo": redo})
+func push(label: String, undo: Callable, redo: Callable, persists: bool = false) -> void:
+	## `persists`: this action changes what a save would write (a part's pose in the assembly), as opposed to a view change (hide, a whole-model
+	## move or scale, a section plane), which undo covers but no save keeps. Only persisting entries make the document "unsaved".
+	_undo_stack.append({"label": label, "undo": undo, "redo": redo, "persists": persists})
 	_redo_stack.clear()
+	if persists:
+		changed.emit()
 
 
 func can_undo() -> bool:
@@ -62,6 +68,8 @@ func undo() -> void:
 	var entry: Dictionary = _undo_stack.pop_back()
 	(entry["undo"] as Callable).call()
 	_redo_stack.append(entry)
+	if entry.get("persists", false):
+		changed.emit()
 
 
 func redo() -> void:
@@ -70,6 +78,8 @@ func redo() -> void:
 	var entry: Dictionary = _redo_stack.pop_back()
 	(entry["redo"] as Callable).call()
 	_undo_stack.append(entry)
+	if entry.get("persists", false):
+		changed.emit()
 
 
 func clear() -> void:

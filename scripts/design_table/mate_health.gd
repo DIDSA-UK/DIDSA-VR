@@ -103,8 +103,96 @@ static func drifted(captured: Array, nodes: Array) -> Array:
 	return out
 
 
+static func flatten_drift(drift_by_mate: Dictionary) -> Array:
+	## The table keeps its drift as mate id -> [references]; the functions here take the flat list drifted() returns.
+	var out: Array = []
+	for mate_id in drift_by_mate:
+		out.append_array(drift_by_mate[mate_id])
+	return out
+
+
 static func mate_ids(drift: Array) -> Array:
 	var seen := {}
 	for d in drift:
 		seen[str(d["mate_id"])] = true
 	return seen.keys()
+
+
+# --- Remaking a mate on the equivalent face -------------------------------------------------------------------------
+
+static func faces_of_body(node: Node3D, body_id: String) -> Array:
+	## The distinct face indices of one body of a part node, from its per-triangle identity metas.
+	var out: Array = []
+	if not node.has_meta("body_ids") or not node.has_meta("face_ids"):
+		return out
+	var bodies: Array = node.get_meta("body_ids")
+	var faces: Array = node.get_meta("face_ids")
+	var seen := {}
+	for i in mini(bodies.size(), faces.size()):
+		if str(bodies[i]) != body_id:
+			continue
+		var f := int(faces[i])
+		if not seen.has(f):
+			seen[f] = true
+			out.append(f)
+	return out
+
+
+static func equivalent_face(before: Dictionary, node: Node3D, body_id: String) -> int:
+	## After an edit renumbered the faces: the index of the face of `body_id` that is the SAME face as `before` (a signature taken before the
+	## edit): same kind and, for a plane, the same direction at the same place. Several faces can qualify (an edit can split one); the
+	## biggest wins, then the one nearest where it was. -1 if the face is gone.
+	var best := -1
+	var best_area := -1.0
+	for index in faces_of_body(node, body_id):
+		var sig := signature(node, body_id, int(index))
+		if not same(before, sig):
+			continue
+		var area := float(sig["area"])
+		if area > best_area + 0.000001:
+			best_area = area
+			best = int(index)
+	return best
+
+
+static func remake_plan(mates: Array, drift: Array, baseline: Array, nodes: Array) -> Array:
+	## For the mates an edit left pointing at different faces: the ones that can be REMADE because every drifted reference has an
+	## equivalent face in the new shape. [{mate_id, type, value, flipped, allow_rotation, references: the mate's references with the new
+	## face indices, moved: how many references changed}]. A mate with a face that is gone is left out (it has to be remade by hand).
+	var by_occurrence := {}
+	for node in nodes:
+		by_occurrence[str(node.get_meta("occurrence_id", ""))] = node
+	var out: Array = []
+	for mate_id in mate_ids(drift):
+		var mate := {}
+		for m in mates:
+			if str(m.get("id", "")) == mate_id:
+				mate = m
+		if mate.is_empty():
+			continue
+		var references: Array = (mate.get("references", []) as Array).duplicate(true)
+		var moved := 0
+		var all_found := true
+		for d in drift:
+			if str(d["mate_id"]) != mate_id:
+				continue
+			var before := {}
+			for b in baseline:
+				if b["mate_id"] == d["mate_id"] and b["occurrence_id"] == d["occurrence_id"] and b["body_id"] == d["body_id"] and int(b["index"]) == int(d["index"]):
+					before = b["before"]
+			var node = by_occurrence.get(str(d["occurrence_id"]))
+			var found := -1
+			if node != null and not before.is_empty():
+				found = equivalent_face(before, node, str(d["body_id"]))
+			if found < 0:
+				all_found = false
+				break
+			for ref in references:
+				var sub = ref.get("subshape_ref")
+				if sub != null and str(ref.get("occurrence_id", "")) == str(d["occurrence_id"]) and str(sub.get("body_id", "")) == str(d["body_id"]) and int(sub.get("index", -1)) == int(d["index"]):
+					sub["index"] = found
+					moved += 1
+		if all_found and moved > 0:
+			out.append({"mate_id": mate_id, "type": str(mate.get("type", "")), "value": mate.get("value"), "flipped": bool(mate.get("flipped", false)),
+				"allow_rotation": bool(mate.get("allow_rotation", true)), "references": references, "moved": moved})
+	return out

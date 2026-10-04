@@ -22,6 +22,10 @@ var mesh_ok := true
 var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
+var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
+var origin_id := ""
+var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
+var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
 
@@ -31,6 +35,11 @@ func is_configured() -> bool:
 
 func request(method: int, path: String, body = null) -> Dictionary:
 	return handle(method, path, body)
+
+
+func supports_view_filters() -> bool:
+	calls.append(["GET /openapi.json", null])
+	return view_filters
 
 
 func fetch_bytes(path: String) -> Dictionary:
@@ -51,7 +60,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
 		return _ok(feature_rows.get(path.get_slice("/", 3), []))
-	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
+	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/revolve-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
 		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 		for row in rows:
 			if row["id"] == path.get_file():
@@ -87,18 +96,29 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": true, "code": 204, "json": null, "error": ""}
 	if verb == "GET" and path.ends_with("/occurrences"):
 		return _ok(occurrences.get(path.get_slice("/", 3), []))
-	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):
+	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/revolve-features") or path.ends_with("/shell-features") or path.ends_with("/mirror-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):
 		return _ok({"id": next_id("feat")})
 	if verb == "DELETE" and path.contains("/features/"):
 		return _ok(null)
 	if verb == "PATCH" and path.contains("/mates/"):
 		return _ok({})
+	if verb == "PATCH" and path.begins_with("/document/parts/") and path.count("/") == 3:
+		return _ok({"id": path.get_file(), "name": body.get("name", "")})
+	if verb == "POST" and path.ends_with("/mates"):
+		return _ok({"id": next_id("mate")})
 	if path.ends_with("/create-plane-features"):
 		if plane_for.is_valid():
 			var answer: Dictionary = plane_for.call(body)
 			answer["id"] = "plane1"
 			return _ok(answer)
 		return _ok({"id": "plane1", "origin": [0, 0, 10], "normal": [0, 0, 1], "x_axis": [1, 0, 0], "y_axis": [0, 1, 0]})
+	if verb == "GET" and path.contains("/sketch/sketches/") and path.count("/") == 3:
+		if not origin:
+			return {"ok": false, "code": 404, "json": null, "error": "no such route"}
+		if origin_id == "":
+			origin_id = next_id("pt")
+			points[origin_id] = Vector2.ZERO
+		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
 	if path.ends_with("/points") and verb == "POST":
@@ -142,6 +162,10 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var k := next_id("k")
 		entities.append({"type": "arc", "id": id, "center_point_id": body["center_point_id"], "start_point_id": body["start_point_id"], "end_point_id": end_id, "radius_constraint_id": k})
 		return _ok({"id": id})
+	if path.ends_with("/slots"):
+		var id := next_id("sl")
+		entities.append({"type": "slot", "id": id, "center1_point_id": body["center1_point_id"], "center2_point_id": body["center2_point_id"], "radius": body["radius"]})
+		return _ok({"id": id})
 	if path.ends_with("/polygons"):
 		var id := next_id("pg")
 		entities.append({"type": "polygon", "id": id, "center_point_id": body["center_point_id"], "vertex_point_ids": [body["first_vertex_point_id"]]})
@@ -152,6 +176,11 @@ func handle(method: int, path: String, body) -> Dictionary:
 		c["id"] = id
 		cons[id] = c
 		return _ok(c)
+	if verb == "PATCH" and (path.contains("/lines/") or path.contains("/circles/") or path.contains("/arcs/")):
+		for e in entities:
+			if e["id"] == path.get_file():
+				e["construction"] = bool(body.get("construction", e.get("construction", false)))
+		return _ok({"id": path.get_file()})
 	if path.contains("/constraints/") and verb == "PATCH":
 		var k: String = path.get_file()
 		cons[k]["distance"] = body["value"]
@@ -161,7 +190,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var plist: Array = []
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": false})
-		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon"])
+		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
 		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}})
 	if path.ends_with("/export"):
 		return _ok({"entities": entities})

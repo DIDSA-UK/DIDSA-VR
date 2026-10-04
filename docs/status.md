@@ -2540,3 +2540,35 @@ roll back, cascade), pytest in DIDSA-CAD. Fixed on the way: the editor kept a st
 
 **Not confirmed:** headset feel (row and button size, the action strip in a 0.30 m window). **Not built:** reopening an existing sketch to change it, the
 flat app's Planes / Surfaces / Curves sections, undo of a cascade delete.
+
+
+### 2026-10-03 (later night) — Milestone 2.5: the first headset session's feedback, and the gaps closed
+
+John tried the design table in a headset once and sent seven comments, and asked for the known gaps to be written down and closed too. The gap list with
+IDs, what was done and what is left is **`docs/design-table-gaps.md`**; the behaviour is in `docs/design-table.md`. In short:
+
+* **Feedback:** edges and **view modes** (Shaded / + edges / Wireframe, edges from the backend's real topology, `edge_overlay.gd`, `view_modes.gd`,
+  `edge_lines.gdshader`); the sketch **stands up 60 degrees from the slab** (animated; the reading of "60" is an assumption to check, `sketch_tilt_degrees`); a
+  **0.8 x 0.4 m gridded sheet** (`sketch_grid.gdshader`); the sketch **origin** is a real, snappable point; a **Select tool** (on by default) with a menu of what
+  applies to the selection (`sketch_selection.gd`, ported from the flat app's selection matrix, plus Fix / Construction / Delete), **pan and zoom** by the existing
+  grips with the sketch rules (locked tilt, release holds the part, the whole sheet is the grab zone, 8x, Part: Locked / Free, Fit); a **point on each slab corner**.
+* **Work loss:** a dirty flag and a "save first" warning; VR's **own `X-Document-Session`** (a behaviour change: VR and the flat app no longer share a backend's
+  document, they exchange files); saves say where they went; Hide / Roll back switch off on an older backend; stale-mate flags are saved (`vr_stale_mates`).
+* **Editing:** an existing sketch reopens from the Build tree (Edit) with a **Done** button that rebuilds the part; **Revolve, Shell and Mirror** and a **Slot** sketch tool; rename a part; a
+  part with no solids goes blank; a turned-off mate can be **remade** on the equivalent face.
+* **Table handling:** slab size remembered, deck width follows the slab, zoom limit and send-back orientation are settings, one-hand wrist turn (left stick modifier).
+* **Tests:** new `view_modes`, `work_loss`, `table_handling` (in `run_all.sh`), and local-only `e2e_sketch_select`, `e2e_revolve`, `e2e_features`; `e2e_build_tree` and
+  `e2e_design_table_mates` extended. The sketch tests found nothing wrong in the backend; one thing worth knowing: a sketch with redundant constraints (horizontal +
+  vertical + perpendicular on the same lines) can make later solves report non-convergence, which the session answers by taking the new constraint back out.
+* **Not done:** sub-assemblies (G14 / G16), carrying a mated part (G15), Pattern / Sweep / Loft / booleans / Ellipse, Spline, Text, Trim, Offset, a feature preview, redo, the Planes /
+  Surfaces / Curves tree sections. **Not verified:** all of it in a headset; the open numbers are listed in `docs/design-table-gaps.md`.
+
+### 2026-10-03 (later night, again) — Sketches look like engineering drawings
+
+John pointed out that the yellow dimension text in a screenshot did not resemble a drawing dimension, and that construction lines (a polygon's, perhaps others') looked solid.
+Both were true: dimensions were a bare billboard label on the geometry with no leaders, arrows or extension lines, and construction lines (flagged by the backend on a polygon's
+centre-to-corner lines, a rectangle's diagonals, a slot's centre line) were only a dimmer colour. Now: object lines heavy and solid, construction lines thin and in a chain pattern,
+a centre mark on every circle, and dimensions drawn with extension lines, a dimension line on the side with room (`dimension_layout.gd`, pure, unit-tested), arrowheads, and the value
+lying along the line in the sketch plane; radius leaders, diameter lines and angle arcs; the candidate dimensions use the same graphics in yellow. A polygon's own corner angles and
+a circle's own structural constraints (zero distances) are no longer drawn as dimensions. Checked in a software render (`tests/sketch_style_render.gd`), not in a headset: text size,
+line weights and arrow size are in world metres and are the numbers to tune after one look (`LABEL_FONT`, `OBJECT_WIDTH`, `ARROW_LENGTH`, `DIM_OFFSET` in `sketch_view.gd`).

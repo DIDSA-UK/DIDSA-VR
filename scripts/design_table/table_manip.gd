@@ -3,7 +3,8 @@ extends RefCounted
 ## real part's pose, the model's pose and the world's scale are never touched while the part is on the table.
 ##
 ##   * ONE hand gripping the part moves it (it follows the hand 1:1, through the same steadiness filter as an arena
-##     part). Turning stays two-handed so a wrist twitch never spins it.
+##     part). Turning is two-handed so a wrist twitch never spins it, except behind a modifier: with the LEFT stick pressed
+##     the part turns with the wrist (turn_held()), about the hand.
 ##   * TWO hands gripping it move it with the midpoint between them, turn it as the line between them swings and scale it
 ##     as they spread or close, all about the midpoint (table_pose.gd). The second grip may be anywhere over the table.
 ##   * The right STICK spins it about the slab's up axis and tips it; A pulls it nearer, B pushes it farther. These
@@ -45,6 +46,8 @@ var _table ## design_table.gd
 var _grips := {} ## hand -> {offset: Vector3 (part middle minus hand, console frame), filter: OneEuro}
 var _prev := {} ## hand -> its filtered console-frame position last frame (two-hand grips)
 var _lost_for := 0.0
+var _prev_basis := {} ## hand -> its orientation in the console frame last frame (one-hand turn)
+var turn_modifier: Callable = Callable() ## (hand) -> bool: the one-hand turn modifier is held. Default: the LEFT stick pressed (the right stick click is the world-scale pad)
 
 
 func setup(table) -> void:
@@ -71,6 +74,8 @@ func try_grab(hand: XRController3D) -> bool:
 	if not _table.is_open() or _table.seated == null or _table.pivot == null or _grips.has(hand) or _grips.size() >= 2:
 		return false
 	var touching: bool = hand.global_position.distance_to(_table.pivot.global_position) <= _table.part_radius() + _table.lift_reach
+	if not touching and _table.editor != null and _table.editor.sheet_reaches(hand.global_position):
+		touching = true # with a sketch open the whole sheet is the thing to grab, not only the part's own bounding sphere
 	if not touching:
 		# A second hand may join from anywhere over the table, so you don't have to find the part with both.
 		if _grips.is_empty() or not TableSeat.in_drop_zone(_table.to_local(hand.global_position), _table.slab_size, _table.drop_floor, _table.drop_ceiling):
@@ -97,6 +102,7 @@ func release(hand: Object) -> bool:
 		return false
 	_grips.erase(hand)
 	_prev.erase(hand)
+	_prev_basis.erase(hand)
 	if is_instance_valid(hand):
 		hand.set_meta("table_part_held", false)
 	if _grips.is_empty():
@@ -113,6 +119,7 @@ func cancel() -> void:
 			hand.set_meta("table_part_held", false)
 	_grips.clear()
 	_prev.clear()
+	_prev_basis.clear()
 	_set_carry_outside(false)
 	_set_engaged(false)
 	_lost_for = 0.0
@@ -125,6 +132,7 @@ func _rebase() -> void:
 		_grips[hand]["offset"] = _table.pivot.position - local
 		(_grips[hand]["filter"] as OneEuro).reset(hand.global_position)
 		_prev[hand] = local
+		_prev_basis[hand] = (_table.global_transform.basis.inverse() * (hand as Node3D).global_transform.basis).orthonormalized()
 
 
 func _finish() -> void:
@@ -132,7 +140,13 @@ func _finish() -> void:
 	if _table.seated == null or _table.pivot == null:
 		return
 	var centre: Vector3 = _table.pivot.position
-	if TableSeat.in_drop_zone(centre, _table.slab_size, _table.drop_floor, _table.drop_ceiling):
+	if _table.editing_sketch():
+		# A sketch is open on the part: letting go beyond the slab must not send the real part away (that would end the sketch), so it is
+		# held back over the slab.
+		centre = TablePose.clamp_to_zone(centre, _table.slab_size, MIN_HEIGHT, _table.drop_ceiling)
+		_table.pivot.position = centre
+		UiFeedback.haptic(_table._right, "confirm")
+	elif TableSeat.in_drop_zone(centre, _table.slab_size, _table.drop_floor, _table.drop_ceiling):
 		centre.y = maxf(centre.y, MIN_HEIGHT)
 		_table.pivot.position = centre
 		UiFeedback.haptic(_table._right, "confirm")
@@ -158,7 +172,7 @@ func process(delta: float) -> void:
 			_follow_one(delta)
 		2:
 			_follow_two(delta)
-	_set_carry_outside(not _grips.is_empty() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
+	_set_carry_outside(not _grips.is_empty() and not _table.editing_sketch() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
 	_update_engaged(delta)
 	if engaged:
 		var right: XRController3D = _table._right
@@ -171,9 +185,26 @@ func _steady(hand: Object, delta: float) -> Vector3:
 	return (g["filter"] as OneEuro).filter(raw, delta) if bool(g["steady"]) else raw
 
 
+func turn_held(hand: Object) -> bool:
+	## True while the one-hand turn modifier is down on a hand that holds the part (never with a sketch locked to its tilt).
+	if _table.sketch_locked():
+		return false
+	if turn_modifier.is_valid():
+		return bool(turn_modifier.call(hand))
+	return hand != _table._right and hand is XRController3D and (hand as XRController3D).is_button_pressed("primary_click")
+
+
 func _follow_one(delta: float) -> void:
 	var hand: Object = _grips.keys()[0]
 	var local: Vector3 = _table.to_local(_steady(hand, delta))
+	var now_basis: Basis = (_table.global_transform.basis.inverse() * (hand as Node3D).global_transform.basis).orthonormalized()
+	if turn_held(hand) and _prev_basis.has(hand):
+		# The wrist turns the part: the hand's own rotation since last frame is applied to the part about the hand, as if it were held
+		# in the fist (so the part's offset from the hand turns with it).
+		var turn: Basis = (now_basis * (_prev_basis[hand] as Basis).inverse()).orthonormalized()
+		_grips[hand]["offset"] = turn * (_grips[hand]["offset"] as Vector3)
+		_table.apply_pose(_table.pivot.position, (turn * _table.pivot.basis.orthonormalized()).orthonormalized(), _table.user_scale)
+	_prev_basis[hand] = now_basis
 	_table.pivot.position = local + (_grips[hand]["offset"] as Vector3)
 	_prev[hand] = local
 
@@ -184,7 +215,7 @@ func _follow_two(delta: float) -> void:
 	var right: Object = keys[1]
 	var l: Vector3 = _table.to_local(_steady(left, delta))
 	var r: Vector3 = _table.to_local(_steady(right, delta))
-	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale)
+	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale())
 	_table.apply_pose(step["centre"], step["rotation"], step["scale"])
 	_prev[left] = l
 	_prev[right] = r
@@ -197,7 +228,7 @@ func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
 	var right: XRController3D = _table._right
 	if bool(right.get_meta("ui_hover", false)):
 		return # the laser is on the tool deck: the stick is the deck's, not the part's
-	if stick.length() >= stick_deadzone:
+	if stick.length() >= stick_deadzone and not _table.sketch_locked(): # the sketch is tilted to face you: the stick must not spin or tip it away
 		_table.stop_pose_tween()
 		_table.apply_pose(_table.pivot.position, TablePose.stick_turn(_table.pivot.basis.orthonormalized(), stick, delta, rotate_speed_degrees), _table.user_scale)
 	var direction := 0.0

@@ -8,11 +8,12 @@ extends RefCounted
 
 const MIN_SCALE := 0.4 ## the part can be scaled down to this multiple of its fitted size...
 const MAX_SCALE := 3.0 ## ...and up to this
+const SKETCH_MAX_SCALE := 8.0 ## while a sketch is open the top is higher: scaling the part is how you zoom into the sketch
 const SPREAD_GAIN := 1.0 ## hands twice as far apart = twice the size (the arena's own two-hand scale uses 3: far too twitchy for a part you're sketching on)
 
 
-static func clamp_scale(scale: float) -> float:
-	return clampf(scale, MIN_SCALE, MAX_SCALE)
+static func clamp_scale(scale: float, top: float = MAX_SCALE) -> float:
+	return clampf(scale, MIN_SCALE, top)
 
 
 static func swing(from_vec: Vector3, to_vec: Vector3) -> Basis:
@@ -32,7 +33,7 @@ static func swing(from_vec: Vector3, to_vec: Vector3) -> Basis:
 	return Basis(Quaternion(a, b))
 
 
-static func two_hand(prev_left: Vector3, prev_right: Vector3, left: Vector3, right: Vector3, centre: Vector3, rotation: Basis, scale: float) -> Dictionary:
+static func two_hand(prev_left: Vector3, prev_right: Vector3, left: Vector3, right: Vector3, centre: Vector3, rotation: Basis, scale: float, allow_turn: bool = true, top: float = MAX_SCALE) -> Dictionary:
 	## One frame of a two-hand grip on the part: it moves with the midpoint between your hands, turns as the line between them
 	## swings and grows as they spread, all about the midpoint, as if it were pinned between your fists. Returns the new
 	## {centre, rotation, scale}; the scale is clamped, and a spread blocked by the clamp neither moves nor turns it oddly.
@@ -40,9 +41,9 @@ static func two_hand(prev_left: Vector3, prev_right: Vector3, left: Vector3, rig
 	var vec := right - left
 	if prev_vec.length() < 0.02 or vec.length() < 0.02:
 		return {"centre": centre + ((left + right) - (prev_left + prev_right)) * 0.5, "rotation": rotation, "scale": scale}
-	var turn := swing(prev_vec, vec)
+	var turn := swing(prev_vec, vec) if allow_turn else Basis.IDENTITY ## a locked part (a sketch is open) only moves and scales
 	var wanted := scale * pow(vec.length() / prev_vec.length(), SPREAD_GAIN)
-	var new_scale := clamp_scale(wanted)
+	var new_scale := clamp_scale(wanted, top)
 	var factor := new_scale / scale
 	var prev_mid := (prev_left + prev_right) * 0.5
 	var mid := (left + right) * 0.5
@@ -82,6 +83,12 @@ static func nudge(centre: Vector3, hand: Vector3, aim: Vector3, direction: float
 			return centre
 		new_dist = maxf(new_dist, min_distance)
 	return hand + dir * new_dist
+
+
+static func fit_scale(bounds_mm: Vector2, window_m: Vector2, fill: float, fitted: float, top: float) -> float:
+	## The user_scale (a multiple of the fitted size) at which a sketch `bounds_mm` big fills `fill` (0..1) of a window `window_m` metres across, clamped.
+	var need := minf(window_m.x * fill / maxf(bounds_mm.x, 0.001), window_m.y * fill / maxf(bounds_mm.y, 0.001)) # metres per mm
+	return clamp_scale(need / maxf(fitted, 0.000001), top)
 
 
 static func ray_near_sphere(origin: Vector3, dir: Vector3, centre: Vector3, radius: float) -> bool:

@@ -11,6 +11,8 @@ extends Node
 ##   sketch      a sketch is open: the laser meets the SKETCH SHEET (a plane through the part), snapped, and the trigger
 ##               places points / picks entities / types dimensions, per the active tool
 ##   pick_edges  Fillet / Chamfer: aim at the part's edges and pull the trigger to add or remove them
+##   pick_faces  Shell: the same with faces (the ones to open)
+## Mirror needs no state of its own: it uses plane picking (pick_plane) and, instead of opening a sketch, mirrors the part across the plane or flat face.
 ##
 ## Extrude, Fillet and Chamfer are applied from the options row under the tool row; each ends with a fresh mesh of the part
 ## fetched from the backend, put on the table AND on every arena instance of it.
@@ -30,16 +32,21 @@ const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
+const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
+const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
-const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point"]
+const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot"]
+const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
 const GHOST_RADIUS := 0.030
+const MENU_SLOTS := 6 ## buttons in the options row
 
 var table ## design_table.gd
 var api ## cad_api.gd, or anything with request(method, path, body) and fetch_bytes(path); null = no backend
@@ -54,7 +61,9 @@ var chosen_face := {} ## {body_id, index} when the sketch is on a face of the pa
 var chosen_plane := "" ## "XY" | "XZ" | "YZ" when it's on a reference plane
 var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0}
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false}
+var faces: Array = [] ## picked face entities (Shell)
+var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
 
 var _hover_uv: Variant = null
@@ -65,6 +74,11 @@ var _hover_face: Dictionary = {}
 var _sheet_vertices: Array = []
 var _last_view_key := ""
 var _orient_tween: Tween = null
+var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
+var _menu_key := ""
+var _menu_page := 0 ## which page of the Select tool's menu is showing
+var _window_scale := 0.0 ## the effective scale the sheet was last sized for
+var _window_msec := 0
 var _edited_nodes: Array = [] ## the arena nodes the last refresh updated: every instance of the part
 
 
@@ -190,7 +204,9 @@ func _reset() -> void:
 	highlight = null
 	chosen_face = {}
 	chosen_plane = ""
+	revolve_axis = ""
 	edges.clear()
+	faces.clear()
 	feature_stack.clear()
 	hovering = false
 	_hover_uv = null
@@ -202,6 +218,7 @@ func _reset() -> void:
 	_last_view_key = ""
 	table.ui.set_undo_enabled(false)
 	table.ui.set_options([])
+	table.ui.set_sketching(false)
 
 
 func _say_pick_plane() -> void:
@@ -223,9 +240,12 @@ func _process(_delta: float) -> void:
 		"pick_plane":
 			_hover_pick_plane(origin, dir)
 		"sketch":
+			_follow_scale()
 			_hover_sketch(origin, dir)
 		"pick_edges":
 			_hover_edges(origin, dir)
+		"pick_faces":
+			_hover_faces(origin, dir)
 	if state != "pick_plane" and markers != null:
 		markers.set_hover("")
 
@@ -302,10 +322,10 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
-	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension":
+	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
 		var pick_mm: float = PICK_RADIUS / maxf(table.effective_scale(), 0.000001)
 		var kinds: Array = ["point", "line", "circle", "arc"]
-		if tool in ["horizontal", "vertical", "parallel", "perpendicular"]:
+		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds)
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
@@ -329,10 +349,23 @@ func _sheet_hit(origin: Vector3, dir: Vector3) -> Variant:
 	if hit == null or origin.distance_to(hit) > PICK_RANGE:
 		return null
 	var uv := SketchMath.to_sheet(copy_xf.affine_inverse() * (hit as Vector3), plane)
-	var half: float = view.sheet_extent * 0.5
-	if absf(uv.x - view.sheet_centre.x) > half or absf(uv.y - view.sheet_centre.y) > half:
+	if not view.contains(uv):
 		return null
 	return uv
+
+
+func _hover_faces(origin: Vector3, dir: Vector3) -> void:
+	var hit := _copy_ray(origin, dir)
+	_hover_face = {}
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	hovering = _claim(float(hit["distance"]))
+	if not hovering:
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	_hover_face = TopologyPick.face_entity(table.table_copy, int(hit.get("face_index", -1)))
+	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
 
 
 func _hover_edges(origin: Vector3, dir: Vector3) -> void:
@@ -363,6 +396,8 @@ func _on_right_pressed(action: String) -> void:
 			await _sketch_trigger()
 		"pick_edges":
 			_toggle_edge()
+		"pick_faces":
+			_toggle_face()
 
 
 func _pick_plane() -> void:
@@ -379,7 +414,39 @@ func _pick_plane() -> void:
 		spec = {"face": {"body_id": body, "index": index}}
 	else:
 		return
+	if table.active_tool == "mirror":
+		await mirror_across(spec)
+		return
 	await begin_sketch(spec)
+
+
+func mirror_across(spec: Dictionary) -> bool:
+	## The Mirror tool's pull: reflects every body of the part across the picked reference plane ({"fixed": "XY"}) or flat face
+	## ({"face": {body_id, index}}). One feature, taken back by Undo like the others.
+	if api == null or table.table_copy == null:
+		return false
+	if table.build.is_rolled_back_any():
+		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
+		UiFeedback.haptic(table._right, "error")
+		return false
+	var plane: Dictionary = {}
+	if spec.has("fixed"):
+		plane = {"fixed_plane": str(spec["fixed"])}
+	elif spec.has("face"):
+		plane = {"face_ref": PartFeatures.face_ref(str(spec["face"]["body_id"]), int(spec["face"]["index"]))}
+	table.set_status("Mirroring...")
+	var result: Dictionary = await features.mirror(part_id, body_ids(), plane, bool(options["mirror_fuse"]))
+	if not result["ok"]:
+		table.set_status("Couldn't mirror it: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return false
+	feature_stack.append(str(result["id"]))
+	var refreshed: bool = await refresh_geometry()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Mirrored." if refreshed else "Mirrored, but the new shape couldn't be fetched.")
+	table.notify_edited(part_id, _edited_nodes)
+	_update_options()
+	return true
 
 
 func begin_sketch(spec: Dictionary) -> bool:
@@ -406,15 +473,99 @@ func begin_sketch(spec: Dictionary) -> bool:
 			set_state("pick_plane")
 		return false
 	session = new_session
+	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
 	_light_chosen_plane()
 	_build_view()
 	table.orient_to_plane(session.plane)
 	set_state("sketch")
-	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool == "dimension":
+	_sync_deck()
+	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool in ["dimension", SELECT_TOOL, "revolve"]:
 		session.set_tool(table.active_tool)
+	elif table.active_tool == "":
+		table.manager.activate(SELECT_TOOL) # a sketch opens ready to pick things; choose a drawing tool to draw
 	table.set_status(_sketch_hint())
 	return true
+
+
+func reopen_sketch(feature_id: String) -> bool:
+	## Opens a sketch the part already has, from its row in the Build tree: reads its entities, turns the part to stand its plane up like a
+	## new sketch, and carries on in Select. Editing it changes the part as soon as Done is pressed (anything built on the sketch follows).
+	if state == "opening" or table.table_copy == null or part_id == "" or session != null:
+		if session != null:
+			table.set_status("Finish the open sketch first (Done), then open another.")
+		return false
+	var row: Dictionary = table.build.row(feature_id)
+	if row.is_empty() or str(row.get("type", "")) != "sketch" or str(row.get("sketch_id", "")) == "":
+		return false
+	set_state("opening")
+	table.set_status("Opening the sketch...")
+	var described: Dictionary = await _call(HTTPClient.METHOD_GET, "/sketch/sketches/%s" % str(row["sketch_id"]), null)
+	if not described["ok"] or not (described["json"] is Dictionary):
+		set_state("pick_plane")
+		table.set_status("Couldn't read that sketch: %s" % str(described["error"]))
+		return false
+	var info: Dictionary = described["json"]
+	var plane: Dictionary = {}
+	chosen_plane = ""
+	chosen_face = {}
+	if info.get("plane") is String:
+		plane = SketchMath.fixed_basis(str(info["plane"]))
+		chosen_plane = str(info["plane"])
+	elif row.get("plane_feature_id") != null:
+		var plane_row: Dictionary = table.build.row(str(row["plane_feature_id"]))
+		plane = SketchMath.basis_from_plane_response(plane_row)
+		var refs: Array = plane_row.get("face_refs", [])
+		if not refs.is_empty() and refs[0] is Dictionary:
+			var ref: Dictionary = (refs[0] as Dictionary).get("face_ref", refs[0])
+			chosen_face = {"body_id": str(ref.get("body_id", "")), "index": int(ref.get("index", 0))}
+	if plane.is_empty() or bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
+		chosen_plane = ""
+		chosen_face = {}
+		set_state("pick_plane")
+		table.set_status("That sketch is flipped or turned in the flat app, or its plane can't be found, so it can't be opened here yet.")
+		return false
+	var new_session := SketchSession.new(Callable(self, "_call"))
+	new_session.owner_part_id = part_id
+	new_session.status.connect(func(text: String) -> void: table.set_status(text))
+	var ok: bool = await new_session.reopen(row, plane)
+	if not ok or table.table_copy == null:
+		chosen_plane = ""
+		chosen_face = {}
+		if state == "opening":
+			set_state("pick_plane")
+		return false
+	session = new_session
+	_opened_revision = session.revision
+	session.changed.connect(_on_session_changed)
+	_light_chosen_plane()
+	_build_view()
+	table.orient_to_plane(session.plane)
+	set_state("sketch")
+	_sync_deck()
+	table.manager.activate(SELECT_TOOL)
+	table.set_status("Sketch open. Select things to change them, draw more, then press Done.")
+	return true
+
+
+func finish_sketch() -> void:
+	## The deck's Done: leaves the open sketch. If it was changed the part is rebuilt (everything built on the sketch follows) and its
+	## mates are flagged like any edit; an untouched sketch just closes.
+	if session == null:
+		return
+	var changed_it: bool = session.revision > _opened_revision
+	if table.active_tool != "":
+		table.manager.deactivate()
+	end_sketch()
+	if not changed_it or api == null:
+		return
+	table.set_status("Rebuilding the part...")
+	var refreshed: bool = await refresh_geometry()
+	if refreshed:
+		table.notify_edited(part_id, _edited_nodes)
+		table.set_status("Sketch updated; the part is rebuilt.")
+	else:
+		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Done again.")
 
 
 func _light_chosen_plane() -> void:
@@ -436,15 +587,70 @@ func _build_view() -> void:
 	var copy: MeshInstance3D = table.table_copy
 	var aabb := copy.get_aabb()
 	var plane: Dictionary = session.plane
-	var extent := aabb.size.length() * 1.3
 	var centre := SketchMath.to_sheet(aabb.get_center(), plane)
 	view = SketchView.new()
 	view.name = "SketchView"
 	copy.add_child(view)
-	view.setup(plane, extent, centre, table.fit_scale, table.tokens)
+	_window_scale = table.effective_scale()
+	view.setup(plane, sheet_size_mm(), centre, _window_scale, table.tokens)
 	_sheet_vertices = _vertices_on_plane(copy, plane)
 	if markers != null:
 		markers.set_markers_visible(false)
+	_refresh_view()
+
+
+func sheet_reaches(world_point: Vector3) -> bool:
+	## True if a world point is over the sketch sheet (inside its rectangle, within about 12 cm of its plane): a grip there takes the part.
+	if session == null or view == null or table.table_copy == null:
+		return false
+	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * world_point
+	var plane: Dictionary = session.plane
+	var off_plane: float = absf((local - (plane["origin"] as Vector3)).dot(plane["n"] as Vector3)) * table.effective_scale()
+	return off_plane <= 0.12 and view.contains(SketchMath.to_sheet(local, plane))
+
+
+func sketch_bounds() -> Rect2:
+	## The sketch's extent in sheet mm: its points and the origin, with a margin; before anything is drawn, the part's own extent on the plane.
+	var plane: Dictionary = session.plane
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for id in session.points:
+		var p: Vector2 = session.points[id]
+		lo = lo.min(p)
+		hi = hi.max(p)
+	if lo.x == INF or session.entity_count() == 0:
+		var aabb: AABB = table.table_copy.get_aabb()
+		var c := SketchMath.to_sheet(aabb.get_center(), plane)
+		var half := aabb.size.length() * 0.5
+		return Rect2(c - Vector2(half, half), Vector2(half, half) * 2.0)
+	var size := hi - lo
+	var pad := maxf(size.x, size.y) * 0.1 + 1.0
+	return Rect2(lo - Vector2(pad, pad), size + Vector2(pad, pad) * 2.0)
+
+
+func _sync_deck() -> void:
+	table.ui.set_sketching(session != null)
+
+
+func sheet_size_mm() -> Vector2:
+	## The sheet's size in sketch mm: a fixed window in the world (table.sheet_window_m), so the more the part is zoomed the fewer mm it spans.
+	return table.sheet_window_m / maxf(table.effective_scale(), 0.000001)
+
+
+func _follow_scale() -> void:
+	## Keeps the sheet a fixed window when the part is zoomed: re-sizes it (and its grid) once the scale has settled a little, never
+	## more than about 6 times a second, and only when it really changed.
+	if view == null or not is_instance_valid(view) or table.effective_scale() <= 0.0:
+		return
+	var s: float = table.effective_scale()
+	if absf(s - _window_scale) < _window_scale * 0.02:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _window_msec < 160:
+		return
+	_window_msec = now
+	_window_scale = s
+	view.set_window(sheet_size_mm(), s)
 	_refresh_view()
 
 
@@ -462,6 +668,10 @@ static func _vertices_on_plane(part: Node3D, plane: Dictionary) -> Array:
 
 
 func _on_session_changed() -> void:
+	var selection_key := str(session.selection.map(func(e): return "%s:%s" % [e["kind"], e["id"]])) if session != null else ""
+	if selection_key != _menu_key:
+		_menu_key = selection_key
+		_menu_page = 0 # a different selection starts its menu on the first page
 	_refresh_view()
 	_update_options()
 	table.ui.set_undo_enabled(can_undo())
@@ -492,7 +702,7 @@ func _sketch_trigger() -> void:
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
-	elif tool == "dimension":
+	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / maxf(table.effective_scale(), 0.000001))
 		if ghost != "":
 			_type_dimension(ghost)
@@ -500,6 +710,13 @@ func _sketch_trigger() -> void:
 			await session.select(_hover_entity)
 		else:
 			session.clear_selection()
+	elif tool == "revolve":
+		if not _hover_entity.is_empty() and str(_hover_entity.get("kind", "")) == "line":
+			revolve_axis = str(_hover_entity["id"])
+			session.selection = [{"kind": "line", "id": revolve_axis}] # lit as the axis
+			session.changed.emit()
+			table.set_status("That line is the axis. Set Boss or Cut and the angle, then Apply.")
+			_update_options()
 	elif CONSTRAIN_TOOLS.has(tool):
 		if not _hover_entity.is_empty():
 			await session.select(_hover_entity)
@@ -532,27 +749,47 @@ func on_tool_changed(tool_id: String) -> void:
 	if state == "idle" and table.table_copy == null:
 		return
 	if session != null:
-		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension") else "")
+		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension" or tool_id == SELECT_TOOL or tool_id == "revolve") else "")
+		if tool_id == "revolve" and revolve_axis != "":
+			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
 	match tool_id:
 		"fillet", "chamfer":
-			if state == "sketch" or state == "pick_plane" or state == "pick_edges" or state == "extrude":
+			if state == "sketch" or state == "pick_plane" or state == "pick_edges" or state == "extrude" or state == "pick_faces":
 				edges.clear()
 				highlight.set_set(table.table_copy, [])
 				set_state("pick_edges")
+		"shell":
+			if state in ["sketch", "pick_plane", "pick_edges", "extrude", "pick_faces"]:
+				faces.clear()
+				highlight.set_set(table.table_copy, [])
+				set_state("pick_faces")
+		"mirror":
+			if state == "sketch" or state == "extrude":
+				table.set_status("Finish the sketch first (Done), then mirror the part.")
+			elif state in ["pick_edges", "pick_faces"]:
+				highlight.set_set(table.table_copy, [])
+				set_state("pick_plane")
 		"extrude":
 			if session == null:
 				table.set_status("Draw a closed shape on a plane first.")
 			elif not session.profile_ok():
 				table.set_status("The sketch needs a closed shape to extrude.")
 			set_state("extrude" if session != null else state)
-		"":
+		"revolve":
+			if session == null:
+				table.set_status("Draw a closed shape and a line on a plane first.")
+			elif not session.profile_ok():
+				table.set_status("The sketch needs a closed shape to revolve (and a line to spin it about).")
 			if state in ["pick_edges", "extrude"]:
+				set_state("sketch" if session != null else "pick_plane") # the laser picks the axis line on the sketch, so the sketch stays live
+		"":
+			if state in ["pick_edges", "pick_faces", "extrude"]:
 				set_state("sketch" if session != null else "pick_plane")
 		_:
-			if state in ["pick_edges", "extrude"]:
+			if state in ["pick_edges", "pick_faces", "extrude"]:
 				set_state("sketch" if session != null else "pick_plane")
-			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension"):
+			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
 				table.set_status("Pick a flat face or a reference plane to sketch on first.")
 	_update_options()
 
@@ -563,6 +800,9 @@ func _update_options() -> void:
 	var tool: String = table.active_tool
 	var list: Array = []
 	match tool:
+		SELECT_TOOL:
+			if session != null:
+				list = _menu_options()
 		"polygon":
 			if session != null:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
@@ -578,6 +818,24 @@ func _update_options() -> void:
 			]
 			if bool(options["boss"]):
 				list.insert(3, {"id": "new_body", "text": "New body", "toggle": true, "pressed": bool(options["new_body"])})
+		"revolve":
+			list = [
+				{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(options["boss"])},
+				{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(options["boss"])},
+				{"id": "angle", "text": "Angle %s deg" % BuildTree.number(float(options["angle"]))},
+				{"id": "axis", "text": "Axis: set" if revolve_axis != "" else "Axis: pick"},
+				{"id": "apply", "text": "Apply", "disabled": session == null or not session.profile_ok() or revolve_axis == ""},
+			]
+		"shell":
+			list = [
+				{"id": "thickness", "text": "Wall %.2f mm" % float(options["thickness"])},
+				{"id": "shell_in", "text": "Inward", "toggle": true, "pressed": str(options["shell_direction"]) == "inward"},
+				{"id": "shell_out", "text": "Outward", "toggle": true, "pressed": str(options["shell_direction"]) == "outward"},
+				{"id": "clear_faces", "text": "Clear"},
+				{"id": "apply", "text": "Apply (%d)" % faces.size(), "disabled": faces.is_empty()},
+			]
+		"mirror":
+			list = [{"id": "mirror_fuse", "text": "Fuse into one", "toggle": true, "pressed": bool(options["mirror_fuse"])}]
 		"fillet":
 			list = [{"id": "radius", "text": "Radius %.2f mm" % float(options["radius"])}, {"id": "clear_edges", "text": "Clear"},
 				{"id": "apply", "text": "Apply (%d)" % edges.size(), "disabled": edges.is_empty()}]
@@ -587,7 +845,34 @@ func _update_options() -> void:
 	table.ui.set_options(list)
 
 
+func _menu_options() -> Array:
+	## The Select tool's contextual menu for what is selected, one page of the options row (More turns the page).
+	var page := SketchSelection.page(session.menu(), _menu_page, MENU_SLOTS)
+	_menu_page = int(page["page"])
+	var list: Array = (page["items"] as Array).duplicate(true)
+	if bool(page["has_more"]):
+		list.append({"id": "menu_more", "text": "More %d/%d" % [_menu_page + 1, int(page["pages"])]})
+	return list
+
+
 func on_option(option_id: String) -> void:
+	if option_id == "menu_more":
+		_menu_page += 1
+		_update_options()
+		return
+	if option_id.begins_with("dim:"):
+		_type_dimension(option_id.substr(4))
+		return
+	if session != null and session.tool == SELECT_TOOL and option_id in SelectMenuIds:
+		_menu_page = 0
+		var result: Dictionary = await session.apply_menu(option_id)
+		if bool(result["ok"]):
+			UiFeedback.haptic(table._right, "confirm")
+		elif str(result["message"]) != "":
+			table.set_status(str(result["message"]))
+			UiFeedback.haptic(table._right, "error")
+		_update_options()
+		return
 	match option_id:
 		"sides_down":
 			if session != null:
@@ -612,6 +897,21 @@ func on_option(option_id: String) -> void:
 			_type_option("radius", "Radius (mm)")
 		"distance":
 			_type_option("distance", "Distance (mm)")
+		"thickness":
+			_type_option("thickness", "Wall thickness (mm)")
+		"shell_in":
+			options["shell_direction"] = "inward"
+		"shell_out":
+			options["shell_direction"] = "outward"
+		"mirror_fuse":
+			options["mirror_fuse"] = not bool(options["mirror_fuse"])
+		"clear_faces":
+			faces.clear()
+			highlight.set_set(table.table_copy, [])
+		"angle":
+			_type_option("angle", "Angle (deg, up to 360)")
+		"axis":
+			table.set_status("Pull the trigger on a line of the sketch to make it the axis.")
 		"clear_edges":
 			edges.clear()
 			highlight.set_set(table.table_copy, [])
@@ -630,11 +930,34 @@ func option_typed(key: String, text: String) -> void:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	if key == "angle" and cleaned.to_float() > 360.0:
+		table.set_status("An angle can't be more than 360 degrees.")
+		UiFeedback.haptic(table._right, "error")
+		return
 	options[key] = cleaned.to_float()
 	_update_options()
 
 
 # --- Edges (Fillet / Chamfer) -----------------------------------------------------------------
+
+func _toggle_face() -> void:
+	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "face":
+		return
+	for i in faces.size():
+		if faces[i]["key"] == _hover_face["key"]:
+			faces.remove_at(i)
+			highlight.set_set(table.table_copy, faces)
+			_update_options()
+			return
+	if not faces.is_empty() and str(faces[0]["body_id"]) != str(_hover_face["body_id"]):
+		table.set_status("A shell opens faces of ONE body. Clear to start again on another.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	faces.append(_hover_face.duplicate())
+	highlight.set_set(table.table_copy, faces)
+	table.set_status("%d face(s) will be opened. Set the wall thickness, then Apply." % faces.size())
+	_update_options()
+
 
 func _toggle_edge() -> void:
 	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "edge":
@@ -702,6 +1025,16 @@ func apply_feature() -> void:
 				return
 			var d := extrude_distances()
 			result = await features.extrude(part_id, session.feature_id, bool(options["boss"]), d[0], d[1], extrude_targets())
+		"revolve":
+			if session == null or not session.profile_ok():
+				table.set_status("The sketch needs a closed shape to revolve.")
+				return
+			result = await features.revolve(part_id, session.feature_id, session.sketch_id, revolve_axis, float(options["angle"]), bool(options["boss"]), extrude_targets())
+		"shell":
+			if faces.is_empty():
+				table.set_status("Pick the faces to open first.")
+				return
+			result = await features.shell(part_id, str(faces[0]["body_id"]), faces.map(func(f): return PartFeatures.face_ref(str(f["body_id"]), int(f["index"]))), float(options["thickness"]), str(options["shell_direction"]))
 		"fillet":
 			result = await features.fillet(part_id, _edge_refs(), float(options["radius"]))
 		"chamfer":
@@ -714,9 +1047,10 @@ func apply_feature() -> void:
 		return
 	feature_stack.append(str(result["id"]))
 	var refreshed: bool = await refresh_geometry()
-	if tool == "extrude":
+	if tool == "extrude" or tool == "revolve":
 		end_sketch()
 	edges.clear()
+	faces.clear()
 	if highlight != null:
 		highlight.set_set(table.table_copy, [])
 	UiFeedback.haptic(table._right, "confirm")
@@ -760,6 +1094,7 @@ func refresh_view() -> void:
 	if highlight != null and table.table_copy != null:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
+	faces.clear()
 	view_changed.emit()
 
 
@@ -805,6 +1140,7 @@ func refresh_geometry() -> bool:
 	if highlight != null:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
+	faces.clear()
 	geometry_changed.emit()
 	return true
 
@@ -842,8 +1178,10 @@ func end_sketch() -> void:
 	if highlight != null:
 		highlight.set_picks([])
 	table.ui.set_undo_enabled(can_undo())
+	_sync_deck()
 	set_state("pick_plane" if state != "pick_plane" else state)
-	if table.active_tool in ["extrude"]:
+	revolve_axis = ""
+	if table.active_tool in ["extrude", "revolve"]:
 		table.manager.deactivate()
 	_say_pick_plane()
 

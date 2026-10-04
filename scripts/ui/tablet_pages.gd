@@ -71,6 +71,7 @@ var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
 var _files_count_label: Label
+var _dirty_label: Label ## "Unsaved changes" on the Files page
 var _new_assembly_button: Button
 var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
 const NEW_ASSEMBLY_CONFIRM_MS := 4000
@@ -107,6 +108,8 @@ func register(reg) -> void:
 		"help": "Jump to a preset scale about the model's centre. Fit to view brings the whole model in front of you; Home returns it to where it loaded. For an exact value, click the right thumbstick."})
 	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
 		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
+	reg.add_tool("view", "display", "Display", "visibility", _build_display_page, {
+		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
 	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
 		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
 		"hint": "Point at a part and pull the right trigger to hide it.",
@@ -371,6 +374,23 @@ func _build_visibility_page() -> Control:
 	page.add_child(_button("Reverse visibility", func() -> void: _main.reverse_visibility()))
 	page.add_child(_button("Isolate selected", func() -> void: _main.isolate_selected()))
 	page.add_child(_hint("To hide parts by pointing at them, use Shoot hide."))
+	return page
+
+
+func _build_display_page() -> Control:
+	var page := _page()
+	if _main == null or _main.get("view_modes") == null:
+		page.add_child(_hint("Display modes aren't available here."))
+		return page
+	page.add_child(_hint("How models are drawn. Edges are the part's real CAD edges, so they need a model made by the backend; a bare local file shows its sharp edges instead."))
+	var group := ButtonGroup.new()
+	var modes = _main.view_modes
+	for i in modes.NAMES.size():
+		var b := _button(modes.NAMES[i], func() -> void: modes.set_mode(i))
+		b.toggle_mode = true
+		b.button_group = group
+		b.set_pressed_no_signal(modes.mode == i)
+		page.add_child(b)
 	return page
 
 
@@ -736,7 +756,17 @@ func _build_table_page() -> Control:
 		if _design_table.is_open():
 			_design_table.recall()))
 	page.add_child(_button("New part", func() -> void: _design_table.new_part(), &"ButtonAccent"))
-	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it. If a part is mated, Relax all mates first."))
+	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it (or one hand with the left stick pressed to turn it with your wrist). If a part is mated, Relax all mates first."))
+	var settings = _main.app_settings() if _main != null else null
+	if settings != null:
+		page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
+			_design_table.keep_turn_on_return = i == 1
+			settings.set_table_keep_turn(i == 1)))
+		var limits := [2.0, 3.0, 5.0, 8.0]
+		var current := limits.find(settings.table_max_scale)
+		page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
+			_design_table.max_scale_setting = limits[i]
+			settings.set_table_max_scale(limits[i])))
 	return page
 
 
@@ -777,6 +807,12 @@ func _build_files_page() -> Control:
 	page.add_child(_hint("Loads from res://models, user://models, and the Settings project folder. Pick Open or Add beside the tablet."))
 	_files_count_label = Label.new()
 	page.add_child(_files_count_label)
+	_dirty_label = _hint("")
+	_dirty_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
+	page.add_child(_dirty_label)
+	if _main != null:
+		_main.dirty_changed.connect(func(_d: bool) -> void: _refresh_dirty_label())
+	_refresh_dirty_label()
 	page.add_child(_button("Refresh list", _rescan_files))
 	page.add_child(_hint("Save writes the whole session, including edits made on the design table, as a new .didsa file the flat app can open. It never overwrites the file you opened.", true))
 	page.add_child(_button("Save as new file", func() -> void:
@@ -789,6 +825,19 @@ func _build_files_page() -> Control:
 	return page
 
 
+func _refresh_dirty_label() -> void:
+	if _dirty_label == null or _main == null:
+		return
+	var dir: String = ProjectSettings.globalize_path(_main.snapshot_path().get_base_dir())
+	_dirty_label.text = ("Unsaved changes. Save as new file before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
+	if _new_assembly_button:
+		_new_assembly_button.text = "New assembly" if _new_assembly_armed_until_ms == 0 else _new_assembly_armed_text()
+
+
+func _new_assembly_armed_text() -> String:
+	return "Unsaved! Press again to discard" if _main != null and _main.document_dirty else "Press again to discard"
+
+
 func _on_new_assembly_pressed() -> void:
 	## Two presses: the first arms the button ("Press again to discard"), the second, within a few seconds, starts the empty assembly.
 	if _main == null:
@@ -796,11 +845,11 @@ func _on_new_assembly_pressed() -> void:
 	var now := Time.get_ticks_msec()
 	if _new_assembly_armed_until_ms == 0 or now > _new_assembly_armed_until_ms:
 		_new_assembly_armed_until_ms = now + NEW_ASSEMBLY_CONFIRM_MS
-		_new_assembly_button.text = "Press again to discard"
+		_new_assembly_button.text = _new_assembly_armed_text()
 		_new_assembly_button.theme_type_variation = &"ButtonDanger"
 		return
 	_disarm_new_assembly()
-	if await _main.new_assembly():
+	if await _main.new_assembly(true):
 		_rescan_files()
 
 

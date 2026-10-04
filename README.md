@@ -397,9 +397,9 @@ live-synced.
     part in the tree — to edit it (a mated part needs **Relax all mates** first if you carry it).
     The arena's own part is left alone and hidden; a scaled copy floats above the slab. **Aim at a
     flat face or one of the three reference planes and pull the trigger** to sketch on it (the part
-    turns to lie flat). Then **Sketch** (Line, Rectangle, Circle, Arc, Polygon, Point), **Constrain**
+    turns to lie flat). Then **Sketch** (Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot), **Constrain**
     (Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident) and **Feature** (Extrude,
-    Fillet, Chamfer) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
+    Revolve, Fillet, Chamfer, Shell, Mirror) on the deck, in DIDSA-CAD's own names; points **snap** (toggle on the deck),
     dimension values are **typed on the numeric pad**, and a finished feature appears on the table
     and on every other placed copy of that part. **Grip the part on the table to move it, grip it
     with both hands to turn and scale it** (independent of the world); the right stick spins it
@@ -412,9 +412,16 @@ live-synced.
     whose face the edit changed rather than solving it against the wrong face. **New part** (the **+**
     in the tree's header, or the tablet's Table page) starts an empty part on the table to sketch on;
     **Files → New assembly** (press twice) starts an empty assembly. **Files → Save as new file**
-    writes the session as a `.didsa` the flat app opens. What's built, how it works, what the
-    code said about the brief's six questions, performance numbers, and what isn't built:
-    [`docs/design-table.md`](docs/design-table.md).
+    writes the session as a `.didsa` the flat app opens, says where it went, and anything that
+    would replace unsaved work asks first. From the first headset session: the sketch **stands up
+    60 degrees** on a big gridded sheet with its **origin as a snap point**, a **Select** tool
+    (on by default) offers a menu of what applies to the selection, one grip pans and two zoom the
+    sketch, **View > Display** gives Shaded / Shaded + edges / Wireframe, and each slab corner has a
+    point to aim at. **Revolve, Shell and Mirror** join Extrude / Fillet / Chamfer, an existing
+    sketch reopens from the Build tree, and a mate turned off by an edit can be remade. What's built,
+    how it works, what the code said about the brief's six questions, performance numbers, and what
+    isn't built: [`docs/design-table.md`](docs/design-table.md); the gap list and what became of
+    each: [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 
 ## 1. Drop in a real assembly
 

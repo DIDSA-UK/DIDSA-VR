@@ -26,8 +26,10 @@ var selected_body := ""
 var rollback_to := "" ## feature id: everything after this row is rolled back ("" = not rolled back)
 var delete_armed_id := ""
 var loaded_part := ""
+var view_filters_ok := true ## false once the backend said it cannot hide or roll back (an older DIDSA-CAD): the buttons are off and the tree says why
 
 var _table ## design_table.gd
+var _probed := false
 var _token := 0
 var _armed_until_ms := 0
 
@@ -61,12 +63,24 @@ func _maybe_reload() -> void:
 		reload() # a sketch was just opened: it is a feature now
 
 
+func probe_backend() -> void:
+	## Asks the backend once whether Hide / Show and Roll back can work at all (see cad_api.gd supports_view_filters()).
+	if _probed or _table.api == null or not _table.api.has_method("supports_view_filters"):
+		return
+	_probed = true
+	var ok: bool = await _table.api.supports_view_filters()
+	if ok != view_filters_ok:
+		view_filters_ok = ok
+		changed.emit()
+
+
 func reload() -> void:
 	## Reads the feature list again (coroutine; a slower earlier answer never overwrites a newer one).
 	var pid: String = _table.editor.part_id
 	if pid == "" or _table.seated == null:
 		clear()
 		return
+	probe_backend()
 	_token += 1
 	var mine := _token
 	var r: Dictionary = await _table.editor.features.list_features(pid)
@@ -213,12 +227,16 @@ func _show(entities: Array) -> void:
 # --- Edit values ----------------------------------------------------------------------------
 
 func can_edit(feature_id: String) -> bool:
-	return BuildTree.EDITABLE.has(str(row(feature_id).get("type", "")))
+	var type := str(row(feature_id).get("type", ""))
+	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "")
 
 
 func edit_selected() -> void:
 	var f := row(selected_id)
 	if f.is_empty() or not can_edit(selected_id):
+		return
+	if str(f.get("type", "")) == "sketch":
+		await _table.editor.reopen_sketch(selected_id) # a sketch is edited on the sheet, not with a number
 		return
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
 
@@ -227,8 +245,8 @@ func edit_typed(feature_id: String, text: String) -> void:
 	## The numeric pad's answer: PATCH the feature, show the result, remember how to take it back.
 	var f := row(feature_id)
 	var cleaned := text.strip_edges()
-	if f.is_empty() or not cleaned.is_valid_float() or cleaned.to_float() <= 0.0:
-		_table.set_status("Enter a number bigger than zero.")
+	if f.is_empty() or not cleaned.is_valid_float() or cleaned.to_float() <= 0.0 or (str(f.get("type", "")) == "revolve" and cleaned.to_float() > 360.0):
+		_table.set_status("Enter a number bigger than zero (an angle: up to 360)." if str(f.get("type", "")) == "revolve" else "Enter a number bigger than zero.")
 		UiFeedback.haptic(_table._right, "error")
 		return
 	var editor = _table.editor
@@ -252,7 +270,7 @@ func edit_typed(feature_id: String, text: String) -> void:
 # --- Hide / Show, roll back -----------------------------------------------------------------
 
 func toggle_hidden_selected() -> void:
-	if selected_id == "":
+	if selected_id == "" or not view_filters_ok:
 		return
 	var now_hidden := not is_hidden(selected_id)
 	_table._main.set_feature_hidden(selected_id, now_hidden)
@@ -262,7 +280,7 @@ func toggle_hidden_selected() -> void:
 
 
 func toggle_rollback_selected() -> void:
-	if selected_id == "":
+	if selected_id == "" or not view_filters_ok:
 		return
 	if rollback_to == selected_id:
 		rollback_to = ""

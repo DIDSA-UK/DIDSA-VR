@@ -57,6 +57,17 @@ static func orient_to_table(plane: Dictionary) -> Basis:
 	return (to_table * from_plane.inverse()).orthonormalized()
 
 
+static func grid_step(target_mm: float) -> float:
+	## The sketch grid's minor spacing: the 1-2-5 step (..., 0.5, 1, 2, 5, 10, 20, 50, ...) at or just above `target_mm`, so the lines
+	## stay about the same distance apart on screen whatever the zoom.
+	var t := maxf(target_mm, 0.0001)
+	var decade := pow(10.0, floorf(log(t) / log(10.0)))
+	for m in [1.0, 2.0, 5.0, 10.0]:
+		if decade * m >= t * 0.999:
+			return decade * m
+	return decade * 10.0
+
+
 static func ray_plane(origin: Vector3, dir: Vector3, plane_point: Vector3, plane_normal: Vector3) -> Variant:
 	## The point where a ray meets a plane, or null if it's parallel or behind the origin.
 	var denom := dir.dot(plane_normal)

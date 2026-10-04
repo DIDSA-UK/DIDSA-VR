@@ -26,28 +26,67 @@ This page is what was decided and built, what the code turned out to say, and wh
    A part that is mated and has its mates enforced is steered by a live solve while you carry it, so **Relax all mates first**, or
    use the tree.
 3. **Pick a sketch plane:** aim at a flat face (it lights up) or at one of the three faint reference planes (XY blue, XZ green,
-   YZ red) drawn through the part, and pull the trigger. The part turns to lie with that plane flat on the table (x to your right,
-   y away from you) and a translucent **sketch sheet** appears on it. The chosen face stays lit.
-4. **Sketch.** Pick a category on the deck, then a tool. The laser meets the sheet; pull the trigger to place points.
+   YZ red) drawn through the part, and pull the trigger. The part turns to stand that plane up **60 degrees from the slab** (x to your right, y
+   away and up; the console already leans back 22 degrees, so in the room the sheet is nearly upright: `sketch_tilt_degrees` on the table
+   is the one number to change if 60 degrees from horizontal was meant), floats a little higher so the sheet's lower edge clears the slab,
+   and a translucent **sketch sheet** appears on it. The chosen face stays lit. The turn is a short tween (instant with Reduce motion).
+4. **Sketch.** A sketch opens with **Select** already on (see below); pick a category on the deck, then a tool to draw. The laser meets the
+   sheet; pull the trigger to place points. The **sheet** is a fixed window in the world, **0.8 x 0.4 m** (`sheet_window_m`) however big the
+   part is, with a faint **grid** (1-2-5 mm lines about 16 mm apart on screen, re-spaced as you zoom; the red u axis and green v axis through
+   the origin; faded at the edge). The sheet is rigid with the part, so **one grip anywhere on the sheet pans it and two hands zoom it** (below).
+   * **The origin** is the backend's real origin point (read when the sketch opens; the backend makes it lazily). It is drawn as a bigger
+     yellow marker and **snaps** like any point (kind "origin"): a line can start on it, a circle can be centred on it, a point can be made
+     coincident to it, and a dimension can start or end at it. It can be selected and constrained but never deleted.
+   * **How it is drawn** (`sketch_view.gd`, `dimension_layout.gd`), like an engineering drawing: the sketch's own geometry is a **heavy solid object line**; **construction
+     lines** (a polygon's centre-to-corner lines, a rectangle's diagonals, a slot's centre line, anything made construction) are **thin and in a chain pattern** (long dash,
+     gap, dot, gap); every circle has a **centre mark** (chain lines crossing at its centre); a typed **dimension** is drawn with **extension lines** (a small gap off the
+     geometry, a little overshoot past the dimension line), a thin **dimension line** standing off the geometry on the side with room (outside the shape, not through other
+     lines), **filled arrowheads** (outside, pointing in, when the dimension is too short to hold them), and its value written along the line, upright, **in the sketch plane**
+     (not a sign turned to face you): 80 and 100 for a width and a height, a leader with **R25** for a radius, a line through the centre with the diameter sign for a diameter,
+     an arc with arrowheads and **45 degrees** for an angle. The candidates offered for what you have selected are drawn the same way in yellow; point at the value to type it.
+     A polygon's own corner angles and a circle's own structural constraints are not drawn as dimensions. `tests/sketch_style_render.gd` renders it to a PNG for a look.
+   * **Select** (first slot of the Sketch row, on by default): pull on a point, line, circle or arc to select it (a point beats a line it is
+     on); pull on a selected one's label area or empty sheet to let go (empty clears everything). Any number can be selected. The **options
+     row shows a menu of what applies**, ported from the flat app's selection matrix (`sketch_selection.gd`): one line: its Length (a
+     dimension: the number pad opens), Horizontal, Vertical; a circle or arc: Radius, Diameter; two points: Coincident, Distance, Horizontal,
+     Vertical; a point and a line: On line, Midpoint, Distance; a point and a circle: On curve; two lines: Parallel, Perpendicular, Equal,
+     Collinear, Distance or Angle; three or more lines: Equal, Collinear; two or more circles / arcs: Concentric, Equal radius (two arcs
+     sharing an end: Tangent); a line and a circle: Tangent; anything: **Fix**, **Construction / Solid** (lines, circles, arcs), **Delete**
+     (not the origin; not undoable, as in the flat app) and **Clear**. A menu longer than the six-button row shows five and **More**.
+   * **Slot:** pick the two end centres, then a third point; its distance from the line between them is the slot's half width.
    * **Snap** (on the deck, on by default) snaps to existing points, the part's own corners on that plane, line midpoints, spots on a
      line or circle, and pulls a line within 4° of horizontal/vertical onto the axis (adding the constraint). Off: the cursor is free.
    * **Dimension:** pick a line (length), a circle or arc (radius, diameter), two points (distance, horizontal, vertical), two
      parallel lines (distance), two other lines (angle) or a point and a line. The candidates float on the sheet; **point at one
      and pull the trigger** to open the numeric pad, type, confirm. Typing over a value that already exists changes it.
-   * **Constraints:** pick the line(s) / point(s) under the laser.
+   * **Constraints:** pick the line(s) / point(s) under the laser (or use Select and its menu).
    * A constraint the rest of the sketch can't satisfy is taken straight back out.
-5. **Add a feature** (Feature category → **Extrude**, **Fillet**, **Chamfer**; settings appear in the row under the tools):
+5. **Add a feature** (Feature category → **Extrude**, **Revolve**, **Fillet**, **Chamfer**, **Shell**, **Mirror**; settings appear in the row under the tools):
    * **Extrude:** Boss or Cut, Flip, New body, Depth (numeric pad), then **Apply**. A boss grows out of the face you sketched on; a
      cut goes into the part.
+   * **Revolve:** draw a closed shape and a line to spin it about; press **Axis** and pull the trigger on that line (it lights), set Boss or Cut and
+     the **Angle** (up to 360), **Apply**. The sketch stays live while you choose the axis.
    * **Fillet / Chamfer:** pull the trigger on edges (each pull adds or removes one; they light up), set the size, **Apply**.
+   * **Shell:** pull the trigger on the faces to open (they light; faces of one body), set the **Wall** thickness and **Inward** or **Outward**, **Apply**.
+   * **Mirror:** aim at a reference plane or a flat face and pull the trigger: every body of the part is reflected across it (**Fuse into one**
+     joins them; the default keeps them separate). There is no Apply; it is one pull, taken back by Undo.
    The new shape appears on the table **and on every other placed instance of that part in the arena**.
+   * **Done** (deck) leaves the open sketch. If it was changed the part is rebuilt from it (everything built on the sketch follows) and the part's
+     mates are flagged like any edit; an untouched sketch just closes. A sketch is also spent by an Extrude, as before.
 6. **Undo** (deck): takes back sketch steps first, then the features made on the table. (Undo only — like the flat sketcher, no redo.)
 7. **Handle it on the table** (all of this is on the table's copy and **independent of the world**: the real part, the model and
    the arena's scale are never touched):
    * **Grip** the part (one hand) to **move** it; it follows your hand 1:1 (through the same steadiness filter as an arena part).
    * **Grip it with both hands** to **turn and scale** it: it moves with the midpoint between your hands, turns as the line between
-     them swings, and grows or shrinks as you spread or close them (0.4x to 3x its fitted size). The second hand may grip anywhere
+     them swings, and grows or shrinks as you spread or close them (0.4x to 3x its fitted size, or the Settings limit 2 / 3 / 5 / 8x). The second hand may grip anywhere
      over the table. Letting go of one hand carries on one-handed without a jump.
+   * **One hand can turn it too, behind a modifier:** grip with the **left** hand and press the left stick: the part turns with your wrist, about your
+     hand. (The right stick click is the world-scale pad, so the right hand has no such modifier.)
+   * **With a sketch open** the part is locked to its tilt (**Part: Locked** on the deck): two hands only move and scale it (up to **8x**, to zoom into the
+     sketch), the stick does not spin or tip it, letting go beyond the slab holds the part back over the slab instead of sending it away (that would end
+     the sketch), and a grip anywhere on the sheet, not only near the part, takes it. **Part: Free** unlocks turning; **Fit** scales and moves the part so
+     the sketch fills most of the sheet; Reset puts the tilt back. A separate canvas zoom (the sheet sliding over a fixed part) was rejected: the sketch would
+     no longer line up with the part beneath it.
    * The **right stick** spins it about the slab's up axis (left/right) and tips it (up/down); **A** pulls it nearer to your hand
      and **B** pushes it farther, never off the slab or through it.
    * **Reset** (deck) puts it back in the middle of the slab at its fitted size, with the sketch plane flat (or the way it went on, before
@@ -61,16 +100,21 @@ This page is what was decided and built, what the code turned out to say, and wh
 8. **Leave the table:**
    * **Let go over the slab:** it stays on the table.
    * **Carry it off the slab and let go:** the real part goes back to the arena **where you let go**, at the arena's scale and in the
-     orientation it had when it went on (a normal move: undoable, saved). While you carry it past the slab the frame turns **amber**
+     orientation it had when it went on, or, with the tablet's Table page set to **As turned**, in the turn you gave it on the table (a normal move: undoable, saved). While you carry it past the slab the frame turns **amber**
      and the status line says letting go will send it back. A part held by enforced mates goes back where it came from instead.
    * **To arena** (deck): the real part goes back **exactly where it came from**, nothing moved.
    * Closing the table does the same as To arena.
 9. **Edited parts have stale mates.** Every instance of an edited part gets a **warning badge** and stops being steered by its mates.
    When one is put down (or handed back), an **Enforce mates** button floats over it. See below.
 10. **Resize the slab:** it is a pane of glass (rounded corners, a rim that glows when the table is engaged) with a bracket hugging each
-    corner, like the floating windows'. Aim at one (it brightens and the laser stops on it), hold the trigger and drag: the opposite corner stays put and the
-    deck, handle and tree follow. 0.5 x 0.3 m to 1.4 x 1.0 m. The part keeps its place relative to the slab's middle.
-11. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open.
+    corner, like the floating windows', and a **small bright point on each corner of the slab's rectangle** (the curved glass leaves nothing to aim at
+    there). Aim at one (it brightens and the laser stops on it), hold the trigger and drag: the opposite corner stays put and the
+    deck, handle and tree follow. 0.5 x 0.3 m to 1.4 x 1.0 m. The part keeps its place relative to the slab's middle. The **size is remembered**
+    for the next launch, and the **tool deck is as wide as the slab** (0.6 m to 1 m).
+11. **View modes** (wrist tablet > View > **Display**): **Shaded**, **Shaded + edges**, **Wireframe**, for every part in the arena and the table's copy.
+    See "View modes" below.
+12. **Save:** Files tab → **Save as new file** writes the whole session as a new `.didsa` the flat app can open, and says where (the full folder,
+    not `user://`). See "Not losing work".
 
 ## The deck
 
@@ -79,9 +123,9 @@ speed dial, constraint ribbon and feature picker); a category with more than six
 
 | Category | Tools now | Not built yet (the flat app has them) |
 |---|---|---|
-| **Sketch** | Line, Rectangle, Circle, Arc, Polygon, Point | Slot, Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
-| **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident | Equal, Collinear, Concentric, Tangent, Fix |
-| **Feature** | Extrude, Fillet, Chamfer | Revolve, Sweep, Loft, Plane, Shell, Mirror, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
+| **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot (eight, so the row shows five and More, then three) | Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
+| **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident (the rest, Equal, Collinear, Concentric, Equal radius, Tangent, Fix, are in Select's menu) | |
+| **Feature** | Extrude, Revolve, Fillet, Chamfer, Shell, Mirror | Sweep, Loft, Plane, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
 
 The deck has room for two more categories (the concept art's five); **Modify** (direct edit) and **Inspect** (Measure, Section) are
 the natural ones and are not built. The deck is data (`table_tools.gd`), so adding a tool is one registration plus its behaviour.
@@ -158,12 +202,18 @@ nothing**, because it had quietly joined two side faces. (A fillet on a vertical
    clears the warning** — confirmed against the real backend.
 3. **Enforce.** The button appears over a flagged part when it's put down (or handed back when the table closes). It **suppresses**
    (not deletes) every mate whose face changed — `PATCH …/mates/{id} {suppressed: true}`, reversible and saved in the file — then
-   re-solves the rest, clears the flags only if everything could be met, and says on the button what it turned off ("Remake them from
-   Assembly > Mates"). A failed solve keeps the flags and says why.
+   re-solves the rest, clears the flags only if everything could be met, and says on the button what it turned off. A failed solve keeps
+   the flags and says why.
+4. **Remake** (second step, on the same button). For each turned-off mate whose faces all still exist in the new shape, `mate_health.gd` finds
+   the face that is now **the same one** (same kind and, for a plane, the same direction at the same place; the biggest if an edit split it)
+   and the button becomes **"Remake N mate(s)"**. Pressing it creates a new mate of the same type, value and flip on those faces (DIDSA-CAD never
+   changes what a mate references, so it is a new mate), deletes the old turned-off one, and solves again. A mate with a face that is gone for good
+   is not offered and has to be made by hand (Assembly > Mates). Checked against the real solver: the plate returns to the stack.
 
-Limits: the flags live on the nodes, so a reload forgets them (a reload re-reads the mates fresh, but a mate that already names the
-wrong face stays wrong — which is why the suppression, being saved, matters). Only the top-level assembly's mates are checked and
-enforced (`enforce_all` works on the root). Non-planar faces are compared loosely (kind, centroid, area).
+Limits: the flags live on the nodes and are saved as the VR-only `vr_stale_mates` extra (see "Not losing work"); a reload without them re-reads the
+mates fresh, but a mate that already names the wrong face stays wrong, which is why the suppression, being saved, matters. Only the top-level
+assembly's mates are checked and enforced (`enforce_all` works on the root; sub-assemblies are not walked). Non-planar faces are compared loosely
+(kind, centroid, area).
 
 ## Saving
 
@@ -201,19 +251,20 @@ and the glb `quality` the table fetches (0.5).
 
 ## Not built / known gaps
 
-* The tool list above (Revolve, the rest of Sketch / Constrain / Feature, Modify, Inspect, AI).
-* **Editing an existing sketch**: v1 starts a new sketch on each pick. The Build tree lists a part's sketches and lights the plane one is on,
-  but cannot reopen it to change its entities. The flat app's separate Planes / Surfaces / Curves sections are not built (planes are rows in
-  the feature list; surfaces and curves are not shown).
+* The tool list above (the rest of Sketch / Feature, Modify, Inspect, AI).
+* **Editing an existing sketch** is now there (Build tree > a sketch row > Edit), except a sketch the flat app **flipped or turned** (refused with
+  a message). The flat app's separate Planes / Surfaces / Curves sections are not built (planes are rows in the feature list; surfaces and curves
+  are not shown).
 * **Dragging a row out of the tree** onto the table or into the world: the laser freezes the pointer while the trigger is held
   (`laser_surface.gd`), so a drag would need its own gesture. Rows have buttons instead.
 * **New part makes a child part only.** It is always a part placed on the root assembly; drawing directly on the root's own content, or
   placing a new part inside a sub-assembly, is not offered. It is also named automatically (renaming is not built).
+  The list of everything still open, with its closing phase, is `docs/design-table-gaps.md`.
 * **Sub-assemblies:** the table edits one *part*. An assembly of other parts is refused with a message.
 * **Persisted dirty flags**, and a bulk "enforce" or mate-health endpoint on the backend (DIDSA-CAD roadmap's reference-drift idea). The
   client-side check above covers planar faces well and others loosely.
-* **A feature preview** before Apply, and editing a feature's values afterwards (only Undo).
-* **Not handled on the table yet:** turning with a single hand's wrist (deliberately two-handed, like the world's one-hand drag), rolling about the line between two hands (the stick spins about the slab instead), and snapping a turned part back to the nearest face. Where the **engaged** threshold sits (the laser has to pass within 1.4 x the part's bounding sphere, or be on the sheet), the 90 deg/s stick rate and the A / B speed are guesses until someone tries them.
+* **A feature preview** before Apply, and redo. (Editing a feature's value afterwards is the Build tree's Edit.)
+* **Not handled on the table yet:** rolling about the line between two hands (the stick spins about the slab instead), and snapping a turned part back to the nearest face. Where the **engaged** threshold sits (the laser has to pass within 1.4 x the part's bounding sphere, or be on the sheet), the 90 deg/s stick rate and the A / B speed are guesses until someone tries them.
 * **On a headset:** nothing here has been seen in a headset. The laser, the grips and the layout are tested with simulated
   controllers and rendered once in software; the feel (deck size, tilt, snap radius, ghost label hit radius) needs a session with a
   real controller.
@@ -224,8 +275,8 @@ and the glb `quality` the table fetches (0.5).
 Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane maths, snapping, seat numbers, the pose maths), `design_table_scene`
 (summon, deck clicks, seat, move / two-hand turn and scale / stick / A-B / engaged tell / Reset, send back to the arena, To arena, close, handle), `sketch_session` (the sketch calls against a fake backend,
 `tests/helpers/fake_cad.gd`), `design_table_editing` (the real laser end to end), `design_table_tree`, `design_table_mates`,
-`design_table_save`, `mate_health`. Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
-session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver). Rendering and timing:
+`design_table_save`, `mate_health`, `view_modes`, `work_loss`, `table_handling`. Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
+session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver), **`e2e_sketch_select`** (the origin point and every Select menu option against the backend's real constraint schemas) `e2e_revolve` and `e2e_features` (Revolve, Shell and Mirror against the real feature schemas) and `e2e_build_tree` (which now also reopens a sketch, changes a dimension, presses Done and sees the rebuilt part). Rendering and timing:
 `design_table_render`, `design_table_perf`. See `tests/README.md` for what each line should say, and `docs/status.md` "How this has been
 worked on" for standing up a throwaway backend.
 
@@ -260,8 +311,9 @@ part changes. Tap a row to select it; a strip under it offers:
 
 * **Select and light up:** an extrude lights the faces of the body it made, a fillet / chamfer its edges, a plane (or a sketch on a plane feature)
   its faces; a sketch on a reference plane just says so.
-* **Edit** (extrude, fillet, chamfer): the numeric pad opens on the current depth / radius / distance; the value goes to the backend as a PATCH (any
+* **Edit** (extrude, revolve, shell, fillet, chamfer): the numeric pad opens on the current depth / angle / wall / radius / distance (on a sketch row: it reopens the sketch); the value goes to the backend as a PATCH (any
   feature, not only the last) and the part updates on the table and in the arena. The table's **Undo** puts the old value back.
+* **Rename** (beside the title): the full keyboard opens on the part's name; confirming renames the part (`PATCH /document/parts/{id}`) and every placed instance.
 * **Delete:** two presses ("Sure? Deleting Sketch 1 also removes Extrude 1, Fillet 1"); the backend's cascade deletes the feature, everything built
   on it and the sketches they owned. Not undoable (as in the flat app).
 * **Hide / Show** and **Roll back / Roll forward:** change **only the table's copy**. The arena's real part always shows everything. Hide leaves a
@@ -269,3 +321,31 @@ part changes. Tap a row to select it; a strip under it offers:
   feature is refused while rolled back. Both reach the backend as the `hidden_feature_ids` / `rollback_excluded_feature_ids` query params of
   `assembly-mesh.glb`, which **needed a DIDSA-CAD change (2026-10-03)**: an older backend ignores them and shows no hiding. Hidden ids are the flat
   app's `hidden_feature_ids` file extra: a save writes them, a file that carries them shows them hidden. Rollback is not saved, like the flat app's.
+
+Edit on a **sketch** row reopens that sketch (see "Sketch" above): the part turns to its plane, its points, lines and origin are read, and **Done** rebuilds the
+part. A backend **older than DIDSA-CAD 2026-10-03** (its OpenAPI document lacks the glb's two parameters, asked once) gets Hide / Show and Roll back
+**switched off** with a note, rather than buttons that claim to work and change nothing.
+
+## View modes
+
+Wrist tablet > View > **Display**: **Shaded**, **Shaded + edges**, **Wireframe** (the flat app's `ViewportRenderMode`), saved with the other settings. Edges are the
+backend's **real B-rep edges**: `assembly-mesh.glb` already carries every body's edges in its `topology` extras and VR kept them for Measure and Mates; they are
+drawn as one line mesh per part (built the first time an edge mode needs it and rebuilt only when the part's mesh changes), dark over faces and light alone, through a shader
+(`edge_lines.gdshader`) that pulls the lines slightly towards you (so they are not buried in the surface) and honours the section tool's clip. Wireframe hides the faces
+(`layers = 0`, so the part is still pickable and grabbable) and keeps the edges. A model with no topology (a bare local `.glb`) falls back to **sharp-angle edges (30 degrees)
+extracted from the mesh**. A blank new part draws nothing in any mode. Lines are one pixel wide, which may be faint at a distance on a Quest: the fallback if so is
+camera-facing ribbons (not built; decide on a headset).
+
+## Not losing work
+
+* **Unsaved changes.** The document counts as unsaved after anything a save would write (a move or mate on the undo stack, a design-table edit, hiding a feature, a
+  new part, adding a component) until you save or load. Anything that **replaces** the document (Open, an import, New assembly) first says
+  "you have unsaved changes: save first, or do it again within a few seconds to discard them"; the Files page shows "Unsaved changes" and where saves go.
+* **Its own document session.** The backend keeps one in-memory document per `X-Document-Session`. VR now sends its own (`vr-` plus random hex per launch, or
+  `document_session` under `[backend]` in `secrets.cfg`), through one header helper (`backend_session.gd`) that every call uses, so a VR import / New assembly /
+  edit never replaces what the flat app has open on the same backend, and the other way round. **Work moves between the apps by file** (Save as new file, then open it
+  in the flat app). This changes how the two apps share a backend: if you relied on them sharing one document, set the same `document_session` in both.
+* **Saves say where they went.** The status line gives the folder in full. On a Quest, `user://models` is the app's own data folder.
+* **Stale-mate flags** (the warning badges on parts whose mates need redoing) are saved as a VR-only extra, `vr_stale_mates` (occurrence ids); the flat app
+  ignores keys it does not know, and opening that file flags those parts again.
+* A normal part that loses its last solid in the Build tree goes blank in the arena (like a new part), instead of keeping the shape that is gone.

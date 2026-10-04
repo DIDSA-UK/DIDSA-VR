@@ -18,6 +18,8 @@ extends SceneTree
 ## genuinely persisted server-side - not just an optimistic local update.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_add_component.gd
 
+const BackendSession := preload("res://scripts/backend_session.gd")
+
 var main
 var _http: HTTPRequest
 
@@ -86,7 +88,7 @@ func _make_fixture_file(name: String, path: String) -> String:
 
 
 func _request(method: HTTPClient.Method, path: String, body: String) -> Variant:
-	var headers := ["X-API-Key: %s" % main.api_key, "Content-Type: application/json"]
+	var headers: Array = BackendSession.headers(main.api_key, true)
 	_http.request(main.backend_url + path, headers, method, body)
 	var result: Array = await _http.request_completed
 	var response_code: int = result[1]

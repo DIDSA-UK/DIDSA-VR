@@ -106,6 +106,7 @@ func show_for(part: Node3D) -> void:
 	_showing = true
 	_busy = false
 	_button.disabled = false
+	_button.text = "Enforce mates"
 	_message.text = "This part changed: its mates need redoing."
 	visible = true
 	surface.arm()
@@ -144,6 +145,19 @@ func set_busy(on: bool) -> void:
 
 func set_message(text: String) -> void:
 	_message.text = text
+
+
+func offer(button_text: String, message_text: String) -> void:
+	## Turns the button into a second step (e.g. "Remake 2 mates") with a line saying what it will do; shown again for the same part.
+	_button.text = button_text
+	_message.text = message_text
+	_button.disabled = false
+	_busy = false
+	visible = true
+
+
+func reset_label() -> void:
+	_button.text = "Enforce mates"
 
 
 func message() -> String:

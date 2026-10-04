@@ -213,6 +213,42 @@ func _initialize() -> void:
 	box.set_meta("body_ids", original_bodies)
 	box.set_meta("topology", original_topology)
 
+	# --- the offer to remake the turned-off mate on the face that is now the same one
+	var unique_ids := {}
+	for f in original_ids:
+		unique_ids[int(f)] = true
+	var face_count := unique_ids.size()
+	var full_mates := [{"id": "m1", "type": "coincident", "value": null, "flipped": false, "allow_rotation": true, "suppressed": false, "references": [
+		{"occurrence_id": "occ_box", "subshape_ref": {"body_id": body_id, "shape_type": "face", "index": face_id}, "plane_ref": null, "point_ref": null},
+		{"occurrence_id": "occ_cyl", "subshape_ref": {"body_id": str(cyl.get_meta("body_ids")[0]), "shape_type": "face", "index": int(cyl.get_meta("face_ids")[0])}, "plane_ref": null, "point_ref": null}]}]
+	mates.mates = full_mates
+	table.mate_baseline.clear()
+	table.add_mate_baseline(MateHealth.capture([box, cyl], full_mates))
+	box.set_meta("face_ids", original_ids.map(func(f): return (int(f) + 1) % face_count)) # the edit renumbered every face of the box by one
+	table.update_mate_drift()
+	var fake2 := Fake.new()
+	table.api = fake2
+	DirtyMates.mark(box)
+	button.show_for(box)
+	await table.enforce_mates()
+	var equivalent := (face_id + 1) % face_count
+	print("SMOKE after Enforce a turned-off mate whose face still exists under a new number is OFFERED for remaking on the button: ", table.remake_plan.size() == 1 and button.button().text == "Remake 1 mate(s)" and button.message().contains("can be remade") and button.is_showing())
+	fake2.calls.clear()
+	await table.remake_mates()
+	var posts := fake2.calls.filter(func(c): return c[0] == "POST /document/parts/ASM/mates")
+	var refs: Array = posts[0][1]["references"] if posts.size() == 1 else []
+	print("SMOKE pressing it makes the mate again on the equivalent face (same type, the box's face moved to its new number, the cylinder's untouched): ", posts.size() == 1 and posts[0][1]["type"] == "coincident" and refs[0]["subshape_ref"]["index"] == equivalent and refs[1]["subshape_ref"]["index"] == int(cyl.get_meta("face_ids")[0]))
+	print("SMOKE ...deletes the old turned-off mate, tells you, and the offer is spent: ", not fake2.calls.filter(func(c): return c[0] == "DELETE /document/parts/ASM/mates/m1").is_empty() and table.status().contains("remade") and table.remake_plan.is_empty())
+	mates.mates = []
+	table.api = real_api
+	button.hide_button()
+	box.mesh = original_mesh
+	box.set_meta("face_ids", original_ids)
+	box.set_meta("body_ids", original_bodies)
+	box.set_meta("topology", original_topology)
+	table.mate_baseline.clear()
+	DirtyMates.clear(box)
+
 	# --- an edit on the table, then the table closing hands the part back with the button
 	button.hide_button()
 	DirtyMates.clear(box)

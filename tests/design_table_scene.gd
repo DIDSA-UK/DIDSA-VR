@@ -127,8 +127,8 @@ func _initialize() -> void:
 	# --- the deck: categories and tools, by real laser clicks
 	print("SMOKE three category buttons: ", ["Sketch", "Constrain", "Feature"].all(func(t): return find_button(func(b): return b.text == t) != null))
 	var shown: Array = table.ui.shown_tool_ids()
-	print("SMOKE Sketch is shown first with DIDSA-CAD's six drawing tools: ", shown == ["line", "rectangle", "circle", "arc", "polygon", "point"])
-	print("SMOKE ...and no More button, since six fit: ", table.ui.more_button() == null)
+	print("SMOKE Sketch is shown first, with Select and the first four drawing tools: ", shown == ["select", "line", "rectangle", "circle", "arc"])
+	print("SMOKE ...and a More button, since seven do not fit the row of six: ", table.ui.more_button() != null)
 	await aim_and_click(find_button(func(b): return b.text == "Constrain"))
 	print("SMOKE clicking Constrain swaps the tool row: ", table.ui.shown_tool_ids() == ["dimension", "horizontal", "vertical", "parallel", "perpendicular", "coincident"])
 	print("SMOKE ...without switching any tool on: ", table.active_tool == "")
@@ -353,6 +353,8 @@ func _initialize() -> void:
 	print("SMOKE aiming at the middle of the glass is not a corner: ", table.resizer.hover == -1 and not r.get_meta("ui_hover", false))
 	await aim_at.call(Vector3(0.35, 0.0, 0.25)) # just outside the front-right corner
 	print("SMOKE aiming just outside a corner lights its bracket and claims the laser (so a trigger never selects a part): ", table.resizer.hover == 3 and r.get_meta("ui_hover", false) and float(r.get_meta("ui_hit_distance", -1.0)) > 0.0 and table.resizer._materials[3].albedo_color.is_equal_approx(table.tokens.accent))
+	var dot3: MeshInstance3D = table.resizer._holders[3].get_node("CornerDot")
+	print("SMOKE ...a small point sits at the slab rectangle's corner (past the curved glass), the aimed one white and the rest in the accent: ", dot3.mesh is SphereMesh and (dot3.mesh as SphereMesh).radius > 0.005 and (dot3.mesh as SphereMesh).radius < 0.02 and table.resizer._dot_materials[3].albedo_color.is_equal_approx(Color.WHITE) and not table.resizer._dot_materials[0].albedo_color.is_equal_approx(Color.WHITE) and table.resizer._holders.all(func(h): return h.get_node("CornerDot").position == Vector3.ZERO))
 	var back_left_before: Vector3 = table.to_global(Vector3(-0.3, 0.0, -0.2))
 	var drag_to: Vector3 = table.to_global(Vector3(0.6, 0.0, 0.35)) # a world point: the console moves as it is dragged
 	var deck_z_before: float = table._deck.position.z

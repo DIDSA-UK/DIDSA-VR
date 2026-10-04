@@ -554,7 +554,8 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 			_sync_pose(part),
 		func() -> void:
 			part.global_transform = after
-			_sync_pose(part))
+			_sync_pose(part),
+		true) # persists: a part's pose is part of the document
 	_sync_pose(part) # the move itself: the backend's copy must match what you see, or every later mate solves against a stale pose
 
 

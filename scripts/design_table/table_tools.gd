@@ -24,12 +24,14 @@ const ACCENT_INSPECT := Color(0.95, 0.50, 0.65) ## rose
 ## them for the tools that are built here (Slot, Ellipse, Ellipse Arc, Spline and
 ## Text come later, as further pages of the same row).
 const SKETCH_TOOLS := [
+	["select", "Select", "tool_select"],
 	["line", "Line", "tool_line"],
 	["rectangle", "Rectangle", "tool_rectangle"],
 	["circle", "Circle", "tool_circle"],
 	["arc", "Arc", "tool_arc"],
 	["polygon", "Polygon", "tool_polygon"],
 	["point", "Point", "tool_point"],
+	["slot", "Slot", "tool_slot"],
 ]
 ## DIDSA-CAD's ribbon constraint chips plus its Dimensions tool.
 const CONSTRAIN_TOOLS := [
@@ -43,17 +45,22 @@ const CONSTRAIN_TOOLS := [
 ## DIDSA-CAD's feature picker: "Sketch-based" and "Modify" sections.
 const FEATURE_TOOLS := [
 	["extrude", "Extrude", "tool_extrude"],
+	["revolve", "Revolve", "tool_revolve"],
 	["fillet", "Fillet", "tool_fillet"],
 	["chamfer", "Chamfer", "tool_chamfer"],
+	["shell", "Shell", "tool_shell"],
+	["mirror", "Mirror", "tool_mirror"],
 ]
 
 const HINTS := {
+	"select": "Pick points, lines and curves. Pick again to let go. Options for what you picked appear below.",
 	"line": "Point at the sheet and pull the trigger to place the start, then the end. Each end starts the next line.",
 	"rectangle": "Pick two opposite corners.",
 	"circle": "Pick the centre, then a point on the circle.",
 	"arc": "Pick the centre, the start, then the end (counter-clockwise).",
 	"polygon": "Pick the centre, then the first corner. Sides are set below.",
 	"point": "Pull the trigger to place a point.",
+	"slot": "Pick the two end centres, then a point as far from the centre line as the slot's half width.",
 	"dimension": "Pick a line, a circle, or two points, then pick the value to type it.",
 	"horizontal": "Pick a line to make it horizontal.",
 	"vertical": "Pick a line to make it vertical.",
@@ -61,8 +68,11 @@ const HINTS := {
 	"perpendicular": "Pick two lines.",
 	"coincident": "Pick two points, or a point and a line or circle.",
 	"extrude": "Draw a closed shape, set Boss or Cut and the depth, then Apply.",
+	"revolve": "Draw a closed shape and a line to spin it about. Press Axis, pull the trigger on that line, set Boss or Cut and the angle, then Apply.",
 	"fillet": "Pick edges on the part, set the radius, then Apply.",
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
+	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",
+	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
 }
 
 

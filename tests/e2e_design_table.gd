@@ -134,7 +134,8 @@ func _initialize() -> void:
 	var up: Vector3 = table.pivot.basis * (plane["n"] as Vector3)
 	var right: Vector3 = table.pivot.basis * (plane["x"] as Vector3)
 	var away: Vector3 = table.pivot.basis * (plane["y"] as Vector3)
-	print("SMOKE the part is turned so the plane lies flat on the table (normal up, x right, y away): ", up.is_equal_approx(Vector3.UP) and right.is_equal_approx(Vector3.RIGHT) and away.is_equal_approx(Vector3(0, 0, -1)), " ", up, right, away, " plane x/y/n ", plane["x"], plane["y"], plane["n"])
+	var tilt := Basis(Vector3.RIGHT, deg_to_rad(table.sketch_tilt_degrees))
+	print("SMOKE the part is turned so the plane stands tilted up 60 degrees from the slab (normal up-and-towards-you, x right, y away-and-up): ", up.is_equal_approx(tilt * Vector3.UP) and right.is_equal_approx(Vector3.RIGHT) and away.is_equal_approx(tilt * Vector3(0, 0, -1)))
 	print("SMOKE the chosen face is highlighted on the part: ", ed.highlight.pick_nodes().size() == 1)
 	print("SMOKE the sheet and the drawing are shown: ", ed.view != null and ed.view.get_child_count() >= 4)
 

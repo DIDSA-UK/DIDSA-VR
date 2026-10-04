@@ -47,7 +47,9 @@ extends Node
 ##   * solve failures and grounded-part refusals are reported on the tablet
 ##     instead of being swallowed.
 
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 signal picks_changed()
+signal document_changed() ## a mate was made or deleted, or a part grounded / floated: what a save would write is different
 signal mates_changed()
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
 
@@ -227,6 +229,7 @@ func create_mate() -> Dictionary:
 	if not result["ok"]:
 		return {"ok": false, "error": result["error"]}
 	clear_picks()
+	document_changed.emit()
 	await refresh_mates(owner_part_id)
 	if not relaxed:
 		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_occurrence_id)
@@ -248,6 +251,8 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 	_busy = true
 	var result := await _api_request(HTTPClient.METHOD_DELETE, "/parts/%s/mates/%s" % [owner_part_id, mate_id], null)
 	_busy = false
+	if result["ok"]:
+		document_changed.emit()
 	await refresh_mates(owner_part_id)
 	return result["ok"]
 
@@ -407,6 +412,7 @@ func toggle_fixed(part: Node3D) -> void:
 		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", str(part.name), _friendly_error(result)])
 		return
 	occurrences[occ] = {"fixed": now_fixed}
+	document_changed.emit()
 	_report("%s is now %s." % [str(part.name), "grounded (fixed)" if now_fixed else "floating (free to move)"])
 
 
@@ -895,7 +901,8 @@ func _push_group_move(label: String, changes: Array) -> void:
 			for c in changes:
 				if is_instance_valid(c["node"]):
 					c["node"].transform = c["after"]
-					persist_pose(c["node"]))
+					persist_pose(c["node"]),
+		true)
 
 
 func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
@@ -959,7 +966,8 @@ func _apply_solved_transform(part: Node3D, transform_json: Dictionary) -> void:
 			func() -> void:
 				if is_instance_valid(part):
 					part.transform = after
-					persist_pose(part))
+					persist_pose(part),
+			true)
 
 
 func _api_request(method: int, path: String, body_dict) -> Dictionary:
@@ -970,7 +978,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	stat_requests += 1
 	var req := HTTPRequest.new()
 	add_child(req)
-	var headers := ["X-API-Key: %s" % api_key, "Content-Type: application/json"]
+	var headers := BackendSession.headers(api_key, true)
 	var body := "" if body_dict == null else JSON.stringify(body_dict)
 	var err := req.request(backend_url + API_PREFIX + path, headers, method, body)
 	if err != OK:
