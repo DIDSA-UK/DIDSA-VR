@@ -146,4 +146,12 @@ func _initialize() -> void:
 				if c.r + c.g + c.b > 0.35:
 					lit += 1
 		print("SMOKE the picture is not blank: ", lit > 200, " ", lit)
+		# the canvas zoomed in on the rectangle's corner (the drawing is clipped at the window's edge), and zoomed right out
+		var views := {"sketch_zoom_in.png": [0.012, Vector2(-130, 0)], "sketch_zoom_out.png": [0.0006, Vector2(0, 0)]}
+		for file_name in views:
+			ed.canvas_set(views[file_name][0], views[file_name][1])
+			await create_timer(0.6).timeout
+			var shot := root.get_texture().get_image()
+			if dir_out != "":
+				shot.save_png(dir_out.path_join(file_name))
 	quit()

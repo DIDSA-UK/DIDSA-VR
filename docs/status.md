@@ -2572,3 +2572,16 @@ a centre mark on every circle, and dimensions drawn with extension lines, a dime
 lying along the line in the sketch plane; radius leaders, diameter lines and angle arcs; the candidate dimensions use the same graphics in yellow. A polygon's own corner angles and
 a circle's own structural constraints (zero distances) are no longer drawn as dimensions. Checked in a software render (`tests/sketch_style_render.gd`), not in a headset: text size,
 line weights and arrow size are in world metres and are the numbers to tune after one look (`LABEL_FONT`, `OBJECT_WIDTH`, `ARROW_LENGTH`, `DIM_OFFSET` in `sketch_view.gd`).
+
+### 2026-10-04 — The sketch canvas pans and zooms inside its window
+
+John asked for the canvas to pan and zoom within the canvas sub-window, so one part can hold a huge sketch or a tiny one. That reverses an earlier call (the sheet was rigid with the part, and
+zooming scaled the part, so every sketch was at the part's scale). Now the sheet window stays a fixed 0.8 x 0.4 m rectangle in the part's plane, and the sketch is drawn on a **canvas**
+inside it with its own pan and zoom (`sketch_view.gd`: one canvas node carries the transform, so a pan is one transform and two shader uniforms; only a zoom rebuilds the drawing). With
+**Part: Locked** one grip pans the canvas (the spot you grabbed stays under the hand) and two hands zoom it about their midpoint, from a window about a millimetre wide to about 80 m; the part
+does not move, turn or scale. The drawing is clipped to the window by a small line shader (`sketch_lines.gdshader`), the grid and the corner readout (grid spacing, "on the part" or "canvas xN the
+part") follow the canvas, snap / pick / label sizes are world sizes. **Fit** zooms the canvas to the sketch; a new **1:1** button puts it back on the part. Sketch coordinates stay true millimetres,
+so the canvas lines up with the part only while registered (its zoom equals the part's, its middle is the window's); off the part the part's own corners stop being snap targets. Part: Free gives the
+grips back to the part. Tests: pure canvas maths in `design_table_logic.gd`, the grips / clamps / Fit / 1:1 / laser mapping in `design_table_editing.gd`, two extra pictures in
+`sketch_style_render.gd` (zoomed in with the clip at the window edge, zoomed right out). `e2e_new_part.gd` had been failing since the unsaved-changes warning (G1) and now clears the dirty flag before
+the second New assembly. Not verified in a headset: how the grips feel (pan gain is 1:1 with the hand, zoom gain 1), where the clip edge looks right, and whether labels that vanish at the window edge need a nicer fade.

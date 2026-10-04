@@ -203,8 +203,9 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	ui.reset_pressed.connect(reset_pose)
 	ui.part_lock_toggled.connect(func(on: bool) -> void:
 		part_locked = on
-		set_status("The part keeps its tilt: two hands move and scale it." if on else "The part is free: two hands turn it, the stick spins it. Reset or Fit puts the tilt back."))
+		set_status("The part keeps its tilt: one hand pans the sketch canvas, two hands zoom it." if on else "The part is free: your hands move, turn and scale the part, the stick spins it. Reset puts the tilt back."))
 	ui.fit_pressed.connect(fit_sketch)
+	ui.register_pressed.connect(register_canvas)
 	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
 	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
@@ -670,22 +671,26 @@ func sketch_locked() -> bool:
 
 
 func max_user_scale() -> float:
-	## The biggest the part may be scaled to: higher while sketching (zooming into the sketch).
-	return maxf(TablePose.SKETCH_MAX_SCALE, max_scale_setting) if editing_sketch() else max_scale_setting
+	## The biggest the part may be scaled to (the sketch canvas zooms on its own, so a sketch needs no more than this).
+	return max_scale_setting
 
 
 func fit_sketch() -> void:
-	## The Fit button: the part goes back to the sketch tilt, and is scaled and moved so the sketch (or, with nothing drawn yet, the part)
-	## fills most of the sheet window, in the middle of the slab.
+	## The Fit button: the canvas shows the whole sketch (or, with nothing drawn yet, the part's extent), filling most of the window. The
+	## part is not touched.
 	if pivot == null or not editing_sketch() or editor.view == null:
 		return
-	var bounds: Rect2 = editor.sketch_bounds()
-	var scale: float = TablePose.fit_scale(bounds.size, sheet_window_m, 0.8, fit_scale, max_user_scale())
-	var rotation := sketch_rotation(editor.session.plane)
-	var basis := rotation.orthonormalized() * scale
-	var centre_in_pivot: Vector3 = table_copy.transform * SketchMath.from_sheet(bounds.get_center(), editor.session.plane)
-	_animate_pose(rotation, Vector3(0.0, sketch_hover_height, 0.0) - basis * centre_in_pivot, scale)
-	set_status("Sketch fitted to the sheet.")
+	editor.canvas_fit()
+	set_status("Canvas fitted to the sketch (%s)." % editor.view.readout_text())
+	UiFeedback.haptic(_right, "confirm")
+
+
+func register_canvas() -> void:
+	## The 1:1 button: the canvas back onto the part, at the part's own scale and place.
+	if pivot == null or not editing_sketch() or editor.view == null:
+		return
+	editor.canvas_register()
+	set_status("Canvas on the part again: 1:1, so its corners snap.")
 	UiFeedback.haptic(_right, "confirm")
 
 

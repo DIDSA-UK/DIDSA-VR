@@ -17,20 +17,25 @@ headset**, so numbers that depend on feel (the 60 degree tilt, the sheet size, l
 | N2b | Points can only be dropped on a small area; no grid. | A fixed **0.8 x 0.4 m** sheet (`sheet_window_m`) with a faint 1-2-5 grid that re-spaces as the part is zoomed. | Closed. Unverified: the sheet size. |
 | N2c | The sketch origin is not a snap point; nothing can be constrained to it or dimensioned from it. | The backend's real origin point is read when a sketch opens (it is created lazily) and used like any point: snap kind "origin", Coincident, a dimension can start or end at it. Checked against the real backend. | Closed. |
 | N2d | Sketch entities cannot be selected; no contextual menu. | A **Select** tool (on by default when a sketch opens) and a menu in the options row of what applies to the selection, ported from the flat app's selection matrix, plus Fix / Construction / Delete. Every option checked against the real constraint schemas. | Closed. |
-| N2e | The sketch canvas cannot be panned or zoomed. | One grip anywhere on the sheet pans, two hands zoom (to 8x), because the sheet is rigid with the part; with the sketch rules below (locked tilt, release holds the part over the slab, the whole sheet is the grab zone, Part: Locked / Free, Fit). | Closed. Unverified: how the grips feel. |
+| N2e | The sketch canvas cannot be panned or zoomed. | The canvas pans and zooms **inside the fixed 0.8 x 0.4 m sheet window**, on its own, so one part can hold a huge sketch or a tiny one (window 1 mm to 80 m of sketch): one grip on the sheet pans the canvas, two hands zoom it about the point between them, and the part keeps its pose. Corner readout (grid spacing, "on the part" or "canvas xN the part"), **Fit** zooms the canvas to the sketch, **1:1** puts it back on the part. First tried as "rigid sheet, zoom = scale the part" (the earlier version of this row); replaced after the first headset session asked for the canvas to zoom within its window. | Closed. Unverified: how the grips feel. |
 | N3 | The corner handle for dragging the table bigger is hard to find. | A small bright point on each corner of the slab's rectangle. | Closed. |
 
 ### Sketch mode and the grips (the rules the pan / zoom follows)
 
-The sketch sheet is a child of the part's table copy, so **moving or scaling the part moves and scales the sheet**. That is why one-hand grip = pan and
-two-hand spread = zoom already work on a sketch. A separate canvas zoom (content sliding over a fixed part) was rejected: the sketch would no longer line
-up with the part under it (snapping to part vertices, sketching on a face, extruding to the part's shape). While a sketch is open:
+The sketch is drawn on a **canvas** inside the sheet window. The window is a rectangle in the part's plane, fixed in the world at 0.8 x 0.4 m, and it
+moves with the part; the canvas has its own pan (the sketch uv at the window's middle) and zoom (world metres per sketch mm), independent of how big the
+part is. Sketch coordinates stay true millimetres, so the canvas **lines up with the part under it only while it is registered**: its zoom equals the
+part's own scale and its middle is the window's middle (the state a sketch opens in, and what **1:1** returns to). Off the part, the part's own corners are
+not offered as snap targets (they would not be where the part shows them); the sketch's own points, lines and the origin snap as usual. (An earlier version
+made the sheet rigid with the part and zoomed by scaling the part, which put every sketch at the part's scale.) While a sketch is open:
 
-1. The pose is **locked to the tilt**: two hands scale and move only (no turn), the stick does not spin or tip, Reset restores. **Part: Locked / Free**
-   on the deck unlocks turning.
+1. With **Part: Locked** (the default) the grips drive the canvas: one hand pans it (the spot you grabbed stays under the hand), two hands zoom it about
+   their midpoint. The part does not move, turn or scale, the stick does not spin or tip it, Reset restores the tilt.
+   **Part: Free** gives the grips (move, turn, scale) and the stick back to the part; the canvas keeps its own zoom, so scaling the part takes it off the part.
 2. Letting go beyond the slab does **not** send the real part back to the arena (that would end the sketch); it is held back over the slab.
-3. A grip inside the sheet's physical rectangle takes it, not only one near the part's bounding sphere.
-4. The scale limit rises to 8x while sketching (the Settings limit is for everyday handling).
+3. A grip inside the window's rectangle takes it, not only one near the part's bounding sphere.
+4. The snap, pick and dimension-label reaches are sizes in the world, so zoomed out they span many sketch mm and zoomed in few.
+5. The drawing is clipped to the window by its line shader (`sketch_lines.gdshader`); labels show while their middle is inside it.
 
 ## Gaps found while building it
 

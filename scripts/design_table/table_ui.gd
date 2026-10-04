@@ -16,9 +16,10 @@ signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
 signal undo_pressed
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
-signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the sketch plane tilted (grips only move and scale), Free also turns it
+signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the part still (grips pan and zoom the sketch canvas), Free lets them move, turn and scale the part
 signal done_pressed ## "Done": leave the open sketch (the part is refreshed if it was changed)
-signal fit_pressed ## "Fit": scale and move the part so the sketch fills the sheet
+signal fit_pressed ## "Fit": pan and zoom the sketch canvas so the sketch fills the window
+signal register_pressed ## "1:1": the canvas back onto the part, at the part's own scale
 signal return_pressed ## "To arena": the real part goes back where it came from
 signal close_requested
 signal feedback(event: String) ## "press" / "error": the host turns it into a haptic pulse and a sound
@@ -46,6 +47,7 @@ var _reset_button: Button
 var _return_button: Button
 var _lock_button: Button
 var _fit_button: Button
+var _register_button: Button
 var _done_button: Button
 var _active_chip: Label
 var _fx: ColorRect
@@ -144,6 +146,13 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		fit_pressed.emit())
 	bottom.add_child(_fit_button)
+	_register_button = _utility("register", "1:1", false)
+	_register_button.custom_minimum_size = Vector2(96, 56)
+	_register_button.disabled = true
+	_register_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		register_pressed.emit())
+	bottom.add_child(_register_button)
 	_reset_button = _utility("recentre", "Reset", false)
 	_reset_button.disabled = true
 	_reset_button.pressed.connect(func() -> void:
@@ -344,6 +353,7 @@ func set_sketching(on: bool) -> void:
 	if _lock_button.disabled == on:
 		_lock_button.disabled = not on
 		_fit_button.disabled = not on
+		_register_button.disabled = not on
 		_done_button.disabled = not on
 		activity.emit()
 
@@ -363,6 +373,10 @@ func done_button() -> Button:
 
 func fit_button() -> Button:
 	return _fit_button
+
+
+func register_button() -> Button:
+	return _register_button
 
 
 func set_engaged(on: bool) -> void:

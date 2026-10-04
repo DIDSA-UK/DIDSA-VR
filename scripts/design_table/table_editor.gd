@@ -77,8 +77,9 @@ var _orient_tween: Tween = null
 var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
 var _menu_key := ""
 var _menu_page := 0 ## which page of the Select tool's menu is showing
-var _window_scale := 0.0 ## the effective scale the sheet was last sized for
-var _window_msec := 0
+var _window_scale := 0.0 ## the part's effective scale the sheet was last sized for
+var _canvas_msec := 0 ## when the drawing was last rebuilt for a zoom
+var _canvas_stale := false ## a zoom has changed the canvas since the drawing was last rebuilt
 var _edited_nodes: Array = [] ## the arena nodes the last refresh updated: every instance of the part
 
 
@@ -241,6 +242,7 @@ func _process(_delta: float) -> void:
 			_hover_pick_plane(origin, dir)
 		"sketch":
 			_follow_scale()
+			_settle_canvas()
 			_hover_sketch(origin, dir)
 		"pick_edges":
 			_hover_edges(origin, dir)
@@ -305,25 +307,25 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		return
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
-	var hit_world: Vector3 = copy_xf * SketchMath.from_sheet(uv, plane)
+	var hit_world: Vector3 = copy_xf * SketchMath.from_sheet(view.from_canvas(uv), plane)
 	hovering = _claim(origin.distance_to(hit_world))
 	if not hovering:
 		view.set_cursor(null)
 		return
 	_hover_uv = uv
-	var radius_mm: float = SNAP_RADIUS / maxf(table.effective_scale(), 0.000001)
+	var radius_mm: float = SNAP_RADIUS / view.canvas_scale # the snap and pick reaches are a size in the world: they shrink in sketch mm as you zoom in
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
 		if tool == "line" and session.pending.size() == 1:
 			var first: Dictionary = session.pending[0]
 			line_start = session.points.get(str(first.get("id", "")), first.get("uv"))
-		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start)
+		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices if view.registered() else [], line_start) # the part's corners only count while the canvas is on the part
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
-		var pick_mm: float = PICK_RADIUS / maxf(table.effective_scale(), 0.000001)
+		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
@@ -340,7 +342,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 
 
 func _sheet_hit(origin: Vector3, dir: Vector3) -> Variant:
-	## Where the laser meets the sketch sheet, as sheet (u, v) in mm, or null if it misses or is off the sheet.
+	## Where the laser meets the canvas window, as the SKETCH's (u, v) in mm there, or null if it misses or is outside the window.
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
 	var normal_w: Vector3 = (copy_xf.basis * (plane["n"] as Vector3)).normalized()
@@ -348,10 +350,10 @@ func _sheet_hit(origin: Vector3, dir: Vector3) -> Variant:
 	var hit: Variant = SketchMath.ray_plane(origin, dir, point_w, normal_w)
 	if hit == null or origin.distance_to(hit) > PICK_RANGE:
 		return null
-	var uv := SketchMath.to_sheet(copy_xf.affine_inverse() * (hit as Vector3), plane)
-	if not view.contains(uv):
+	var on_plane := SketchMath.to_sheet(copy_xf.affine_inverse() * (hit as Vector3), plane)
+	if not view.window_contains(on_plane):
 		return null
-	return uv
+	return view.to_canvas(on_plane)
 
 
 func _hover_faces(origin: Vector3, dir: Vector3) -> void:
@@ -592,7 +594,8 @@ func _build_view() -> void:
 	view.name = "SketchView"
 	copy.add_child(view)
 	_window_scale = table.effective_scale()
-	view.setup(plane, sheet_size_mm(), centre, _window_scale, table.tokens)
+	view.setup(plane, table.sheet_window_m, centre, _window_scale, _window_scale, centre, table.tokens) # the canvas starts on the part: its scale, its middle
+	_canvas_stale = false
 	_sheet_vertices = _vertices_on_plane(copy, plane)
 	if markers != null:
 		markers.set_markers_visible(false)
@@ -600,13 +603,13 @@ func _build_view() -> void:
 
 
 func sheet_reaches(world_point: Vector3) -> bool:
-	## True if a world point is over the sketch sheet (inside its rectangle, within about 12 cm of its plane): a grip there takes the part.
+	## True if a world point is over the canvas window (inside its rectangle, within about 12 cm of its plane): a grip there takes the canvas.
 	if session == null or view == null or table.table_copy == null:
 		return false
 	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * world_point
 	var plane: Dictionary = session.plane
 	var off_plane: float = absf((local - (plane["origin"] as Vector3)).dot(plane["n"] as Vector3)) * table.effective_scale()
-	return off_plane <= 0.12 and view.contains(SketchMath.to_sheet(local, plane))
+	return off_plane <= 0.12 and view.window_contains(SketchMath.to_sheet(local, plane))
 
 
 func sketch_bounds() -> Rect2:
@@ -632,26 +635,73 @@ func _sync_deck() -> void:
 	table.ui.set_sketching(session != null)
 
 
-func sheet_size_mm() -> Vector2:
-	## The sheet's size in sketch mm: a fixed window in the world (table.sheet_window_m), so the more the part is zoomed the fewer mm it spans.
-	return table.sheet_window_m / maxf(table.effective_scale(), 0.000001)
-
-
 func _follow_scale() -> void:
-	## Keeps the sheet a fixed window when the part is zoomed: re-sizes it (and its grid) once the scale has settled a little, never
-	## more than about 6 times a second, and only when it really changed.
+	## The part was scaled (a free grip): the window keeps its size in the world, so only its size in part mm changes. The canvas keeps
+	## its own zoom, so it no longer lines up with the part until 1:1 puts it back.
 	if view == null or not is_instance_valid(view) or table.effective_scale() <= 0.0:
 		return
 	var s: float = table.effective_scale()
-	if absf(s - _window_scale) < _window_scale * 0.02:
+	if absf(s - _window_scale) < _window_scale * 0.0005:
+		return
+	_window_scale = s
+	view.set_part_scale(s)
+
+
+# --- The canvas: the sketch's own pan and zoom inside the window --------------------------------------------
+
+func plane_uv_at(world_point: Vector3) -> Vector2:
+	## Where a world point is over the sketch plane, in plane uv (part mm): its height off the plane is dropped.
+	return SketchMath.to_sheet(table.table_copy.global_transform.affine_inverse() * world_point, session.plane)
+
+
+func canvas_pan_to(centre: Vector2) -> void:
+	## The sketch uv that should be at the window's middle.
+	if view == null:
+		return
+	view.set_canvas(view.canvas_scale, centre)
+
+
+func canvas_set(scale: float, centre: Vector2) -> void:
+	## Zooms (world metres per sketch mm) and pans the canvas. The drawing is rebuilt for the new zoom a few times a second while it's
+	## changing and once more when it settles.
+	if view == null:
+		return
+	if view.set_canvas(scale, centre):
+		_canvas_stale = true
+		_settle_canvas()
+
+
+func _settle_canvas() -> void:
+	if not _canvas_stale or view == null or not is_instance_valid(view):
 		return
 	var now := Time.get_ticks_msec()
-	if now - _window_msec < 160:
+	if now - _canvas_msec < 70:
 		return
-	_window_msec = now
-	_window_scale = s
-	view.set_window(sheet_size_mm(), s)
+	_canvas_msec = now
+	_canvas_stale = false
 	_refresh_view()
+
+
+func canvas_fit() -> void:
+	## The canvas shows the whole sketch (or, with nothing drawn, the part's extent on the plane), filling most of the window.
+	if view == null or session == null:
+		return
+	var bounds := sketch_bounds()
+	var scale := minf(view.window_m.x * 0.8 / maxf(bounds.size.x, 0.001), view.window_m.y * 0.8 / maxf(bounds.size.y, 0.001))
+	canvas_set(scale, bounds.get_center())
+	_canvas_stale = true
+	_canvas_msec = 0
+	_settle_canvas()
+
+
+func canvas_register() -> void:
+	## The canvas back onto the part: the part's own scale and place, so the part's corners can be snapped to again.
+	if view == null:
+		return
+	view.register()
+	_canvas_stale = true
+	_canvas_msec = 0
+	_settle_canvas()
 
 
 static func _vertices_on_plane(part: Node3D, plane: Dictionary) -> Array:
@@ -703,7 +753,7 @@ func _sketch_trigger() -> void:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
 	elif tool == "dimension" or tool == SELECT_TOOL:
-		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / maxf(table.effective_scale(), 0.000001))
+		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if ghost != "":
 			_type_dimension(ghost)
 		elif not _hover_entity.is_empty():

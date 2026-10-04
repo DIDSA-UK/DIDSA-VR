@@ -9,6 +9,8 @@ extends RefCounted
 ##     as they spread or close, all about the midpoint (table_pose.gd). The second grip may be anywhere over the table.
 ##   * The right STICK spins it about the slab's up axis and tips it; A pulls it nearer, B pushes it farther. These
 ##     belong to the table only while it is ENGAGED.
+##   * WITH A SKETCH OPEN and "Part: Locked" the grips drive the sketch CANVAS instead (the part and its tilt stay put): one hand on the
+##     sheet pans the canvas, two hands zoom it about the midpoint between them (table_editor.gd: canvas_set).
 ##   * LETTING GO over the slab leaves it on the table; letting go beyond it sends the real part back to the arena
 ##     where you let go (design_table.gd: send_to_arena).
 ##
@@ -167,11 +169,12 @@ func process(delta: float) -> void:
 			_prev.erase(hand)
 	if _grips.is_empty() and _prev.size() > 0:
 		_prev.clear()
+	var on_canvas: bool = _table.sketch_locked() and _table.editor != null and _table.editor.view != null
 	match _grips.size():
 		1:
-			_follow_one(delta)
+			_pan_canvas(delta) if on_canvas else _follow_one(delta)
 		2:
-			_follow_two(delta)
+			_zoom_canvas(delta) if on_canvas else _follow_two(delta)
 	_set_carry_outside(not _grips.is_empty() and not _table.editing_sketch() and not TableSeat.in_drop_zone(_table.pivot.position, _table.slab_size, _table.drop_floor, _table.drop_ceiling))
 	_update_engaged(delta)
 	if engaged:
@@ -219,6 +222,41 @@ func _follow_two(delta: float) -> void:
 	_table.apply_pose(step["centre"], step["rotation"], step["scale"])
 	_prev[left] = l
 	_prev[right] = r
+
+
+func _pan_canvas(delta: float) -> void:
+	## One hand on the canvas: the sketch follows the hand across the sheet, so the spot you grabbed stays under it.
+	var hand: Object = _grips.keys()[0]
+	var local: Vector3 = _table.to_local(_steady(hand, delta))
+	var editor = _table.editor
+	var now_uv: Vector2 = editor.plane_uv_at(_table.to_global(local))
+	var was_uv: Vector2 = editor.plane_uv_at(_table.to_global(_prev.get(hand, local)))
+	var view = editor.view
+	editor.canvas_pan_to(view.sheet_centre - (now_uv - was_uv) / view.canvas_k())
+	_prev[hand] = local
+
+
+func _zoom_canvas(delta: float) -> void:
+	## Two hands on the canvas: it zooms as they spread or close, keeping the spot between them under the midpoint (which also pans it).
+	var keys := _grips.keys()
+	var l: Vector3 = _table.to_local(_steady(keys[0], delta))
+	var r: Vector3 = _table.to_local(_steady(keys[1], delta))
+	var prev_l: Vector3 = _prev.get(keys[0], l)
+	var prev_r: Vector3 = _prev.get(keys[1], r)
+	var editor = _table.editor
+	var view = editor.view
+	var prev_len := prev_l.distance_to(prev_r)
+	var len := l.distance_to(r)
+	var was_mid: Vector2 = editor.plane_uv_at(_table.to_global((prev_l + prev_r) * 0.5))
+	var mid: Vector2 = editor.plane_uv_at(_table.to_global((l + r) * 0.5))
+	var scale: float = view.canvas_scale
+	if prev_len >= 0.02 and len >= 0.02:
+		scale = clampf(scale * pow(len / prev_len, TablePose.SPREAD_GAIN), view.MIN_CANVAS_SCALE, view.MAX_CANVAS_SCALE)
+	var held: Vector2 = view.sheet_centre + (was_mid - view.window_centre) / view.canvas_k() # the sketch spot that was under the midpoint
+	var new_k: float = scale / view.scale_m_per_mm
+	editor.canvas_set(scale, held - (mid - view.window_centre) / new_k)
+	_prev[keys[0]] = l
+	_prev[keys[1]] = r
 
 
 func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
