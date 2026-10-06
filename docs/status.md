@@ -1690,7 +1690,9 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   not listed in `tests/expected_false.txt`) on every push/PR touching code,
   scenes, shaders or tests, and a warning-only `render` job runs the four
   assert-based render tests under Xvfb + Mesa (`tests/ci_render.sh`). See
-  `tests/README.md` "CI" for what runs where. Picture-only render tests and
+  `tests/README.md` "CI" (and its "CI open items": make `headless` required,
+  try the e2e `workflow_dispatch` once, watch the warning-only `render` job)
+  for what runs where. Picture-only render tests and
   the `e2e_*` tests stay manual.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
   `e2e_mates.gd`, `e2e_colour.gd`, `e2e_colour_group.gd`, `e2e_section.gd`,
