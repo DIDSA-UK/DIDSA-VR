@@ -137,7 +137,7 @@ func _initialize() -> void:
 	var tilt := Basis(Vector3.RIGHT, deg_to_rad(table.sketch_tilt_degrees))
 	print("SMOKE the part is turned so the plane stands tilted up 60 degrees from the slab (normal up-and-towards-you, x right, y away-and-up): ", up.is_equal_approx(tilt * Vector3.UP) and right.is_equal_approx(Vector3.RIGHT) and away.is_equal_approx(tilt * Vector3(0, 0, -1)))
 	print("SMOKE the chosen face is highlighted on the part: ", ed.highlight.pick_nodes().size() == 1)
-	print("SMOKE the sheet and the drawing are shown: ", ed.view != null and ed.view.get_child_count() >= 4)
+	print("SMOKE the sheet and the drawing are shown: ", ed.view != null and ed.view.get_node_or_null("Canvas") != null and ed.view.get_node("Canvas").get_child_count() >= 4) # the drawing nodes live in the Canvas since the pan/zoom-inside-a-fixed-window change
 
 	# --- draw a circle, dimension it with a typed radius
 	table.manager.activate("circle")
