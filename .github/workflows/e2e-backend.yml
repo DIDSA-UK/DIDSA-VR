@@ -4,9 +4,6 @@ name: E2E against the real backend
 # (tests/ci_e2e.sh). Separate from the fast headless job (slow first build, depends on another repo). Not a required check yet.
 # Run by hand with a different backend ref: Actions > "E2E against the real backend" > Run workflow (cad_ref).
 on:
-  push:   # TEMP: verification on the CI branch only; removed before merge
-    branches: [ci-headless-tests]
-    paths: [".github/workflows/e2e-backend.yml", "tests/ci_e2e.sh", "tests/e2e_ci_list.txt", "tests/expected_false_e2e.txt"]
   workflow_dispatch:
     inputs:
       cad_ref:

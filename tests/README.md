@@ -147,7 +147,8 @@ check was either kept or moved (compared with the pre-removal run):
 | Parse check + the `run_all.sh` suite, via `tests/ci.sh`, then `tests/check_smoke.py` | job `headless` | yes |
 | The four assert-based render tests (`sketch_clip_render`, `section_render`, `section_render_transformed`, `highlight_clip_render`) under Xvfb + Mesa software GL, via `tests/ci_render.sh` | job `render` | no (`continue-on-error`) until it has been steady |
 | Picture-only render tests (`sketch_clip_picture`, `sketch_style_render`, `references_render`, `design_table_render`, `tablet_render`, `windows_render`, `ui_lab_render`, `look_render`, `topology_render`), `gpu_timing.gd`, the benches | nowhere | manual |
-| `e2e_*.gd` (need a real DIDSA-CAD backend) | not in CI yet | manual |
+| The `e2e_*.gd` tests listed in `tests/e2e_ci_list.txt`, against DIDSA-CAD's backend image built from source (`tests/ci_e2e.sh`, baseline `tests/expected_false_e2e.txt`, `SMOKE SKIPPED` fails) | workflow `e2e-backend.yml` (manual `workflow_dispatch` with a `cad_ref`, and PRs touching `scripts/design_table/**`, `scripts/mesh_identity.gd` or `tests/e2e_*.gd`) | yes, but the check is not required yet |
+| The other `e2e_*.gd` tests | nowhere | manual |
 
 **How the assertions are checked.** The tests print `SMOKE <what>: <value>` and exit 0, so `tests/check_smoke.py` reads the captured log (the
 `== <test>` headers `run_all.sh` prints, then each test's SMOKE lines) and fails when:

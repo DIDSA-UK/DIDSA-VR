@@ -1698,8 +1698,12 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   `main.secrets_file_path` at the real `secrets.cfg` and drives real network
   calls against a running backend, using the tracked `assembly.didsa` (or,
   for `e2e_add_component.gd`, two throwaway Parts it creates itself).
-  Run them manually once your backend is up; none are part of `run_all.sh`
-  or CI yet.
+  Run them manually once your backend is up; none are part of `run_all.sh`.
+  A subset (`tests/e2e_ci_list.txt`) also runs in CI: `.github/workflows/
+  e2e-backend.yml` builds DIDSA-CAD's `backend/Dockerfile` (public repo, `cad_ref`
+  input, default `main`), starts it with a throwaway `CAD_API_KEY`, writes
+  `secrets.cfg` and runs `tests/ci_e2e.sh`; first run found one stale assertion
+  in `e2e_design_table.gd` (fixed).
   `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
   instantiating the scene to "Loaded" — the first time this path was
