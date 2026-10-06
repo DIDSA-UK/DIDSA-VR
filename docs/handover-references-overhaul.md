@@ -40,6 +40,8 @@ Backend fixed (all four probes pass) and the flat app done; full account in `DID
   the VR version only needs to drive the same PATCH `.../fillet-features/{id}` and read the sketch feature.
 * The flat app's rule "nothing is offered between two pinned things" is implemented as in VR (a Point is pinned if it is a body reference, a Fix, or the origin).
 
+**Later Session A rounds (same day, merged to DIDSA-CAD):** circle / arc centres from converted circles are live references (`kind: circle_centre`); every `SubShapeRef` consumer (Fillet, Chamfer, Create Plane, Pattern, Mirror, Shell, Delete / Move Face) carries a signature and the feature responses carry `lost_references` / `moved_references` / `followed_references` with reasons; OCCT history now covers vertices, edges and faces, and every in-place Body operation feeds the recorder. No route changed shape, so nothing here needs VR work beyond item 4 above. Still open: assembly mate references, a re-attach route for non-sketch Features, replay stays signature-only until the next refresh. See `DIDSA-CAD/docs/reference-identity-design.md`.
+
 ## Session A: DIDSA-CAD, backend first, then the flat app (the prompt, kept for the record)
 
 Prompt to paste:
