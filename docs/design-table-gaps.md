@@ -8,6 +8,22 @@ is unmeasured, DIDSA-VR has no CI, the flat app's own UI has not opened a VR-sav
 **Everything marked Closed is closed in code and tests (headless, and against a real backend where it touches one). None of it has been seen in a
 headset**, so numbers that depend on feel (the 60 degree tilt, the sheet size, line weight, grip pan / zoom, the one-hand turn) are called out below.
 
+## Open items at a glance (read this first)
+
+Everything else in this file is history and detail. This is the one list of what is still open, as of 2026-10-06. Items marked **backend** live in DIDSA-CAD.
+
+| # | Open item | Where | Detail |
+|---|---|---|---|
+| 1 | **References silently rebind** when an upstream edit changes the part's topology (5 of 7 probes; `has_lost_reference` stays false). Needs a geometric signature, then OCCT `Modified()` / `Generated()` history, and a flag instead of a silent rebind. | **backend** (+ both clients show the flag) | R2 below; `DIDSA-CAD/docs/roadmap.md` "Reference drift"; `DIDSA-CAD/backend/tests/test_reference_follows_upstream_topology_change.py` (xfail = the wanted behaviour) |
+| 2 | **The flat app's referencing flow is the old, explicit one** (Dimension mode ghost picks, a separate Convert mode). Make it implicit like the VR table: aim at a part corner or edge in any tool and the reference is made on demand. | flat app (`client/lib/sketch`) | `docs/handover-references-overhaul.md` |
+| 3 | **The part is not clipped to the sketch window**: zoomed right in (up to 200x) it fills the room. | VR | N2e / "Sketch mode and the grips" item 6 |
+| 4 | References **not yet** for: circular edges (a hole's centre / radius), an edge's midpoint or along it, faces; a driven (reference) dimension between two pinned things; sketches on a part with something hidden or rolled back, or a reopened sketch that is not the last feature. | VR (some need the backend: arcs come from `convert-entities/edge`) | R1 below |
+| 5 | **Nothing has been seen in a headset**: the 60 degree tilt, window size and zoom range, grip pan / zoom feel, reference line weight and colours (`REF_*` in `sketch_view.gd`), line / text weights, edge weight, the Quest save folder. | VR | "Everything marked Closed" note above |
+| 6 | Sub-assemblies: mates through them (G14), New part inside one (G16), carrying a mated part (G15, a workaround exists). | VR (+ backend nested solve) | the tables below |
+| 7 | Modelling depth (G8): Pattern, Sweep, Loft, booleans, direct edit; sketch tools Ellipse, Spline, Text, Point, Trim, Offset; a preview before Apply; redo. Build tree sections for Planes / Surfaces / Curves (G11). | VR | the tables below |
+
+Accepted, not open: G5 (legacy bundle save shape only), G9 (cascade delete cannot be undone).
+
 ## Feedback from the first headset session
 
 | ID | What was found | How it was closed | Status |
@@ -94,7 +110,5 @@ is flagged, never rebound. That is in the DIDSA-CAD backend and is recorded in i
 
 ## What is left, in the order it would be worth doing
 
-1. **A headset session** to check everything marked unverified above (the 60 degree reading, the sheet, grips, edge weight, the save folder).
-2. G14 / G16 sub-assemblies (needs a nested assembly to build against).
-3. G8's remainder: Pattern, then Sweep / Loft / booleans / direct edit, more sketch tools, a preview before Apply, redo.
-4. G11's Planes / Surfaces / Curves sections; G15 carrying a mated part.
+See "Open items at a glance" at the top. The order: 1 (backend references), 2 (flat app flow), 3 (clip the part), 4 (more reference kinds), then a headset session
+(5) before anything is tuned, then 6 and 7.
