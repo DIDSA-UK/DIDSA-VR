@@ -38,7 +38,7 @@ func _arrow_ok(view) -> bool:
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	view._arrow(verts, colors, Vector2(10, 5), Vector2(0, 1), Color.WHITE)
-	var length: float = view.ARROW_LENGTH / view.scale_m_per_mm
+	var length: float = view.ARROW_LENGTH / view.canvas_scale
 	return verts.size() == 3 and colors.size() == 3 and Vector2(verts[0].x, verts[0].y).is_equal_approx(Vector2(10, 5)) and absf(verts[1].y - (5.0 - length)) < 0.001 and absf(verts[2].y - (5.0 - length)) < 0.001 and absf(verts[1].x - verts[2].x) > 0.1
 
 
@@ -218,7 +218,7 @@ func _initialize() -> void:
 	var still := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(0, 0, 0.1), Vector3(0, 0, -0.1), Vector3(0.1, 0, 0), Basis.IDENTITY, 1.0, false)
 	print("SMOKE with the turn locked, a quarter swing of the hands does not turn the part (it only moves with the midpoint): ", still["rotation"].is_equal_approx(Basis.IDENTITY) and is_equal_approx(still["scale"], 1.0))
 	var zoomed := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.5, 0, 0), Vector3(0.5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)
-	print("SMOKE while sketching, hands five times as far apart zoom to 5x (the cap is 8x; ordinarily 3x): ", is_equal_approx(zoomed["scale"], 5.0) and TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)["scale"] == TablePose.SKETCH_MAX_SCALE)
+	print("SMOKE while sketching, hands five times as far apart zoom to 5x (the cap is 200x; ordinarily 3x): ", is_equal_approx(zoomed["scale"], 5.0) and TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-500, 0, 0), Vector3(500, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE)["scale"] == TablePose.SKETCH_MAX_SCALE)
 	print("SMOKE Fit scales a 100 x 50 mm sketch to fill 80% of a 0.8 x 0.4 m window (3.2 mm per mm at fit 0.003 is 1.07x), clamped to the cap: ", is_equal_approx(TablePose.fit_scale(Vector2(100, 50), Vector2(0.8, 0.4), 0.8, 0.003, 8.0), 0.0064 / 0.003) and TablePose.fit_scale(Vector2(1, 1), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == 8.0 and TablePose.fit_scale(Vector2(10000, 10000), Vector2(0.8, 0.4), 0.8, 0.003, 8.0) == TablePose.MIN_SCALE)
 
 	var outline: Array = SketchView.slot_outline(Vector2(0, 0), Vector2(40, 0), 6.0, 8)
@@ -264,7 +264,7 @@ func _initialize() -> void:
 	var dash_verts := PackedVector3Array()
 	var dash_colors := PackedColorArray()
 	view.plane = {"origin": Vector3.ZERO, "x": Vector3(1, 0, 0), "y": Vector3(0, 1, 0), "n": Vector3(0, 0, 1)}
-	view.scale_m_per_mm = 0.01
+	view.canvas_scale = 0.01
 	view._dashed(dash_verts, dash_colors, [Vector2(0, 0), Vector2(400, 0)], 0.002, Color.WHITE, false)
 	var solid_verts := PackedVector3Array()
 	var solid_colors := PackedColorArray()
@@ -276,6 +276,21 @@ func _initialize() -> void:
 	print("SMOKE a construction line is drawn in a CHAIN (long dash, gap, dot, gap), not solid: many pieces, about two thirds of the length covered: ", pieces >= 20 and solid_verts.size() == 6 and covered > 400.0 * 0.55 and covered < 400.0 * 0.8)
 	print("SMOKE an arrowhead is a filled triangle with its tip where it is told, pointing the way it is told: ", _arrow_ok(view))
 	view.free()
+
+	# --- the sketch window: fixed in the world, the part (and its sketch) slides and scales under it
+	var cv := SketchView.new()
+	var cplane := {"origin": Vector3.ZERO, "x": Vector3(1, 0, 0), "y": Vector3(0, 1, 0), "n": Vector3(0, 0, 1)}
+	cv.setup(cplane, Vector2(0.8, 0.4), Vector2(10, 20), 0.002, load("res://ui/didsa_ui_theme.tres"))
+	print("SMOKE a window 0.8 x 0.4 m of world at 0.002 m per mm spans 400 x 200 mm of sketch, around the spot it is centred on: ", cv.sheet_size.is_equal_approx(Vector2(400, 200)) and cv.contains(Vector2(10 + 199, 20)) and not cv.contains(Vector2(10 + 201, 20)))
+	var zoomed_in: bool = cv.set_frame(0.008, Vector2(100, 50))
+	print("SMOKE zooming reports that the drawing must be rebuilt, sliding alone does not: ", zoomed_in and not cv.set_frame(0.008, Vector2(120, 50)))
+	print("SMOKE ...four times the zoom: the window spans a quarter as much sketch (100 x 50 mm) around the new spot: ", cv.sheet_size.is_equal_approx(Vector2(100, 50)) and cv.sheet_centre.is_equal_approx(Vector2(120, 50)) and cv.contains(Vector2(120 + 49, 50)) and not cv.contains(Vector2(120 + 51, 50)))
+	print("SMOKE the grid and the line clip follow the window: ", is_equal_approx(cv.grid_step(), SketchMath.grid_step(0.016 / 0.008)) and (cv._line_material.get_shader_parameter("clip_half") as Vector2).is_equal_approx(Vector2(50, 25)) and (cv._line_material.get_shader_parameter("clip_centre") as Vector2).is_equal_approx(Vector2(120, 50)))
+	print("SMOKE the corner line gives the grid spacing as a drawing would: 2 mm, 0.5 mm, 1.5 m, 50 mm: ", SketchView.format_length(2.0) == "2 mm" and SketchView.format_length(0.5) == "0.5 mm" and SketchView.format_length(1500.0) == "1.5 m" and SketchView.format_length(50.0) == "50 mm" and cv.readout_text().begins_with("Grid "))
+	cv.free()
+	var wide_in := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-50, 0, 0), Vector3(50, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE, TablePose.SKETCH_MIN_SCALE)
+	var wide_out := TablePose.two_hand(Vector3(-1.0, 0, 0), Vector3(1.0, 0, 0), Vector3(-0.0101, 0, 0), Vector3(0.0101, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, false, TablePose.SKETCH_MAX_SCALE, TablePose.SKETCH_MIN_SCALE)
+	print("SMOKE while sketching the part can be zoomed from 1/50 to 200 times (a tiny sketch to a huge one), and no further: ", is_equal_approx(wide_in["scale"], TablePose.SKETCH_MAX_SCALE) and is_equal_approx(wide_out["scale"], TablePose.SKETCH_MIN_SCALE) and TablePose.SKETCH_MIN_SCALE < TablePose.MIN_SCALE)
 
 	# --- the Select tool's menu (sketch_selection.gd), mirroring the flat app's availableConstraintOptions
 	var model := SnapModel.new()

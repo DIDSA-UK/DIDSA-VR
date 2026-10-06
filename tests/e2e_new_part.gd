@@ -119,6 +119,7 @@ func _initialize() -> void:
 	print("SMOKE ...and importing it back (what the flat app's bundle open does) gives the same root, parts and occurrence: ", again["ok"] and re_export["json"]["document"]["root_part_id"] == root_id and re_parts.size() == native_parts.size() and (re_root["occurrences"] as Array).size() == 1 and re_root["occurrences"][0]["resolved_part_id"] == part_id and re_root["occurrences"][0]["id"] == occ["id"])
 
 	# --- a second New assembly does not pile up
+	main.document_dirty = false # (the edits above would otherwise make New assembly warn first, which work_loss.gd covers)
 	await main.new_assembly()
 	var fresh: Dictionary = await req(HTTPClient.METHOD_GET, "/document/export/native")
 	print("SMOKE a second New assembly starts clean: one part again, none of the old ones: ", (fresh["json"]["document"]["parts"] as Array).size() == 1 and fresh["json"]["document"]["parts"][0]["id"] == main.current_root_part_id() and main.current_root_part_id() != root_id)
@@ -130,7 +131,9 @@ func _initialize() -> void:
 	var f := FileAccess.open(obj_path, FileAccess.WRITE)
 	f.store_string(obj)
 	f.close()
+	main.document_dirty = false
 	await main._import_external_file(obj_path, "obj")
+	main.document_dirty = false
 	await main._import_external_file(obj_path, "obj")
 	var piled: Dictionary = await req(HTTPClient.METHOD_GET, "/document/export/native")
 	print("SMOKE importing a file twice leaves ONE part in the backend document, not a pile: ", piled["ok"] and (piled["json"]["document"]["parts"] as Array).size() == 1 and get_nodes_in_group("grabbable_parts").size() >= 1, " ", (piled["json"]["document"]["parts"] as Array).size() if piled["ok"] else piled["error"])

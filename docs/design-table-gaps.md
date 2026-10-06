@@ -8,6 +8,22 @@ is unmeasured, DIDSA-VR has no CI, the flat app's own UI has not opened a VR-sav
 **Everything marked Closed is closed in code and tests (headless, and against a real backend where it touches one). None of it has been seen in a
 headset**, so numbers that depend on feel (the 60 degree tilt, the sheet size, line weight, grip pan / zoom, the one-hand turn) are called out below.
 
+## Open items at a glance (read this first)
+
+Everything else in this file is history and detail. This is the one list of what is still open, as of 2026-10-06. Items marked **backend** live in DIDSA-CAD.
+
+| # | Open item | Where | Detail |
+|---|---|---|---|
+| 1 | **References silently rebind** when an upstream edit changes the part's topology (5 of 7 probes; `has_lost_reference` stays false). Needs a geometric signature, then OCCT `Modified()` / `Generated()` history, and a flag instead of a silent rebind. | **backend** (+ both clients show the flag) | R2 below; `DIDSA-CAD/docs/roadmap.md` "Reference drift"; `DIDSA-CAD/backend/tests/test_reference_follows_upstream_topology_change.py` (xfail = the wanted behaviour) |
+| 2 | **The flat app's referencing flow is the old, explicit one** (Dimension mode ghost picks, a separate Convert mode). Make it implicit like the VR table: aim at a part corner or edge in any tool and the reference is made on demand. | flat app (`client/lib/sketch`) | `docs/handover-references-overhaul.md` |
+| 3 | **The part is not clipped to the sketch window**: zoomed right in (up to 200x) it fills the room. | VR | N2e / "Sketch mode and the grips" item 6 |
+| 4 | References **not yet** for: circular edges (a hole's centre / radius), an edge's midpoint or along it, faces; a driven (reference) dimension between two pinned things; sketches on a part with something hidden or rolled back, or a reopened sketch that is not the last feature. | VR (some need the backend: arcs come from `convert-entities/edge`) | R1 below |
+| 5 | **Nothing has been seen in a headset**: the 60 degree tilt, window size and zoom range, grip pan / zoom feel, reference line weight and colours (`REF_*` in `sketch_view.gd`), line / text weights, edge weight, the Quest save folder. | VR | "Everything marked Closed" note above |
+| 6 | Sub-assemblies: mates through them (G14), New part inside one (G16), carrying a mated part (G15, a workaround exists). | VR (+ backend nested solve) | the tables below |
+| 7 | Modelling depth (G8): Pattern, Sweep, Loft, booleans, direct edit; sketch tools Ellipse, Spline, Text, Point, Trim, Offset; a preview before Apply; redo. Build tree sections for Planes / Surfaces / Curves (G11). | VR | the tables below |
+
+Accepted, not open: G5 (legacy bundle save shape only), G9 (cascade delete cannot be undone).
+
 ## Feedback from the first headset session
 
 | ID | What was found | How it was closed | Status |
@@ -17,20 +33,39 @@ headset**, so numbers that depend on feel (the 60 degree tilt, the sheet size, l
 | N2b | Points can only be dropped on a small area; no grid. | A fixed **0.8 x 0.4 m** sheet (`sheet_window_m`) with a faint 1-2-5 grid that re-spaces as the part is zoomed. | Closed. Unverified: the sheet size. |
 | N2c | The sketch origin is not a snap point; nothing can be constrained to it or dimensioned from it. | The backend's real origin point is read when a sketch opens (it is created lazily) and used like any point: snap kind "origin", Coincident, a dimension can start or end at it. Checked against the real backend. | Closed. |
 | N2d | Sketch entities cannot be selected; no contextual menu. | A **Select** tool (on by default when a sketch opens) and a menu in the options row of what applies to the selection, ported from the flat app's selection matrix, plus Fix / Construction / Delete. Every option checked against the real constraint schemas. | Closed. |
-| N2e | The sketch canvas cannot be panned or zoomed. | One grip anywhere on the sheet pans, two hands zoom (to 8x), because the sheet is rigid with the part; with the sketch rules below (locked tilt, release holds the part over the slab, the whole sheet is the grab zone, Part: Locked / Free, Fit). | Closed. Unverified: how the grips feel. |
+| N2e | The sketch canvas cannot be panned or zoomed. | The **sketch window** is a fixed 0.8 x 0.4 m rectangle in the sketch plane, anchored in the world (the console); the part and its sketch slide and scale together **under** it, so the part's edges and corners always line up with the sketch. One grip slides the part in the plane, two hands zoom it about the point between them (1/50 to 200x while a sketch is open), the drawing is clipped to the window. Tried twice: first the window moved with the part (the frame got dragged around); then a separate canvas zoom independent of the part (a mistake: it broke the registration that dimensioning to part geometry needs, and was replaced). | Closed. Unverified: how the grips feel. |
 | N3 | The corner handle for dragging the table bigger is hard to find. | A small bright point on each corner of the slab's rectangle. | Closed. |
 
 ### Sketch mode and the grips (the rules the pan / zoom follows)
 
-The sketch sheet is a child of the part's table copy, so **moving or scaling the part moves and scales the sheet**. That is why one-hand grip = pan and
-two-hand spread = zoom already work on a sketch. A separate canvas zoom (content sliding over a fixed part) was rejected: the sketch would no longer line
-up with the part under it (snapping to part vertices, sketching on a face, extruding to the part's shape). While a sketch is open:
+The sketch is a child of the part's table copy, so it always moves, turns and scales **with the part**: the part's edges and corners stay exactly under
+the sketch's coordinates (sketch mm = part mm), which is what dimensioning to existing geometry needs. What is fixed is the **window**: a rectangle in the
+sketch plane, anchored in the console when the sketch opens (`design_table.window_anchor`), 0.8 x 0.4 m of world whatever the zoom. Panning and
+zooming slide and scale the part under it, so it works as a viewport, and the drawing is clipped to it by `sketch_lines.gdshader`. While a sketch is open:
 
-1. The pose is **locked to the tilt**: two hands scale and move only (no turn), the stick does not spin or tip, Reset restores. **Part: Locked / Free**
-   on the deck unlocks turning.
+1. With **Part: Locked** (the default) the grips slide the part **along the sketch plane** (whatever would move it off the plane is taken back out,
+   `pin_sketch_plane`) and two hands zoom it about the point between them; nothing turns, the stick does not spin or tip it, Reset restores the tilt.
+   **Part: Free** gives the part its ordinary move / turn / scale back, anywhere.
 2. Letting go beyond the slab does **not** send the real part back to the arena (that would end the sketch); it is held back over the slab.
-3. A grip inside the sheet's physical rectangle takes it, not only one near the part's bounding sphere.
-4. The scale limit rises to 8x while sketching (the Settings limit is for everyday handling).
+3. A grip inside the window's rectangle takes the part, not only one near its bounding sphere.
+4. The zoom range is 1/50 to 200x (everyday handling: 0.4 to 3x, or the Settings limit); Fit slides and zooms the part so the sketch fills the window.
+5. The snap, pick and dimension-label reaches are sizes in the world, so zoomed out they span many sketch mm and zoomed in few.
+6. Labels show while their middle is inside the window. **Not done:** the part's own mesh is not clipped to the window (zoomed right in it fills the room).
+
+### Dimensioning to the part's own geometry (R1) and how far references can be trusted (R2)
+
+**R1, closed (first cut).** Dimensioning to existing edges and corners used to be missing (only the corners of the face you sketched on snapped, to a free point
+with no link). Now the part's vertices and straight edges, projected onto the sketch plane, are references everywhere (`part_references.gd`): snap, pick and
+dimension go straight to them, and the session makes the pinned point / construction line on demand (`convert-entities/vertex`, idempotent; an edge is the two
+points and a construction line, reused if already there). Still open: circular edges (a hole's centre / radius), midpoint and along-edge snaps, faces, a driven
+(reference) dimension between two pinned things, and sketches on a part with something hidden or rolled back.
+
+**R2, a known limit of the backend (found by experiment, not yet fixed).** A reference is `body_id` + a raw OCCT vertex index, resolved when the sketch is
+solved. Edits that keep the part's topology (a changed extrude depth, base-sketch dimensions, a fillet radius) are followed correctly, with no flag. An upstream
+edit that changes the topology (moving which edge a fillet rounds, adding one) renumbers the vertices, and the reference then **silently binds to a different
+corner**: in the probe 5 of 7 such edits did, with `has_lost_reference` false. The fix is a geometric signature stored with each reference and checked on every
+refresh (and, better, OCCT's `Modified()` / `Generated()` history), so a renumbered vertex is found again by where it was and a reference that cannot be found
+is flagged, never rebound. That is in the DIDSA-CAD backend and is recorded in its roadmap ("Reference drift"); it has not been started here.
 
 ## Gaps found while building it
 
@@ -75,7 +110,5 @@ up with the part under it (snapping to part vertices, sketching on a face, extru
 
 ## What is left, in the order it would be worth doing
 
-1. **A headset session** to check everything marked unverified above (the 60 degree reading, the sheet, grips, edge weight, the save folder).
-2. G14 / G16 sub-assemblies (needs a nested assembly to build against).
-3. G8's remainder: Pattern, then Sweep / Loft / booleans / direct edit, more sketch tools, a preview before Apply, redo.
-4. G11's Planes / Surfaces / Curves sections; G15 carrying a mated part.
+See "Open items at a glance" at the top. The order: 1 (backend references), 2 (flat app flow), 3 (clip the part), 4 (more reference kinds), then a headset session
+(5) before anything is tuned, then 6 and 7.

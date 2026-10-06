@@ -29,6 +29,7 @@ const TopologyPick := preload("res://scripts/topology_pick.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
+const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
@@ -71,14 +72,15 @@ var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
 var _hover_plane := ""
 var _hover_face: Dictionary = {}
+var part_refs: RefCounted = null ## part_references.gd: the part's vertices and edges projected onto the sketch plane (null if they can't be used)
 var _sheet_vertices: Array = []
 var _last_view_key := ""
 var _orient_tween: Tween = null
 var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
 var _menu_key := ""
 var _menu_page := 0 ## which page of the Select tool's menu is showing
-var _window_scale := 0.0 ## the effective scale the sheet was last sized for
-var _window_msec := 0
+var _canvas_msec := 0 ## when the drawing was last rebuilt for a zoom
+var _canvas_stale := false ## a zoom has changed the part's scale since the drawing was last rebuilt
 var _edited_nodes: Array = [] ## the arena nodes the last refresh updated: every instance of the part
 
 
@@ -240,7 +242,10 @@ func _process(_delta: float) -> void:
 		"pick_plane":
 			_hover_pick_plane(origin, dir)
 		"sketch":
-			_follow_scale()
+			_follow_window()
+			if view != null and is_instance_valid(view):
+				view.refresh_references()
+			_settle_canvas()
 			_hover_sketch(origin, dir)
 		"pick_edges":
 			_hover_edges(origin, dir)
@@ -302,6 +307,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	if uv == null:
 		view.set_cursor(null)
 		view.set_preview("", [], null)
+		view.set_reference_hover({})
 		return
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
@@ -311,28 +317,32 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(null)
 		return
 	_hover_uv = uv
-	var radius_mm: float = SNAP_RADIUS / maxf(table.effective_scale(), 0.000001)
+	var radius_mm: float = SNAP_RADIUS / view.canvas_scale # the snap and pick reaches are a size in the world: they shrink in sketch mm as you zoom in
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
 		if tool == "line" and session.pending.size() == 1:
 			var first: Dictionary = session.pending[0]
 			line_start = session.points.get(str(first.get("id", "")), first.get("uv"))
-		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start)
+		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs)
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
+		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
-		var pick_mm: float = PICK_RADIUS / maxf(table.effective_scale(), 0.000001)
+		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds)
+		if _hover_entity.is_empty() and part_refs != null and session.references_ok and tool != "revolve":
+			_hover_entity = part_refs.pick(uv, pick_mm, kinds) # nothing of the sketch there: the part's own corner or edge, to dimension to
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
 		view.set_preview("", [], null)
-		var key := "%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", "")]
+		var key := "%s:%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", ""), str(_hover_entity.get("ref", {}))]
 		if key != _last_view_key:
 			_last_view_key = key
+			view.set_reference_hover(_hover_entity.get("ref", {}))
 			_refresh_view() # the drawing is rebuilt only when what's under the laser changes
 	else:
 		view.set_cursor(uv, "free")
@@ -340,7 +350,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 
 
 func _sheet_hit(origin: Vector3, dir: Vector3) -> Variant:
-	## Where the laser meets the sketch sheet, as sheet (u, v) in mm, or null if it misses or is off the sheet.
+	## Where the laser meets the sketch window, as the sketch's (u, v) in mm, or null if it misses or is outside the window.
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
 	var normal_w: Vector3 = (copy_xf.basis * (plane["n"] as Vector3)).normalized()
@@ -591,16 +601,23 @@ func _build_view() -> void:
 	view = SketchView.new()
 	view.name = "SketchView"
 	copy.add_child(view)
-	_window_scale = table.effective_scale()
-	view.setup(plane, sheet_size_mm(), centre, _window_scale, table.tokens)
-	_sheet_vertices = _vertices_on_plane(copy, plane)
+	view.setup(plane, table.sheet_window_m, centre, table.effective_scale(), table.tokens)
+	_canvas_stale = false
+	_sheet_vertices.clear()
+	part_refs = null
+	if _references_valid() and copy.has_meta("topology"):
+		part_refs = PartReferences.build(copy.get_meta("topology"), plane)
+		if part_refs.is_empty():
+			part_refs = null
+	session.references_ok = part_refs != null
+	view.set_references(part_refs)
 	if markers != null:
 		markers.set_markers_visible(false)
 	_refresh_view()
 
 
 func sheet_reaches(world_point: Vector3) -> bool:
-	## True if a world point is over the sketch sheet (inside its rectangle, within about 12 cm of its plane): a grip there takes the part.
+	## True if a world point is over the canvas window (inside its rectangle, within about 12 cm of its plane): a grip there takes the canvas.
 	if session == null or view == null or table.table_copy == null:
 		return false
 	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * world_point
@@ -632,25 +649,42 @@ func _sync_deck() -> void:
 	table.ui.set_sketching(session != null)
 
 
-func sheet_size_mm() -> Vector2:
-	## The sheet's size in sketch mm: a fixed window in the world (table.sheet_window_m), so the more the part is zoomed the fewer mm it spans.
-	return table.sheet_window_m / maxf(table.effective_scale(), 0.000001)
-
-
-func _follow_scale() -> void:
-	## Keeps the sheet a fixed window when the part is zoomed: re-sizes it (and its grid) once the scale has settled a little, never
-	## more than about 6 times a second, and only when it really changed.
+func _follow_window() -> void:
+	## The sketch window is fixed in the world while the part pans and zooms under it: every frame, tell the view which sketch spot is now
+	## at the window's middle and how big the part is. A zoom also rebuilds the drawing (a few times a second at most, see _settle_canvas).
 	if view == null or not is_instance_valid(view) or table.effective_scale() <= 0.0:
 		return
-	var s: float = table.effective_scale()
-	if absf(s - _window_scale) < _window_scale * 0.02:
+	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * table.to_global(table.window_anchor)
+	if view.set_frame(table.effective_scale(), SketchMath.to_sheet(local, session.plane)):
+		_canvas_stale = true
+
+
+func _references_valid() -> bool:
+	## The part's own vertices and edges may be used as references only when the geometry shown is the geometry the backend resolves a sketch's
+	## references against: the whole part, nothing hidden or rolled back, and (for a sketch that was already there) the sketch is the last thing built.
+	if view_is_filtered():
+		return false
+	if session == null or session.feature_id == "":
+		return false
+	var rows: Array = table.build.features
+	if rows.is_empty():
+		return true
+	return str((rows.back() as Dictionary).get("id", "")) == session.feature_id or table.build.index_of(session.feature_id) < 0
+
+
+func plane_uv_at(world_point: Vector3) -> Vector2:
+	## Where a world point is over the sketch plane, in sketch uv: its height off the plane is dropped.
+	return SketchMath.to_sheet(table.table_copy.global_transform.affine_inverse() * world_point, session.plane)
+
+
+func _settle_canvas() -> void:
+	if not _canvas_stale or view == null or not is_instance_valid(view):
 		return
 	var now := Time.get_ticks_msec()
-	if now - _window_msec < 160:
+	if now - _canvas_msec < 70:
 		return
-	_window_msec = now
-	_window_scale = s
-	view.set_window(sheet_size_mm(), s)
+	_canvas_msec = now
+	_canvas_stale = false
 	_refresh_view()
 
 
@@ -699,11 +733,13 @@ func _sketch_trigger() -> void:
 		if _snap.is_empty():
 			return
 		var pick := {"uv": _snap["uv"], "id": _snap["id"]}
+		if _snap.has("ref"):
+			pick["ref"] = _snap["ref"] # a corner of the part: made a pinned point that follows the part when the shape is made
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
 	elif tool == "dimension" or tool == SELECT_TOOL:
-		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / maxf(table.effective_scale(), 0.000001))
+		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if ghost != "":
 			_type_dimension(ghost)
 		elif not _hover_entity.is_empty():

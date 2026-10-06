@@ -9,6 +9,8 @@ extends RefCounted
 ##     as they spread or close, all about the midpoint (table_pose.gd). The second grip may be anywhere over the table.
 ##   * The right STICK spins it about the slab's up axis and tips it; A pulls it nearer, B pushes it farther. These
 ##     belong to the table only while it is ENGAGED.
+##   * WITH A SKETCH OPEN and "Part: Locked" the grips drive the sketch CANVAS instead (the part and its tilt stay put): one hand on the
+##     sheet pans the canvas, two hands zoom it about the midpoint between them (table_editor.gd: canvas_set).
 ##   * LETTING GO over the slab leaves it on the table; letting go beyond it sends the real part back to the arena
 ##     where you let go (design_table.gd: send_to_arena).
 ##
@@ -206,6 +208,7 @@ func _follow_one(delta: float) -> void:
 		_table.apply_pose(_table.pivot.position, (turn * _table.pivot.basis.orthonormalized()).orthonormalized(), _table.user_scale)
 	_prev_basis[hand] = now_basis
 	_table.pivot.position = local + (_grips[hand]["offset"] as Vector3)
+	_table.pin_sketch_plane()
 	_prev[hand] = local
 
 
@@ -215,8 +218,9 @@ func _follow_two(delta: float) -> void:
 	var right: Object = keys[1]
 	var l: Vector3 = _table.to_local(_steady(left, delta))
 	var r: Vector3 = _table.to_local(_steady(right, delta))
-	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale())
+	var step := TablePose.two_hand(_prev.get(left, l), _prev.get(right, r), l, r, _table.pivot.position, _table.pivot.basis.orthonormalized(), _table.user_scale, not _table.sketch_locked(), _table.max_user_scale(), _table.min_user_scale())
 	_table.apply_pose(step["centre"], step["rotation"], step["scale"])
+	_table.pin_sketch_plane()
 	_prev[left] = l
 	_prev[right] = r
 
@@ -246,6 +250,7 @@ func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
 			moved = TablePose.clamp_to_zone(moved, _table.slab_size, MIN_HEIGHT, _table.drop_ceiling) # a nudge never walks it off the table
 		var shift: Vector3 = moved - _table.pivot.position
 		_table.pivot.position = moved
+		_table.pin_sketch_plane()
 		for hand in _grips:
 			_grips[hand]["offset"] = (_grips[hand]["offset"] as Vector3) + shift # a held part keeps the hold you have on it
 

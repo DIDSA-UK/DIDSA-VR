@@ -16,9 +16,9 @@ signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
 signal undo_pressed
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
-signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the sketch plane tilted (grips only move and scale), Free also turns it
+signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
 signal done_pressed ## "Done": leave the open sketch (the part is refreshed if it was changed)
-signal fit_pressed ## "Fit": scale and move the part so the sketch fills the sheet
+signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
 signal return_pressed ## "To arena": the real part goes back where it came from
 signal close_requested
 signal feedback(event: String) ## "press" / "error": the host turns it into a haptic pulse and a sound
@@ -363,6 +363,7 @@ func done_button() -> Button:
 
 func fit_button() -> Button:
 	return _fit_button
+
 
 
 func set_engaged(on: bool) -> void:

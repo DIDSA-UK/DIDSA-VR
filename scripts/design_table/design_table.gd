@@ -116,6 +116,8 @@ var seated: MeshInstance3D = null ## the arena's own node that is on the table (
 var pivot: Node3D = null ## the copy's pivot, floating above the slab; its basis is the part's orientation on the table
 var table_copy: MeshInstance3D = null ## what's edited; a child of pivot, in the part's own mm frame
 var fit_scale := 0.0 ## metres per mm of the part at its fitted size
+var window_anchor_normal := Vector3.ZERO ## console frame: the sketch plane's normal at that pose
+var window_anchor := Vector3.ZERO ## console frame: the spot on the sketch plane that the sketch window is centred on (fixed while a sketch is open; the part slides under it)
 var user_scale := 1.0 ## how much bigger / smaller than fitted the part has been made with two hands (the pivot carries it; fit_scale does not change)
 var build ## table_build.gd: the Build tree of the part on the table (the tree window's Build tab is its view)
 var manip ## table_manip.gd: gripping, turning, scaling and nudging the part, and whether the table is engaged
@@ -203,7 +205,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	ui.reset_pressed.connect(reset_pose)
 	ui.part_lock_toggled.connect(func(on: bool) -> void:
 		part_locked = on
-		set_status("The part keeps its tilt: two hands move and scale it." if on else "The part is free: two hands turn it, the stick spins it. Reset or Fit puts the tilt back."))
+		set_status("The part keeps its tilt: one hand slides it under the sketch window, two hands zoom it." if on else "The part is free: your hands move, turn and scale it anywhere, the stick spins it. Reset puts the tilt back."))
 	ui.fit_pressed.connect(fit_sketch)
 	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
 	ui.return_pressed.connect(return_to_arena)
@@ -670,23 +672,47 @@ func sketch_locked() -> bool:
 
 
 func max_user_scale() -> float:
-	## The biggest the part may be scaled to: higher while sketching (zooming into the sketch).
+	## The biggest the part may be scaled to: much higher while sketching (zooming right in on the sketch under the window).
 	return maxf(TablePose.SKETCH_MAX_SCALE, max_scale_setting) if editing_sketch() else max_scale_setting
 
 
+func min_user_scale() -> float:
+	## The smallest: much lower while sketching (panning out to a huge sketch).
+	return TablePose.SKETCH_MIN_SCALE if editing_sketch() else TablePose.MIN_SCALE
+
+
 func fit_sketch() -> void:
-	## The Fit button: the part goes back to the sketch tilt, and is scaled and moved so the sketch (or, with nothing drawn yet, the part)
-	## fills most of the sheet window, in the middle of the slab.
+	## The Fit button: the part goes back to the sketch tilt and is scaled and slid so the sketch (or, with nothing drawn yet, the part)
+	## fills most of the sketch window.
 	if pivot == null or not editing_sketch() or editor.view == null:
 		return
 	var bounds: Rect2 = editor.sketch_bounds()
-	var scale: float = TablePose.fit_scale(bounds.size, sheet_window_m, 0.8, fit_scale, max_user_scale())
+	var scale: float = TablePose.fit_scale(bounds.size, sheet_window_m, 0.8, fit_scale, max_user_scale(), min_user_scale())
 	var rotation := sketch_rotation(editor.session.plane)
 	var basis := rotation.orthonormalized() * scale
 	var centre_in_pivot: Vector3 = table_copy.transform * SketchMath.from_sheet(bounds.get_center(), editor.session.plane)
-	_animate_pose(rotation, Vector3(0.0, sketch_hover_height, 0.0) - basis * centre_in_pivot, scale)
-	set_status("Sketch fitted to the sheet.")
+	_animate_pose(rotation, window_anchor - basis * centre_in_pivot, scale)
+	set_status("Sketch fitted to the window.")
 	UiFeedback.haptic(_right, "confirm")
+
+
+func pin_sketch_plane() -> void:
+	## While a sketch is open and the part is locked, the part may only slide ALONG the sketch plane under the window: whatever moved
+	## it off the plane (a hand, A / B, a scale about a point off the plane) is taken back out, so the window stays in the plane.
+	if not sketch_locked() or pivot == null or table_copy == null or window_anchor_normal == Vector3.ZERO:
+		return
+	var plane: Dictionary = editor.session.plane
+	var on_plane: Vector3 = pivot.position + pivot.basis * (table_copy.transform * (plane["origin"] as Vector3))
+	pivot.position -= window_anchor_normal * window_anchor_normal.dot(on_plane - window_anchor)
+
+
+func _set_window_anchor(rotation: Basis, centre: Vector3, scale: float, plane: Dictionary) -> void:
+	## Fixes the sketch window where the sketch plane will be once the part has settled into `rotation`, `centre`, `scale`: on the
+	## plane, as near the part's middle as it gets.
+	var basis := rotation.orthonormalized() * scale
+	var on_plane: Vector3 = centre + basis * (table_copy.transform * (plane["origin"] as Vector3))
+	window_anchor_normal = (rotation.orthonormalized() * (table_copy.basis * (plane["n"] as Vector3))).normalized()
+	window_anchor = centre - window_anchor_normal * window_anchor_normal.dot(centre - on_plane)
 
 
 func part_radius() -> float:
@@ -999,6 +1025,7 @@ func orient_to_plane(plane: Dictionary) -> void:
 		return
 	var at := pivot.position
 	at.y = maxf(at.y, sketch_hover_height)
+	_set_window_anchor(sketch_rotation(plane), at, user_scale, plane)
 	_animate_pose(sketch_rotation(plane), at, user_scale)
 
 
@@ -1018,7 +1045,10 @@ func reset_pose() -> void:
 	if editor != null and editor.session != null and not (editor.session.plane as Dictionary).is_empty():
 		rotation = sketch_rotation(editor.session.plane)
 		text = "Back to the sketch plane."
-	_animate_pose(rotation, Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0), 1.0)
+	var target := Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0)
+	if editing_sketch():
+		_set_window_anchor(rotation, target, 1.0, editor.session.plane)
+	_animate_pose(rotation, target, 1.0)
 	set_status(text)
 	UiFeedback.haptic(_right, "confirm")
 

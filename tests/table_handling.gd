@@ -66,9 +66,9 @@ func _initialize() -> void:
 	table.set_slab_size(Vector2(0.6, 0.4))
 
 	# --- the biggest zoom is a setting
-	print("SMOKE the everyday zoom limit is 3x by default and a sketch allows 8x: ", is_equal_approx(table.max_user_scale(), 3.0))
+	print("SMOKE the everyday zoom limit is 3x by default (a sketch allows far more, 1/50 to 200x): ", is_equal_approx(table.max_user_scale(), 3.0))
 	table.max_scale_setting = 5.0
-	print("SMOKE ...set to 5x it is 5x (and a sketch still allows 8x, or more if the setting is higher): ", is_equal_approx(table.max_user_scale(), 5.0))
+	print("SMOKE ...set to 5x it is 5x (outside a sketch): ", is_equal_approx(table.max_user_scale(), 5.0))
 	var zoomed := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-5, 0, 0), Vector3(5, 0, 0), Vector3.ZERO, Basis.IDENTITY, 1.0, true, table.max_user_scale())
 	print("SMOKE ...two hands spread far stop at the limit: ", is_equal_approx(zoomed["scale"], 5.0))
 	table.max_scale_setting = 3.0

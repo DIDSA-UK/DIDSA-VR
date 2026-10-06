@@ -7,6 +7,7 @@ extends SceneTree
 ## Run it, look at the picture. Not in run_all.sh.
 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 
 
 func wait_for(pred: Callable, frames := 600) -> bool:
@@ -146,4 +147,16 @@ func _initialize() -> void:
 				if c.r + c.g + c.b > 0.35:
 					lit += 1
 		print("SMOKE the picture is not blank: ", lit > 200, " ", lit)
+		# the part (and its sketch) zoomed 4x about a spot and then right out, under the fixed window: the drawing is clipped at the window's edge
+		var rot: Basis = table.pivot.basis.orthonormalized()
+		var wanted := {"sketch_zoom_in.png": [4.0, Vector2(-130, 0)], "sketch_zoom_out.png": [0.25, Vector2(0, 0)]}
+		for file_name in wanted:
+			var factor: float = wanted[file_name][0]
+			var spot: Vector3 = table.pivot.position + table.pivot.basis * (table.table_copy.transform * SketchMath.from_sheet(wanted[file_name][1], s.plane))
+			table.apply_pose(spot + (table.pivot.position - spot) * factor, rot, table.user_scale * factor)
+			await create_timer(0.7).timeout
+			var shot := root.get_texture().get_image()
+			if dir_out != "":
+				shot.save_png(dir_out.path_join(file_name))
+			table.apply_pose(spot + (table.pivot.position - spot) / factor, rot, table.user_scale / factor)
 	quit()

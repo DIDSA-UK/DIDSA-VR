@@ -59,9 +59,11 @@ var profile_status := ""
 var dof := -1
 var converged := true
 
+var references_ok := false ## the part's own vertices and edges may be used as references (set by the editor: the topology it shows is the one the backend resolves against)
 var selection: Array = [] ## picked entities for the constraint / dimension tools: [{kind, id}]
 var ghosts: Array = [] ## dimension candidates for the current selection (see _build_ghosts)
 
+var _ref_points := {} ## "body:vertex index" -> the pinned point made for it
 var _undo: Array = [] ## [{label, calls: [[method, path]]}]
 
 
@@ -275,9 +277,13 @@ func _post(path: String, body) -> Dictionary:
 
 
 func _point(pick: Dictionary, created: Array) -> String:
-	## The id of a pick's point: the existing one it snapped to, else a new one at its position.
+	## The id of a pick's point: the existing one it snapped to, the pinned reference point of a part vertex it snapped to (made now, if it is
+	## the first time), else a new one at its position.
 	if str(pick.get("id", "")) != "":
 		return str(pick["id"])
+	if pick.get("ref") is Dictionary:
+		var made := await ensure_reference(pick["ref"])
+		return str(made["id"]) if made["ok"] else ""
 	var uv: Vector2 = pick["uv"]
 	var r := await _post(SKETCH + sketch_id + "/points", {"x": uv.x, "y": uv.y})
 	if not r["ok"]:
@@ -430,6 +436,53 @@ func _make_polygon(taps: Array) -> Dictionary:
 
 # --- Finding things under the laser -------------------------------------------------------
 
+# --- The part's own geometry as references ----------------------------------------------------
+
+func ensure_reference(ref: Dictionary) -> Dictionary:
+	## Makes a part vertex or straight edge usable in this sketch and returns {ok, id, message}: a vertex becomes a pinned point that follows the
+	## part (the backend re-resolves it whenever the part changes, and flags the sketch if it can't), an edge becomes a pinned construction line
+	## between two such points. Idempotent: asking again for the same vertex gives the same point, and an edge whose two points are already joined
+	## by a line gives that line. Nothing for the user to convert, fix or mark as construction.
+	if not references_ok:
+		return {"ok": false, "id": "", "message": "This sketch can't use the part's own geometry (the part shown isn't the one the backend sketches on)."}
+	match str(ref.get("kind", "")):
+		"vertex":
+			return await _ensure_vertex(str(ref["body"]), int(ref["index"]))
+		"edge":
+			var a := await _ensure_vertex(str(ref["body"]), int(ref["a_vertex"]))
+			if not a["ok"]:
+				return a
+			var b := await _ensure_vertex(str(ref["body"]), int(ref["b_vertex"]))
+			if not b["ok"]:
+				return b
+			for id in lines:
+				var l: Dictionary = lines[id]
+				if (l["a"] == a["id"] and l["b"] == b["id"]) or (l["a"] == b["id"] and l["b"] == a["id"]):
+					return {"ok": true, "id": id, "message": ""}
+			var made := await _post(SKETCH + sketch_id + "/lines", {"start_point_id": a["id"], "end_point_id": b["id"], "construction": true})
+			if not made["ok"]:
+				return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
+			lines[str(made["json"]["id"])] = {"a": a["id"], "b": b["id"], "construction": true}
+			changed.emit()
+			return {"ok": true, "id": str(made["json"]["id"]), "message": ""}
+	return {"ok": false, "id": "", "message": ""}
+
+
+func _ensure_vertex(body: String, index: int) -> Dictionary:
+	var key := "%s:%d" % [body, index]
+	if _ref_points.has(key) and points.has(_ref_points[key]):
+		return {"ok": true, "id": _ref_points[key], "message": ""}
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/vertex" % [owner_part_id, feature_id], {"body_id": body, "vertex_index": index})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that corner of the part: %s" % str(made["error"])}
+	var id := str(made["json"]["id"])
+	points[id] = Vector2(float(made["json"]["x"]), float(made["json"]["y"]))
+	point_locked[id] = true
+	_ref_points[key] = id
+	changed.emit()
+	return {"ok": true, "id": id, "message": ""}
+
+
 func nearest_point(uv: Vector2, radius: float) -> String:
 	## The id of the existing point nearest `uv` within `radius`, or "". The sketch's own construction points
 	## (a rectangle's centre) count: they're real points.
@@ -500,9 +553,18 @@ static func _distance_to_arc(uv: Vector2, c: Vector2, s: Vector2, e: Vector2) ->
 # --- Constraint tools --------------------------------------------------------------------
 
 func select(entity: Dictionary) -> Dictionary:
-	## One laser pick of an entity for a constraint tool or Dimension. Returns {ok, done, message}.
+	## One laser pick of an entity for a constraint tool or Dimension. Returns {ok, done, message}. A pick of the PART's own vertex or edge
+	## (entity.ref, no id yet) is first made a pinned reference point or line, the way the flat app's "use edge" does, and then is just an entity.
 	if busy or entity.is_empty():
 		return {"ok": false, "done": false, "message": ""}
+	if entity.get("ref") is Dictionary and str(entity.get("id", "")) == "":
+		busy = true
+		var made := await ensure_reference(entity["ref"])
+		busy = false
+		if not made["ok"]:
+			status.emit(str(made["message"]))
+			return {"ok": false, "done": false, "message": str(made["message"])}
+		entity = {"kind": str(entity["kind"]), "id": str(made["id"])}
 	if tool == "dimension":
 		return _select_for_dimension(entity)
 	if tool == SELECT:
@@ -827,6 +889,8 @@ func _build_ghosts() -> Array:
 	var out: Array = []
 	if selection.is_empty():
 		return out
+	if _all_pinned(selection):
+		return out # two pieces of the part (or the origin) are already where they are: there is nothing a dimension between them could drive
 	var first: Dictionary = selection[0]
 	if selection.size() == 1:
 		match first["kind"]:
@@ -876,6 +940,18 @@ func _build_ghosts() -> Array:
 			var dist2: float = points[pt].distance_to(closest)
 			out.append(_ghost("point_line", "Distance", "mm", dist2, (points[pt] + closest) * 0.5, {"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}, perp_spec(pt, ln)))
 	return out
+
+
+func _all_pinned(entities: Array) -> bool:
+	## True if every point of the picked points and lines is pinned (a part reference, the origin, or Fixed).
+	var seen := 0
+	for e in entities:
+		var ids: Array = [str(e["id"])] if str(e["kind"]) == "point" else (_line_points(str(e["id"])) if str(e["kind"]) == "line" else [])
+		for pid in ids:
+			seen += 1
+			if not point_locked.get(pid, false) and not is_origin(str(pid)):
+				return false
+	return seen > 0
 
 
 func _ghost(key: String, label: String, unit: String, value: float, uv: Vector2, apply: Dictionary, spec: Dictionary = {}) -> Dictionary:

@@ -5,12 +5,13 @@ extends RefCounted
 ## Order, like the flat sketcher's (client/lib/sketch/sketch_controller.dart, _pointIdAt):
 ##   1. an EXISTING POINT within the radius -> reuse it (the entity then shares it, which is what makes shapes join). The sketch's ORIGIN is one
 ##      of them (kind "origin"), so a line can start on it, a circle can be centred on it, and a dimension can start or end at it;
-##   2. a VERTEX of the part that lies on the sheet's plane (the corners of the face you're sketching on);
+##   2. a VERTEX of the part, projected onto the sheet (the corners of the face you're sketching on, and every other corner of the part seen
+##      along the plane's normal): the pick carries a `ref` and the session makes it a pinned point that follows the part when it is used;
 ##   3. a line's MIDPOINT;
 ##   4. the nearest spot ON a line, circle or arc (position only);
 ##   5. otherwise the free position.
-## Only (1) carries an id. (2)-(4) snap the position exactly but make an ordinary new point: the flat app makes a real
-## constraint for those, which a later step here can add.
+## Only (1) carries an id and (2) a reference to the part's vertex. (3)-(4) snap the position exactly but make an ordinary new point: the flat
+## app makes a real constraint for those, which a later step here can add.
 ##
 ## Axis inference for a line: with one end placed, a second end within AXIS_DEGREES of horizontal or vertical is
 ## pulled exactly onto the axis and flagged, so the session can add the Horizontal / Vertical constraint.
@@ -23,9 +24,10 @@ enum Kind { FREE, POINT, VERTEX, MIDPOINT, CURVE, ORIGIN }
 const NAMES := {Kind.FREE: "free", Kind.POINT: "point", Kind.VERTEX: "vertex", Kind.MIDPOINT: "midpoint", Kind.CURVE: "curve", Kind.ORIGIN: "origin"}
 
 
-static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null) -> Dictionary:
-	## {uv, id, kind (a name), infer}. `session` is a sketch_session.gd (points / lines / circles / arcs).
-	## `vertices` are the part's vertices on the sheet (Vector2s). `line_start` is the first end of the line being drawn, if any.
+static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null, refs: Variant = null) -> Dictionary:
+	## {uv, id, kind (a name), infer, ref?}. `session` is a sketch_session.gd (points / lines / circles / arcs).
+	## `vertices` are plain positions to snap to (Vector2s); `refs` is the part's projected geometry (part_references.gd), whose vertices are snapped
+	## to as references. `line_start` is the first end of the line being drawn, if any.
 	var out := {"uv": uv, "id": "", "kind": NAMES[Kind.FREE], "infer": ""}
 	if not enabled or session == null:
 		return out
@@ -47,6 +49,11 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		if d <= best:
 			best = d
 			out = {"uv": v, "id": "", "kind": NAMES[Kind.VERTEX], "infer": ""}
+	if refs != null and session.references_ok:
+		var rv: Dictionary = refs.nearest_vertex(uv, radius)
+		if not rv.is_empty() and float(rv["distance"]) <= best:
+			best = float(rv["distance"])
+			out = {"uv": rv["uv"], "id": "", "kind": NAMES[Kind.VERTEX], "infer": "", "ref": {"kind": "vertex", "body": rv["body"], "index": rv["index"]}}
 	if out["kind"] == NAMES[Kind.VERTEX]:
 		return out
 
