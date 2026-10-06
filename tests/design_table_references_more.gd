@@ -297,4 +297,109 @@ func _initialize() -> void:
 	print("SMOKE pulling the trigger on a driven candidate keeps it (in brackets, R30) with no constraint call: ", ed.session.driven.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").is_empty() and ed.session.dimension_items()[0]["text"] == "(R30)")
 	table.manager.deactivate()
 	table.close()
+
+	# --- sketches that used to be refused: something hidden, and a reopened sketch that is not the last feature
+	fake = Fake.new()
+	fake.occurrences = {owner_id: [{"id": "occ_box", "resolved_part_id": "PART_BOX"}, {"id": "occ_cyl", "resolved_part_id": "PART_CYL"}]}
+	fake.mesh_bytes = bytes
+	fake.filtered_mesh_bytes = bytes # (the fixture has one shape; what is checked is WHICH fetch was made and that its topology is used)
+	fake.origin = true
+	fake.sketch_plane = "XY"
+	fake.points = {"pA": Vector2(0, 0), "pB": Vector2(40, 0)}
+	fake.entities = [{"type": "line", "id": "lnA", "start_point_id": "pA", "end_point_id": "pB", "construction": false}]
+	fake.feature_rows = {"PART_BOX": [
+		{"type": "sketch", "id": "sk1", "sketch_id": "s1", "plane_feature_id": null, "locked": true, "has_lost_reference": false},
+		{"type": "extrude", "id": "ex1", "sketch_feature_id": "sk1", "extrude_type": "boss", "start_distance": 0.0, "end_distance": 12.0, "target_body_ids": [], "locked": true},
+		{"type": "sketch", "id": "sk2", "sketch_id": "s2", "plane_feature_id": null, "locked": true, "has_lost_reference": false},
+		{"type": "extrude", "id": "ex2", "sketch_feature_id": "sk2", "extrude_type": "boss", "start_distance": 0.0, "end_distance": 5.0, "target_body_ids": [], "locked": true},
+		{"type": "fillet", "id": "fl1", "edge_refs": [{"body_id": "ex2", "shape_type": "edge", "index": 0}], "radius": 2.0, "locked": false},
+	]}
+	table.api = fake
+	ed.api = fake
+	table.open()
+	table.seat(box)
+	await settle(func() -> bool: return table.build.features.size() == 5)
+	fake.calls.clear()
+	var reopened: bool = await ed.reopen_sketch("sk2")
+	await settle(func() -> bool: return ed.part_refs != null)
+	var path_used := ""
+	for c in fake.calls:
+		if str(c[0]).contains("assembly-mesh.glb"):
+			path_used = str(c[0])
+	print("SMOKE reopening a sketch that is NOT the last feature now gets the part's corners and edges: the part is fetched as the sketch saw it, with everything after it (the extrude and the fillet) left out, and only its topology is used: ", reopened and ed.session.references_ok and ed.part_refs != null and path_used.contains("rollback_excluded_feature_ids=ex2") and path_used.contains("rollback_excluded_feature_ids=fl1") and not path_used.contains("hidden_feature_ids") and not path_used.contains("sk2") and not path_used.contains("=ex1"))
+	print("SMOKE ...the table's own picture was not touched (the same mesh is on the copy): ", table.table_copy.mesh == box.mesh)
+	await ed.session.ensure_reference({"kind": "vertex", "body": "body_box", "index": 5})
+	print("SMOKE ...and a reference from it is made as usual (the backend resolves the index at that point of the history, which is the topology the corner was read from): ", calls_to("convert-entities/vertex").size() == 1 and calls_to("convert-entities/vertex")[0][1] == {"body_id": "body_box", "vertex_index": 5})
+	var last_sketch_calls := calls_to("assembly-mesh.glb").size()
+	ed.end_sketch()
+	table.build.select("ex2")
+	table.build.toggle_hidden_selected()
+	await frames(3)
+	fake.calls.clear()
+	await ed.begin_sketch({"fixed": "XY"})
+	await settle(func() -> bool: return ed.part_refs != null)
+	path_used = ""
+	for c in fake.calls:
+		if str(c[0]).contains("assembly-mesh.glb"):
+			path_used = str(c[0])
+	print("SMOKE with a feature hidden in the Build tree a new sketch on the part gets references too: the whole part's topology is fetched (nothing hidden, nothing rolled back, the backend ignores hiding), the table shows the hidden view as before: ", ed.session.references_ok and ed.part_refs != null and path_used.contains("assembly-mesh.glb") and not path_used.contains("hidden_feature_ids") and not path_used.contains("rollback_excluded"))
+	ed.end_sketch()
+
+	# --- lost and moved references (the backend's answer after an upstream edit): shown in the editor, re-picked, kept
+	fake = Fake.new()
+	fake.occurrences = {owner_id: [{"id": "occ_box", "resolved_part_id": "PART_BOX"}, {"id": "occ_cyl", "resolved_part_id": "PART_CYL"}]}
+	fake.mesh_bytes = bytes
+	fake.filtered_mesh_bytes = bytes
+	fake.origin = true
+	fake.sketch_plane = "XY"
+	fake.points = {"pL": Vector2(100, 0), "pM": Vector2(0, 0), "pOK": Vector2(0, 100)}
+	fake.pinned = {"pL": true, "pM": true, "pOK": true}
+	fake.entities = []
+	fake.reference_rows = [
+		{"point_id": "pM", "body_id": "body_box", "kind": "vertex", "vertex_index": 1, "status": "potentially_moved", "reason": "unique_fingerprint_far", "method": "signature", "candidates": []},
+		{"point_id": "pL", "body_id": "body_box", "kind": "vertex", "vertex_index": 5, "status": "lost", "reason": "consumed_by_fl1", "method": "", "candidates": []},
+		{"point_id": "pOK", "body_id": "body_box", "kind": "vertex", "vertex_index": 3, "status": "ok", "reason": "", "method": "index", "candidates": []},
+	]
+	fake.feature_rows = {"PART_BOX": [
+		{"type": "sketch", "id": "sk1", "sketch_id": "s1", "plane_feature_id": null, "locked": true, "has_lost_reference": true, "lost_reference_point_ids": ["pL"], "moved_reference_point_ids": ["pM"], "followed_reference_point_ids": [], "reference_reasons": {"pL": "consumed_by_fl1"}},
+		{"type": "extrude", "id": "ex1", "sketch_feature_id": "sk1", "extrude_type": "boss", "start_distance": 0.0, "end_distance": 12.0, "target_body_ids": [], "locked": true},
+		{"type": "fillet", "id": "fl1", "edge_refs": [{"body_id": "ex1", "shape_type": "edge", "index": 0}], "radius": 2.0, "locked": false, "has_lost_reference": false, "lost_references": [], "moved_references": ["edge_refs[0]"], "followed_references": []},
+	]}
+	table.api = fake
+	ed.api = fake
+	table.open()
+	table.seat(box)
+	table.build.clear() # (the part never really left in this test: read its features afresh, as seating it for the first time does)
+	await table.build.reload()
+	await settle(func() -> bool: return table.build.features.size() == 3)
+	var BuildTree := preload("res://scripts/design_table/build_tree.gd")
+	print("SMOKE the Build tree's notes say what is wrong with each row: a sketch's lost and moved points, another feature's moved reference, nothing for a healthy one: ", BuildTree.reference_note(table.build.features[0]) == "1 lost, 1 may have moved" and BuildTree.reference_note(table.build.features[2]) == "reference may have moved" and BuildTree.reference_note(table.build.features[1]) == "" and BuildTree.reference_note({"has_lost_reference": true}) == "lost reference" and BuildTree.reference_note({"lost_reference_point_ids": ["a", "b"]}) == "2 lost references")
+	print("SMOKE the sketch's Build row carries the note, in the warning colour (and so does the fillet's): ", table.tree._build_rows.find_children("*", "Button", true, false).any(func(b): return str(b.text).begins_with("Sketch 1") and str(b.text).contains("1 lost, 1 may have moved")) and table.tree._build_rows.find_children("*", "Button", true, false).any(func(b): return str(b.text).begins_with("Fillet 1") and str(b.text).contains("reference may have moved")))
+	print("SMOKE the status line names them when the list is read (once): ", table.ui._status_label.text.begins_with("Build tree: Sketch 1: 1 lost, 1 may have moved; Fillet 1: reference may have moved"), " ", table.ui._status_label.text)
+	fake.calls.clear()
+	await ed.reopen_sketch("sk1")
+	await settle(func() -> bool: return ed.part_refs != null)
+	var sess = ed.session
+	print("SMOKE reopening it reads which of its points are the part's references and how each is doing: ", calls_to("/external-references").size() == 1 and sess.reference_status("pL") == "lost" and sess.reference_status("pM") == "potentially_moved" and sess.reference_status("pOK") == "ok" and sess.reference_status("nothing") == "ok")
+	print("SMOKE the flagged ones are listed lost first, and the status line carries a warning with the counts: ", sess.flagged_references().map(func(r): return r["point_id"]) == ["pL", "pM"] and sess.reference_warning().contains("1 lost, 1 may have moved") and ed._sketch_hint().begins_with("Reference to the part: 1 lost, 1 may have moved"))
+	print("SMOKE the Select tool, with nothing picked, offers Fix (and Keep for the moved one) in the options row: ", table.ui._options.map(func(o): return o["id"]) == ["refs_fix", "refs_keep"] and str(table.ui._options[0]["text"]) == "Fix 2 reference(s)")
+	print("SMOKE the view marks the two flagged points (the drawing has more in it than without them): ", ed.view._geo.mesh != null)
+	await ed.on_option("refs_fix")
+	print("SMOKE Fix starts on the lost point and says what to do (and why it was lost): ", ed.repick_point == "pL" and ed.view.repick_point == "pL" and table.ui._status_label.text.contains("Lost (2 to do)") and table.ui._status_label.text.contains("consumed by fl1") and table.ui._options.map(func(o): return o["id"]) == ["refs_next", "refs_cancel"])
+	table.manager.deactivate()
+	table.manager.activate("select")
+	await aim_uv(Vector2(98, 1.5))
+	print("SMOKE while re-picking, aiming near a corner of the part picks that corner (only corners and hole centres count, not the sketch's own things): ", ed._hover_entity.get("ref", {}) == {"kind": "vertex", "body": "body_box", "index": 5})
+	await pull()
+	await settle(func() -> bool: return not fake.reattached.is_empty() and not ed.session.busy)
+	print("SMOKE the trigger re-attaches the lost point to that corner: one reattach call naming the point, the body and the vertex: ", fake.reattached == [["pL", "body_box", 5]])
+	print("SMOKE ...and the walk goes on to the next flagged point (here the moved one still stands in the fake's answer, so it is next): ", ed.repick_point in ["pM", ""])
+	ed._stop_repick()
+	await ed.on_option("refs_keep")
+	await settle(func() -> bool: return not fake.confirmed.is_empty())
+	print("SMOKE Keep confirms the potentially moved point with the backend (and only that one): ", fake.confirmed == ["pM"])
+	var wrong: Dictionary = await sess.reattach("pM", {"kind": "circle_centre", "body": "body_cyl", "index": 2})
+	print("SMOKE a corner-following point refuses a hole as its replacement (and the other way round), with a reason and nothing sent: ", not wrong["ok"] and str(wrong["message"]).contains("corner") and fake.reattached.size() == 1)
+	ed.end_sketch()
+	table.close()
 	quit()

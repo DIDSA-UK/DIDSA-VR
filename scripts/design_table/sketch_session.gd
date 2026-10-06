@@ -562,6 +562,95 @@ func _point_on_reference(pick: Dictionary, created: Array) -> String:
 	return id
 
 
+func reference_status(point_id: String) -> String:
+	## What state the backend says a pinned point's reference is in: "ok", "followed" (re-found at a new index, informational), "potentially_moved" (bound on
+	## weaker evidence: confirm it or re-pick) or "lost" (never rebound silently). "ok" for a point that is not a reference.
+	for row in reference_rows:
+		if str(row.get("point_id", "")) == point_id:
+			return str(row.get("status", "ok"))
+	return "ok"
+
+
+func flagged_references() -> Array:
+	## The reference rows that need the user: lost ones first, then the potentially moved.
+	var lost: Array = []
+	var moved: Array = []
+	for row in reference_rows:
+		match str(row.get("status", "ok")):
+			"lost":
+				lost.append(row)
+			"potentially_moved":
+				moved.append(row)
+	return lost + moved
+
+
+func reference_warning() -> String:
+	## One line for the status area, "" when every reference is fine.
+	var lost := 0
+	var moved := 0
+	for row in flagged_references():
+		if str(row["status"]) == "lost":
+			lost += 1
+		else:
+			moved += 1
+	if lost == 0 and moved == 0:
+		return ""
+	var parts: Array = []
+	if lost > 0:
+		parts.append("%d lost" % lost)
+	if moved > 0:
+		parts.append("%d may have moved" % moved)
+	return "Reference to the part: %s. Select, with nothing picked, offers Fix." % ", ".join(parts)
+
+
+func reattach(point_id: String, ref: Dictionary) -> Dictionary:
+	## Points a flagged reference point at the corner (ref {kind: "vertex", body, index}) or hole (ref {kind: "circle_centre", body, index}) the user picked as
+	## its replacement: everything built on the point (lines, dimensions, constraints) stays on it, only what it follows changes. {ok, message}.
+	var body := {"body_id": str(ref["body"])}
+	match str(ref.get("kind", "")):
+		"vertex":
+			body["vertex_index"] = int(ref["index"])
+		"circle_centre":
+			body["edge_index"] = int(ref["index"])
+		_:
+			return {"ok": false, "message": "Pick a corner of the part (or the centre of a hole) to follow."}
+	var wants_centre := false
+	for row in reference_rows:
+		if str(row.get("point_id", "")) == point_id:
+			wants_centre = str(row.get("kind", "vertex")) == "circle_centre"
+	if wants_centre != (str(ref["kind"]) == "circle_centre"):
+		return {"ok": false, "message": "That point follows the centre of a hole, so pick a hole's centre." if wants_centre else "That point follows a corner of the part, so pick a corner."}
+	busy = true
+	var r := await _post("/document/parts/%s/features/sketch/%s/external-references/%s/reattach" % [owner_part_id, feature_id, point_id], body)
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't re-attach it: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	_ref_points.clear()
+	_ref_circles.clear()
+	await refresh(true)
+	await load_references()
+	busy = false
+	changed.emit()
+	return {"ok": true, "message": ""}
+
+
+func confirm_reference(point_id: String) -> Dictionary:
+	## "Yes, this is the right corner": a potentially moved reference stops being flagged.
+	busy = true
+	var r := await _post("/document/parts/%s/features/sketch/%s/external-references/%s/confirm" % [owner_part_id, feature_id, point_id], {})
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't keep it: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	await load_references()
+	busy = false
+	changed.emit()
+	return {"ok": true, "message": ""}
+
+
 func load_references() -> void:
 	## Reads which of this sketch's points are the part's own corners and hole centres (the backend's list of external references), so a reopened sketch
 	## reuses them instead of making a second copy, and what state each is in (reference_rows: ok / followed / potentially_moved / lost). Quietly nothing

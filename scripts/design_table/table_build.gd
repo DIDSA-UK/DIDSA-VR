@@ -23,6 +23,7 @@ var features: Array = [] ## the backend's rows, build order
 var names: Array = [] ## "Sketch 1", "Extrude 1"... one per row
 var selected_id := ""
 var selected_body := ""
+var _last_reference_warning := "" ## what the status line was last told about flagged references
 var rollback_to := "" ## feature id: everything after this row is rolled back ("" = not rolled back)
 var delete_armed_id := ""
 var loaded_part := ""
@@ -50,6 +51,7 @@ func clear() -> void:
 	rollback_to = ""
 	delete_armed_id = ""
 	loaded_part = ""
+	_last_reference_warning = ""
 	changed.emit()
 
 
@@ -61,6 +63,29 @@ func _maybe_reload() -> void:
 		reload()
 	elif pid != "" and _table.editor.state == "sketch":
 		reload() # a sketch was just opened: it is a feature now
+
+
+func reference_warning() -> String:
+	## One line naming what the backend flagged in the feature list: which sketches (and other features) lost a reference to the part or have one that
+	## may have moved. "" when all is well.
+	var bits: Array = []
+	for i in features.size():
+		var note := BuildTree.reference_note(features[i])
+		if note != "":
+			bits.append("%s: %s" % [names[i], note])
+	if bits.is_empty():
+		return ""
+	return "Build tree: %s. Edit a sketch and use Fix to re-pick." % "; ".join(bits)
+
+
+func _warn_references() -> void:
+	## The status line says so once when the list first shows a flagged reference (and again if the flags change), not on every refresh.
+	var warning := reference_warning()
+	if warning == _last_reference_warning:
+		return
+	_last_reference_warning = warning
+	if warning != "":
+		_table.set_status(warning)
 
 
 func probe_backend() -> void:
@@ -100,6 +125,7 @@ func reload() -> void:
 	if delete_armed_id != "" and index_of(delete_armed_id) < 0:
 		delete_armed_id = ""
 	changed.emit()
+	_warn_references()
 	if first_time and _table.editor.view_is_filtered():
 		await _table.editor.refresh_view() # a part seated with features already hidden: the copy shows it that way
 

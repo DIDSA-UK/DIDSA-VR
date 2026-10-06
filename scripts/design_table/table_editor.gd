@@ -56,6 +56,8 @@ var state := "idle"
 var session: RefCounted = null ## sketch_session.gd while a sketch is open
 var features: RefCounted = null ## part_features.gd
 var view: Node3D = null ## sketch_view.gd, a child of the table's copy
+var repick_point := "" ## a flagged reference point the user is choosing a replacement corner for ("" = not re-picking)
+var _repick_queue: Array = [] ## the flagged points still to do, in order
 var clip := SketchClip.new() ## clips the copy to the sketch window while a sketch is open (sketch_clip.gd)
 var markers: Node3D = null ## plane_markers.gd, a child of the table's copy
 var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Measure never see it)
@@ -200,6 +202,8 @@ func _reset() -> void:
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	clip.end()
+	repick_point = ""
+	_repick_queue.clear()
 	session = null
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
@@ -337,8 +341,10 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		var kinds: Array = ["point", "line", "circle", "arc"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
-		_hover_entity = session.nearest_entity(uv, pick_mm, kinds)
-		if _hover_entity.is_empty() and part_refs != null and session.references_ok and tool != "revolve":
+		_hover_entity = session.nearest_entity(uv, pick_mm, kinds) if repick_point == "" else {}
+		if repick_point != "" and part_refs != null:
+			_hover_entity = part_refs.pick(uv, pick_mm, ["point"]) # re-picking: only the part's own corners and hole centres, whatever the sketch has there
+		if _hover_entity.is_empty() and repick_point == "" and part_refs != null and session.references_ok and tool != "revolve":
 			_hover_entity = part_refs.pick(uv, pick_mm, kinds) # nothing of the sketch there: the part's own corner or edge, to dimension to
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
 		view.set_preview("", [], null)
@@ -610,15 +616,71 @@ func _build_view() -> void:
 	_canvas_stale = false
 	_sheet_vertices.clear()
 	part_refs = null
-	if _references_valid() and copy.has_meta("topology"):
-		part_refs = PartReferences.build(copy.get_meta("topology"), plane)
-		if part_refs.is_empty():
-			part_refs = null
-	session.references_ok = part_refs != null
-	view.set_references(part_refs)
+	session.references_ok = false
+	view.set_references(null)
 	if markers != null:
 		markers.set_markers_visible(false)
 	_refresh_view()
+	_load_references() # a coroutine, not waited for: with nothing hidden or rolled back it finishes right here
+
+
+func _load_references() -> void:
+	## The part's own corners, edges and holes as references for the sketch that is open. They have to be the geometry the BACKEND resolves this sketch's
+	## references against: the part as it stood at the sketch's place in the history (every feature built after it left out). That is the part the table
+	## shows when nothing is hidden or rolled back and the sketch is the last thing built, and then the copy's own topology is used at once. Otherwise
+	## (something hidden or rolled back, or a reopened sketch with features after it) the part is fetched again the way the Build tree does it, with
+	## `rollback_excluded_feature_ids` for what came after the sketch, and only its topology is used; the picture on the table is not changed.
+	var my_session = session
+	var copy: MeshInstance3D = table.table_copy
+	var plane: Dictionary = session.plane
+	var excluded := _reference_excluded_ids()
+	var topology: Dictionary = {}
+	if excluded.is_empty() and not view_is_filtered():
+		if copy.has_meta("topology"):
+			topology = copy.get_meta("topology")
+	else:
+		topology = await _fetch_reference_topology(excluded)
+		if session != my_session or table.table_copy != copy:
+			return # the sketch was left, or the part changed, while the answer was on its way
+	if topology.is_empty():
+		return
+	var refs := PartReferences.build(topology, plane)
+	if refs.is_empty():
+		return
+	part_refs = refs
+	session.references_ok = true
+	view.set_references(part_refs)
+	if view_is_filtered() or not excluded.is_empty():
+		table.set_status("%s The part's corners and edges are the ones this sketch sees: features built after it do not count, hidden ones do." % _sketch_hint())
+
+
+func _reference_excluded_ids() -> Array:
+	## The features the backend leaves out when it resolves this sketch's references: every one after the sketch in the history (the sketch's causal snapshot).
+	## None for a sketch that is not in the list yet (a new one: it is the last thing built).
+	if session == null or session.feature_id == "":
+		return []
+	var at: int = table.build.index_of(session.feature_id)
+	return [] if at < 0 else BuildTree.rolled_back_ids(table.build.features, at)
+
+
+func _fetch_reference_topology(excluded: Array) -> Dictionary:
+	## The part's topology (body id -> edges / vertices ...) with the features after the sketch left out, from the backend; {} if it cannot be had.
+	if api == null or part_id == "":
+		return {}
+	if api.has_method("supports_view_filters") and not await api.supports_view_filters():
+		table.set_status("This backend can't give the part as it was at this sketch, so the part's own corners and edges aren't offered here.")
+		return {}
+	var path := "/document/parts/%s/assembly-mesh.glb?quality=0.5" % part_id
+	for id in excluded:
+		path += "&rollback_excluded_feature_ids=%s" % str(id).uri_encode()
+	var fetched: Dictionary = await api.fetch_bytes(path)
+	if not fetched["ok"]:
+		table.set_status("Couldn't read the part as this sketch sees it: %s" % str(fetched["error"]))
+		return {}
+	var parsed: Dictionary = table._main.mesh_from_glb(fetched["bytes"])
+	if not parsed["ok"]:
+		return {}
+	return (parsed["metas"] as Dictionary).get("topology", {})
 
 
 func sheet_reaches(world_point: Vector3) -> bool:
@@ -665,19 +727,6 @@ func _follow_window() -> void:
 	var plane: Dictionary = session.plane
 	var turn: Basis = table.table_copy.global_transform.basis
 	clip.update(table.to_global(table.window_anchor), turn * (plane["x"] as Vector3), turn * (plane["y"] as Vector3), turn * (plane["n"] as Vector3), table.sheet_window_m)
-
-
-func _references_valid() -> bool:
-	## The part's own vertices and edges may be used as references only when the geometry shown is the geometry the backend resolves a sketch's
-	## references against: the whole part, nothing hidden or rolled back, and (for a sketch that was already there) the sketch is the last thing built.
-	if view_is_filtered():
-		return false
-	if session == null or session.feature_id == "":
-		return false
-	var rows: Array = table.build.features
-	if rows.is_empty():
-		return true
-	return str((rows.back() as Dictionary).get("id", "")) == session.feature_id or table.build.index_of(session.feature_id) < 0
 
 
 func plane_uv_at(world_point: Vector3) -> Vector2:
@@ -728,9 +777,11 @@ func _refresh_view() -> void:
 
 func _sketch_hint() -> String:
 	var def = table.registry.tool_def(table.active_tool) if table.active_tool != "" else null
+	var hint := "Sketch open. Pick a tool to draw or constrain."
 	if def != null and def.hint != "":
-		return def.hint
-	return "Sketch open. Pick a tool to draw or constrain."
+		hint = def.hint
+	var warning: String = session.reference_warning() if session != null else ""
+	return hint if warning == "" else "%s  %s" % [warning, hint]
 
 
 func _sketch_trigger() -> void:
@@ -746,6 +797,8 @@ func _sketch_trigger() -> void:
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
+	elif tool == SELECT_TOOL and repick_point != "":
+		await _do_repick()
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if ghost != "":
@@ -767,6 +820,86 @@ func _sketch_trigger() -> void:
 	elif CONSTRAIN_TOOLS.has(tool):
 		if not _hover_entity.is_empty():
 			await session.select(_hover_entity)
+
+
+# --- Flagged references: lost, or may have moved (the backend's answer, after an upstream edit) ---------------------
+
+func _start_repick() -> void:
+	## "Fix": walks the flagged reference points (lost first) one by one. For each, point at the corner of the part (or the centre of the hole) it
+	## should follow and pull the trigger; everything built on the point stays on it.
+	if session == null:
+		return
+	_repick_queue = session.flagged_references()
+	if _repick_queue.is_empty():
+		return
+	_set_repick(str(_repick_queue[0]["point_id"]))
+
+
+func _set_repick(point_id: String) -> void:
+	repick_point = point_id
+	if view != null:
+		view.repick_point = point_id
+	_refresh_view()
+	_update_options()
+	var row := _repick_row()
+	var wants_hole: bool = str(row.get("kind", "vertex")) == "circle_centre"
+	var why := str(row.get("reason", ""))
+	table.set_status("%s (%d to do). Point at %s of the part that this point should follow, then pull the trigger.%s" % [
+		"Lost" if str(row.get("status", "")) == "lost" else "May have moved", _repick_queue.size(),
+		"the centre of the hole" if wants_hole else "the corner", (" Why: %s." % why.replace("_", " ")) if why != "" else ""])
+
+
+func _repick_row() -> Dictionary:
+	for row in _repick_queue:
+		if str(row["point_id"]) == repick_point:
+			return row
+	return {}
+
+
+func _stop_repick(message: String = "") -> void:
+	repick_point = ""
+	_repick_queue.clear()
+	if view != null:
+		view.repick_point = ""
+	_refresh_view()
+	_update_options()
+	if message != "":
+		table.set_status(message)
+
+
+func _do_repick() -> void:
+	## The trigger while re-picking: the part's corner or hole under the laser becomes what the flagged point follows.
+	var ref: Dictionary = _hover_entity.get("ref", {}) if _hover_entity.get("ref") is Dictionary else {}
+	if ref.is_empty():
+		table.set_status("Point at a corner of the part (or the centre of a hole), then pull the trigger.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	var done_point := repick_point
+	var result: Dictionary = await session.reattach(done_point, ref)
+	if not bool(result["ok"]):
+		table.set_status(str(result["message"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	UiFeedback.haptic(table._right, "confirm")
+	_repick_queue = _repick_queue.filter(func(row) -> bool: return str(row["point_id"]) != done_point)
+	var still: Array = session.flagged_references().filter(func(row) -> bool: return _repick_queue.any(func(q) -> bool: return str(q["point_id"]) == str(row["point_id"])))
+	if still.is_empty():
+		_stop_repick("References fixed. Press Done to rebuild the part from the sketch.")
+		return
+	_repick_queue = still
+	_set_repick(str(_repick_queue[0]["point_id"]))
+
+
+func _keep_moved() -> void:
+	## "Keep moved ones": the user looked and the corners the backend found again are the right ones.
+	var kept := 0
+	for row in session.flagged_references():
+		if str(row["status"]) == "potentially_moved":
+			var result: Dictionary = await session.confirm_reference(str(row["point_id"]))
+			kept += 1 if bool(result["ok"]) else 0
+	table.set_status("Kept %d reference(s)." % kept if kept > 0 else "Nothing to keep.")
+	_refresh_view()
+	_update_options()
 
 
 func _keep_driven(ghost_key: String) -> void:
@@ -858,6 +991,12 @@ func _update_options() -> void:
 		SELECT_TOOL:
 			if session != null:
 				list = _menu_options()
+				if repick_point != "":
+					list = [{"id": "refs_next", "text": "Skip", "disabled": _repick_queue.size() < 2}, {"id": "refs_cancel", "text": "Stop fixing"}]
+				elif list.is_empty() and not session.flagged_references().is_empty():
+					list = [{"id": "refs_fix", "text": "Fix %d reference(s)" % session.flagged_references().size()}]
+					if session.flagged_references().any(func(row): return str(row["status"]) == "potentially_moved"):
+						list.append({"id": "refs_keep", "text": "Keep moved ones"})
 		"polygon":
 			if session != null:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
@@ -911,6 +1050,20 @@ func _menu_options() -> Array:
 
 
 func on_option(option_id: String) -> void:
+	if option_id == "refs_fix":
+		_start_repick()
+		return
+	if option_id == "refs_cancel":
+		_stop_repick("Stopped. The flagged points stay as they are.")
+		return
+	if option_id == "refs_next":
+		if _repick_queue.size() > 1:
+			_repick_queue.push_back(_repick_queue.pop_front())
+			_set_repick(str(_repick_queue[0]["point_id"]))
+		return
+	if option_id == "refs_keep":
+		await _keep_moved()
+		return
 	if option_id == "menu_more":
 		_menu_page += 1
 		_update_options()
@@ -1220,6 +1373,8 @@ func _rebuild_markers() -> void:
 
 func end_sketch() -> void:
 	## The sketch is spent (extruded): back to choosing a plane.
+	repick_point = ""
+	_repick_queue.clear()
 	session = null
 	clip.end()
 	if view != null and is_instance_valid(view):

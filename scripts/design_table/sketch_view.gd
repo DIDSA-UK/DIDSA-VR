@@ -39,6 +39,8 @@ const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
 const DIM_COLOUR := Color(0.55, 0.88, 1.0)
 const DRIVEN_COLOUR := Color(0.72, 0.76, 0.82, 0.9) ## a reference (driven) dimension: it measures, it does not drive, so it is quieter and in brackets
 const ORIGIN_COLOUR := Color(1.0, 0.92, 0.45)
+const LOST_COLOUR := Color(1.0, 0.36, 0.36, 0.95) ## a reference point whose corner of the part can no longer be found
+const MOVED_COLOUR := Color(1.0, 0.72, 0.25, 0.95) ## ...one that may have moved to a different corner (confirm it or re-pick)
 const POINT_SIZE := 0.0036
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
@@ -46,6 +48,7 @@ const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
 
 var plane: Dictionary = {}
+var repick_point := "" ## the flagged reference point the user is choosing a replacement for: drawn extra large
 var window_m := Vector2(0.8, 0.4) ## the window's size in the world, metres: fixed
 var canvas_scale := 0.003 ## the part's scale: world metres per sketch (= part) mm
 var sheet_size := Vector2(100.0, 100.0) ## the window's size in sketch mm, u by v: window_m / canvas_scale
@@ -539,6 +542,12 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
 				continue
 			var colour: Color = warn if (selected.has(key) or key == hovered) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3))
+			var ref_state: String = session.reference_status(id)
+			if ref_state == "lost" or ref_state == "potentially_moved":
+				var flag: Color = LOST_COLOUR if ref_state == "lost" else MOVED_COLOUR
+				var big := 3.4 if id == repick_point else 2.6
+				_marker(verts, colors, session.points[id], POINT_SIZE * (big + 0.9), UNDERLAY, 1.0)
+				_marker(verts, colors, session.points[id], POINT_SIZE * big, flag, 1.1)
 			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
 			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
 	_set_surface(_geo, verts, colors)
