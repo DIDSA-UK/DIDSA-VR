@@ -11,10 +11,10 @@ system prompt names; do not open PRs unless asked.
   (`POST .../convert-entities/vertex`, idempotent) or pinned construction line on demand, so there is no convert / fix / construction step. Nothing is offered between two
   pinned things. Tests: `tests/design_table_references.gd` (fake backend), `tests/e2e_references.gd` (real backend, local only), `tests/references_render.gd` (a picture).
 * **VR (done, merged):** the sketch window is fixed in the world and the part and its sketch slide / zoom together under it (1/50x to 200x), the drawing clipped to it.
-* **Backend (probed, NOT fixed):** `Sketch.external_references` is `body_id` + a raw OCCT vertex index. Edits that keep the topology are followed; a topology-changing
+* **Backend (probed; fixed since by Session A, see "Session A result" below - the text in this bullet is the state when the handover was written):** `Sketch.external_references` is `body_id` + a raw OCCT vertex index. Edits that keep the topology are followed; a topology-changing
   upstream edit renumbers vertices and the reference silently binds to a different corner with `has_lost_reference` false (5 of 7 probes). Evidence and the wanted behaviour:
   `DIDSA-CAD/backend/tests/test_reference_follows_upstream_topology_change.py` (2 passing, 4 xfail) and `DIDSA-CAD/docs/roadmap.md` "Reference drift" (Findings 2026-10-06).
-* **Flat app (not changed):** still the explicit flow: Dimension mode shows ghost body vertices / edges you pick (`pickReferenceGhostVertex` / `pickReferenceGhostEdge` in
+* **Flat app (not changed when this was written; done by Session A, see below):** still the explicit flow: Dimension mode shows ghost body vertices / edges you pick (`pickReferenceGhostVertex` / `pickReferenceGhostEdge` in
   `client/lib/sketch/sketch_controller.dart`), plus a separate Convert mode (`SketchMode.convert`, `sketch_convert_bar.dart`) with Offset / Pattern each their own mode.
 
 ## Why SolidWorks feels seamless (the target), and what DIDSA lacks
@@ -24,7 +24,25 @@ system prompt names; do not open PRs unless asked.
    downstream sketches and dimensions follow. (DIDSA has only raw indices: the gap above.)
 3. **Loud, recoverable failure:** a reference that cannot be found is flagged (dangling dimension, rebuild error) and can be re-attached, never silently moved.
 
-## Session A: DIDSA-CAD, backend first, then the flat app
+## Session A result (2026-10-06, DIDSA-CAD branch `ccr-c5e04801-z93yio`)
+
+Backend fixed (all four probes pass) and the flat app done; full account in `DIDSA-CAD/docs/reference-identity-design.md` and the 2026-10-06 entry of `DIDSA-CAD/docs/status.md`. What Session B needs:
+
+* **No route changed shape**, so `sketch_session.gd: ensure_reference` (`convert-entities/vertex` / `edge`, idempotent) is untouched and still correct. One behaviour change: the creation routes now resolve the vertex against the Sketch's **causal snapshot**
+  (the Part as it stood after the features *before* that Sketch), exactly as the refresh always did. For the last feature in the history this is identical; for a reopened earlier sketch the glb the VR client takes vertex
+  indices from must therefore be fetched with the matching `rollback_excluded_feature_ids` (item 3 above), or the index names a different corner than the backend binds.
+* **For item 4 (show lost / moved in the editor)** the sketch feature in `GET /document/parts/{id}/features` now carries `has_lost_reference`, `lost_reference_point_ids`, `moved_reference_point_ids` ("potentially moved": bound on weaker
+  evidence), `followed_reference_point_ids` (informational: re-found at a new index) and `reference_reasons` (`point id -> consumed_by_<feature id> | ambiguous | no_match | body_missing | nearest_of_identical_vertices | unique_fingerprint_far | ...`).
+  Per-reference detail: `GET /document/parts/{id}/features/sketch/{feature id}/external-references` -> `[{point_id, body_id, vertex_index, status ok|followed|potentially_moved|lost, reason, method, candidates}]` (`candidates` = the vertex indices an ambiguous
+  reference could be). Re-attach = `POST .../external-references/{point id}/reattach {body_id, vertex_index}` (the Point id, and every line / dimension on it, is kept); keep = `POST .../external-references/{point id}/confirm`.
+  An edge reference is two vertex references, so re-attaching an edge is two calls (the flat app does it one corner at a time).
+* The e2e test the item asks for (move the fillet to another edge; the reference follows or is flagged) is `DIDSA-CAD/backend/tests/test_reference_identity.py::test_moving_the_fillet_to_any_edge_follows_the_corner_or_flags_it_lost` in pytest form;
+  the VR version only needs to drive the same PATCH `.../fillet-features/{id}` and read the sketch feature.
+* The flat app's rule "nothing is offered between two pinned things" is implemented as in VR (a Point is pinned if it is a body reference, a Fix, or the origin).
+
+**Later Session A rounds (same day, merged to DIDSA-CAD):** circle / arc centres from converted circles are live references (`kind: circle_centre`); every `SubShapeRef` consumer (Fillet, Chamfer, Create Plane, Pattern, Mirror, Shell, Delete / Move Face) carries a signature and the feature responses carry `lost_references` / `moved_references` / `followed_references` with reasons; OCCT history now covers vertices, edges and faces, and every in-place Body operation feeds the recorder. No route changed shape, so nothing here needs VR work beyond item 4 above. Still open: assembly mate references, a re-attach route for non-sketch Features, replay stays signature-only until the next refresh. See `DIDSA-CAD/docs/reference-identity-design.md`.
+
+## Session A: DIDSA-CAD, backend first, then the flat app (the prompt, kept for the record)
 
 Prompt to paste:
 
