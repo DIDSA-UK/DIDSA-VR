@@ -1,0 +1,1 @@
+# Tests that legitimately print no SMOKE lines (one name per line). Empty on purpose: a test with no assertions fails CI.

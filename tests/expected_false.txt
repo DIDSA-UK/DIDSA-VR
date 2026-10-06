@@ -1,0 +1,20 @@
+# SMOKE lines that are expected to print `false` (or end in `false`). Format: `<test> | <key>`, where <key> is the
+# SMOKE text up to its first ": " (the whole line when it has none). A line printing false that is NOT here fails CI
+# (tests/check_smoke.py). Each entry says why false is the right answer -- if you cannot say, it is a bug, not a baseline entry.
+# An entry that no longer prints false is reported as stale (a warning): delete it.
+# NB: a flip of an expected-false line to true is only a stale warning, not a failure (the checker cannot know which way is right).
+
+# Wrist-tablet "stays closed unless the bullseye is shot" (tests/README.md): off to the side, nothing opens or hovers.
+tablet_scene | SMOKE 15cm off the bullseye
+tablet_scene | SMOKE trigger 15cm off the bullseye -> open=false
+# Right after shooting the bullseye the tablet is open and visible, so the bullseye itself is hidden (last field = false).
+tablet_scene | SMOKE after shooting bullseye -> open=true visible=true bullseye visible=false
+# View > Navigate: each toggle is clicked once from its default-on state, so every one ends up off ("modes toggle off").
+tablet_scene | SMOKE after user-movement click
+tablet_scene | SMOKE after model-movement click
+tablet_scene | SMOKE after part-manipulation click
+tablet_scene | SMOKE modes
+# Settings > Display: the Shadows button is clicked once from on ("shadows before: true"), so it ends off.
+tablet_scene | SMOKE shadows after click
+# The tablet's viewport renders only while open; after the close button it must have stopped ("panel renders only while open").
+tablet_scene | SMOKE tablet panel rendering after close
