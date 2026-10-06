@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, unshaded, cull_disabled, depth_draw_never;
+render_mode blend_mix, unshaded, cull_disabled, depth_draw_never, depth_test_disabled; // the sketch shows over the part, also when its plane is inside the part
 
 // The sketch's lines, markers and dimension strokes on the design table: flat vertex colours, clipped to the canvas window. The
 // geometry is built in the sketch's own (u, v) millimetres (the canvas node maps those onto the part), so the window is just a

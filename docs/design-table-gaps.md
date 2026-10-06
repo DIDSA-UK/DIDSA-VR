@@ -36,6 +36,21 @@ zooming slide and scale the part under it, so it works as a viewport, and the dr
 5. The snap, pick and dimension-label reaches are sizes in the world, so zoomed out they span many sketch mm and zoomed in few.
 6. Labels show while their middle is inside the window. **Not done:** the part's own mesh is not clipped to the window (zoomed right in it fills the room).
 
+### Dimensioning to the part's own geometry (R1) and how far references can be trusted (R2)
+
+**R1, closed (first cut).** Dimensioning to existing edges and corners used to be missing (only the corners of the face you sketched on snapped, to a free point
+with no link). Now the part's vertices and straight edges, projected onto the sketch plane, are references everywhere (`part_references.gd`): snap, pick and
+dimension go straight to them, and the session makes the pinned point / construction line on demand (`convert-entities/vertex`, idempotent; an edge is the two
+points and a construction line, reused if already there). Still open: circular edges (a hole's centre / radius), midpoint and along-edge snaps, faces, a driven
+(reference) dimension between two pinned things, and sketches on a part with something hidden or rolled back.
+
+**R2, a known limit of the backend (found by experiment, not yet fixed).** A reference is `body_id` + a raw OCCT vertex index, resolved when the sketch is
+solved. Edits that keep the part's topology (a changed extrude depth, base-sketch dimensions, a fillet radius) are followed correctly, with no flag. An upstream
+edit that changes the topology (moving which edge a fillet rounds, adding one) renumbers the vertices, and the reference then **silently binds to a different
+corner**: in the probe 5 of 7 such edits did, with `has_lost_reference` false. The fix is a geometric signature stored with each reference and checked on every
+refresh (and, better, OCCT's `Modified()` / `Generated()` history), so a renumbered vertex is found again by where it was and a reference that cannot be found
+is flagged, never rebound. That is in the DIDSA-CAD backend and is recorded in its roadmap ("Reference drift"); it has not been started here.
+
 ## Gaps found while building it
 
 ### Work loss

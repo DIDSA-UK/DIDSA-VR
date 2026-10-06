@@ -29,6 +29,7 @@ const TopologyPick := preload("res://scripts/topology_pick.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
+const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
@@ -71,6 +72,7 @@ var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
 var _hover_plane := ""
 var _hover_face: Dictionary = {}
+var part_refs: RefCounted = null ## part_references.gd: the part's vertices and edges projected onto the sketch plane (null if they can't be used)
 var _sheet_vertices: Array = []
 var _last_view_key := ""
 var _orient_tween: Tween = null
@@ -241,6 +243,8 @@ func _process(_delta: float) -> void:
 			_hover_pick_plane(origin, dir)
 		"sketch":
 			_follow_window()
+			if view != null and is_instance_valid(view):
+				view.refresh_references()
 			_settle_canvas()
 			_hover_sketch(origin, dir)
 		"pick_edges":
@@ -303,6 +307,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	if uv == null:
 		view.set_cursor(null)
 		view.set_preview("", [], null)
+		view.set_reference_hover({})
 		return
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
@@ -319,8 +324,9 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		if tool == "line" and session.pending.size() == 1:
 			var first: Dictionary = session.pending[0]
 			line_start = session.points.get(str(first.get("id", "")), first.get("uv"))
-		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start)
+		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs)
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
+		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
@@ -329,11 +335,14 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds)
+		if _hover_entity.is_empty() and part_refs != null and session.references_ok and tool != "revolve":
+			_hover_entity = part_refs.pick(uv, pick_mm, kinds) # nothing of the sketch there: the part's own corner or edge, to dimension to
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
 		view.set_preview("", [], null)
-		var key := "%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", "")]
+		var key := "%s:%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", ""), str(_hover_entity.get("ref", {}))]
 		if key != _last_view_key:
 			_last_view_key = key
+			view.set_reference_hover(_hover_entity.get("ref", {}))
 			_refresh_view() # the drawing is rebuilt only when what's under the laser changes
 	else:
 		view.set_cursor(uv, "free")
@@ -594,7 +603,14 @@ func _build_view() -> void:
 	copy.add_child(view)
 	view.setup(plane, table.sheet_window_m, centre, table.effective_scale(), table.tokens)
 	_canvas_stale = false
-	_sheet_vertices = _vertices_on_plane(copy, plane)
+	_sheet_vertices.clear()
+	part_refs = null
+	if _references_valid() and copy.has_meta("topology"):
+		part_refs = PartReferences.build(copy.get_meta("topology"), plane)
+		if part_refs.is_empty():
+			part_refs = null
+	session.references_ok = part_refs != null
+	view.set_references(part_refs)
 	if markers != null:
 		markers.set_markers_visible(false)
 	_refresh_view()
@@ -641,6 +657,19 @@ func _follow_window() -> void:
 	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * table.to_global(table.window_anchor)
 	if view.set_frame(table.effective_scale(), SketchMath.to_sheet(local, session.plane)):
 		_canvas_stale = true
+
+
+func _references_valid() -> bool:
+	## The part's own vertices and edges may be used as references only when the geometry shown is the geometry the backend resolves a sketch's
+	## references against: the whole part, nothing hidden or rolled back, and (for a sketch that was already there) the sketch is the last thing built.
+	if view_is_filtered():
+		return false
+	if session == null or session.feature_id == "":
+		return false
+	var rows: Array = table.build.features
+	if rows.is_empty():
+		return true
+	return str((rows.back() as Dictionary).get("id", "")) == session.feature_id or table.build.index_of(session.feature_id) < 0
 
 
 func plane_uv_at(world_point: Vector3) -> Vector2:
@@ -704,6 +733,8 @@ func _sketch_trigger() -> void:
 		if _snap.is_empty():
 			return
 		var pick := {"uv": _snap["uv"], "id": _snap["id"]}
+		if _snap.has("ref"):
+			pick["ref"] = _snap["ref"] # a corner of the part: made a pinned point that follows the part when the shape is made
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)

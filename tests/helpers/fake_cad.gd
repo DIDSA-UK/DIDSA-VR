@@ -24,6 +24,9 @@ var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
 var origin_id := ""
+var ref_points := {} ## "body:vertex index" -> the pinned point POST .../convert-entities/vertex made for it (idempotent, like the real route)
+var vertex_positions := {} ## "body:vertex index" -> where that vertex lands in the sketch (default (index, 0))
+var pinned := {} ## point ids the backend reports as is_locked
 var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
@@ -121,6 +124,14 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
+	if path.ends_with("/convert-entities/vertex") and verb == "POST":
+		var vkey := "%s:%d" % [body["body_id"], int(body["vertex_index"])]
+		if not ref_points.has(vkey):
+			var rid := next_id("pt")
+			points[rid] = vertex_positions.get(vkey, Vector2(float(body["vertex_index"]), 0.0))
+			ref_points[vkey] = rid
+			pinned[rid] = true
+		return _ok({"id": ref_points[vkey], "x": points[ref_points[vkey]].x, "y": points[ref_points[vkey]].y, "is_locked": true})
 	if path.ends_with("/points") and verb == "POST":
 		var id := next_id("pt")
 		points[id] = Vector2(body["x"], body["y"])
@@ -138,7 +149,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"pruned_point_ids": []})
 	if path.ends_with("/lines"):
 		var id := next_id("ln")
-		entities.append({"type": "line", "id": id, "start_point_id": body["start_point_id"], "end_point_id": body["end_point_id"], "construction": false})
+		entities.append({"type": "line", "id": id, "start_point_id": body["start_point_id"], "end_point_id": body["end_point_id"], "construction": bool(body.get("construction", false))})
 		return _ok({"id": id})
 	if path.ends_with("/rectangles"):
 		var id := next_id("rc")
@@ -189,7 +200,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 	if path.ends_with("/solve-and-refresh"):
 		var plist: Array = []
 		for id in points:
-			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": false})
+			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": pinned.has(id)})
 		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
 		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}})
 	if path.ends_with("/export"):

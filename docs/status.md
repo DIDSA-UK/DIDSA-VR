@@ -2585,3 +2585,16 @@ drawing. Fit slides and zooms the part so the sketch fills the window. Not done:
 Tests in `design_table_editing.gd` (the window stays put while the part slides / zooms, in-plane only, no turn, A / B cannot lift it off the plane, Fit, Free, Reset) and `design_table_logic.gd`; pictures
 from `sketch_style_render.gd`. `e2e_new_part.gd` had been failing since the unsaved-changes warning (G1) and now clears the dirty flag before the second New assembly. Not verified in a headset: how the
 grips feel.
+
+### 2026-10-06 — The part's own corners and edges are references: dimension straight to them
+
+John said dimensioning to part geometry felt clunky (convert, fix, set as construction, then dimension) and asked how SolidWorks makes it seamless and whether upstream
+changes are followed as reliably. The design table now treats the part's vertices and straight edges, projected onto the sketch plane, as reference geometry
+(`part_references.gd`: pure, grid-indexed, tested on the fixture; drawn quietly under the sketch with a dark underlay and shown over the part, because the sketch plane is often
+inside it). Any tool snaps to a corner; Select, Dimension and the constraint tools pick a corner or a straight edge; the session makes the pinned point or construction line in the same
+tap with the existing `convert-entities/vertex` route (idempotent; an edge is two such points and a construction line, reused if there), and a dimension between a pinned thing and one of the
+sketch's own is offered as usual (nothing is offered between two pinned things). No backend change was needed. Checked with the fake backend (`design_table_references.gd`) and against the real one
+(`e2e_references.gd`: a line from a top-face corner, a 12 mm distance to a picked edge, then the base made 30 mm wider: the pinned corner follows, the dimension holds, nothing flagged).
+**Robustness finding (backend):** references are body id plus a raw OCCT vertex index; edits that keep the topology are followed, but a topology change renumbers the vertices and the reference
+silently binds to a different corner (5 of 7 probes), unflagged. Recorded as R2 in `docs/design-table-gaps.md` with the fix (geometric signature, then OCCT history); not started. The earlier
+canvas work was also reworked the same day: the sketch window is fixed in the world and the part and its sketch slide and zoom together under it (see the entry above).

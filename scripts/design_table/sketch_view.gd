@@ -30,6 +30,10 @@ const ARROW_LENGTH := 0.011
 const DIM_OFFSET := 0.030 ## how far a dimension line stands off the geometry
 const DIM_GAP := 0.004 ## the small gap between the geometry and an extension line
 const DIM_OVERSHOOT := 0.006
+const REF_COLOUR := Color(0.62, 0.78, 0.98, 0.95) ## the part's own edges and corners, seen through the sketch: reference geometry, quieter than the sketch
+const REF_FAR_COLOUR := Color(0.62, 0.78, 0.98, 0.50) ## ...those that lie off the sketch plane, projected onto it
+const REF_WIDTH := 0.0018
+const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
 const DIM_COLOUR := Color(0.55, 0.88, 1.0)
@@ -47,6 +51,11 @@ var sheet_size := Vector2(100.0, 100.0) ## the window's size in sketch mm, u by 
 var sheet_centre := Vector2.ZERO ## the sketch uv at the window's middle: where the part is under the window
 var grid_target_m := 0.016 ## the minor grid lines are about this far apart in the world
 
+var _refs: RefCounted = null ## part_references.gd: the part's geometry projected onto the sketch plane (or null)
+var _refs_node: MeshInstance3D
+var _refs_hover: MeshInstance3D
+var _refs_scale := 0.0 ## the scale and window the reference drawing was built for
+var _refs_centre := Vector2(INF, INF)
 var _canvas: Node3D
 var _readout: Label3D
 var _readout_text := ""
@@ -98,6 +107,8 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_geo = _new_mesh_node("Drawing")
 	_dims = _new_mesh_node("Dimensions")
 	_preview = _new_mesh_node("Preview")
+	_refs_node = _new_mesh_node("PartGeometry")
+	_refs_hover = _new_mesh_node("PartGeometryHover")
 	_cursor = MeshInstance3D.new()
 	_cursor.name = "Cursor"
 	_ring = TorusMesh.new()
@@ -187,6 +198,73 @@ static func _compact(v: float) -> String:
 	if v >= 1.0:
 		return ("%.1f" % v).rstrip("0").rstrip(".")
 	return ("%.3f" % v).rstrip("0").rstrip(".")
+
+
+# --- The part's own geometry, seen through the sketch ------------------------------------------------
+
+func set_references(refs: RefCounted) -> void:
+	## Shows the part's edges and corners (projected onto the sketch plane) as quiet reference lines under the sketch: what you aim at to dimension
+	## to them or start a line on them.
+	_refs = refs
+	_refs_scale = 0.0
+	_rebuild_references()
+
+
+func refresh_references() -> void:
+	## Called every frame by the editor: the reference drawing is built for a window a bit bigger than the one shown, so it only needs rebuilding
+	## when the part has been slid a long way (a zoom rebuilds it with the rest of the drawing).
+	if _refs == null:
+		return
+	if _refs_centre.distance_to(sheet_centre) > minf(sheet_size.x, sheet_size.y) * 0.3 or not is_equal_approx(_refs_scale, canvas_scale):
+		_rebuild_references()
+
+
+func _rebuild_references() -> void:
+	_refs_scale = canvas_scale
+	_refs_centre = sheet_centre
+	if _refs == null or _refs.is_empty():
+		_refs_node.mesh = null
+		return
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var lo := sheet_centre - sheet_size
+	var hi := sheet_centre + sheet_size
+	for e in _refs.edges_in(lo, hi):
+		var colour: Color = REF_COLOUR if float(e["depth"]) < 0.05 else REF_FAR_COLOUR
+		var segs: PackedVector2Array = e["segs"]
+		for i in range(0, segs.size() - 1, 2):
+			_ribbon(verts, colors, segs[i], segs[i + 1], REF_WIDTH + 0.0016, THIN_UNDERLAY, 0.3) # dark under the light, so it reads on a white part too
+			_ribbon(verts, colors, segs[i], segs[i + 1], REF_WIDTH, colour, 0.4)
+	for v in _refs.vertices_in(lo, hi):
+		_marker(verts, colors, v["uv"], REF_POINT + 0.0018, UNDERLAY, 0.45)
+		_marker(verts, colors, v["uv"], REF_POINT, REF_COLOUR if float(v["depth"]) < 0.05 else REF_FAR_COLOUR, 0.5)
+	_set_surface(_refs_node, verts, colors)
+
+
+func set_reference_hover(ref: Dictionary) -> void:
+	## Lights the part vertex or edge under the laser (an empty dictionary clears it).
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var warn: Color = _tokens.warn
+	match str(ref.get("kind", "")):
+		"vertex":
+			var v: Dictionary = _vertex_of(ref)
+			if not v.is_empty():
+				_marker(verts, colors, v["uv"], POINT_SIZE * 3.2, UNDERLAY, 1.3)
+				_marker(verts, colors, v["uv"], POINT_SIZE * 2.2, warn, 1.6)
+		"edge":
+			_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH + (UNDERLAY_WIDTH - LINE_WIDTH), UNDERLAY, 1.0)
+			_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH * 1.2, warn, 1.2)
+	_set_surface(_refs_hover, verts, colors)
+
+
+func _vertex_of(ref: Dictionary) -> Dictionary:
+	if _refs == null:
+		return {}
+	for v in _refs.vertices:
+		if v["body"] == ref["body"] and int(v["index"]) == int(ref["index"]):
+			return v
+	return {}
 
 
 func grid_step() -> float:
@@ -427,6 +505,8 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
 			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
 	_set_surface(_geo, verts, colors)
+	if _refs != null and not is_equal_approx(_refs_scale, canvas_scale):
+		_rebuild_references()
 	_rebuild_dimensions(session)
 
 

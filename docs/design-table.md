@@ -34,6 +34,15 @@ This page is what was decided and built, what the code turned out to say, and wh
    sheet; pull the trigger to place points. The **sheet** is a fixed window in the world, **0.8 x 0.4 m** (`sheet_window_m`) however big the
    part is, with a faint **grid** (1-2-5 mm lines about 16 mm apart on screen, re-spaced as you zoom; the red u axis and green v axis through
    the origin; faded at the edge). The window is fixed in the world; the part and its sketch slide and scale together **under** it (**one grip slides the part, two hands zoom it**, below), so the part's edges and corners always line up with the sketch, and the same part can take a huge sketch or a tiny one. A line in the window's corner gives the grid spacing.
+   * **The part's own corners and edges are references.** Under the sketch the part's vertices and edges are drawn quietly, projected onto the
+     sketch plane (a box seen from above is its 4 corners and 4 edges; where several land on one spot the one nearest the plane wins). Aim any tool near a
+     **corner** and the cursor snaps to it; start a line, a circle or a corner there and it is a pinned point that follows the part. Aim Select, Dimension or a
+     constraint tool at a **corner or a straight edge** and it is picked: it becomes a pinned point (or a pinned construction line between two) in the same
+     tap, and a dimension to it is offered like any other: pick the edge, then your own point, point at the value, type it. There is no Convert, Fix or Make
+     construction step first. A thing that is already pinned (two corners, an edge on its own, the origin) offers no dimension, since it has nothing to drive.
+     The backend keeps each reference tied to its vertex (`has_lost_reference` flags a sketch whose vertex has gone: the Build tree shows it). References are
+     offered only when the part shown is the part the backend sketches on: not with something hidden or rolled back, and for a reopened sketch only if it is
+     the last thing built. **Not yet:** circular edges (a hole's centre and radius), snapping onto an edge's midpoint or along it, the part's faces.
    * **The origin** is the backend's real origin point (read when the sketch opens; the backend makes it lazily). It is drawn as a bigger
      yellow marker and **snaps** like any point (kind "origin"): a line can start on it, a circle can be centred on it, a point can be made
      coincident to it, and a dimension can start or end at it. It can be selected and constrained but never deleted.
