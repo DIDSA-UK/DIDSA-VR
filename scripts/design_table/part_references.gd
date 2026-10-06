@@ -13,8 +13,14 @@ extends RefCounted
 
 const SELF := "res://scripts/design_table/part_references.gd"
 
+## A circular edge lies "in the plane" (a hole or boss on the face you are sketching on) when every point of it is this close to the plane, mm: the backend
+## only turns such an edge into a circle or arc of the sketch (plane_geometry.resolve_planar_circle uses 1e-4); a circle in a parallel plane, or a tilted one
+## (an ellipse seen along the normal), is drawn as a quiet reference but cannot be picked.
+const COPLANAR_MM := 0.001
+
 var vertices: Array = [] ## [{body, index, uv, depth}] (depth: distance off the plane, mm)
-var edges: Array = [] ## [{body, index, kind, segs (PackedVector2Array of segment pairs), a, b, a_vertex, b_vertex, depth, lo, hi}]
+var edges: Array = [] ## [{body, index, kind, segs (PackedVector2Array of segment pairs), a, b, a_vertex, b_vertex, depth, lo, hi, circle}]
+var circles: Array = [] ## the coplanar circular edges, indices into `edges` ({circle: {c, r, full}} is on the entry itself): what a hole or boss is
 
 var _cell := 10.0
 var _vertex_grid := {} ## Vector2i -> Array of indices into `vertices`
@@ -89,6 +95,8 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 			var ekey := "%s|%s|%s" % [kind, k1 if k1 < k2 else k2, k2 if k1 < k2 else k1]
 			var depth := depth_sum / float(pts.size())
 			var entry := _edge(str(body_id), int(index), kind, segs, first, last, vertex_at, pts, depth, elo, ehi)
+			if kind == "circle":
+				entry["circle"] = _fit_circle(pts, plane)
 			if seen_edges.has(ekey):
 				if depth < float((edges[seen_edges[ekey]] as Dictionary)["depth"]) - 0.0001:
 					edges[seen_edges[ekey]] = entry
@@ -97,6 +105,9 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 			edges.append(entry)
 			lo = lo.min(elo)
 			hi = hi.max(ehi)
+	for i in edges.size():
+		if not ((edges[i] as Dictionary).get("circle", {}) as Dictionary).is_empty():
+			circles.append(i)
 	if lo.x == INF:
 		return
 	_cell = maxf(maxf(hi.x - lo.x, hi.y - lo.y) / 32.0, 1.0)
@@ -122,6 +133,36 @@ static func _edge(body: String, index: int, kind: String, segs: PackedVector2Arr
 		"a_vertex": int(vertex_at.get(Vector3i((pts[0] * 100.0).round()), -1)),
 		"b_vertex": int(vertex_at.get(Vector3i((pts[pts.size() - 1] * 100.0).round()), -1)),
 		"depth": depth, "lo": lo, "hi": hi}
+
+
+static func _fit_circle(pts: PackedVector3Array, plane: Dictionary) -> Dictionary:
+	## {c (uv), r, full} for a circular edge that lies in the sketch plane, else {}: the circle through three well-spread points of the edge's polyline.
+	## `full` is a whole circle (a hole's rim: the edge starts and ends at the same place), else an arc.
+	var origin: Vector3 = plane["origin"]
+	var normal: Vector3 = plane["n"]
+	for p in pts:
+		if absf((p - origin).dot(normal)) > COPLANAR_MM:
+			return {}
+	var poly: Array = [pts[0]]
+	for i in range(1, pts.size(), 2):
+		poly.append(pts[i])
+	var n := poly.size()
+	if n < 4:
+		return {}
+	var a := _to_uv(poly[0], plane)
+	var b := _to_uv(poly[n / 3], plane)
+	var c := _to_uv(poly[(2 * n) / 3], plane)
+	var d := 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+	if absf(d) < 0.000001:
+		return {}
+	var centre := Vector2(
+		((a.length_squared()) * (b.y - c.y) + b.length_squared() * (c.y - a.y) + c.length_squared() * (a.y - b.y)) / d,
+		((a.length_squared()) * (c.x - b.x) + b.length_squared() * (a.x - c.x) + c.length_squared() * (b.x - a.x)) / d)
+	var radius := centre.distance_to(a)
+	if radius < 0.001:
+		return {}
+	var full: bool = (poly[0] as Vector3).distance_to(poly[n - 1]) < 0.01
+	return {"c": centre, "r": radius, "full": full}
 
 
 static func _to_uv(p: Vector3, plane: Dictionary) -> Vector2:
@@ -172,6 +213,16 @@ func nearest_vertex(uv: Vector2, radius: float) -> Dictionary:
 func nearest_edge(uv: Vector2, radius: float, straight_only: bool = true) -> Dictionary:
 	## The part edge nearest `uv` within `radius`: {body, index, kind, a, b, a_vertex, b_vertex, depth, distance, point} or {}. Only straight
 	## edges unless told otherwise (a straight edge is a line in the sketch; a circle is not one).
+	return _nearest_edge(uv, radius, func(e: Dictionary) -> bool: return not straight_only or str(e["kind"]) == "line")
+
+
+func nearest_circular(uv: Vector2, radius: float) -> Dictionary:
+	## The nearest circular edge lying in the sketch plane (a hole's or boss's rim, or an arc of one): the same entry as nearest_edge's, with
+	## `circle` ({c, r, full}) on it. {} if none within `radius`.
+	return _nearest_edge(uv, radius, func(e: Dictionary) -> bool: return not (e.get("circle", {}) as Dictionary).is_empty())
+
+
+func _nearest_edge(uv: Vector2, radius: float, wanted: Callable) -> Dictionary:
 	var best := {}
 	var best_d := radius
 	if _edge_grid.is_empty() or radius > _cell * 64.0:
@@ -183,7 +234,7 @@ func nearest_edge(uv: Vector2, radius: float, straight_only: bool = true) -> Dic
 				continue
 			tried[i] = true
 			var e: Dictionary = edges[i]
-			if straight_only and str(e["kind"]) != "line":
+			if not wanted.call(e):
 				continue
 			var segs: PackedVector2Array = e["segs"]
 			for s in range(0, segs.size() - 1, 2):
@@ -191,23 +242,96 @@ func nearest_edge(uv: Vector2, radius: float, straight_only: bool = true) -> Dic
 				var d := uv.distance_to(near)
 				if d <= best_d:
 					best_d = d
-					best = {"body": e["body"], "index": e["index"], "kind": e["kind"], "a": e["a"], "b": e["b"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "depth": e["depth"], "distance": d, "point": near}
+					best = {"body": e["body"], "index": e["index"], "kind": e["kind"], "a": e["a"], "b": e["b"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "depth": e["depth"], "distance": d, "point": near, "circle": e.get("circle", {})}
 	return best
+
+
+func nearest_centre(uv: Vector2, radius: float) -> Dictionary:
+	## The centre of the circular edge (in the sketch plane) whose centre is nearest `uv` within `radius`: {body, index, uv, radius, full, distance} or {}.
+	var best := {}
+	var best_d := radius
+	for i in circles:
+		var e: Dictionary = edges[i]
+		var circle: Dictionary = e["circle"]
+		var d := uv.distance_to(circle["c"])
+		if d <= best_d:
+			best_d = d
+			best = {"body": e["body"], "index": e["index"], "uv": circle["c"], "radius": circle["r"], "full": circle["full"], "distance": d}
+	return best
+
+
+func nearest_midpoint(uv: Vector2, radius: float) -> Dictionary:
+	## The midpoint of the straight part edge whose midpoint is nearest `uv` within `radius`: {body, index, a, b, a_vertex, b_vertex, uv, distance} or {}.
+	var best := {}
+	var best_d := radius
+	if _edge_grid.is_empty() or radius > _cell * 64.0:
+		return best
+	var tried := {}
+	for cell in _cells_near(uv, radius):
+		for i in _edge_grid.get(cell, []):
+			if tried.has(i):
+				continue
+			tried[i] = true
+			var e: Dictionary = edges[i]
+			if str(e["kind"]) != "line" or not _straight_ok(e):
+				continue
+			var mid: Vector2 = ((e["a"] as Vector2) + (e["b"] as Vector2)) * 0.5
+			var d := uv.distance_to(mid)
+			if d <= best_d:
+				best_d = d
+				best = {"body": e["body"], "index": e["index"], "a": e["a"], "b": e["b"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "uv": mid, "distance": d}
+	return best
+
+
+static func _straight_ok(e: Dictionary) -> bool:
+	## A straight edge the sketch can turn into a line: both ends are real, different part vertices.
+	return int(e["a_vertex"]) >= 0 and int(e["b_vertex"]) >= 0 and int(e["a_vertex"]) != int(e["b_vertex"])
+
+
+static func edge_usable(e: Dictionary) -> bool:
+	## True for a straight edge the sketch can use as a pinned line (public form of _straight_ok, for the snap resolver).
+	return _straight_ok(e)
+
+
+static func edge_ref(e: Dictionary) -> Dictionary:
+	## The reference a picked straight edge carries (what the session's ensure_reference turns into a pinned construction line).
+	return {"kind": "edge", "body": e["body"], "index": e["index"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "a": e["a"], "b": e["b"]}
+
+
+static func circle_ref(e: Dictionary) -> Dictionary:
+	## The reference a picked circular edge carries: ensure_reference makes a pinned construction circle (or arc) with its centre pinned to the hole.
+	var circle: Dictionary = e["circle"]
+	return {"kind": "circle_edge", "body": e["body"], "index": e["index"], "full": circle["full"], "c": circle["c"], "r": circle["r"],
+		"a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"]}
 
 
 func pick(uv: Vector2, radius: float, kinds: Array) -> Dictionary:
 	## What a pick of the part's geometry at `uv` means, as the entity the sketch tools take: a vertex beats an edge, as a point beats a line in
-	## the sketch. {kind: "point", id: "", ref: {kind: "vertex", body, index}, uv} or {kind: "line", id: "", ref: {kind: "edge", ...}, uv} or {}.
+	## the sketch (a hole's centre counts as a corner: a {kind: "point", ref: {kind: "circle_centre", ...}}); of a straight edge and a circular one (a
+	## hole's rim) the nearer wins. {kind: "point", id: "", ref: {kind: "vertex", body, index}, uv}
+	## or {kind: "line", id: "", ref: {kind: "edge", ...}, uv} or {kind: "circle" | "arc", id: "", ref: {kind: "circle_edge", ...}, uv} or {}.
 	if "point" in kinds:
 		var v := nearest_vertex(uv, radius)
+		var centre: Dictionary = nearest_centre(uv, radius)
+		if not centre.is_empty() and (v.is_empty() or float(centre["distance"]) < float(v["distance"])):
+			return {"kind": "point", "id": "", "distance": centre["distance"], "uv": centre["uv"], "ref": {"kind": "circle_centre", "body": centre["body"], "index": centre["index"]}}
 		if not v.is_empty():
 			return {"kind": "point", "id": "", "distance": v["distance"], "uv": v["uv"], "ref": {"kind": "vertex", "body": v["body"], "index": v["index"]}}
+	var line := {}
 	if "line" in kinds:
 		var e := nearest_edge(uv, radius)
-		if not e.is_empty() and int(e["a_vertex"]) >= 0 and int(e["b_vertex"]) >= 0 and int(e["a_vertex"]) != int(e["b_vertex"]):
-			return {"kind": "line", "id": "", "distance": e["distance"], "uv": e["point"], "ref": {"kind": "edge", "body": e["body"], "index": e["index"],
-				"a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "a": e["a"], "b": e["b"]}}
-	return {}
+		if not e.is_empty() and _straight_ok(e):
+			line = {"kind": "line", "id": "", "distance": e["distance"], "uv": e["point"], "ref": edge_ref(e)}
+	var rim := {}
+	if "circle" in kinds or "arc" in kinds:
+		var c := nearest_circular(uv, radius)
+		if not c.is_empty():
+			var full: bool = bool(c["circle"]["full"])
+			if ("circle" in kinds and full) or ("arc" in kinds and not full):
+				rim = {"kind": "circle" if full else "arc", "id": "", "distance": c["distance"], "uv": c["point"], "ref": circle_ref(c)}
+	if not line.is_empty() and not rim.is_empty():
+		return line if float(line["distance"]) <= float(rim["distance"]) else rim
+	return line if not line.is_empty() else rim
 
 
 func edges_in(lo: Vector2, hi: Vector2) -> Array:

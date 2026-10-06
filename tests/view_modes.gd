@@ -54,7 +54,7 @@ func _initialize() -> void:
 	var lines: MeshInstance3D = vm.edge_lines_of(box)
 	var topology_segments := EdgeOverlay.lines_from_topology(box.get_meta("topology")).size()
 	print("SMOKE Shaded + edges builds each part's edges from its real topology and keeps the faces: ", parts.all(func(p): return vm.edge_lines_of(p) != null and vm.edge_lines_of(p).visible and p.layers == 1) and lines.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX].size() == topology_segments and topology_segments > 0)
-	print("SMOKE ...as lines in the dark edge colour, through the shader that honours the section clip: ", lines.mesh.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES and (lines.material_override as ShaderMaterial).shader.resource_path.ends_with("edge_lines.gdshader") and (lines.material_override as ShaderMaterial).get_shader_parameter("line_color").get_luminance() < 0.3 and (lines.material_override as ShaderMaterial).shader.code.contains("section_enabled"))
+	print("SMOKE ...as lines in the dark edge colour, through the shader that honours the section clip: ", lines.mesh.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES and (lines.material_override as ShaderMaterial).shader.resource_path.ends_with("edge_lines.gdshader") and (lines.material_override as ShaderMaterial).get_shader_parameter("line_color").get_luminance() < 0.3 and (lines.material_override as ShaderMaterial).shader.code.contains("clip_common.gdshaderinc"))
 	print("SMOKE ...and the overlay is a child with no collider, so the laser and grip still see only the part: ", lines.get_children().is_empty() and lines.get_parent() == box and box.get_children().any(func(c): return c is StaticBody3D))
 
 	vm.set_mode(vm.Mode.WIREFRAME)

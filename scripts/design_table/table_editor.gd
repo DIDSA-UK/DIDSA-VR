@@ -749,7 +749,10 @@ func _sketch_trigger() -> void:
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if ghost != "":
-			_type_dimension(ghost)
+			if bool(session.ghost(ghost).get("driven", false)):
+				await _keep_driven(ghost)
+			else:
+				_type_dimension(ghost)
 		elif not _hover_entity.is_empty():
 			await session.select(_hover_entity)
 		else:
@@ -764,6 +767,14 @@ func _sketch_trigger() -> void:
 	elif CONSTRAIN_TOOLS.has(tool):
 		if not _hover_entity.is_empty():
 			await session.select(_hover_entity)
+
+
+func _keep_driven(ghost_key: String) -> void:
+	## A candidate between two pinned things has no value to type (nothing could move): pointing at it keeps it as a reference dimension.
+	var result: Dictionary = await session.confirm_ghost(ghost_key, 0.0)
+	if bool(result["ok"]):
+		UiFeedback.haptic(table._right, "confirm")
+		table.set_status("Reference dimension kept (in brackets: it measures, it does not drive). Undo takes it back.")
 
 
 func _type_dimension(ghost_key: String) -> void:

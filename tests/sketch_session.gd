@@ -31,7 +31,7 @@ func _initialize() -> void:
 	s = Session.new(Callable(fake, "handle"))
 	s.owner_part_id = "P"
 	var ok: bool = await s.open_sketch({"fixed": "XZ"})
-	print("SMOKE opening on a reference plane makes one sketch feature then reads the sketch: ", ok and fake.paths() == ["POST /document/parts/P/features/sketch", "GET /sketch/sketches/sk1", "POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export"])
+	print("SMOKE opening on a reference plane makes one sketch feature then reads the sketch and which of its points are the part's own references: ", ok and fake.paths() == ["POST /document/parts/P/features/sketch", "GET /sketch/sketches/sk1", "POST /sketch/sketches/sk1/solve-and-refresh", "GET /sketch/sketches/sk1/export", "GET /document/parts/P/features/sketch/feat1/external-references"])
 	print("SMOKE ...asking for the plane by name, and keeping the plane basis (XZ's x is -X): ", fake.calls[0][1] == {"plane": "XZ"} and s.plane["x"].is_equal_approx(Vector3(-1, 0, 0)) and s.is_open())
 	print("SMOKE ...and remembers the sketch feature (what an extrude names): ", s.feature_id == "feat1" and s.sketch_id == "sk1")
 	fake = Fake.new()
