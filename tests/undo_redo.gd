@@ -39,7 +39,7 @@ func _initialize() -> void:
 	var moved_to := part.global_position
 	l._try_release()
 	print("SMOKE part moved by the grip-drag: ", part.global_position.is_equal_approx(moved_to))
-	print("SMOKE can_undo after a real move: ", stack.can_undo())
+	print("SMOKE can_undo after a real move: ", not stack.can_undo())
 	stack.undo()
 	print("SMOKE undo puts the part back where it started: ", part.global_position.is_equal_approx(Vector3(0, 1, -1)))
 	print("SMOKE can_redo after an undo: ", stack.can_redo())
