@@ -169,4 +169,11 @@ correct. Never print a *false* for the good outcome. If a line must print `false
 a new intended false (add it, with a comment). Do not add an entry just to get green. To run the checker on a saved log:
 `python3 tests/check_smoke.py run.log --baseline tests/expected_false.txt --no-smoke tests/no_smoke.txt`.
 
-Branch protection is a repository setting, not part of the workflow: make the `headless` check required once it has been green on a few PRs.
+### CI open items
+
+- **Make `headless` a required check.** Branch protection is a repository setting, not part of the workflow: do it once `headless` has been green on a few PRs.
+- **Run `e2e-backend.yml` by hand once** (Actions > "E2E against the real backend" > Run workflow, `cad_ref` = `main`). Its `workflow_dispatch` trigger could not be tried before the workflow reached `main`; the PR path filter and the job itself are verified. Make `e2e` required only after that and a few PR runs. It has not been run against an incompatible `cad_ref` either (a flipped assertion was used to prove it can go red).
+- **Watch the `render` job** (software GL under Xvfb is a new environment). It is warning-only (`continue-on-error`); once it has been steady, remove that line from `headless-tests.yml` and make it required.
+- **Baselines.** A new test that must print `false` when correct goes in `expected_false.txt` (`expected_false_e2e.txt` for e2e) with a one-line reason; see "Adding a test" above. A stale-entry warning in the log means delete that entry.
+- **Known limits of the check:** it reads booleans only (numbers meant to be eyeballed, such as the steadiness and sensitivity tables, are not machine-checked), and an expected-false line that flips to `true` is only a stale warning, not a failure. Runner timing could in principle flip the frame-count `settle` tests; none has so far (about 8 runs). Investigate any flip rather than adding retries.
+- Not in CI by design: the picture-only render tests, `gpu_timing.gd`, the benches, and the `e2e_*` tests not in `e2e_ci_list.txt`.
