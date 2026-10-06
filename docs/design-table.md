@@ -34,15 +34,35 @@ This page is what was decided and built, what the code turned out to say, and wh
    sheet; pull the trigger to place points. The **sheet** is a fixed window in the world, **0.8 x 0.4 m** (`sheet_window_m`) however big the
    part is, with a faint **grid** (1-2-5 mm lines about 16 mm apart on screen, re-spaced as you zoom; the red u axis and green v axis through
    the origin; faded at the edge). The window is fixed in the world; the part and its sketch slide and scale together **under** it (**one grip slides the part, two hands zoom it**, below), so the part's edges and corners always line up with the sketch, and the same part can take a huge sketch or a tiny one. A line in the window's corner gives the grid spacing.
-   * **The part's own corners and edges are references.** Under the sketch the part's vertices and edges are drawn quietly, projected onto the
+   * **The part's own corners, edges and holes are references.** Under the sketch the part's vertices and edges are drawn quietly, projected onto the
      sketch plane (a box seen from above is its 4 corners and 4 edges; where several land on one spot the one nearest the plane wins). Aim any tool near a
      **corner** and the cursor snaps to it; start a line, a circle or a corner there and it is a pinned point that follows the part. Aim Select, Dimension or a
      constraint tool at a **corner or a straight edge** and it is picked: it becomes a pinned point (or a pinned construction line between two) in the same
      tap, and a dimension to it is offered like any other: pick the edge, then your own point, point at the value, type it. There is no Convert, Fix or Make
-     construction step first. A thing that is already pinned (two corners, an edge on its own, the origin) offers no dimension, since it has nothing to drive.
-     The backend keeps each reference tied to its vertex (`has_lost_reference` flags a sketch whose vertex has gone: the Build tree shows it). References are
-     offered only when the part shown is the part the backend sketches on: not with something hidden or rolled back, and for a reopened sketch only if it is
-     the last thing built. **Not yet:** circular edges (a hole's centre and radius), snapping onto an edge's midpoint or along it, the part's faces.
+     construction step first. More of what you can aim at (all only when the sketch may use the part's geometry):
+       * **A hole or boss** (a circular edge lying in the sketch plane, or an arc of one such as a fillet's): snap to its **centre** (the cursor says "centre") and a
+         pinned construction circle is made on the rim, its centre a live reference that follows the hole; the shape you are drawing starts on it. Aim Dimension at
+         the **rim** to pick the circle: radius and diameter.
+       * **The middle of an edge** ("edge_midpoint") and **somewhere along an edge or a rim** ("edge_point"): the edge becomes a pinned line, and a new point is made
+         on it and held there by an at-midpoint / point-on-line constraint, so what you draw from it stays on the part's edge. (In a sketch that already holds a hole
+         converted this way, the backend's solver refuses at-midpoint: it is taken back out with a message; along-an-edge always works.)
+       * **A driven dimension.** Two things that are both pinned (two corners, an edge, a hole's circle, the origin) cannot be driven by a dimension, so pointing
+         Dimension at them offers a **reference dimension** instead (label in brackets): point at it and it is kept as `(12.5)` in a quiet colour; it measures live
+         and changes nothing. It lives in the editor only (the backend has no driven constraint) and Undo takes it back.
+     The backend keeps each reference tied to its vertex or hole and says when it cannot find it again after an upstream edit (below). The references are the part as
+     the backend resolves the sketch against it, which is the part at the sketch's place in the history: for a reopened sketch with features after it, or a part
+     with something hidden or rolled back, the part is fetched again that way and only its topology is used (the picture on the table is unchanged).
+     **Not yet:** the part's faces.
+   * **Lost and moved references.** When the part is edited upstream of a sketch the backend re-finds each pinned corner or hole by signature and history. A reference it
+     cannot find again is **lost**, one it found on weaker evidence **may have moved**; it never rebinds silently. The sketch's **Build row** carries the note (`lost
+     reference`, `1 lost, 1 may have moved`; fillets and other features too), the status line names it, and when the sketch is open the flagged points are marked red
+     (lost) or amber (may have moved) with a warning line. With nothing picked, **Select's options row offers Fix** and **Keep moved ones**: Fix walks the flagged points,
+     lost first: point at the corner of the part (or the hole's centre) it should follow and pull the trigger; the point is re-attached and keeps everything built on it.
+     Then Done rebuilds the part.
+   * **The part is clipped to the sketch window** while a sketch is open (`sketch_clip.gd`): the part's copy, its edge lines and its overlays are cut to a box, the
+     window's rectangle in the sketch plane and `SketchClip.DEPTH_M` (25 cm) either side of it, so zooming in to 200x does not fill the room. It is the section tool's
+     shader and global-uniform scheme (`shaders/clip_common.gdshaderinc`) with a per-material switch, so the arena's parts are never clipped; colours, view modes and
+     overlays work as before.
    * **The origin** is the backend's real origin point (read when the sketch opens; the backend makes it lazily). It is drawn as a bigger
      yellow marker and **snaps** like any point (kind "origin"): a line can start on it, a circle can be centred on it, a point can be made
      coincident to it, and a dimension can start or end at it. It can be selected and constrained but never deleted.
@@ -163,7 +183,9 @@ There is no AI category: the repo has no hook for it.
 | Editing session | `table_editor.gd` | The state machine (pick plane → sketch → features), the laser hover and the shared `ui_hover` claim, tool routing, the options row, applying features, refreshing geometry, undo. |
 | Sketch logic | `sketch_session.gd` | No scene: the backend sketch, the local copy of it, each tool's calls, selection, dimension candidates, undo. Takes an `api` Callable, so tests give it a fake. |
 | Sketch drawing | `sketch_view.gd`, `plane_markers.gd` | The sheet window and, in the sketch plane's own frame, entities as constant-width ribbons clipped by `sketch_lines.gdshader` (bright core over a dark edge so they read on a white part and on the slab), cursor, rubber band, dimension labels; the three plane squares. Built only when the sketch changes. |
-| Snapping | `snap_resolver.gd` | Pure. |
+| Snapping | `snap_resolver.gd` | Pure. Existing point, the origin, a corner or hole centre of the part, a midpoint (a sketch line's, or a part edge's), the nearest spot on a curve or a part edge / rim, axis inference. |
+| The part's geometry as references | `part_references.gd` | Pure, grid-indexed: the part's vertices, straight edges and circular edges in the sketch plane (centre, radius, whole circle or arc), projected onto the sketch plane; look-ups for the laser (corner, centre, edge, rim, midpoint). `sketch_session.gd: ensure_reference` makes whatever is aimed at a pinned point / line / circle; `load_references` reads which of the sketch's points are references and how each is doing. |
+| Clip to the sketch window | `sketch_clip.gd`, `clip_globals.gd`, `shaders/clip_common.gdshaderinc` | While a sketch is open the copy, its edge lines and its overlays are cut to a box (the window rectangle in the sketch plane, `DEPTH_M` either side). The section tool's shader and global-uniform scheme, with a per-material `window_clip` switch; `clip_globals.gd` registers the global parameters once for both. |
 | Plane maths | `sketch_math.gd`, `table_seat.gd` | Pure: fixed-plane bases (XZ's x is −X, as the backend), turning any plane flat on the table, ray→sheet, fit scale. |
 | Backend line | `cad_api.gd`, `part_features.gd` | A serial HTTP queue (one request in flight, in order) and thin Extrude / Fillet / Chamfer / delete calls. |
 | Stale mates | `dirty_mates.gd`, `mate_health.gd`, `enforce_button.gd` | See below. |
@@ -284,8 +306,8 @@ and the glb `quality` the table fetches (0.5).
 Headless, in `tests/run_all.sh`: `design_table_logic` (pager, registry, plane maths, snapping, seat numbers, the pose maths), `design_table_scene`
 (summon, deck clicks, seat, move / two-hand turn and scale / stick / A-B / engaged tell / Reset, send back to the arena, To arena, close, handle), `sketch_session` (the sketch calls against a fake backend,
 `tests/helpers/fake_cad.gd`), `design_table_editing` (the real laser end to end), `design_table_tree`, `design_table_mates`,
-`design_table_save`, `mate_health`, `view_modes`, `work_loss`, `table_handling`. Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
-session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver), **`e2e_sketch_select`** (the origin point and every Select menu option against the backend's real constraint schemas) `e2e_revolve` and `e2e_features` (Revolve, Shell and Mirror against the real feature schemas) and `e2e_build_tree` (which now also reopens a sketch, changes a dimension, presses Done and sees the rebuilt part). Rendering and timing:
+`design_table_save`, `mate_health`, `view_modes`, `work_loss`, `table_handling`, `design_table_references` and `design_table_references_more` (corners, edges, holes, midpoints, driven dimensions, the references of hidden / rolled-back parts and reopened sketches, lost and moved references), `sketch_clip` (the window clip's logic). Local only (a running backend, `secrets.cfg`): **`e2e_design_table`** (a plate built through the
+session, placed twice, edited on the table, saved, reopened) and **`e2e_design_table_mates`** (the real solver), **`e2e_sketch_select`** (the origin point and every Select menu option against the backend's real constraint schemas) `e2e_revolve` and `e2e_features` (Revolve, Shell and Mirror against the real feature schemas) and `e2e_build_tree` (which now also reopens a sketch, changes a dimension, presses Done and sees the rebuilt part), `e2e_references`, `e2e_references_more` (a hole's centre and rim, edge points, driven dimensions), `e2e_references_lost` (a fillet moved to another edge: the reference follows or is flagged, shown, re-picked) and `e2e_references_history` (a reopened non-last sketch, a hidden feature). Rendering and timing: `sketch_clip_render` and `sketch_clip_picture` (the window clip),
 `design_table_render`, `design_table_perf`. See `tests/README.md` for what each line should say, and `docs/status.md` "How this has been
 worked on" for standing up a throwaway backend.
 

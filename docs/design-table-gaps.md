@@ -10,17 +10,19 @@ headset**, so numbers that depend on feel (the 60 degree tilt, the sheet size, l
 
 ## Open items at a glance (read this first)
 
-Everything else in this file is history and detail. This is the one list of what is still open, as of 2026-10-06. Items marked **backend** live in DIDSA-CAD.
+Everything else in this file is history and detail. This is the one list of what is still open, as of 2026-10-06 (end of Session B). Items marked **backend** live in DIDSA-CAD.
 
 | # | Open item | Where | Detail |
 |---|---|---|---|
-| 1 | **References silently rebind** when an upstream edit changes the part's topology (5 of 7 probes; `has_lost_reference` stays false). Needs a geometric signature, then OCCT `Modified()` / `Generated()` history, and a flag instead of a silent rebind. | **backend** (+ both clients show the flag) | R2 below; `DIDSA-CAD/docs/roadmap.md` "Reference drift"; `DIDSA-CAD/backend/tests/test_reference_follows_upstream_topology_change.py` (xfail = the wanted behaviour) |
-| 2 | **The flat app's referencing flow is the old, explicit one** (Dimension mode ghost picks, a separate Convert mode). Make it implicit like the VR table: aim at a part corner or edge in any tool and the reference is made on demand. | flat app (`client/lib/sketch`) | `docs/handover-references-overhaul.md` |
-| 3 | **The part is not clipped to the sketch window**: zoomed right in (up to 200x) it fills the room. | VR | N2e / "Sketch mode and the grips" item 6 |
-| 4 | References **not yet** for: circular edges (a hole's centre / radius), an edge's midpoint or along it, faces; a driven (reference) dimension between two pinned things; sketches on a part with something hidden or rolled back, or a reopened sketch that is not the last feature. | VR (some need the backend: arcs come from `convert-entities/edge`) | R1 below |
-| 5 | **Nothing has been seen in a headset**: the 60 degree tilt, window size and zoom range, grip pan / zoom feel, reference line weight and colours (`REF_*` in `sketch_view.gd`), line / text weights, edge weight, the Quest save folder. | VR | "Everything marked Closed" note above |
+| 1 | **Nothing has been seen in a headset**: the 60 degree tilt, window size and zoom range, grip pan / zoom feel, reference line weight and colours (`REF_*` in `sketch_view.gd`), the flagged-point colours (`LOST_COLOUR` / `MOVED_COLOUR`), line / text weights, edge weight, the Quest save folder, and the clip box (`SketchClip.DEPTH_M`, `MARGIN_M`: how deep either side of the sketch plane the part survives, and whether the cut shows well). All are named constants. | VR | "Everything marked Closed" note below |
+| 2 | **At-midpoint is refused in a sketch that already holds a converted hole**: the backend's solver reports `result_code` 5 (a redundancy) for the pinned circle `convert-entities/edge` makes (it is Fixed and keeps its radius constraint), and then distrusts `converged` for any constraint outside its allowlist, which `at_midpoint` is. VR takes the constraint and its point straight back out and says so; snapping to a midpoint works in any other sketch, and along-an-edge (point-on-line) always works. Fix is in the solver (`app/sketch/solver.py`): make the converted circle not redundant, or let `at_midpoint` through when the residual check holds. | **backend** | `docs/handover-references-overhaul.md` "Session B result"; `tests/e2e_references_more.gd` pins it |
+| 3 | **A driven (reference-only) dimension lasts only while the sketch is open**: the backend has no driven constraint, so VR measures and draws it in brackets but keeps it in the editor, not in the sketch. To persist, the backend needs a constraint flag (a distance / radius / angle that is reported but not solved) that both apps draw. | VR + **backend** | R1 below |
+| 4 | **References not yet for faces** (a face as something to dimension to or a point on). A circular edge counts only when it lies in the sketch plane (the backend refuses any other as a circle); an ellipse seen along the normal is drawn but not offered. | VR (+ backend for faces) | R1 below |
+| 5 | **Re-attach is one corner at a time** (an edge is two vertex references, re-picked one by one, as in the flat app), and only sketches have a re-attach route: a fillet / chamfer / pattern with a lost or moved reference is flagged on its Build row but cannot be mended from the table. | VR + **backend** (a re-attach route for non-sketch Features, listed in the handover as still open) | R2 below |
 | 6 | Sub-assemblies: mates through them (G14), New part inside one (G16), carrying a mated part (G15, a workaround exists). | VR (+ backend nested solve) | the tables below |
 | 7 | Modelling depth (G8): Pattern, Sweep, Loft, booleans, direct edit; sketch tools Ellipse, Spline, Text, Point, Trim, Offset; a preview before Apply; redo. Build tree sections for Planes / Surfaces / Curves (G11). | VR | the tables below |
+
+**Closed since the last version of this list (all in code and tests, none in a headset):** the references drift in the backend (DIDSA-CAD, Session A: a geometric signature, OCCT history, `has_lost_reference` and a "moved" state, a re-attach route) and the flat app's implicit referencing (Session A); the part clipped to the sketch window (N2e / "Sketch mode and the grips" item 6); circular edges as references (centre snap, rim pick, radius / diameter), an edge's midpoint and the nearest point along it as snaps, and driven dimensions between pinned things (R1); references for a part with something hidden or rolled back and for a reopened sketch that is not the last feature (R1); lost / moved references shown on the Build row, in the status line, on the sketch, with Fix / Keep (R2).
 
 Accepted, not open: G5 (legacy bundle save shape only), G9 (cascade delete cannot be undone).
 
@@ -50,22 +52,57 @@ zooming slide and scale the part under it, so it works as a viewport, and the dr
 3. A grip inside the window's rectangle takes the part, not only one near its bounding sphere.
 4. The zoom range is 1/50 to 200x (everyday handling: 0.4 to 3x, or the Settings limit); Fit slides and zooms the part so the sketch fills the window.
 5. The snap, pick and dimension-label reaches are sizes in the world, so zoomed out they span many sketch mm and zoomed in few.
-6. Labels show while their middle is inside the window. **Not done:** the part's own mesh is not clipped to the window (zoomed right in it fills the room).
+6. Labels show while their middle is inside the window. **The part is clipped to the window** (`sketch_clip.gd`): its copy, its edge lines and its hover / selection overlays are discarded outside a box, the window's rectangle in the sketch plane with `DEPTH_M` (0.25 m) either side, by the same shaders and global-uniform scheme as the section tool (`shaders/clip_common.gdshaderinc`, shared by `section_clip`, `edge_lines` and `highlight_clip`; a per-material `window_clip` switch picks what is clipped, so the arena's parts never are). Colour (a flat override or the glTF surfaces' own albedo), view modes and overlays keep working; the cut shows the inside of the part darker, as the section tool's does. A very tall part is cut at `DEPTH_M` below the plane as well as above it. Checked in a software render (`tests/sketch_clip_render.gd`, `sketch_clip_picture.gd`), not in a headset; `DEPTH_M` and `MARGIN_M` are the numbers that depend on feel.
 
 ### Dimensioning to the part's own geometry (R1) and how far references can be trusted (R2)
 
-**R1, closed (first cut).** Dimensioning to existing edges and corners used to be missing (only the corners of the face you sketched on snapped, to a free point
-with no link). Now the part's vertices and straight edges, projected onto the sketch plane, are references everywhere (`part_references.gd`): snap, pick and
-dimension go straight to them, and the session makes the pinned point / construction line on demand (`convert-entities/vertex`, idempotent; an edge is the two
-points and a construction line, reused if already there). Still open: circular edges (a hole's centre / radius), midpoint and along-edge snaps, faces, a driven
-(reference) dimension between two pinned things, and sketches on a part with something hidden or rolled back.
+**R1, closed.** Dimensioning to existing edges and corners used to be missing (only the corners of the face you sketched on snapped, to a free point
+with no link). Now the part's geometry, projected onto the sketch plane, is reference geometry everywhere (`part_references.gd`): snap, pick and
+dimension go straight to it, and the session makes the pinned point / construction line / circle on demand (`sketch_session.gd: ensure_reference`), so
+there is no convert / fix / construction step. What counts:
 
-**R2, a known limit of the backend (found by experiment, not yet fixed).** A reference is `body_id` + a raw OCCT vertex index, resolved when the sketch is
-solved. Edits that keep the part's topology (a changed extrude depth, base-sketch dimensions, a fillet radius) are followed correctly, with no flag. An upstream
-edit that changes the topology (moving which edge a fillet rounds, adding one) renumbers the vertices, and the reference then **silently binds to a different
-corner**: in the probe 5 of 7 such edits did, with `has_lost_reference` false. The fix is a geometric signature stored with each reference and checked on every
-refresh (and, better, OCCT's `Modified()` / `Generated()` history), so a renumbered vertex is found again by where it was and a reference that cannot be found
-is flagged, never rebound. That is in the DIDSA-CAD backend and is recorded in its roadmap ("Reference drift"); it has not been started here.
+* **Corners** (a pinned point, `convert-entities/vertex`, idempotent) and **straight edges** (two pinned points and a pinned construction line, reused if there).
+* **Circular edges in the sketch plane** (a hole or boss, or an arc of one, such as a fillet's): snapping near the **centre** (kind "centre") or picking it
+  makes a pinned construction circle (or arc) on the rim with `convert-entities/edge`; its centre is a live `circle_centre` reference (DIDSA-CAD, Session A:
+  it follows the hole when the part changes and is flagged when it is gone), the shape starts on it, and a second use reuses it (the answer is remembered and
+  read back from `GET .../external-references` when the sketch is reopened, since the route adds a new circle on every call). Aim Dimension / Select at the
+  **rim** and the circle is picked: radius and diameter are offered (as driven candidates, below).
+* **The middle of a straight edge** (snap kind "edge_midpoint") and **the nearest point along an edge or a rim** ("edge_point"): the edge is made a pinned
+  line (or circle) and a NEW point is made on it and held there by an `at_midpoint` / `point_on_line` / `point_on_circle` constraint; the midpoint's point is
+  reused if the edge already has one. If the solver will not accept the constraint (see open item 2: `at_midpoint` in a sketch that already has a converted
+  hole) it and its point are taken straight back out with a message.
+* **A driven (reference-only) dimension** between pinned things. Nothing a dimension says could move two pinned corners, a pinned edge, a hole's circle or the
+  origin, so the candidates for them are marked **driven**: pointing at one keeps it as a dimension in brackets, `(12.5)`, `(R30)`, in a quieter colour; it
+  measures live from where the things are, sends nothing to the backend (it has no driven constraint) and lasts as long as the sketch is open (Undo takes it
+  back). Open item 3.
+* **Which part geometry.** The references have to be the geometry the backend resolves the sketch against, which is the part as it stood at the sketch's
+  place in the history. For a sketch that is the last thing built, with nothing hidden or rolled back, that is the table's own copy. Otherwise (something hidden
+  or rolled back, or a reopened sketch with features after it) the part is fetched again with `rollback_excluded_feature_ids` for everything after the sketch
+  and only its topology is used (`table_editor.gd: _load_references`); the picture on the table does not change, so with a hidden feature the part's corners
+  shown under the sketch are the ones the sketch sees, and the status line says so. A backend without the Build tree's glb parameters offers none.
+* **Still not**: faces (open item 4).
+
+Checked with the fake backend (`design_table_references.gd`, `design_table_references_more.gd`) and the real one (`e2e_references.gd`, `e2e_references_more.gd`,
+`e2e_references_lost.gd`, `e2e_references_history.gd`).
+
+**R2, fixed in the backend (Session A, 2026-10-06), shown here.** A reference is `body_id` + a raw OCCT index, and used to **silently bind to a different corner** when
+an upstream edit changed the topology (5 of 7 probes). DIDSA-CAD now stores a geometric signature with each reference, re-finds it by signature and OCCT
+history, follows it where it can, and **flags** it where it cannot (`has_lost_reference`, `lost_reference_point_ids`, `moved_reference_point_ids` ("potentially
+moved": bound on weaker evidence), `followed_reference_point_ids`, `reference_reasons`; per point `GET .../external-references`; `.../reattach`, `.../confirm`).
+The design table shows it:
+
+* the **Build row** carries a note (`lost reference`, `2 lost references`, `reference may have moved`, `1 lost, 1 may have moved`; sketches count point ids, other
+  features their reference paths) in the warning colour, and the status line names the sketches and features when the list is read;
+* a **sketch** shows the flagged points in red (lost) and amber (may have moved) and a warning ("Reference to the part: 1 lost, 1 may have moved.") in the
+  status line while it is open;
+* with nothing picked, **Select's options row offers Fix** (and **Keep moved ones**): Fix walks the flagged points, lost first; point at the corner of the part
+  (or the centre of the hole) the point should follow and pull the trigger and the point is re-attached (`reattach`: it keeps its id, so every line and
+  dimension on it stays); Keep confirms the moved ones (`confirm`). A corner-following point refuses a hole and the other way round. Then press Done to
+  rebuild the part from the sketch.
+
+`tests/e2e_references_lost.gd` moves a fillet to another edge against the real backend: to an edge away from the corner the reference follows (nothing flagged);
+onto the corner itself it is flagged lost (`consumed_by_<fillet>`), shown, and re-picked. Not done: a re-attach for non-sketch features (open item 5), showing the
+backend's `candidates` for an ambiguous reference (the re-pick is free: aim at any corner).
 
 ## Gaps found while building it
 
@@ -110,5 +147,5 @@ is flagged, never rebound. That is in the DIDSA-CAD backend and is recorded in i
 
 ## What is left, in the order it would be worth doing
 
-See "Open items at a glance" at the top. The order: 1 (backend references), 2 (flat app flow), 3 (clip the part), 4 (more reference kinds), then a headset session
-(5) before anything is tuned, then 6 and 7.
+See "Open items at a glance" at the top. The order: a headset session (1) before anything is tuned (the clip depth, the flagged colours and the reference weights
+among the numbers), then the backend's solver for 2 and driven constraints for 3, then 4, 5, 6 and 7.

@@ -153,4 +153,16 @@ func _initialize() -> void:
 	row = await sketch_row(sketch_feature_id)
 	print("SMOKE the backend agrees: the sketch has no lost reference now: ", not bool(row.get("has_lost_reference", true)), " ", row.get("lost_reference_point_ids"))
 	ed.end_sketch()
+
+	# --- a rounded corner is an arc: in a new sketch the fillet's arc on the bottom face (now at the corner (60, 40): radius 3 about (57, 37)) is picked
+	await ed.begin_sketch({"fixed": "XY"})
+	s = ed.session
+	refs = ed.part_refs
+	var arc_pick: Dictionary = refs.pick(Vector2(57.0 + 2.1213, 37.0 + 2.1213), 0.8, ["point", "line", "circle", "arc"])
+	print("SMOKE the fillet's rounded corner is a circular edge that is only part of a circle: a pick on it is an ARC entity, radius 3 about (57, 37): ", refs.circles.size() == 1 and arc_pick.get("kind") == "arc" and (arc_pick["ref"]["c"] as Vector2).distance_to(Vector2(57, 37)) < 0.05 and absf(float(arc_pick["ref"]["r"]) - 3.0) < 0.05, " ", arc_pick.get("kind"))
+	s.set_tool("dimension")
+	var arc_made: Dictionary = await s.select(arc_pick)
+	var arc_centre: String = s.arcs.values()[0]["c"] if s.arcs.size() == 1 else ""
+	print("SMOKE picking it makes ONE construction arc with a pinned centre (convert-entities/edge on a partial circular edge), and offers radius 3 as a driven candidate: ", arc_made["ok"] and s.arcs.size() == 1 and arc_centre != "" and s.point_locked.get(arc_centre, false) and s.points[arc_centre].distance_to(Vector2(57, 37)) < 0.05 and s.ghosts.size() == 2 and bool(s.ghosts[0].get("driven", false)) and absf(float(s.ghosts[0]["value"]) - 3.0) < 0.05, " ", s.ghosts.map(func(g): return [g["key"], g["value"]]))
+	ed.end_sketch()
 	quit()
