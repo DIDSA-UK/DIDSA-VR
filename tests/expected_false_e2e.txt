@@ -1,1 +1,1 @@
-# Expected-false SMOKE lines for the e2e run (same format as expected_false.txt). Reviewed by hand; empty until a real run says otherwise.
+# Expected-false SMOKE lines for the e2e run (same format as expected_false.txt). Reviewed by hand; empty until a real run says otherwise. First real run: only one false, a stale assertion (fixed), so nothing is baselined.
