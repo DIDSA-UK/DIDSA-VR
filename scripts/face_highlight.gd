@@ -19,6 +19,7 @@ extends Node
 const HOVER_COLOUR := Color(1.0, 0.93, 0.45, 0.55)
 const PICK_COLOURS: Array[Color] = [Color(0.25, 0.85, 1.0, 0.55), Color(1.0, 0.62, 0.22, 0.55)]
 const ClipShader := preload("res://shaders/highlight_clip.gdshader")
+const ClipGlobals := preload("res://scripts/clip_globals.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const MAX_CACHED_PARTS := 4
 const EDGE_RADIUS := 0.0018 ## world metres: the tube drawn along a highlighted edge
@@ -32,8 +33,15 @@ var _set: Array = [] ## nodes of the design table's multi-entity set (set_set)
 var _set_part: Node3D = null
 var _cache := {} ## part instance id -> {faces: PackedVector3Array, map: Dictionary key -> PackedInt32Array}
 var _cache_order: Array = []
-var _hover_material := _make_material(HOVER_COLOUR)
-var _pick_materials: Array[ShaderMaterial] = [_make_material(PICK_COLOURS[0]), _make_material(PICK_COLOURS[1])]
+var _hover_material: ShaderMaterial
+
+var _pick_materials: Array[ShaderMaterial] = []
+
+
+func _init() -> void:
+	ClipGlobals.ensure() # the highlight shader reads the clip globals
+	_hover_material = _make_material(HOVER_COLOUR)
+	_pick_materials = [_make_material(PICK_COLOURS[0]), _make_material(PICK_COLOURS[1])]
 
 
 static func face_key(part: Node, face_index: int) -> String:
@@ -241,12 +249,23 @@ func _build_vertex_node(part: Node3D, entity: Dictionary, material: ShaderMateri
 	return node
 
 
+func _for_part(part: Node3D, material: ShaderMaterial) -> ShaderMaterial:
+	## An overlay on the design table's copy while a sketch is open is clipped to the sketch window too (sketch_clip.gd): its own copy of the
+	## material with the switch on, so the material shared with the arena's overlays stays as it is.
+	if not bool(part.get_meta("window_clip", false)):
+		return material
+	var m := material.duplicate() as ShaderMaterial
+	m.set_shader_parameter("window_clip", true)
+	return m
+
+
 func _attach(part: Node3D, node_name: String, mesh: Mesh, material: ShaderMaterial) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
 	node.name = node_name
 	node.set_meta("highlight_kind", node_name.trim_suffix("Highlight").to_lower()) # "edge" / "vertex" (the node's own name is made unique when two sit on one part)
 	node.mesh = mesh
-	node.material_override = material
+	node.material_override = _for_part(part, material)
+	node.set_meta("window_clip_adopted", part.has_meta("window_clip")) # already switched on (or not needed): sketch_clip.gd leaves it
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	part.add_child(node)
 	return node
@@ -290,7 +309,8 @@ func _build_node(part: Node3D, key: String, material: ShaderMaterial, lift: floa
 	node.name = "FaceHighlight"
 	node.set_meta("highlight_kind", "face")
 	node.mesh = mesh
-	node.material_override = material
+	node.material_override = _for_part(part, material)
+	node.set_meta("window_clip_adopted", part.has_meta("window_clip"))
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	part.add_child(node)
 	return node

@@ -26,6 +26,11 @@ var origin := false ## whether GET .../sketches/{id} (which creates the sketch's
 var origin_id := ""
 var ref_points := {} ## "body:vertex index" -> the pinned point POST .../convert-entities/vertex made for it (idempotent, like the real route)
 var vertex_positions := {} ## "body:vertex index" -> where that vertex lands in the sketch (default (index, 0))
+var edge_circles := {} ## "body:edge index" -> {c: Vector2, r: float, full: bool}: the circular edges (coplanar with the sketch) POST .../convert-entities/edge turns into a circle / arc
+var circle_made := {} ## "body:edge index" -> the circle / arc id that route made (it adds a new one on every call, like the real one)
+var reference_rows = null ## what GET .../external-references answers with (an Array), or null for "no such route"
+var reattached: Array = [] ## [point id, body, vertex / edge index] of each POST .../reattach
+var confirmed: Array = [] ## point ids of each POST .../confirm
 var pinned := {} ## point ids the backend reports as is_locked
 var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
@@ -124,6 +129,50 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
+	if path.ends_with("/convert-entities/edge") and verb == "POST":
+		var ekey := "%s:%d" % [body["body_id"], int(body["edge_index"])]
+		if not edge_circles.has(ekey):
+			var chord_a := next_id("pt")
+			var chord_b := next_id("pt")
+			points[chord_a] = Vector2.ZERO
+			points[chord_b] = Vector2(10, 0)
+			pinned[chord_a] = true
+			pinned[chord_b] = true
+			var chord := next_id("ln")
+			entities.append({"type": "line", "id": chord, "start_point_id": chord_a, "end_point_id": chord_b, "construction": bool(body.get("construction", false))})
+			return {"ok": true, "code": 201, "json": {"line": {"id": chord}, "start_point": {"id": chord_a, "x": 0.0, "y": 0.0, "is_locked": true}, "end_point": {"id": chord_b, "x": 10.0, "y": 0.0, "is_locked": true}}, "error": ""}
+		var shape: Dictionary = edge_circles[ekey]
+		var centre_id := next_id("pt")
+		var rim_id := next_id("pt")
+		points[centre_id] = shape["c"]
+		points[rim_id] = (shape["c"] as Vector2) + Vector2(float(shape["r"]), 0.0)
+		pinned[centre_id] = true
+		pinned[rim_id] = true
+		ref_points["%s:c%d" % [body["body_id"], int(body["edge_index"])]] = centre_id
+		var shape_id := next_id("ci" if bool(shape["full"]) else "ar")
+		var radius_k := next_id("k")
+		cons[radius_k] = {"type": "distance", "id": radius_k, "point_a_id": centre_id, "point_b_id": rim_id, "distance": shape["r"], "orientation": "linear", "provisional": true}
+		var centre_resp := {"id": centre_id, "x": points[centre_id].x, "y": points[centre_id].y, "is_locked": true}
+		if bool(shape["full"]):
+			entities.append({"type": "circle", "id": shape_id, "center_point_id": centre_id, "radius_point_id": rim_id, "radius_constraint_id": radius_k, "construction": bool(body.get("construction", false))})
+			circle_made[ekey] = shape_id
+			return {"ok": true, "code": 201, "json": {"circle": {"id": shape_id, "center_point_id": centre_id, "radius_point_id": rim_id, "radius": shape["r"]}, "start_point": centre_resp, "end_point": centre_resp, "center_point": centre_resp}, "error": ""}
+		var end_id := next_id("pt")
+		points[end_id] = (shape["c"] as Vector2) + Vector2(0.0, float(shape["r"]))
+		pinned[end_id] = true
+		entities.append({"type": "arc", "id": shape_id, "center_point_id": centre_id, "start_point_id": rim_id, "end_point_id": end_id, "radius_constraint_id": radius_k, "construction": bool(body.get("construction", false))})
+		circle_made[ekey] = shape_id
+		return {"ok": true, "code": 201, "json": {"arc": {"id": shape_id, "center_point_id": centre_id, "start_point_id": rim_id, "end_point_id": end_id}, "start_point": {"id": rim_id, "x": points[rim_id].x, "y": points[rim_id].y, "is_locked": true}, "end_point": {"id": end_id, "x": points[end_id].x, "y": points[end_id].y, "is_locked": true}, "center_point": centre_resp}, "error": ""}
+	if verb == "GET" and path.ends_with("/external-references"):
+		if reference_rows == null:
+			return {"ok": false, "code": 404, "json": null, "error": "no such route"}
+		return _ok(reference_rows)
+	if verb == "POST" and path.contains("/external-references/") and path.ends_with("/reattach"):
+		reattached.append([path.get_slice("/", path.count("/") - 1), body.get("body_id", ""), body.get("vertex_index", body.get("edge_index", -1))])
+		return _ok({"id": path.get_slice("/", path.count("/") - 1), "x": 0.0, "y": 0.0, "is_locked": true})
+	if verb == "POST" and path.contains("/external-references/") and path.ends_with("/confirm"):
+		confirmed.append(path.get_slice("/", path.count("/") - 1))
+		return _ok({"id": path.get_slice("/", path.count("/") - 1), "x": 0.0, "y": 0.0, "is_locked": true})
 	if path.ends_with("/convert-entities/vertex") and verb == "POST":
 		var vkey := "%s:%d" % [body["body_id"], int(body["vertex_index"])]
 		if not ref_points.has(vkey):

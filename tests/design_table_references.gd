@@ -147,7 +147,7 @@ func _initialize() -> void:
 	await pull()
 	var made: bool = await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
 	print("SMOKE the pick makes the edge usable in one go: its two end corners as pinned points (one of them is the corner from before, so only one convert) and a construction line between them, nothing else: ", made and calls_to("convert-entities/vertex").size() == 2 and calls_to("/lines").size() == 2 and calls_to("/lines")[1][1].get("construction", false) == true and ed.session.selection.size() == 1 and ed.session.selection[0]["kind"] == "line")
-	print("SMOKE ...and since both its ends are pinned to the part there is nothing to dimension on the edge alone (no length offered): ", ed.session.ghosts.is_empty())
+	print("SMOKE ...and since both its ends are pinned to the part nothing could be driven by a dimension on the edge alone: its length is offered only as a DRIVEN (reference) one: ", ed.session.ghosts.size() == 1 and bool(ed.session.ghosts[0].get("driven", false)))
 	# now the free end of the drawn line: a distance from the part's edge to it
 	var free_end: Vector2 = Vector2(60, 70)
 	await aim_uv(free_end)

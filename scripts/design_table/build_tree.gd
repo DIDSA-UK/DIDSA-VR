@@ -103,6 +103,30 @@ static func summary(features: Array, index: int) -> String:
 	return ""
 
 
+static func reference_counts(f: Dictionary) -> Dictionary:
+	## {lost, moved}: how many references of a feature the backend says are lost / may have moved (a sketch lists its point ids, other features list
+	## their reference paths). A bare `has_lost_reference` with no list (an older backend) counts as one lost.
+	var lost: int = (f.get("lost_reference_point_ids", []) as Array).size() + (f.get("lost_references", []) as Array).size()
+	var moved: int = (f.get("moved_reference_point_ids", []) as Array).size() + (f.get("moved_references", []) as Array).size()
+	if lost == 0 and bool(f.get("has_lost_reference", false)):
+		lost = 1
+	return {"lost": lost, "moved": moved}
+
+
+static func reference_note(f: Dictionary) -> String:
+	## The short flag on a Build row: "lost reference", "2 lost references", "reference may have moved", "1 lost, 2 may have moved"; "" if all is well.
+	var c := reference_counts(f)
+	var lost: int = c["lost"]
+	var moved: int = c["moved"]
+	if lost == 0 and moved == 0:
+		return ""
+	if moved == 0:
+		return "lost reference" if lost == 1 else "%d lost references" % lost
+	if lost == 0:
+		return "reference may have moved" if moved == 1 else "%d references may have moved" % moved
+	return "%d lost, %d may have moved" % [lost, moved]
+
+
 static func value_of(feature: Dictionary) -> float:
 	## The one number Edit changes: an extrude's depth, a fillet's radius, a chamfer's distance. -1 for a type with none.
 	match str(feature.get("type", "")):

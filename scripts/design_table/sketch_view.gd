@@ -37,7 +37,10 @@ const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
 const DIM_COLOUR := Color(0.55, 0.88, 1.0)
+const DRIVEN_COLOUR := Color(0.72, 0.76, 0.82, 0.9) ## a reference (driven) dimension: it measures, it does not drive, so it is quieter and in brackets
 const ORIGIN_COLOUR := Color(1.0, 0.92, 0.45)
+const LOST_COLOUR := Color(1.0, 0.36, 0.36, 0.95) ## a reference point whose corner of the part can no longer be found
+const MOVED_COLOUR := Color(1.0, 0.72, 0.25, 0.95) ## ...one that may have moved to a different corner (confirm it or re-pick)
 const POINT_SIZE := 0.0036
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
@@ -45,6 +48,7 @@ const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
 
 var plane: Dictionary = {}
+var repick_point := "" ## the flagged reference point the user is choosing a replacement for: drawn extra large
 var window_m := Vector2(0.8, 0.4) ## the window's size in the world, metres: fixed
 var canvas_scale := 0.003 ## the part's scale: world metres per sketch (= part) mm
 var sheet_size := Vector2(100.0, 100.0) ## the window's size in sketch mm, u by v: window_m / canvas_scale
@@ -255,7 +259,43 @@ func set_reference_hover(ref: Dictionary) -> void:
 		"edge":
 			_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH + (UNDERLAY_WIDTH - LINE_WIDTH), UNDERLAY, 1.0)
 			_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH * 1.2, warn, 1.2)
+		"circle_edge":
+			_hover_edge_of(verts, colors, ref, warn)
+		"edge_midpoint", "edge_point":
+			_hover_edge_of(verts, colors, ref["edge"], warn)
+		"circle_centre":
+			var e := _edge_entry(ref)
+			if not e.is_empty() and not (e.get("circle", {}) as Dictionary).is_empty():
+				var c: Vector2 = e["circle"]["c"]
+				_marker(verts, colors, c, POINT_SIZE * 3.2, UNDERLAY, 1.3)
+				_marker(verts, colors, c, POINT_SIZE * 2.2, warn, 1.6)
+				_hover_edge_of(verts, colors, ref, warn, 0.6)
 	_set_surface(_refs_hover, verts, colors)
+
+
+func _edge_entry(ref: Dictionary) -> Dictionary:
+	## The part's projected edge a reference names (by body and edge index), or {}.
+	if _refs == null:
+		return {}
+	for e in _refs.edges:
+		if e["body"] == ref.get("body", "") and int(e["index"]) == int(ref.get("index", -1)):
+			return e
+	return {}
+
+
+func _hover_edge_of(verts: PackedVector3Array, colors: PackedColorArray, ref: Dictionary, colour: Color, weight := 1.0) -> void:
+	## Lights an edge of the part (a straight one by its two ends, a round one along its whole curve).
+	if str(ref.get("kind", "")) == "edge":
+		_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH + (UNDERLAY_WIDTH - LINE_WIDTH), UNDERLAY, 1.0)
+		_ribbon(verts, colors, ref["a"], ref["b"], OBJECT_WIDTH * 1.2 * weight, colour, 1.2)
+		return
+	var e := _edge_entry(ref)
+	if e.is_empty():
+		return
+	var segs: PackedVector2Array = e["segs"]
+	for i in range(0, segs.size() - 1, 2):
+		_ribbon(verts, colors, segs[i], segs[i + 1], OBJECT_WIDTH + (UNDERLAY_WIDTH - LINE_WIDTH), UNDERLAY, 1.0)
+		_ribbon(verts, colors, segs[i], segs[i + 1], OBJECT_WIDTH * 1.2 * weight, colour, 1.2)
 
 
 func _vertex_of(ref: Dictionary) -> Dictionary:
@@ -502,6 +542,12 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
 				continue
 			var colour: Color = warn if (selected.has(key) or key == hovered) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3))
+			var ref_state: String = session.reference_status(id)
+			if ref_state == "lost" or ref_state == "potentially_moved":
+				var flag: Color = LOST_COLOUR if ref_state == "lost" else MOVED_COLOUR
+				var big := 3.4 if id == repick_point else 2.6
+				_marker(verts, colors, session.points[id], POINT_SIZE * (big + 0.9), UNDERLAY, 1.0)
+				_marker(verts, colors, session.points[id], POINT_SIZE * big, flag, 1.1)
 			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
 			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
 	_set_surface(_geo, verts, colors)
@@ -534,7 +580,7 @@ func set_cursor(uv: Variant, kind: String = "free") -> void:
 	var colour: Color = _tokens.text
 	match kind:
 		"point": colour = Color(0.45, 1.0, 0.6)
-		"vertex", "midpoint", "curve": colour = _tokens.accent
+		"vertex", "midpoint", "curve", "centre", "edge_midpoint", "edge_point": colour = _tokens.accent
 		"origin": colour = ORIGIN_COLOUR
 		"hover": colour = _tokens.warn
 	_cursor_material.albedo_color = colour
@@ -647,14 +693,17 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 			var layout := _layout_for(item["spec"], str(item["text"]), session)
 			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
 				continue
-			_draw_dimension(verts, colors, layout, DIM_COLOUR)
-			_label_on_sheet(str(item["text"]), layout, DIM_COLOUR)
+			var item_colour: Color = DRIVEN_COLOUR if bool(item.get("driven", false)) else DIM_COLOUR
+			_draw_dimension(verts, colors, layout, item_colour)
+			_label_on_sheet(str(item["text"]), layout, item_colour)
 	for g in ghosts:
 		var spec: Dictionary = g.get("spec", {})
 		if spec.is_empty():
 			continue
 		var kind := "radius" if g["key"] == "radius" else ("diameter" if g["key"] == "diameter" else ("angle" if g["key"] == "angle" else "linear"))
 		var text: String = session.dimension_text(kind, float(g["value"])) if session != null else str(g["value"])
+		if bool(g.get("driven", false)):
+			text = "(%s)" % text
 		var layout := _layout_for(spec, text, session)
 		_draw_dimension(verts, colors, layout, _tokens.warn)
 		_label_on_sheet(text, layout, _tokens.warn)

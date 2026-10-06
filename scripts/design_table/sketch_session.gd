@@ -63,7 +63,11 @@ var references_ok := false ## the part's own vertices and edges may be used as r
 var selection: Array = [] ## picked entities for the constraint / dimension tools: [{kind, id}]
 var ghosts: Array = [] ## dimension candidates for the current selection (see _build_ghosts)
 
-var _ref_points := {} ## "body:vertex index" -> the pinned point made for it
+var _ref_points := {} ## "body:vertex index" -> the pinned point made for it; "body:c<edge index>" -> the pinned centre of that circular edge
+var _ref_circles := {} ## "body:c<edge index>" -> {id, kind ("circle" | "arc"), centre}: the pinned construction circle / arc made on that circular edge
+var reference_rows: Array = [] ## the backend's health of this sketch's references (GET .../external-references): [{point_id, body_id, kind, vertex_index, status, reason, candidates}]
+var driven: Array = [] ## reference-only (driven) dimensions the user kept between pinned things: [{id, selection: [{kind, id}], key}]. They measure, they never drive: kept here, not on the backend
+var _driven_n := 0
 var _undo: Array = [] ## [{label, calls: [[method, path]]}]
 
 
@@ -130,6 +134,7 @@ func open_sketch(spec: Dictionary) -> bool:
 	if described["ok"] and described["json"] is Dictionary:
 		origin_id = str((described["json"] as Dictionary).get("origin_point_id", ""))
 	var refreshed := await refresh(true)
+	await load_references()
 	busy = false
 	return refreshed
 
@@ -151,6 +156,7 @@ func reopen(sketch_feature: Dictionary, p_plane: Dictionary) -> bool:
 	if described["ok"] and described["json"] is Dictionary:
 		origin_id = str((described["json"] as Dictionary).get("origin_point_id", ""))
 	var refreshed := await refresh(true)
+	await load_references()
 	busy = false
 	return refreshed
 
@@ -282,6 +288,8 @@ func _point(pick: Dictionary, created: Array) -> String:
 	if str(pick.get("id", "")) != "":
 		return str(pick["id"])
 	if pick.get("ref") is Dictionary:
+		if str((pick["ref"] as Dictionary).get("kind", "")) in ["edge_midpoint", "edge_point"]:
+			return await _point_on_reference(pick, created)
 		var made := await ensure_reference(pick["ref"])
 		return str(made["id"]) if made["ok"] else ""
 	var uv: Vector2 = pick["uv"]
@@ -465,7 +473,208 @@ func ensure_reference(ref: Dictionary) -> Dictionary:
 			lines[str(made["json"]["id"])] = {"a": a["id"], "b": b["id"], "construction": true}
 			changed.emit()
 			return {"ok": true, "id": str(made["json"]["id"]), "message": ""}
+		"circle_centre":
+			var on_circle := await _ensure_circle(str(ref["body"]), int(ref["index"]))
+			if not on_circle["ok"]:
+				return on_circle
+			return {"ok": true, "id": on_circle["centre"], "message": ""}
+		"circle_edge":
+			return await _ensure_circle(str(ref["body"]), int(ref["index"]))
 	return {"ok": false, "id": "", "message": ""}
+
+
+func _ensure_circle(body: String, edge_index: int) -> Dictionary:
+	## A circular edge of the part in the sketch plane (a hole's or boss's rim, or an arc of one) as a pinned construction circle / arc in the sketch, and its
+	## centre as a pinned point: convert-entities/edge does both (the centre is a live reference of kind "circle_centre", so it follows the hole when the part
+	## changes and is flagged when the hole is gone). Not idempotent on the backend (each call adds a circle), so the answer is remembered, and read back from
+	## the sketch's references when it is reopened (load_references). {ok, id (the circle / arc), kind, centre (its centre point), message}.
+	var key := "%s:c%d" % [body, edge_index]
+	if _ref_circles.has(key):
+		var known: Dictionary = _ref_circles[key]
+		if circles.has(known["id"]) or arcs.has(known["id"]):
+			return {"ok": true, "id": known["id"], "kind": known["kind"], "centre": known["centre"], "message": ""}
+		_ref_circles.erase(key) # taken back since
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that round edge of the part: %s" % str(made["error"])}
+	var json: Dictionary = made["json"]
+	var kind := "circle" if json.get("circle") is Dictionary else ("arc" if json.get("arc") is Dictionary else "")
+	if kind == "":
+		if json.get("line") is Dictionary: # not round in this sketch's plane after all: the backend made its chord, which nobody asked for
+			await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/lines/" + str(json["line"]["id"]), null)
+			await refresh(true)
+		return {"ok": false, "id": "", "message": "That edge isn't a circle in the sketch's plane, so it can't be used here."}
+	var centre := str((json[kind] as Dictionary)["center_point_id"])
+	_ref_points[key] = centre
+	_ref_circles[key] = {"id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre}
+	await refresh(true) # the circle's own points and the circle itself come in with the next read
+	return {"ok": true, "id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre, "message": ""}
+
+
+func _point_on_reference(pick: Dictionary, created: Array) -> String:
+	## The point a snap to the middle of, or somewhere along, an edge of the part means: the edge is made a pinned construction line (or circle), and a
+	## NEW point is made on it and held there: at its middle by an at-midpoint constraint, or where you aimed by a point-on-line / point-on-circle one.
+	## The midpoint's point is reused if the edge already has one. "" if it could not be made.
+	var ref: Dictionary = pick["ref"]
+	var host := await ensure_reference(ref["edge"])
+	if not host["ok"]:
+		status.emit(str(host["message"]))
+		return ""
+	var host_id := str(host["id"])
+	var on_circle: bool = str((ref["edge"] as Dictionary).get("kind", "")) == "circle_edge"
+	var target: Vector2 = pick["uv"]
+	var constraint := {}
+	if str(ref["kind"]) == "edge_midpoint":
+		for cid in constraints:
+			var c: Dictionary = constraints[cid]
+			if str(c.get("type", "")) == "at_midpoint" and str(c.get("line_id", "")) == host_id and points.has(str(c.get("point_id", ""))):
+				return str(c["point_id"])
+		var l: Dictionary = lines.get(host_id, {})
+		if not points.has(str(l.get("a", ""))) or not points.has(str(l.get("b", ""))):
+			return ""
+		target = (points[l["a"]] + points[l["b"]]) * 0.5
+		constraint = {"type": "at_midpoint", "line_id": host_id}
+	elif on_circle:
+		constraint = {"type": "point_on_circle", "circle_or_arc_id": host_id}
+	else:
+		constraint = {"type": "point_on_line", "line_id": host_id}
+	var r := await _post(SKETCH + sketch_id + "/points", {"x": target.x, "y": target.y})
+	if not r["ok"]:
+		return ""
+	var id := str(r["json"]["id"])
+	created.append(id)
+	constraint["point_id"] = id
+	var held := await _post(SKETCH + sketch_id + "/constraints", constraint)
+	if not held["ok"]:
+		status.emit("Couldn't hold that point on the part's edge: %s" % str(held["error"]))
+		return "" # the caller's cleanup takes the point back out
+	await refresh(false)
+	if not converged:
+		# The solver would not accept it together with the rest of the sketch (the backend's at-midpoint is the one it distrusts most: it reports "not
+		# converged" in a sketch that already has a redundancy, such as a converted hole): take it back out rather than leave a broken sketch.
+		await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(held["json"]["id"]), null)
+		await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/points/" + id, null)
+		created.erase(id)
+		await refresh(false)
+		status.emit("The solver can't hold a point there together with the rest of this sketch, so it wasn't added. Try another spot on the edge.")
+		return ""
+	points[id] = points.get(id, target)
+	return id
+
+
+func reference_status(point_id: String) -> String:
+	## What state the backend says a pinned point's reference is in: "ok", "followed" (re-found at a new index, informational), "potentially_moved" (bound on
+	## weaker evidence: confirm it or re-pick) or "lost" (never rebound silently). "ok" for a point that is not a reference.
+	for row in reference_rows:
+		if str(row.get("point_id", "")) == point_id:
+			return str(row.get("status", "ok"))
+	return "ok"
+
+
+func flagged_references() -> Array:
+	## The reference rows that need the user: lost ones first, then the potentially moved.
+	var lost: Array = []
+	var moved: Array = []
+	for row in reference_rows:
+		match str(row.get("status", "ok")):
+			"lost":
+				lost.append(row)
+			"potentially_moved":
+				moved.append(row)
+	return lost + moved
+
+
+func reference_warning() -> String:
+	## One line for the status area, "" when every reference is fine.
+	var lost := 0
+	var moved := 0
+	for row in flagged_references():
+		if str(row["status"]) == "lost":
+			lost += 1
+		else:
+			moved += 1
+	if lost == 0 and moved == 0:
+		return ""
+	var parts: Array = []
+	if lost > 0:
+		parts.append("%d lost" % lost)
+	if moved > 0:
+		parts.append("%d may have moved" % moved)
+	return "Reference to the part: %s. Select, with nothing picked, offers Fix." % ", ".join(parts)
+
+
+func reattach(point_id: String, ref: Dictionary) -> Dictionary:
+	## Points a flagged reference point at the corner (ref {kind: "vertex", body, index}) or hole (ref {kind: "circle_centre", body, index}) the user picked as
+	## its replacement: everything built on the point (lines, dimensions, constraints) stays on it, only what it follows changes. {ok, message}.
+	var body := {"body_id": str(ref["body"])}
+	match str(ref.get("kind", "")):
+		"vertex":
+			body["vertex_index"] = int(ref["index"])
+		"circle_centre":
+			body["edge_index"] = int(ref["index"])
+		_:
+			return {"ok": false, "message": "Pick a corner of the part (or the centre of a hole) to follow."}
+	var wants_centre := false
+	for row in reference_rows:
+		if str(row.get("point_id", "")) == point_id:
+			wants_centre = str(row.get("kind", "vertex")) == "circle_centre"
+	if wants_centre != (str(ref["kind"]) == "circle_centre"):
+		return {"ok": false, "message": "That point follows the centre of a hole, so pick a hole's centre." if wants_centre else "That point follows a corner of the part, so pick a corner."}
+	busy = true
+	var r := await _post("/document/parts/%s/features/sketch/%s/external-references/%s/reattach" % [owner_part_id, feature_id, point_id], body)
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't re-attach it: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	_ref_points.clear()
+	_ref_circles.clear()
+	await refresh(true)
+	await load_references()
+	busy = false
+	changed.emit()
+	return {"ok": true, "message": ""}
+
+
+func confirm_reference(point_id: String) -> Dictionary:
+	## "Yes, this is the right corner": a potentially moved reference stops being flagged.
+	busy = true
+	var r := await _post("/document/parts/%s/features/sketch/%s/external-references/%s/confirm" % [owner_part_id, feature_id, point_id], {})
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't keep it: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	await load_references()
+	busy = false
+	changed.emit()
+	return {"ok": true, "message": ""}
+
+
+func load_references() -> void:
+	## Reads which of this sketch's points are the part's own corners and hole centres (the backend's list of external references), so a reopened sketch
+	## reuses them instead of making a second copy, and what state each is in (reference_rows: ok / followed / potentially_moved / lost). Quietly nothing
+	## on a backend without the route.
+	reference_rows = []
+	if owner_part_id.is_empty() or feature_id.is_empty():
+		return
+	var r: Dictionary = await api.call(HTTPClient.METHOD_GET, "/document/parts/%s/features/sketch/%s/external-references" % [owner_part_id, feature_id], null)
+	if not r["ok"] or not (r["json"] is Array):
+		return
+	reference_rows = r["json"]
+	for row in reference_rows:
+		var point_id := str(row.get("point_id", ""))
+		if str(row.get("kind", "vertex")) == "circle_centre":
+			var key := "%s:c%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]
+			_ref_points[key] = point_id
+			for cid in circles:
+				if circles[cid]["c"] == point_id:
+					_ref_circles[key] = {"id": cid, "kind": "circle", "centre": point_id}
+			for aid in arcs:
+				if arcs[aid]["c"] == point_id:
+					_ref_circles[key] = {"id": aid, "kind": "arc", "centre": point_id}
+		else:
+			_ref_points["%s:%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]] = point_id
 
 
 func _ensure_vertex(body: String, index: int) -> Dictionary:
@@ -564,7 +773,7 @@ func select(entity: Dictionary) -> Dictionary:
 		if not made["ok"]:
 			status.emit(str(made["message"]))
 			return {"ok": false, "done": false, "message": str(made["message"])}
-		entity = {"kind": str(entity["kind"]), "id": str(made["id"])}
+		entity = {"kind": str(made.get("kind", entity["kind"])), "id": str(made["id"])}
 	if tool == "dimension":
 		return _select_for_dimension(entity)
 	if tool == SELECT:
@@ -882,17 +1091,30 @@ func _line_points(id: String) -> Array:
 
 
 func _build_ghosts() -> Array:
-	## What the current selection can be dimensioned as, the way the flat app offers it: one line -> its length;
+	return _ghosts_for(selection)
+
+
+func _ghosts_for(picked: Array) -> Array:
+	## What `picked` can be dimensioned as, the way the flat app offers it: one line -> its length;
 	## one circle / arc -> radius and diameter; two points -> linear, horizontal and vertical distance; a point and
 	## a line -> their distance; two lines -> a distance if parallel, else an angle. Each: {key, label, unit,
-	## value, uv (where the label floats), apply: {patch_id?, create?, factor}}.
+	## value, uv (where the label floats), apply: {patch_id?, create?, factor}}. When everything picked is already pinned (pieces of the part, the origin,
+	## or Fixed) nothing a dimension could say would move anything, so each candidate is a DRIVEN (reference-only) one: `driven` true, it only measures,
+	## and keeping it (keep_driven) adds no constraint.
+	var out: Array = _ghosts_raw(picked)
+	if not out.is_empty() and _all_pinned(picked):
+		for g in out:
+			g["driven"] = true
+			g["label"] = "Reference " + str(g["label"]).to_lower()
+	return out
+
+
+func _ghosts_raw(picked: Array) -> Array:
 	var out: Array = []
-	if selection.is_empty():
+	if picked.is_empty():
 		return out
-	if _all_pinned(selection):
-		return out # two pieces of the part (or the origin) are already where they are: there is nothing a dimension between them could drive
-	var first: Dictionary = selection[0]
-	if selection.size() == 1:
+	var first: Dictionary = picked[0]
+	if picked.size() == 1:
 		match first["kind"]:
 			"line":
 				var pts := _line_points(first["id"])
@@ -908,7 +1130,7 @@ func _build_ghosts() -> Array:
 					out.append(_ghost("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}, circle_spec("radius", str(first["id"]))))
 					out.append(_ghost("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}, circle_spec("diameter", str(first["id"]))))
 		return out
-	var second: Dictionary = selection[1]
+	var second: Dictionary = picked[1]
 	if first["kind"] == "point" and second["kind"] == "point":
 		var a: String = first["id"]
 		var b: String = second["id"]
@@ -946,7 +1168,18 @@ func _all_pinned(entities: Array) -> bool:
 	## True if every point of the picked points and lines is pinned (a part reference, the origin, or Fixed).
 	var seen := 0
 	for e in entities:
-		var ids: Array = [str(e["id"])] if str(e["kind"]) == "point" else (_line_points(str(e["id"])) if str(e["kind"]) == "line" else [])
+		var ids: Array = []
+		match str(e["kind"]):
+			"point":
+				ids = [str(e["id"])]
+			"line":
+				ids = _line_points(str(e["id"]))
+			"circle":
+				var c: Dictionary = circles.get(str(e["id"]), {})
+				ids = [c.get("c", ""), c.get("p", "")]
+			"arc":
+				var a: Dictionary = arcs.get(str(e["id"]), {})
+				ids = [a.get("c", ""), a.get("s", ""), a.get("e", "")]
 		for pid in ids:
 			seen += 1
 			if not point_locked.get(pid, false) and not is_origin(str(pid)):
@@ -1074,7 +1307,48 @@ func dimension_items() -> Array:
 			var aspec := angle_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")))
 			if not aspec.is_empty():
 				out.append({"id": id, "spec": aspec, "text": dimension_text("angle", float(c.get("angle_degrees", 0.0)))})
+	for item in driven_items():
+		out.append(item)
 	return out
+
+
+func driven_items() -> Array:
+	## The reference dimensions kept between pinned things, measured now from where those things are: [{id, spec, text: "(12.5)", driven: true}]. One whose
+	## entities have gone is dropped.
+	var out: Array = []
+	var keep: Array = []
+	for d in driven:
+		var g := {}
+		for candidate in _ghosts_raw(d["selection"]):
+			if candidate["key"] == d["key"]:
+				g = candidate
+		if g.is_empty() or (g.get("spec", {}) as Dictionary).is_empty():
+			continue
+		keep.append(d)
+		out.append({"id": d["id"], "spec": g["spec"], "text": "(%s)" % dimension_text(_dimension_kind(str(g["key"])), float(g["value"])), "driven": true})
+	if keep.size() != driven.size():
+		driven = keep
+	return out
+
+
+static func _dimension_kind(key: String) -> String:
+	return key if key in ["radius", "diameter", "angle"] else "linear"
+
+
+func keep_driven(key: String) -> Dictionary:
+	## The user pointed at a driven candidate: keep it as a reference dimension. It measures the two pinned things and is drawn in brackets; nothing is
+	## sent to the backend (it has no driven dimension), so it lasts as long as the sketch is open. Undo takes it back.
+	var g := ghost(key)
+	if g.is_empty() or not bool(g.get("driven", false)):
+		return {"ok": false, "message": ""}
+	_driven_n += 1
+	var id := "driven%d" % _driven_n
+	driven.append({"id": id, "selection": selection.duplicate(true), "key": key})
+	_undo.append({"label": "reference dimension", "calls": [], "driven_id": id})
+	selection.clear()
+	ghosts.clear()
+	changed.emit()
+	return {"ok": true, "message": ""}
 
 
 func _distance_apply(a: String, b: String, orientation: String) -> Dictionary:
@@ -1101,6 +1375,8 @@ func confirm_ghost(key: String, value: float) -> Dictionary:
 	var g := ghost(key)
 	if g.is_empty():
 		return {"ok": false, "message": ""}
+	if bool(g.get("driven", false)):
+		return keep_driven(key) # a reference dimension has no value to type: it measures
 	if value <= 0.0:
 		var msg := "A dimension has to be bigger than zero."
 		status.emit(msg)
@@ -1158,6 +1434,8 @@ func undo() -> bool:
 	var step: Dictionary = _undo.pop_back()
 	var was_busy := busy
 	busy = true
+	if step.has("driven_id"):
+		driven = driven.filter(func(d) -> bool: return d["id"] != step["driven_id"])
 	for entry in step["calls"]:
 		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
 	pending.clear()

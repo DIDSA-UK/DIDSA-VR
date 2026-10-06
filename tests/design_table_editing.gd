@@ -466,7 +466,7 @@ func _initialize() -> void:
 	print("SMOKE aiming at a reference plane past the part's side picks the plane: ", ed.hovering and ed._hover_plane == "XY" and ed.markers.hovered == "XY")
 	await pull()
 	var on_plane: bool = await settle(func() -> bool: return ed.state == "sketch")
-	var sketch_calls := calls_to("/features/sketch")
+	var sketch_calls := calls_to("/features/sketch").filter(func(c): return str(c[0]).begins_with("POST"))
 	print("SMOKE the trigger opens a sketch on the plane BY NAME (no plane feature needed): ", on_plane and sketch_calls.back()[1] == {"plane": "XY"} and ed.chosen_plane == "XY" and ed.markers.chosen == "XY")
 	var tilt_basis := Basis(Vector3.RIGHT, deg_to_rad(60.0))
 	print("SMOKE ...and the part turns to stand that plane up at 60 degrees from the slab, x to the right, y away and up: ", (table.pivot.basis * Vector3(0, 0, 1)).normalized().is_equal_approx(tilt_basis * Vector3.UP) and (table.pivot.basis * Vector3(1, 0, 0)).normalized().is_equal_approx(Vector3.RIGHT) and (table.pivot.basis * Vector3(0, 1, 0)).normalized().is_equal_approx(tilt_basis * Vector3(0, 0, -1)))

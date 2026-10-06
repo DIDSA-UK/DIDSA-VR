@@ -232,8 +232,9 @@ func _feature_row(build, index: int, f: Dictionary, is_hidden: bool) -> Button:
 		state = "  · hidden"
 	if rolled:
 		state += "  · rolled back"
-	if bool(f.get("has_lost_reference", false)):
-		state += "  · lost reference"
+	var reference_note := BuildTree.reference_note(f)
+	if reference_note != "":
+		state += "  · %s" % reference_note
 		b.add_theme_color_override("font_color", tokens.warn)
 	b.text = "%s   %s%s" % [build.names[index], line2, state]
 	b.add_theme_stylebox_override("pressed", tokens.selected_box(tokens.accent))
