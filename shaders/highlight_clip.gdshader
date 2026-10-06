@@ -6,9 +6,7 @@ render_mode unshaded, blend_mix, cull_disabled, depth_draw_never;
 // is cut away with it instead of floating in the air where the part used to be.
 uniform vec4 colour : source_color = vec4(1.0);
 
-global uniform vec3 section_plane_origin;
-global uniform vec3 section_plane_normal;
-global uniform bool section_enabled;
+#include "res://shaders/clip_common.gdshaderinc" // the section plane and the sketch-window box
 
 varying vec3 world_pos;
 
@@ -17,7 +15,7 @@ void vertex() {
 }
 
 void fragment() {
-	if (section_enabled && dot(world_pos - section_plane_origin, section_plane_normal) < 0.0) {
+	if (clipped(world_pos)) {
 		discard;
 	}
 	ALBEDO = colour.rgb;

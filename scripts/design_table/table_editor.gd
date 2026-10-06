@@ -29,6 +29,7 @@ const TopologyPick := preload("res://scripts/topology_pick.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
+const SketchClip := preload("res://scripts/design_table/sketch_clip.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
@@ -55,6 +56,7 @@ var state := "idle"
 var session: RefCounted = null ## sketch_session.gd while a sketch is open
 var features: RefCounted = null ## part_features.gd
 var view: Node3D = null ## sketch_view.gd, a child of the table's copy
+var clip := SketchClip.new() ## clips the copy to the sketch window while a sketch is open (sketch_clip.gd)
 var markers: Node3D = null ## plane_markers.gd, a child of the table's copy
 var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Measure never see it)
 var part_id := "" ## the PART DEFINITION being edited (every instance of it changes), resolved from the seated node's occurrence
@@ -197,6 +199,7 @@ func on_cleared() -> void:
 func _reset() -> void:
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
+	clip.end()
 	session = null
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
@@ -602,6 +605,8 @@ func _build_view() -> void:
 	view.name = "SketchView"
 	copy.add_child(view)
 	view.setup(plane, table.sheet_window_m, centre, table.effective_scale(), table.tokens)
+	clip.begin(copy, table._main.view_modes)
+	_follow_window()
 	_canvas_stale = false
 	_sheet_vertices.clear()
 	part_refs = null
@@ -657,6 +662,9 @@ func _follow_window() -> void:
 	var local: Vector3 = table.table_copy.global_transform.affine_inverse() * table.to_global(table.window_anchor)
 	if view.set_frame(table.effective_scale(), SketchMath.to_sheet(local, session.plane)):
 		_canvas_stale = true
+	var plane: Dictionary = session.plane
+	var turn: Basis = table.table_copy.global_transform.basis
+	clip.update(table.to_global(table.window_anchor), turn * (plane["x"] as Vector3), turn * (plane["y"] as Vector3), turn * (plane["n"] as Vector3), table.sheet_window_m)
 
 
 func _references_valid() -> bool:
@@ -1202,6 +1210,7 @@ func _rebuild_markers() -> void:
 func end_sketch() -> void:
 	## The sketch is spent (extruded): back to choosing a plane.
 	session = null
+	clip.end()
 	if view != null and is_instance_valid(view):
 		view.queue_free()
 	view = null

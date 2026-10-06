@@ -44,9 +44,7 @@ render_mode cull_disabled;
 
 uniform vec4 albedo_color : source_color = vec4(1.0);
 
-global uniform vec3 section_plane_origin;
-global uniform vec3 section_plane_normal;
-global uniform bool section_enabled;
+#include "res://shaders/clip_common.gdshaderinc" // the section plane and the sketch-window box, shared with the edge and highlight shaders
 
 // World position must be computed in vertex(): in Godot 4's fragment(),
 // VERTEX is VIEW-space, not model-space. The earlier version here did
@@ -64,10 +62,8 @@ void vertex() {
 }
 
 void fragment() {
-	if (section_enabled) {
-		if (dot(world_pos - section_plane_origin, section_plane_normal) < 0.0) {
-			discard;
-		}
+	if (clipped(world_pos)) {
+		discard;
 	}
 	NORMAL = FRONT_FACING ? NORMAL : -NORMAL;
 	// The newly-visible interior (a back face, only ever seen at all once

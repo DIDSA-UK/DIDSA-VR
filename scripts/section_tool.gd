@@ -51,6 +51,7 @@ extends Node
 const OneEuro := preload("res://scripts/one_euro.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, same convention controller.gd's own preload uses
 const ClipShader := preload("res://shaders/section_clip.gdshader")
+const ClipGlobals := preload("res://scripts/clip_globals.gd")
 
 signal changed() ## wrist tablet refresh, mirroring mates_tool.gd's picks_changed
 
@@ -71,8 +72,6 @@ var _gesture_start_transform := Transform3D.IDENTITY
 var _wrapped: Dictionary = {} ## part (MeshInstance3D) -> the ShaderMaterial we installed as its material_override
 var _unclipped_override: Dictionary = {} ## part -> whatever material_override it had right before we wrapped it (Material or null)
 
-static var _params_registered := false ## RenderingServer's global shader parameters are process-wide, not per-instance — a `static var` (shared by every SectionTool instance, not one bool per instance) is the correct guard; re-adding an already-registered name is a real engine ERROR, not a no-op (confirmed headless — only ever hit here when more than one SectionTool exists in the same process, i.e. this project's own tests, not the real app, which creates exactly one)
-
 
 func _init() -> void:
 	_register_global_params()
@@ -83,12 +82,8 @@ func setup(stack) -> void:
 
 
 func _register_global_params() -> void:
-	if _params_registered:
-		return
-	_params_registered = true
-	RenderingServer.global_shader_parameter_add("section_plane_origin", RenderingServer.GLOBAL_VAR_TYPE_VEC3, Vector3.ZERO)
-	RenderingServer.global_shader_parameter_add("section_plane_normal", RenderingServer.GLOBAL_VAR_TYPE_VEC3, Vector3.UP)
-	RenderingServer.global_shader_parameter_add("section_enabled", RenderingServer.GLOBAL_VAR_TYPE_BOOL, false)
+	## The section plane's globals (and the sketch window's, which share shaders/clip_common.gdshaderinc), once per process.
+	ClipGlobals.ensure()
 
 
 func set_steadiness(level: int) -> void:

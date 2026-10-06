@@ -14,6 +14,7 @@ signal changed(mode: int)
 enum Mode { SHADED, SHADED_EDGES, WIREFRAME }
 
 const NAMES: Array[String] = ["Shaded", "Shaded + edges", "Wireframe"]
+const ClipGlobals := preload("res://scripts/clip_globals.gd")
 const EdgeOverlay := preload("res://scripts/edge_overlay.gd")
 const EDGE_SHADER := preload("res://shaders/edge_lines.gdshader")
 const EDGE_COLOUR := Color(0.14, 0.14, 0.15) ## over faces: dark, like the flat app's #333
@@ -23,11 +24,15 @@ var mode: int = Mode.SHADED
 
 var _main: Node
 var _material := ShaderMaterial.new()
+var _clip_material := ShaderMaterial.new() ## the same lines for a part clipped to the sketch window (sketch_clip.gd): its `window_clip` switch on
 
 
 func setup(main: Node, initial_mode: int) -> void:
+	ClipGlobals.ensure() # the edge shader reads the clip globals
 	_main = main
 	_material.shader = EDGE_SHADER
+	_clip_material.shader = EDGE_SHADER
+	_clip_material.set_shader_parameter("window_clip", true)
 	mode = clampi(initial_mode, 0, 2)
 	_style()
 
@@ -57,7 +62,9 @@ func set_mode(new_mode: int) -> void:
 
 
 func _style() -> void:
-	_material.set_shader_parameter("line_color", WIRE_COLOUR if mode == Mode.WIREFRAME else EDGE_COLOUR)
+	var colour := WIRE_COLOUR if mode == Mode.WIREFRAME else EDGE_COLOUR
+	_material.set_shader_parameter("line_color", colour)
+	_clip_material.set_shader_parameter("line_color", colour)
 
 
 func apply_all() -> void:
@@ -82,10 +89,16 @@ func apply_to(node: Node) -> void:
 		lines = _ensure_edges(part)
 		if lines != null:
 			lines.visible = true
+			lines.material_override = edge_material(part)
 	elif lines != null:
 		lines.visible = false
 	if part.is_in_group("grabbable_parts"):
 		part.layers = 1 if shows_faces() else 0
+
+
+func edge_material(part: Node) -> ShaderMaterial:
+	## The line material for a part: the switched-on one while the part is clipped to the sketch window (its `window_clip` meta, sketch_clip.gd).
+	return _clip_material if bool(part.get_meta("window_clip", false)) else _material
 
 
 func edge_lines_of(part: Node) -> MeshInstance3D:
