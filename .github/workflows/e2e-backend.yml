@@ -6,7 +6,7 @@ name: E2E against the real backend
 on:
   push:   # TEMP: verification on the CI branch only; removed before merge
     branches: [ci-headless-tests]
-    paths: [".github/workflows/e2e-backend.yml", "tests/ci_e2e.sh", "tests/e2e_ci_list.txt", "tests/expected_false_e2e.txt"]
+    paths: ["tests/e2e_*.gd", ".github/workflows/e2e-backend.yml", "tests/ci_e2e.sh", "tests/e2e_ci_list.txt", "tests/expected_false_e2e.txt"]
   workflow_dispatch:
     inputs:
       cad_ref:

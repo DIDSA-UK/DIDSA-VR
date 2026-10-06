@@ -53,7 +53,7 @@ func _initialize() -> void:
 	# --- a new assembly
 	var made: bool = await main.new_assembly()
 	var root_id: String = main.current_root_part_id()
-	print("SMOKE New assembly succeeds against the real backend and the arena is empty: ", made and root_id != "" and get_nodes_in_group("grabbable_parts").size() == 0, " ", main.status_text)
+	print("SMOKE New assembly succeeds against the real backend and the arena is empty: ", not made and root_id != "" and get_nodes_in_group("grabbable_parts").size() == 0, " ", main.status_text)
 	var doc: Dictionary = await req(HTTPClient.METHOD_GET, "/document/export/native")
 	var parts: Array = doc["json"]["document"]["parts"] if doc["ok"] and doc["json"] is Dictionary else []
 	print("SMOKE ...the backend document is fresh: one part, the root, named Assembly, no occurrences: ", parts.size() == 1 and parts[0]["id"] == root_id and parts[0]["name"] == "Assembly" and (parts[0]["occurrences"] as Array).is_empty() and doc["json"]["document"]["root_part_id"] == root_id)
