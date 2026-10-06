@@ -1,0 +1,114 @@
+name: Headless tests
+
+# The Godot test suite (tests/run_all.sh) needs no GPU, headset or backend. tests/ci.sh also checks every SMOKE
+# assertion against tests/expected_false.txt, so a `false` fails the job (run_all.sh alone only fails on script errors).
+on:
+  push:
+    paths:
+      - "scripts/**"
+      - "shaders/**"
+      - "scenes/**"
+      - "tests/**"
+      - "project.godot"
+      - ".github/workflows/headless-tests.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "shaders/**"
+      - "scenes/**"
+      - "tests/**"
+      - "project.godot"
+      - ".github/workflows/headless-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: headless-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_BIN: ${{ github.workspace }}/.godot-bin/Godot_v4.7.2-stable_linux.x86_64
+
+jobs:
+  headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot binary
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .godot-bin
+          curl -sSfL --retry 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d .godot-bin
+          rm godot.zip
+          chmod +x "$GODOT_BIN"
+
+      - name: Checker self-test
+        run: python3 -I tests/check_smoke_selftest.py
+
+      - name: Headless suite
+        env:
+          GODOT: ${{ env.GODOT_BIN }}
+        run: tests/ci.sh
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-run-log
+          path: run.log
+          if-no-files-found: ignore
+
+  # Real (software) rendering: guards shaders/clip_common.gdshaderinc, which the dummy headless renderer cannot execute.
+  # Warning-only for now (continue-on-error): software GL on a runner is a new environment; make it required once it is steady.
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot binary
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .godot-bin
+          curl -sSfL --retry 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d .godot-bin
+          rm godot.zip
+          chmod +x "$GODOT_BIN"
+
+      - name: Install Xvfb and Mesa software GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglu1-mesa
+
+      - name: Render tests (Xvfb + llvmpipe)
+        env:
+          GODOT: ${{ env.GODOT_BIN }}
+        run: tests/ci_render.sh
+
+      - name: Upload render log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-run-log
+          path: render.log
+          if-no-files-found: ignore

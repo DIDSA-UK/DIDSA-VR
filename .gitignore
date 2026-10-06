@@ -15,3 +15,11 @@ export_presets.cfg
 # they stay on the machine. The folder itself is kept via .gitkeep.
 models/*
 !models/.gitkeep
+
+# CI run logs
+/run.log
+/render.log
+/.godot-bin/
+/e2e.log
+/logs/
+/backend.log

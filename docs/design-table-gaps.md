@@ -2,7 +2,7 @@
 
 What the design table (milestone 2) did not do, or did not do well, as of the first headset session, and where each stands now. Each gap has an
 ID, what was wrong, how it was closed (or why it is accepted), and its **status**. Testing-related gaps (the headset has barely been used, Quest 2
-is unmeasured, DIDSA-VR has no CI, the flat app's own UI has not opened a VR-saved file) are tracked in `docs/design-table.md` ("Performance",
+is unmeasured, CI covers only the headless suite (no backend, no headset), the flat app's own UI has not opened a VR-saved file) are tracked in `docs/design-table.md` ("Performance",
 "Not built / known gaps") and not repeated here.
 
 **Everything marked Closed is closed in code and tests (headless, and against a real backend where it touches one). None of it has been seen in a

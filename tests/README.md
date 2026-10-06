@@ -3,7 +3,8 @@
 Godot scripts that exercise the interaction code without a headset, GPU or
 backend. They print `SMOKE ...` lines rather than pass/fail, so compare
 against the expected values below. `run_all.sh` runs the lot and fails on any
-script or parse error.
+script or parse error; `ci.sh` (what CI runs) additionally fails on any
+assertion that prints `false` (see "CI" below).
 
 ```
 GODOT=/path/to/godot tests/run_all.sh        # from the project root (it points the settings at its own file, DIDSA_SETTINGS_PATH, and resets it before every test)
@@ -135,3 +136,37 @@ check was either kept or moved (compared with the pre-removal run):
 | `tools_tab`, `section_tab`, `windows_tab` | Ported (aim along the quad normal; Visibility / Shoot hide / Sections / Windows are now rail tools, and selecting a mode tool on the rail turns it on). `windows_tab` output identical; `tools_tab` and `section_tab` keep every check (the 'tab opens' and 'toggle on' lines merged into the rail click; wording adjusted), all true. |
 | `tablet_scene` | Ported (watch, Files rows in the side panel, Scale, Navigate, Settings, toast hold, drift click). Print-style test: values read as before; the Colours "message" is now a toast. |
 | `bug_round` | Kept: snap-turn, hand ring, locomotion/stick ownership, Files (every file listed), load errors, Assembly Tree height, A/X nudge. Dropped as covered elsewhere: old rail one-row / size / rail-width lines (`tablet.gd` checks the one-row grid and 0.40 x 0.26 m size), stick scrolling and held-click edge slack (`laser_surface.gd` has both, same logic). |
+
+## CI
+
+`.github/workflows/headless-tests.yml` runs on every push and pull request that touches `scripts/`, `shaders/`, `scenes/`, `tests/`,
+`project.godot` or the workflow itself.
+
+| What | Where | Fails the build? |
+|---|---|---|
+| Parse check + the `run_all.sh` suite, via `tests/ci.sh`, then `tests/check_smoke.py` | job `headless` | yes |
+| The four assert-based render tests (`sketch_clip_render`, `section_render`, `section_render_transformed`, `highlight_clip_render`) under Xvfb + Mesa software GL, via `tests/ci_render.sh` | job `render` | no (`continue-on-error`) until it has been steady |
+| Picture-only render tests (`sketch_clip_picture`, `sketch_style_render`, `references_render`, `design_table_render`, `tablet_render`, `windows_render`, `ui_lab_render`, `look_render`, `topology_render`), `gpu_timing.gd`, the benches | nowhere | manual |
+| The `e2e_*.gd` tests listed in `tests/e2e_ci_list.txt`, against DIDSA-CAD's backend image built from source (`tests/ci_e2e.sh`, baseline `tests/expected_false_e2e.txt`, `SMOKE SKIPPED` fails) | workflow `e2e-backend.yml` (manual `workflow_dispatch` with a `cad_ref`, and PRs touching `scripts/design_table/**`, `scripts/mesh_identity.gd` or `tests/e2e_*.gd`) | yes, but the check is not required yet |
+| The other `e2e_*.gd` tests | nowhere | manual |
+
+**How the assertions are checked.** The tests print `SMOKE <what>: <value>` and exit 0, so `tests/check_smoke.py` reads the captured log (the
+`== <test>` headers `run_all.sh` prints, then each test's SMOKE lines) and fails when:
+- a SMOKE line ends in `false` (or its value starts with `false`) and is not in `tests/expected_false.txt`;
+- a `SCRIPT ERROR` / `Parse Error` / `FAIL <test>` line appears;
+- a test printed no SMOKE lines at all (unless its name is in `tests/no_smoke.txt`, empty on purpose).
+
+Baseline entries that no longer print `false` are reported as stale warnings (never failures): delete them. Note this also means an
+*expected* false that flips to `true` is only a warning. The checker reads booleans only: a line that prints a number you are meant to eyeball
+(steadiness, sensitivity, timing tables) is not machine-checked, and a `false` in the middle of a line (`... true (pressed=false)`) is
+informational. `tests/check_smoke_selftest.py` tests the checker itself.
+
+**Adding a test.** Add it to the `for t in ...` list in `run_all.sh` and make every assertion a `print("SMOKE <what>: ", <bool>)` line, true when
+correct. Never print a *false* for the good outcome. If a line must print `false` when the code is right (an informational state such as
+"panel rendering after close: false"), add `<test> | <SMOKE text up to the first ": ">` to `tests/expected_false.txt` with a comment saying why.
+
+**Updating `expected_false.txt`.** Run `GODOT=... tests/ci.sh`; each `FAILURE ... unexpected false` line is either a regression (fix the code) or
+a new intended false (add it, with a comment). Do not add an entry just to get green. To run the checker on a saved log:
+`python3 tests/check_smoke.py run.log --baseline tests/expected_false.txt --no-smoke tests/no_smoke.txt`.
+
+Branch protection is a repository setting, not part of the workflow: make the `headless` check required once it has been green on a few PRs.

@@ -1685,7 +1685,13 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   Tools-tab, full-scene tablet, mesh-identity, mates-tool, measure-tool,
   colour-tool, section-tool, section-tab and laser/left-hand tests).
   `tests/README.md` lists the expected values. Needs no GPU, headset or
-  backend.
+  backend. **CI:** `.github/workflows/headless-tests.yml` runs `tests/ci.sh`
+  (that suite plus `tests/check_smoke.py`, which fails on any `SMOKE ...: false`
+  not listed in `tests/expected_false.txt`) on every push/PR touching code,
+  scenes, shaders or tests, and a warning-only `render` job runs the four
+  assert-based render tests under Xvfb + Mesa (`tests/ci_render.sh`). See
+  `tests/README.md` "CI" for what runs where. Picture-only render tests and
+  the `e2e_*` tests stay manual.
 - **`tests/e2e_*.gd` are the exceptions** (`e2e_backend.gd`, `e2e_step_import.gd`,
   `e2e_mates.gd`, `e2e_colour.gd`, `e2e_colour_group.gd`, `e2e_section.gd`,
   `e2e_add_component.gd`, `e2e_measure.gd`): each deliberately points
@@ -1693,6 +1699,11 @@ refactors. Since `dd0db4e` a local Claude Code CLI session in this repo
   calls against a running backend, using the tracked `assembly.didsa` (or,
   for `e2e_add_component.gd`, two throwaway Parts it creates itself).
   Run them manually once your backend is up; none are part of `run_all.sh`.
+  A subset (`tests/e2e_ci_list.txt`) also runs in CI: `.github/workflows/
+  e2e-backend.yml` builds DIDSA-CAD's `backend/Dockerfile` (public repo, `cad_ref`
+  input, default `main`), starts it with a throwaway `CAD_API_KEY`, writes
+  `secrets.cfg` and runs `tests/ci_e2e.sh`; first run found one stale assertion
+  in `e2e_design_table.gd` (fixed).
   `e2e_backend.gd` confirmed once from the cloud sandbox: 3 parts, import
   21 ms, download 83 ms (47 KB glb), parse 2–3 ms, ~130 ms wall clock from
   instantiating the scene to "Loaded" — the first time this path was
