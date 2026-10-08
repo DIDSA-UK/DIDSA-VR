@@ -20,7 +20,7 @@ func handle_option(ed, option_id: String) -> bool:
 func on_activated(ed) -> void:
 	if ed.state == "sketch" or ed.state == "extrude":
 		ed.table.set_status("Finish the sketch first (Done), then mirror the part.")
-	elif ed.state in ["pick_edges", "pick_faces"]:
+	elif ed.state in ed.PICK_STATES:
 		ed.highlight.set_set(ed.table.table_copy, [])
 		ed.set_state("pick_plane")
 

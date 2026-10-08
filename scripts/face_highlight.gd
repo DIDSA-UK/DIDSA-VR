@@ -186,6 +186,8 @@ func _build_entity_node(part: Node3D, entity: Dictionary, material: ShaderMateri
 	match str(entity.get("kind", "face")):
 		"edge":
 			return _build_edge_node(part, entity, material, lift)
+		"curve":
+			return _build_curve_node(part, entity, material, lift)
 		"vertex":
 			return _build_vertex_node(part, entity, material, lift)
 	return _build_node(part, str(entity.get("key", "")), material, lift)
@@ -202,10 +204,26 @@ func _line_material(material: ShaderMaterial) -> ShaderMaterial:
 func _build_edge_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	## A thin square-section tube along the edge's polyline, in the part's own space (so it follows the part).
 	var pts := TopologyPick.edge_points(part, str(entity["body_id"]), int(entity["index"]))
+	return _tube_node(part, pts, material, lift)
+
+
+func _build_curve_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
+	## A sketch curve of an earlier sketch (sketch_picks.gd): the entity carries its own polyline, as pairs of points in the part's space.
+	return _tube_node(part, entity.get("points", PackedVector3Array()), material, lift)
+
+
+func _tube_node(part: Node3D, pts: PackedVector3Array, material: ShaderMaterial, lift: float) -> MeshInstance3D:
 	if pts.size() < 2:
 		return null
 	var scale_x: float = maxf(part.global_transform.basis.get_scale().x, 0.000001)
-	var r: float = EDGE_RADIUS * lift / scale_x
+	var mesh := tube_mesh(pts, EDGE_RADIUS * lift / scale_x)
+	if mesh == null:
+		return null
+	return _attach(part, "EdgeHighlight", mesh, _line_material(material))
+
+
+static func tube_mesh(pts: PackedVector3Array, r: float) -> ArrayMesh:
+	## Square-section tubes along point PAIRS (a, b, a, b...), `r` thick, overshooting each end by r so consecutive segments overlap at the joints.
 	var verts := PackedVector3Array()
 	for i in range(0, pts.size() - 1, 2):
 		var a := pts[i]
@@ -214,7 +232,7 @@ func _build_edge_node(part: Node3D, entity: Dictionary, material: ShaderMaterial
 		if dir.length() < 0.0000001:
 			continue
 		dir = dir.normalized()
-		a -= dir * r # overshoot both ends by the radius so consecutive segments overlap at the joints
+		a -= dir * r
 		b += dir * r
 		var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
 		var u := dir.cross(up).normalized() * r
@@ -231,7 +249,7 @@ func _build_edge_node(part: Node3D, entity: Dictionary, material: ShaderMaterial
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return _attach(part, "EdgeHighlight", mesh, _line_material(material))
+	return mesh
 
 
 func _build_vertex_node(part: Node3D, entity: Dictionary, material: ShaderMaterial, lift: float) -> MeshInstance3D:
@@ -333,6 +351,10 @@ func _face_data(part: Node3D) -> Dictionary:
 		var list: PackedInt32Array = map.get(key, PackedInt32Array()) # packed arrays are values: write it back
 		list.append(t)
 		map[key] = list
+		var solid_key := TopologyPick.body_key(str(body_ids[t])) # a whole body is lit as every triangle it has
+		var solid_list: PackedInt32Array = map.get(solid_key, PackedInt32Array())
+		solid_list.append(t)
+		map[solid_key] = solid_list
 	var data := {"faces": faces, "map": map}
 	_cache[id] = data
 	_cache_order.append(id)

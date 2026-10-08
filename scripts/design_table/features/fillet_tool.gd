@@ -30,5 +30,9 @@ func can_apply(ed) -> bool:
 	return not ed.edges.is_empty()
 
 
+func preview_mode() -> String:
+	return "eager"
+
+
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	return PartFeatures.fillet_request(ed.edge_refs(), float(ed.options["radius"]))

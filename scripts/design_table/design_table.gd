@@ -210,6 +210,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	manip.setup(self)
 	manip.engaged_changed.connect(set_engaged)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
+	ui.redo_pressed.connect(func() -> void: editor.redo())
 	ui.reset_pressed.connect(reset_pose)
 	ui.part_lock_toggled.connect(func(on: bool) -> void:
 		part_locked = on

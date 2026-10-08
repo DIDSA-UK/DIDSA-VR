@@ -39,6 +39,7 @@ var face_lines := {} ## "body:face index" -> [vertex index a, vertex index b]: a
 var face_axes := {} ## "body:face index" -> Vector2: where a round face's axis is, for POST .../convert-entities/face
 var reference_dimensions := {} ## id -> {id, kind, refs: [{type, id}]}: the reference (driven) dimensions POST .../reference-dimensions made (value computed on read, like the real backend)
 var face_made := {} ## "body:face index" -> the answer that route gave (idempotent per face, like the real one)
+var coarse_bodies: Array = [] ## what POST .../coarse-preview answers with: [{body_id, source, mesh: {vertices, normals, triangle_indices, ...}}]
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
@@ -74,7 +75,9 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
 		return _ok(feature_rows.get(path.get_slice("/", 3), []))
-	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/revolve-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/") or path.contains("/shell-features/") or path.contains("/mirror-features/") or path.contains("/create-plane-features/")):
+	if verb == "POST" and path.contains("/coarse-preview"):
+		return _ok(coarse_bodies)
+	if verb == "PATCH" and path.contains("-features/"):
 		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 		for row in rows:
 			if row["id"] == path.get_file():
@@ -115,7 +118,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": true, "code": 204, "json": null, "error": ""}
 	if verb == "GET" and path.ends_with("/occurrences"):
 		return _ok(occurrences.get(path.get_slice("/", 3), []))
-	if verb == "POST" and (path.ends_with("/extrude-features") or path.ends_with("/revolve-features") or path.ends_with("/shell-features") or path.ends_with("/mirror-features") or path.ends_with("/fillet-features") or path.ends_with("/chamfer-features")):
+	if verb == "POST" and path.ends_with("-features") and not path.ends_with("/create-plane-features"):
 		return _ok({"id": next_id("feat")})
 	if verb == "DELETE" and path.contains("/features/"):
 		return _ok(null)

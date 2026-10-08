@@ -56,6 +56,7 @@ func attach_build(build) -> void:
 	## The table's Build tree state (table_build.gd) is what the Build tab shows; the tab redraws whenever it changes, and the
 	## window opens on it as soon as a part goes on the table.
 	build.changed.connect(_on_build_changed)
+	table.editor.state_changed.connect(func(_state: String) -> void: _on_build_changed()) # the sketch rows offer "Lines" while curves are being picked
 	table.part_seated.connect(func(_part: Node3D) -> void: show_tab("build"))
 
 
@@ -255,6 +256,13 @@ func _action_strip(build, id: String, is_hidden: bool) -> Control:
 		var fix := _strip_button("Fix", "settings", func() -> void: build.fix_selected())
 		fix.theme_type_variation = &"ButtonAccent" # a flagged reference: re-pick it
 		strip.add_child(fix)
+	var picks = table.editor.sketch_picks if table.editor.state == "pick_curves" else null
+	if picks != null and is_instance_valid(picks) and picks.sketches.has(id):
+		var on: bool = bool(picks.sketches[id]["included"])
+		var lines_button := _strip_button("Lines: on" if on else "Lines: off", "visibility", func() -> void:
+			picks.set_included(id, not on)
+			_redraw_build())
+		strip.add_child(lines_button) # a finished sketch's lines are picked for a Loft / Sweep / Pattern; off leaves them out
 	var hide_button := _strip_button("Show" if is_hidden else "Hide", "visibility", func() -> void: build.toggle_hidden_selected())
 	hide_button.disabled = not build.view_filters_ok
 	strip.add_child(hide_button)

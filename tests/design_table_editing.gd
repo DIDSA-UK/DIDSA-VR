@@ -372,7 +372,7 @@ func _initialize() -> void:
 	# --- applying the extrude
 	var gets_before := calls_to("/assembly-mesh.glb").size()
 	await ed.apply_feature()
-	var extrude_call: Array = calls_to("/extrude-features")[0]
+	var extrude_call: Array = calls_to("/extrude-features").back() # the preview made the feature early; Apply PATCHes the final settings onto it
 	print("SMOKE Extrude sends the sketch, a boss from the face outward, the depth and the body sketched on: ", extrude_call[1]["sketch_feature_id"] == "feat1" and extrude_call[1]["extrude_type"] == "boss" and extrude_call[1]["start_distance"] == 0.0 and extrude_call[1]["end_distance"] == 7.5 and extrude_call[1]["target_body_ids"] == [picked["body_id"]])
 	print("SMOKE ...then fetches the part's new mesh for the right part: ", calls_to("/assembly-mesh.glb").size() == gets_before + 1 and calls_to("/assembly-mesh.glb").back()[0].contains("PART_BOX"))
 	print("SMOKE ...and the editor is back to choosing a plane with the sketch spent: ", ed.state == "pick_plane" and ed.session == null and ed.view == null and ed.markers.visible)
@@ -402,7 +402,7 @@ func _initialize() -> void:
 	await pull()
 	ed.options["radius"] = 2.0
 	await ed.apply_feature()
-	var fillet_call: Array = calls_to("/fillet-features")[0]
+	var fillet_call: Array = calls_to("/fillet-features").back()
 	print("SMOKE Fillet sends the picked edges as edge refs with the radius: ", fillet_call[1]["edge_refs"] == [{"body_id": body_id, "shape_type": "edge", "index": edge_index}] and fillet_call[1]["radius"] == 2.0)
 	print("SMOKE ...and keeps the sketch features list for Undo: ", ed.feature_stack.size() == 2)
 
@@ -429,7 +429,7 @@ func _initialize() -> void:
 	print("SMOKE Outward and a typed wall are kept: ", ed.options["shell_direction"] == "outward" and ed.options["thickness"] == 1.5 and table.ui.option_button("thickness").text == "Wall 1.50 mm")
 	await ed.on_option("shell_in")
 	await ed.apply_feature()
-	var shell_call: Array = calls_to("/shell-features")[0] if not calls_to("/shell-features").is_empty() else []
+	var shell_call: Array = calls_to("/shell-features").back() if not calls_to("/shell-features").is_empty() else []
 	print("SMOKE Apply sends the body, the opened face as a face ref, the wall and the direction (inward): ", not shell_call.is_empty() and shell_call[1]["body_id"] == shell_face["body_id"] and shell_call[1]["faces_to_remove"] == [{"body_id": shell_face["body_id"], "shape_type": "face", "index": shell_face["index"]}] and shell_call[1]["thickness"] == 1.5 and shell_call[1]["thickness_direction"] == "inward")
 	print("SMOKE ...the faces are forgotten (the new shape renumbers them) and the feature is on Undo's stack: ", ed.faces.is_empty() and ed.feature_stack.size() >= 2)
 	table.manager.deactivate()
@@ -510,7 +510,7 @@ func _initialize() -> void:
 	print("SMOKE ...90 is kept and shown: ", ed.options["angle"] == 90.0 and table.ui.option_button("angle").text == "Angle 90 deg")
 	var gets_rev: int = calls_to("/assembly-mesh.glb").size()
 	await ed.apply_feature()
-	var revolve_call: Array = calls_to("/revolve-features")[0] if not calls_to("/revolve-features").is_empty() else []
+	var revolve_call: Array = calls_to("/revolve-features").back() if not calls_to("/revolve-features").is_empty() else []
 	print("SMOKE Apply sends the sketch feature, the axis as a LINE ref of the sketch, the angle and Boss: ", not revolve_call.is_empty() and revolve_call[1]["sketch_feature_id"] == "feat1" and revolve_call[1]["axis_ref"] == {"sketch_id": "sk1", "entity_type": "line", "entity_id": rev_line} and revolve_call[1]["angle"] == 90.0 and revolve_call[1]["mode"] == "boss")
 	print("SMOKE ...fetches the new mesh, spends the sketch (back to choosing a plane) and forgets the axis: ", calls_to("/assembly-mesh.glb").size() > gets_rev and ed.state == "pick_plane" and ed.session == null and ed.revolve_axis == "")
 

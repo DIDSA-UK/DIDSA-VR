@@ -291,11 +291,12 @@ func edit_typed(feature_id: String, text: String) -> void:
 		_table.set_status("Couldn't change it: %s" % str(result["error"]))
 		UiFeedback.haptic(_table._right, "error")
 		return
-	editor.feature_stack.append({"kind": "edit", "id": feature_id, "type": str(f["type"]), "payload": undo_payload})
+	editor.feature_stack.append({"kind": "edit", "id": feature_id, "type": str(f["type"]), "payload": undo_payload, "redo_payload": payload})
+	editor.redo_stack.clear() # a new action: what was taken back can't be put back any more
 	var refreshed: bool = await editor.refresh_geometry()
 	_table.notify_edited(editor.part_id, editor._edited_nodes)
 	await reload()
-	_table.ui.set_undo_enabled(editor.can_undo())
+	editor.sync_undo_redo()
 	UiFeedback.haptic(_table._right, "confirm")
 	_table.set_status(("%s is now %s mm." % [names[index_of(feature_id)], BuildTree.number(cleaned.to_float())]) if refreshed else "Changed, but the new shape couldn't be fetched.")
 

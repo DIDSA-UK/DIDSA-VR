@@ -48,6 +48,10 @@ func finishes_sketch() -> bool:
 	return true
 
 
+func preview_mode() -> String:
+	return "eager"
+
+
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	if ed.session == null or not ed.session.profile_ok():
 		return PartFeatures._bad("The sketch needs a closed shape to revolve.")

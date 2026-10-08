@@ -53,5 +53,11 @@ func preview_route() -> String:
 	return ""
 
 
+func patch_body(req: Dictionary) -> Dictionary:
+	## What a PATCH of the feature made from `req` sends. The update routes ignore fields they do not take, so the create body does (override
+	## when a field must not be sent again).
+	return req["body"]
+
+
 func done_text() -> String:
 	return "%s done." % id.capitalize()

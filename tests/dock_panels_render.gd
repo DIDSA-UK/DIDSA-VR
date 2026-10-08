@@ -3,7 +3,7 @@ extends SceneTree
 ##   TABLE_RENDER_DIR=/tmp/dock xvfb-run -a "$GODOT" --path . --script res://tests/dock_panels_render.gd
 ## Picture-only (a human reads the PNGs; not run by ci_render.sh). Puts the box-and-cylinder fixture on the design table with the fake backend,
 ## opens a sketch on the top face and draws a rectangle, then activates each tool in turn and saves two PNGs per tool: the whole console
-## and a close-up of the deck (the tool row and the settings under it), named NN_category_tool.png / NN_category_tool_panel.png.
+## and a close-up of the Properties panel (or, for a tool with no settings, of the deck), named NN_category_tool.png / NN_category_tool_panel.png.
 ## DOCK_MODE=before names the files before_<tool>.png and covers only Extrude, Fillet and Mirror (the deck's old options row, kept for comparison).
 ## GL-compatibility software render, not a headset view: a layout smoke test.
 
@@ -106,9 +106,14 @@ func _shoot(name: String, category: String, tool_id: String, with_console: bool)
 		await create_timer(0.2).timeout
 		root.get_texture().get_image().save_png(_dir.path_join(name + ".png"))
 		_saved += 1
-	var deck_world: Vector3 = _table._deck_quad.global_position
-	_eye.global_position = deck_world + _table._deck_quad.global_transform.basis.z * 0.38
-	_eye.look_at(deck_world)
+	if _table.props.is_open():
+		var panel_world: Vector3 = _table.props.global_position
+		_eye.global_position = panel_world + _table.props.global_transform.basis.z * 0.5 # the Properties panel, close up
+		_eye.look_at(panel_world)
+	else:
+		var deck_world: Vector3 = _table._deck_quad.global_position
+		_eye.global_position = deck_world + _table._deck_quad.global_transform.basis.z * 0.38 # no settings to show: the deck, close up
+		_eye.look_at(deck_world)
 	await create_timer(0.3).timeout
 	root.get_texture().get_image().save_png(_dir.path_join((name + "_panel.png") if with_console else (name + ".png")))
 	_saved += 1

@@ -32,13 +32,17 @@ func handle_option(ed, option_id: String) -> bool:
 
 
 func on_activated(ed) -> void:
-	if ed.state in ["sketch", "pick_plane", "pick_edges", "extrude", "pick_faces"]:
+	if ed.state in ed.PICK_FROM_STATES:
 		ed.clear_picks()
 		ed.set_state("pick_faces")
 
 
 func can_apply(ed) -> bool:
 	return not ed.faces.is_empty()
+
+
+func preview_mode() -> String:
+	return "eager"
 
 
 func request(ed, _extra: Dictionary = {}) -> Dictionary:

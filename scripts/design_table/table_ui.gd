@@ -15,6 +15,7 @@ extends Control
 signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
 signal undo_pressed
+signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
 signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
 signal done_pressed ## "Done": leave the open sketch (the part is refreshed if it was changed)
@@ -41,6 +42,7 @@ var _options_row: HBoxContainer
 var _status_label: Label
 var _snap_button: Button
 var _undo_button: Button
+var _redo_button: Button
 var _close_button: Button
 var _reset_button: Button
 var _return_button: Button
@@ -163,6 +165,12 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		undo_pressed.emit())
 	bottom.add_child(_undo_button)
+	_redo_button = _utility("redo", "", false)
+	_redo_button.disabled = true
+	_redo_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		redo_pressed.emit())
+	bottom.add_child(_redo_button)
 	_close_button = _utility("close", "", false)
 	_close_button.theme_type_variation = &"ButtonDanger"
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
@@ -324,6 +332,16 @@ func set_status(text: String) -> void:
 	if _status_label.text != text:
 		_status_label.text = text
 		activity.emit()
+
+
+func set_redo_enabled(on: bool) -> void:
+	if _redo_button.disabled == on:
+		_redo_button.disabled = not on
+		activity.emit()
+
+
+func redo_button() -> Button:
+	return _redo_button
 
 
 func set_undo_enabled(on: bool) -> void:

@@ -52,6 +52,10 @@ func finishes_sketch() -> bool:
 	return true
 
 
+func preview_mode() -> String:
+	return "eager"
+
+
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	if not can_apply(ed):
 		return PartFeatures._bad("The sketch needs a closed shape to extrude.")

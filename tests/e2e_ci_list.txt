@@ -14,3 +14,4 @@ e2e_new_part
 e2e_design_table
 e2e_design_table_mates
 e2e_references_fix_feature
+e2e_preview
