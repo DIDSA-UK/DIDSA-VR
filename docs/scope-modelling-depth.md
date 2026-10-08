@@ -39,7 +39,7 @@ valuable item here because every later piece depends on it.
    part. Extend `laser_pick.gd` / the highlight with a "pick a body" mode.
 2. **Reference picks beyond edges and faces:** a sketch line from an *earlier* sketch (Sweep path, Loft guide, Pattern direction, Revolve-like axes), and fixed axes X / Y / Z as chips.
 3. **A properties panel (decided: docked).** The options row holds six buttons plus More. Pattern (type, direction, count, spacing, reverse, second direction, axis, angle, merge) needs
-   more, and Loft and Sweep more again. Decided (John, 2026-10-08): a docked panel like the tree window, holding all of the active tool's settings at once. Its place on the console is part of the deck reorganisation (see the roadmap item).
+   more, and Loft and Sweep more again. Decided (John, 2026-10-08): a docked panel like the tree window, holding all of the active tool's settings at once. Its layout, use of space and colour are their own roadmap item ("Design-table dock").
 4. **Preview before Apply.** See below.
 5. **Mate and reference health.** Every new feature goes through `notify_edited`. Pattern and Boolean add or remove faces and bodies, so check `mate_health.gd` and
    `dirty_mates.gd` against them (a pattern adds bodies; a boolean consumes some).
