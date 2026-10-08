@@ -112,6 +112,11 @@ func _initialize() -> void:
 	fake.mesh_bytes = bytes
 	fake.origin = true
 	fake.vertex_positions = {"body_box:5": Vector2(100, 0), "body_box:1": Vector2(0, 0)}
+	fake.edge_vertices_for = func(b: String, e: int) -> Array:
+		for x in ed.part_refs.edges:
+			if x["body"] == b and int(x["index"]) == e:
+				return [x["a_vertex"], x["b_vertex"]]
+		return [-1, -1]
 	ed.api = fake
 	table.open()
 	table.seat(box)
@@ -128,7 +133,7 @@ func _initialize() -> void:
 	await pull()
 	var drew: bool = await settle(func() -> bool: return not calls_to("/lines").is_empty() and not ed.session.busy)
 	var convert: Array = calls_to("convert-entities/vertex")
-	print("SMOKE a line started on the corner makes ONE pinned point for it (no convert / fix / construction steps) and starts the line there: ", drew and convert.size() == 1 and convert[0][1] == {"body_id": "body_box", "vertex_index": 5} and calls_to("/lines")[0][1]["start_point_id"] == fake.ref_points["body_box:5"])
+	print("SMOKE a line started on the corner makes ONE pinned point for it (no convert / fix / construction steps) and starts the line there: ", drew and convert.size() == 1 and convert[0][1] == {"body_id": "body_box", "vertex_index": 5, "reference": true} and calls_to("/lines")[0][1]["start_point_id"] == fake.ref_points["body_box:5"])
 	print("SMOKE ...the point is pinned (the backend says locked), so the sketch cannot drag it away from the part: ", ed.session.point_locked.get(fake.ref_points["body_box:5"], false))
 	table.manager.deactivate()
 	table.manager.activate("circle")
@@ -146,7 +151,9 @@ func _initialize() -> void:
 	print("SMOKE with Dimension on, aiming at an edge of the part picks it (a line, from the part) and lights it: ", ed._hover_entity.get("kind") == "line" and ed._hover_entity.get("ref", {}).get("kind") == "edge" and ed.view._refs_hover.mesh != null)
 	await pull()
 	var made: bool = await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
-	print("SMOKE the pick makes the edge usable in one go: its two end corners as pinned points (one of them is the corner from before, so only one convert) and a construction line between them, nothing else: ", made and calls_to("convert-entities/vertex").size() == 2 and calls_to("/lines").size() == 2 and calls_to("/lines")[1][1].get("construction", false) == true and ed.session.selection.size() == 1 and ed.session.selection[0]["kind"] == "line")
+	var edge_converts := calls_to("convert-entities/edge")
+	print("SMOKE the pick makes the edge usable in ONE call (convert-entities/edge: its two end corners as pinned points, one of them the corner from before, and a construction line between them, all flagged as reference helpers), nothing else: ", made and edge_converts.size() == 1 and edge_converts[0][1]["construction"] == true and edge_converts[0][1]["reference"] == true and calls_to("convert-entities/vertex").size() == 1 and calls_to("/lines").size() == 1 and ed.session.selection.size() == 1 and ed.session.selection[0]["kind"] == "line")
+	print("SMOKE ...the line and its end points are reference helpers in the session (quiet, never offered for selection): ", ed.session.is_reference(str(ed.session.selection[0]["id"])) and ed.session.nearest_entity(Vector2(40.0, 0.5), 3.0, ["line"]).is_empty())
 	print("SMOKE ...and since both its ends are pinned to the part nothing could be driven by a dimension on the edge alone: its length is offered only as a DRIVEN (reference) one: ", ed.session.ghosts.size() == 1 and bool(ed.session.ghosts[0].get("driven", false)))
 	# now the free end of the drawn line: a distance from the part's edge to it
 	var free_end: Vector2 = Vector2(60, 70)
@@ -164,6 +171,6 @@ func _initialize() -> void:
 	# --- a sketch that is not on the geometry the backend would use gets no references
 	ed.session.references_ok = false
 	var denied: Dictionary = await ed.session.ensure_reference({"kind": "vertex", "body": "body_box", "index": 3})
-	print("SMOKE with references off, asking for one is refused with a reason and nothing is sent: ", not denied["ok"] and str(denied["message"]).contains("can't use") and calls_to("convert-entities/vertex").size() == 2)
+	print("SMOKE with references off, asking for one is refused with a reason and nothing is sent: ", not denied["ok"] and str(denied["message"]).contains("can't use") and calls_to("convert-entities/vertex").size() == 1)
 	table.close()
 	quit()

@@ -29,9 +29,13 @@ class SnapModel extends RefCounted:
 	var circles := {}
 	var arcs := {}
 	var origin_id := ""
+	var references := {} ## id -> true: reference helpers (see sketch_session.gd reference_ids)
 
 	func is_origin(id: String) -> bool:
 		return origin_id != "" and id == origin_id
+
+	func is_reference(id: String) -> bool:
+		return references.has(id)
 
 
 func _arrow_ok(view) -> bool:

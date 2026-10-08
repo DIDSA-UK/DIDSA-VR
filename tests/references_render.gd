@@ -72,16 +72,24 @@ func _initialize() -> void:
 	await s.tap({"uv": Vector2(8, 0)})
 	table.manager.activate("extrude")
 	ed.options["boss"] = false
+	ed.options["flip"] = true # a cut goes the other way from a boss: down into the part from the plane it was sketched on, which here is the part's own base, so flip it up into it
 	ed.options["depth"] = 20.0
 	await ed.apply_feature()
+	ed.options["flip"] = false
 	await wait_for(func() -> bool: return ed.state == "pick_plane")
 	await ed.begin_sketch({"fixed": "XY"})
 	s = ed.session
 	print("SMOKE references on: ", s.references_ok, " ", ed.part_refs.vertices.size(), " corners ", ed.part_refs.edges.size(), " edges")
 	table.manager.activate("dimension")
-	# light the right-hand edge of the part
+	# a silent reference dimension: the hole's centre to the part's right-hand edge, both picked as the part's own geometry (the sketch makes the pinned
+	# helpers; none of them is drawn as sketch geometry)
 	var hit: Dictionary = ed.part_refs.pick(Vector2(30, 0), 2.0, ["line"])
-	ed.view.set_reference_hover(hit.get("ref", {}))
+	var centre_pick: Dictionary = ed.part_refs.pick(Vector2(0.5, 0.5), 3.0, ["point"])
+	await dimension(s, [centre_pick, hit], "point_line")
+	var helper_lines: Array = s.lines.keys().filter(func(id): return s.is_reference(id))
+	print("SMOKE the dimension made reference helpers (the edge as a pinned line, the hole's centre), none selectable: ", not helper_lines.is_empty() and s.nearest_entity(Vector2(30, 0), 1.0, ["line"]).is_empty() and s.reference_ids.size() >= 3, " ", s.reference_ids.size())
+	print("SMOKE ...and the dimension is a reference one, in brackets (no constraint sent to the backend for it): ", s.dimension_items().filter(func(i): return i.get("driven", false)).size() == 1)
+	ed.view.set_reference_hover({})
 	table.apply_pose(table.pivot.position, table.pivot.basis.orthonormalized(), 1.0)
 	table._slab.visible = false
 	table._ring.visible = false
@@ -98,6 +106,19 @@ func _initialize() -> void:
 	eye.look_at(mid, up)
 	await create_timer(0.8).timeout
 	var dir_out := OS.get_environment("SKETCH_RENDER_DIR")
+	var shot := root.get_texture().get_image()
 	if dir_out != "":
-		root.get_texture().get_image().save_png(dir_out.path_join("references.png"))
+		shot.save_png(dir_out.path_join("references.png"))
+	# the helper line lies exactly on the part's edge: where it is, the picture shows the quiet reference blue, not the heavy object line or the chained construction line
+	var on_edge: Vector2 = eye.unproject_position(copy.global_transform * SketchMath.from_sheet(Vector2(30, 5), plane)) * (Vector2(shot.get_size()) / root.get_visible_rect().size) # the saved picture is the window's size, not the viewport's
+	var best_blue := 0.0
+	var seen_object := false
+	for dx in range(-8, 9):
+		for dy in range(-8, 9):
+			var c := shot.get_pixel(clampi(int(on_edge.x) + dx, 0, shot.get_width() - 1), clampi(int(on_edge.y) + dy, 0, shot.get_height() - 1))
+			best_blue = maxf(best_blue, c.b - c.r)
+			if c.r > 0.9 and c.g < 0.5: # the warning colour of a lit / selected sketch line
+				seen_object = true
+	var seen_blue: bool = best_blue > 0.15
+	print("SMOKE the part's edge under the helper is drawn in the quiet reference blue and no sketch line of the helper's own is drawn over it: ", seen_blue and not seen_object)
 	quit()

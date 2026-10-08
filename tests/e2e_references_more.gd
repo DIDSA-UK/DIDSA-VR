@@ -120,7 +120,7 @@ func _initialize() -> void:
 
 	# --- Dimension on the rim: a driven radius
 	s.set_tool("dimension")
-	var rim_pick: Dictionary = s.nearest_entity(centre_uv + Vector2(6.0, 0.0), 1.5, ["circle"])
+	var rim_pick: Dictionary = refs.pick(centre_uv + Vector2(-6.0, 0.0), 1.5, ["circle"]) # the rim is the part's own (the sketch's helper circle on it is hidden): picked through the part, found again by the session
 	var picked: Dictionary = await s.select(rim_pick if not rim_pick.is_empty() else {})
 	var keys: Array = s.ghosts.map(func(g): return g["key"])
 	print("SMOKE picking the hole's circle offers radius and diameter as driven candidates, 6 and 12: ", picked["ok"] and keys == ["radius", "diameter"] and s.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(s.ghosts[0]["value"]) - 6.0) < 0.01, " ", keys)

@@ -173,6 +173,11 @@ func _initialize() -> void:
 	fake.mesh_bytes = bytes
 	fake.origin = true
 	fake.vertex_positions = {"body_box:5": Vector2(100, 0), "body_box:1": Vector2(0, 0)}
+	fake.edge_vertices_for = func(b: String, e: int) -> Array:
+		for x in ed.part_refs.edges:
+			if x["body"] == b and int(x["index"]) == e:
+				return [x["a_vertex"], x["b_vertex"]]
+		return [-1, -1]
 	ed.api = fake
 	table.open()
 	table.seat(box)
@@ -193,7 +198,7 @@ func _initialize() -> void:
 		if e["type"] == "line" and e["construction"]:
 			host_line = e["id"]
 	var mid_constraint: Dictionary = constraint_calls[0][1] if not constraint_calls.is_empty() else {}
-	print("SMOKE a line started there makes the edge a pinned construction line, a NEW point held at its middle by an at-midpoint constraint, and the line starts on that point: ", calls_to("convert-entities/vertex").size() == 2 and host_line != "" and mid_constraint.get("type") == "at_midpoint" and mid_constraint.get("line_id") == host_line and line_calls.size() == 2 and line_calls[1][1]["start_point_id"] == mid_constraint.get("point_id"))
+	print("SMOKE a line started there makes the edge a pinned construction line, a NEW point held at its middle by an at-midpoint constraint, and the line starts on that point: ", calls_to("convert-entities/edge").size() == 1 and host_line != "" and mid_constraint.get("type") == "at_midpoint" and mid_constraint.get("line_id") == host_line and line_calls.size() == 1 and line_calls[0][1]["start_point_id"] == mid_constraint.get("point_id"))
 	var new_point: String = str(mid_constraint.get("point_id", ""))
 	print("SMOKE ...at the middle of the edge, and it is a free point of the sketch (not pinned: the constraint holds it): ", fake.points.has(new_point) and (fake.points[new_point] as Vector2).is_equal_approx(Vector2(50, 0)) and not fake.pinned.has(new_point))
 	table.manager.deactivate()
@@ -209,7 +214,7 @@ func _initialize() -> void:
 	await pull()
 	await settle(func() -> bool: return calls_to("POST /sketch/sketches/sk1/constraints").size() == 2 and not ed.session.busy)
 	var along: Dictionary = calls_to("POST /sketch/sketches/sk1/constraints").back()[1]
-	print("SMOKE a point placed there is held on the pinned line by a point-on-line constraint (the same pinned line, no second one made): ", along.get("type") == "point_on_line" and along.get("line_id") == host_line and calls_to("convert-entities/vertex").size() == 2 and fake.entities.filter(func(e): return e["type"] == "line" and e["construction"]).size() == 1 and (fake.points[along["point_id"]] as Vector2).is_equal_approx(Vector2(30, 0)))
+	print("SMOKE a point placed there is held on the pinned line by a point-on-line constraint (the same pinned line, no second one made): ", along.get("type") == "point_on_line" and along.get("line_id") == host_line and calls_to("convert-entities/edge").size() == 1 and fake.entities.filter(func(e): return e["type"] == "line" and e["construction"]).size() == 1 and (fake.points[along["point_id"]] as Vector2).is_equal_approx(Vector2(30, 0)))
 	table.manager.deactivate()
 	table.close()
 
@@ -234,21 +239,21 @@ func _initialize() -> void:
 	await pull()
 	await settle(func() -> bool: return not calls_to("POST /sketch/sketches/sk1/lines").is_empty() and not ed.session.busy)
 	var converts := calls_to("convert-entities/edge")
-	print("SMOKE the line starts on the centre: ONE convert-entities/edge of the rim (a construction circle, centre pinned to the hole), no vertex converts, and no free point made for the start: ", converts.size() == 1 and converts[0][1] == {"body_id": "body_cyl", "edge_index": 2, "construction": true} and calls_to("convert-entities/vertex").is_empty() and calls_to("POST /sketch/sketches/sk1/lines")[0][1]["start_point_id"] == fake.ref_points["body_cyl:c2"])
+	print("SMOKE the line starts on the centre: ONE convert-entities/edge of the rim (a construction circle, centre pinned to the hole), no vertex converts, and no free point made for the start: ", converts.size() == 1 and converts[0][1] == {"body_id": "body_cyl", "edge_index": 2, "construction": true, "reference": true} and calls_to("convert-entities/vertex").is_empty() and calls_to("POST /sketch/sketches/sk1/lines")[0][1]["start_point_id"] == fake.ref_points["body_cyl:c2"])
 	print("SMOKE ...the circle came into the sketch as a construction circle with a pinned centre: ", ed.session.circles.size() == 1 and ed.session.circles.values()[0]["construction"] and ed.session.point_locked.get(fake.ref_points["body_cyl:c2"], false))
 	table.manager.deactivate()
 	table.manager.activate("circle")
 	await aim_uv(hole + Vector2(1.5, 0.5))
 	await pull()
-	await aim_uv(hole + Vector2(-20, 15))
+	await aim_uv(hole + Vector2(-8, 6))
 	await pull()
 	await settle(func() -> bool: return not calls_to("POST /sketch/sketches/sk1/circles").is_empty() and not ed.session.busy)
 	print("SMOKE the centre is reused for a second shape (no second convert): ", calls_to("convert-entities/edge").size() == 1 and calls_to("POST /sketch/sketches/sk1/circles")[0][1]["center_point_id"] == fake.ref_points["body_cyl:c2"])
 	table.manager.deactivate()
 
 	table.manager.activate("dimension")
-	await aim_uv(hole + Vector2(21.0, 21.5))
-	print("SMOKE with Dimension on, aiming at the rim picks the hole's circle (already in the sketch, from the centre snap, so it is the sketch's own): ", ed._hover_entity.get("kind") == "circle" and str(ed._hover_entity.get("id", "")) != "") # the circle the centre snap made is already the sketch's own
+	await aim_uv(hole + Vector2(-28.3, -10.3)) # on the rim, away from the sketch's own shapes (a sketch shape under the laser wins over the part's)
+	print("SMOKE with Dimension on, aiming at the rim picks the hole's circle (a reference helper now: it is the part's rim that is picked, and the helper the centre snap made is found for it): ", ed._hover_entity.get("kind") == "circle" and str(ed._hover_entity.get("ref", {}).get("kind", "")) == "circle_edge")
 	await pull()
 	await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
 	var keys: Array = ed.session.ghosts.map(func(g): return g["key"])
@@ -329,7 +334,7 @@ func _initialize() -> void:
 	print("SMOKE reopening a sketch that is NOT the last feature now gets the part's corners and edges: the part is fetched as the sketch saw it, with everything after it (the extrude and the fillet) left out, and only its topology is used: ", reopened and ed.session.references_ok and ed.part_refs != null and path_used.contains("rollback_excluded_feature_ids=ex2") and path_used.contains("rollback_excluded_feature_ids=fl1") and not path_used.contains("hidden_feature_ids") and not path_used.contains("sk2") and not path_used.contains("=ex1"))
 	print("SMOKE ...the table's own picture was not touched (the same mesh is on the copy): ", table.table_copy.mesh == box.mesh)
 	await ed.session.ensure_reference({"kind": "vertex", "body": "body_box", "index": 5})
-	print("SMOKE ...and a reference from it is made as usual (the backend resolves the index at that point of the history, which is the topology the corner was read from): ", calls_to("convert-entities/vertex").size() == 1 and calls_to("convert-entities/vertex")[0][1] == {"body_id": "body_box", "vertex_index": 5})
+	print("SMOKE ...and a reference from it is made as usual (the backend resolves the index at that point of the history, which is the topology the corner was read from): ", calls_to("convert-entities/vertex").size() == 1 and calls_to("convert-entities/vertex")[0][1] == {"body_id": "body_box", "vertex_index": 5, "reference": true})
 	var last_sketch_calls := calls_to("assembly-mesh.glb").size()
 	ed.end_sketch()
 	table.build.select("ex2")

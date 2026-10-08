@@ -21,6 +21,7 @@ const COPLANAR_MM := 0.001
 var vertices: Array = [] ## [{body, index, uv, depth}] (depth: distance off the plane, mm)
 var edges: Array = [] ## [{body, index, kind, segs (PackedVector2Array of segment pairs), a, b, a_vertex, b_vertex, depth, lo, hi, circle}]
 var circles: Array = [] ## the coplanar circular edges, indices into `edges` ({circle: {c, r, full}} is on the entry itself): what a hole or boss is
+var faces: Array = [] ## the faces the sketch can point at without a rim of theirs in the plane: [{body, index, kind ("face_line" | "face_axis"), a, b (a flat face seen edge-on: its ends) | c, r (a round face with its axis square to the plane: the axis point), depth}]
 
 var _cell := 10.0
 var _vertex_grid := {} ## Vector2i -> Array of indices into `vertices`
@@ -34,7 +35,7 @@ static func build(topology: Dictionary, plane: Dictionary) -> RefCounted:
 
 
 func is_empty() -> bool:
-	return vertices.is_empty() and edges.is_empty()
+	return vertices.is_empty() and edges.is_empty() and faces.is_empty()
 
 
 func _build(topology: Dictionary, plane: Dictionary) -> void:
@@ -108,6 +109,7 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 	for i in edges.size():
 		if not ((edges[i] as Dictionary).get("circle", {}) as Dictionary).is_empty():
 			circles.append(i)
+	_build_faces(topology, plane)
 	if lo.x == INF:
 		return
 	_cell = maxf(maxf(hi.x - lo.x, hi.y - lo.y) / 32.0, 1.0)
@@ -126,6 +128,84 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 				if not _edge_grid.has(ecell):
 					_edge_grid[ecell] = []
 				(_edge_grid[ecell] as Array).append(i)
+
+
+## How far (mm) a face's boundary may stray from a straight line (a flat face seen edge-on) or from one circle (a round face with its axis square to the plane)
+## and still count; the backend's own test is an angle of a degree.
+const FACE_FIT_MM := 0.02
+const FACE_MIN_MM := 0.5
+
+func _build_faces(topology: Dictionary, plane: Dictionary) -> void:
+	## A flat face standing square to the sketch plane is a line there; a cylinder with its axis square to it is a circle there, whose centre is the axis.
+	## Both are read from the face's boundary edges alone (their points projected onto the plane), so no mesh is walked and a part with thousands of faces
+	## costs a pass over its edges. Anything that does not fit stays out (a face at an angle, a cone, a cylinder seen sideways).
+	var origin: Vector3 = plane["origin"]
+	var normal: Vector3 = plane["n"]
+	for body_id in topology:
+		var body: Dictionary = topology[body_id]
+		var face_edges: Array = body.get("face_edges", [])
+		var kinds: Array = body.get("face_kinds", [])
+		var body_edges: Dictionary = body.get("edges", {})
+		for face_id in face_edges.size():
+			var kind := str(kinds[face_id]) if face_id < kinds.size() else ""
+			if kind != "plane" and kind != "cylinder":
+				continue
+			var uvs: Array = []
+			var depth := INF
+			for edge_index in (face_edges[face_id] as PackedInt32Array):
+				for p in (body_edges.get(edge_index, PackedVector3Array()) as PackedVector3Array):
+					uvs.append(_to_uv(p, plane))
+					depth = minf(depth, absf((p - origin).dot(normal)))
+			if uvs.size() < 2:
+				continue
+			var entry: Dictionary = _fit_flat_face(uvs) if kind == "plane" else _fit_round_face(uvs)
+			if entry.is_empty():
+				continue
+			entry["body"] = str(body_id)
+			entry["index"] = face_id
+			entry["depth"] = depth
+			faces.append(entry)
+
+
+static func _fit_flat_face(uvs: Array) -> Dictionary:
+	## {kind: "face_line", a, b} if every point lies on one line (and it has a length), else {}.
+	var a: Vector2 = uvs[0]
+	var far_a := a
+	for uv in uvs:
+		if a.distance_to(uv) > a.distance_to(far_a):
+			far_a = uv
+	var far_b := far_a
+	for uv in uvs:
+		if far_a.distance_to(uv) > far_a.distance_to(far_b):
+			far_b = uv
+	if far_a.distance_to(far_b) < FACE_MIN_MM:
+		return {}
+	for uv in uvs:
+		var near := Geometry2D.get_closest_point_to_segment(uv, far_a, far_b)
+		if uv.distance_to(near) > FACE_FIT_MM:
+			return {}
+	return {"kind": "face_line", "a": far_a, "b": far_b}
+
+
+static func _fit_round_face(uvs: Array) -> Dictionary:
+	## {kind: "face_axis", c, r} if every point lies on one circle (the projected rims of a cylinder whose axis is square to the plane), else {}.
+	var n := uvs.size()
+	var a: Vector2 = uvs[0]
+	var b: Vector2 = uvs[n / 3]
+	var c: Vector2 = uvs[(2 * n) / 3]
+	var d := 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+	if absf(d) < 0.000001:
+		return {}
+	var centre := Vector2(
+		(a.length_squared() * (b.y - c.y) + b.length_squared() * (c.y - a.y) + c.length_squared() * (a.y - b.y)) / d,
+		(a.length_squared() * (c.x - b.x) + b.length_squared() * (a.x - c.x) + c.length_squared() * (b.x - a.x)) / d)
+	var radius := centre.distance_to(a)
+	if radius < FACE_MIN_MM:
+		return {}
+	for uv in uvs:
+		if absf(centre.distance_to(uv) - radius) > FACE_FIT_MM:
+			return {}
+	return {"kind": "face_axis", "c": centre, "r": radius}
 
 
 static func _edge(body: String, index: int, kind: String, segs: PackedVector2Array, a: Vector2, b: Vector2, vertex_at: Dictionary, pts: PackedVector3Array, depth: float, lo: Vector2, hi: Vector2) -> Dictionary:
@@ -260,6 +340,36 @@ func nearest_centre(uv: Vector2, radius: float) -> Dictionary:
 	return best
 
 
+func nearest_face_axis(uv: Vector2, radius: float) -> Dictionary:
+	## The axis of the round face (a blind hole's wall: its rims are not in the sketch plane) whose axis point is nearest `uv` within `radius`:
+	## {body, index, uv, radius, distance} or {}. A hole whose rim IS in the plane is the circular edge's centre instead (nearest_centre), which wins.
+	var best := {}
+	var best_d := radius
+	for f in faces:
+		if str(f["kind"]) != "face_axis":
+			continue
+		var d := uv.distance_to(f["c"])
+		if d <= best_d:
+			best_d = d
+			best = {"body": f["body"], "index": f["index"], "uv": f["c"], "radius": f["r"], "distance": d}
+	return best
+
+
+func nearest_face_line(uv: Vector2, radius: float) -> Dictionary:
+	## The flat face standing square to the sketch plane whose edge-on line passes nearest `uv` within `radius`: {body, index, a, b, distance, point} or {}.
+	var best := {}
+	var best_d := radius
+	for f in faces:
+		if str(f["kind"]) != "face_line":
+			continue
+		var near := Geometry2D.get_closest_point_to_segment(uv, f["a"], f["b"])
+		var d := uv.distance_to(near)
+		if d <= best_d:
+			best_d = d
+			best = {"body": f["body"], "index": f["index"], "a": f["a"], "b": f["b"], "distance": d, "point": near}
+	return best
+
+
 func nearest_midpoint(uv: Vector2, radius: float) -> Dictionary:
 	## The midpoint of the straight part edge whose midpoint is nearest `uv` within `radius`: {body, index, a, b, a_vertex, b_vertex, uv, distance} or {}.
 	var best := {}
@@ -298,6 +408,16 @@ static func edge_ref(e: Dictionary) -> Dictionary:
 	return {"kind": "edge", "body": e["body"], "index": e["index"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "a": e["a"], "b": e["b"]}
 
 
+static func face_axis_ref(f: Dictionary) -> Dictionary:
+	## A round face's axis as a live centre: ensure_reference asks convert-entities/face, which finds a circular edge of the face to follow.
+	return {"kind": "face_axis", "body": f["body"], "index": f["index"]}
+
+
+static func face_line_ref(f: Dictionary) -> Dictionary:
+	## A flat face seen edge-on as a pinned line between its two extreme corners (convert-entities/face).
+	return {"kind": "face_line", "body": f["body"], "index": f["index"], "a": f["a"], "b": f["b"]}
+
+
 static func circle_ref(e: Dictionary) -> Dictionary:
 	## The reference a picked circular edge carries: ensure_reference makes a pinned construction circle (or arc) with its centre pinned to the hole.
 	var circle: Dictionary = e["circle"]
@@ -317,6 +437,9 @@ func pick(uv: Vector2, radius: float, kinds: Array) -> Dictionary:
 			return {"kind": "point", "id": "", "distance": centre["distance"], "uv": centre["uv"], "ref": {"kind": "circle_centre", "body": centre["body"], "index": centre["index"]}}
 		if not v.is_empty():
 			return {"kind": "point", "id": "", "distance": v["distance"], "uv": v["uv"], "ref": {"kind": "vertex", "body": v["body"], "index": v["index"]}}
+		var axis := nearest_face_axis(uv, radius)
+		if not axis.is_empty():
+			return {"kind": "point", "id": "", "distance": axis["distance"], "uv": axis["uv"], "ref": face_axis_ref(axis)}
 	var line := {}
 	if "line" in kinds:
 		var e := nearest_edge(uv, radius)
@@ -331,6 +454,10 @@ func pick(uv: Vector2, radius: float, kinds: Array) -> Dictionary:
 				rim = {"kind": "circle" if full else "arc", "id": "", "distance": c["distance"], "uv": c["point"], "ref": circle_ref(c)}
 	if not line.is_empty() and not rim.is_empty():
 		return line if float(line["distance"]) <= float(rim["distance"]) else rim
+	if line.is_empty() and rim.is_empty() and "line" in kinds:
+		var flat := nearest_face_line(uv, radius) # a flat face standing square to the sketch with no usable straight edge of its own under the laser
+		if not flat.is_empty():
+			return {"kind": "line", "id": "", "distance": flat["distance"], "uv": flat["point"], "ref": face_line_ref(flat)}
 	return line if not line.is_empty() else rim
 
 

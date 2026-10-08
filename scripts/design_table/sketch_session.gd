@@ -50,6 +50,7 @@ var busy := false
 
 var points := {} ## id -> Vector2 (sheet mm)
 var point_locked := {} ## id -> bool
+var reference_ids := {} ## id -> true: the points and shapes the backend says are reference helpers (made only to point the sketch at the part's own corner, edge, hole or face). Drawn quietly, never offered for selection or deletion
 var lines := {} ## id -> {a, b, construction}
 var circles := {} ## id -> {c, p, k, construction} (centre point, radius point, radius constraint id)
 var arcs := {} ## id -> {c, s, e, k, construction}
@@ -192,6 +193,10 @@ func _ingest_state(json: Dictionary) -> void:
 	for p in json.get("points", []):
 		points[str(p["id"])] = Vector2(float(p["x"]), float(p["y"]))
 		point_locked[str(p["id"])] = bool(p.get("is_locked", false))
+		if bool(p.get("is_reference", false)):
+			reference_ids[str(p["id"])] = true
+		else:
+			reference_ids.erase(str(p["id"]))
 	constraints.clear()
 	for c in json.get("constraints", []):
 		constraints[str(c["id"])] = c
@@ -206,6 +211,9 @@ func _ingest_entities(json: Dictionary) -> void:
 	circles.clear()
 	arcs.clear()
 	shapes.clear()
+	reference_ids.clear()
+	for id in json.get("reference_ids", []):
+		reference_ids[str(id)] = true
 	for e in json.get("entities", []):
 		var id := str(e.get("id", ""))
 		match str(e.get("type", "")):
@@ -221,6 +229,11 @@ func _ingest_entities(json: Dictionary) -> void:
 				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", [])}
 			"slot":
 				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
+
+
+func is_reference(id: String) -> bool:
+	## A reference helper (see reference_ids): the sketch's plumbing to the part's own geometry, not the user's.
+	return reference_ids.has(id)
 
 
 func profile_ok() -> bool:
@@ -446,32 +459,23 @@ func _make_polygon(taps: Array) -> Dictionary:
 # --- The part's own geometry as references ----------------------------------------------------
 
 func ensure_reference(ref: Dictionary) -> Dictionary:
-	## Makes a part vertex or straight edge usable in this sketch and returns {ok, id, message}: a vertex becomes a pinned point that follows the
-	## part (the backend re-resolves it whenever the part changes, and flags the sketch if it can't), an edge becomes a pinned construction line
-	## between two such points. Idempotent: asking again for the same vertex gives the same point, and an edge whose two points are already joined
-	## by a line gives that line. Nothing for the user to convert, fix or mark as construction.
+	## Makes a part vertex, edge, hole or face usable in this sketch and returns {ok, id, message}: a vertex becomes a pinned point that follows the
+	## part (the backend re-resolves it whenever the part changes, and flags the sketch if it can't), an edge a pinned construction line between two such
+	## points, a hole's rim a pinned circle with a live centre, a face (standing square to the sketch, or round with its axis square to it) a pinned
+	## line or a live centre. Everything made is flagged as a reference helper by the backend (`reference: true`), so it is drawn quietly, never offered for
+	## selection or deletion, and cleaned up when nothing depends on it. Every route is idempotent: asking again gives the same thing. Nothing for the
+	## user to convert, fix or mark as construction, and a failure leaves nothing half made (one call each).
 	if not references_ok:
 		return {"ok": false, "id": "", "message": "This sketch can't use the part's own geometry (the part shown isn't the one the backend sketches on)."}
 	match str(ref.get("kind", "")):
 		"vertex":
 			return await _ensure_vertex(str(ref["body"]), int(ref["index"]))
 		"edge":
-			var a := await _ensure_vertex(str(ref["body"]), int(ref["a_vertex"]))
-			if not a["ok"]:
-				return a
-			var b := await _ensure_vertex(str(ref["body"]), int(ref["b_vertex"]))
-			if not b["ok"]:
-				return b
-			for id in lines:
-				var l: Dictionary = lines[id]
-				if (l["a"] == a["id"] and l["b"] == b["id"]) or (l["a"] == b["id"] and l["b"] == a["id"]):
-					return {"ok": true, "id": id, "message": ""}
-			var made := await _post(SKETCH + sketch_id + "/lines", {"start_point_id": a["id"], "end_point_id": b["id"], "construction": true})
-			if not made["ok"]:
-				return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
-			lines[str(made["json"]["id"])] = {"a": a["id"], "b": b["id"], "construction": true}
-			changed.emit()
-			return {"ok": true, "id": str(made["json"]["id"]), "message": ""}
+			return await _ensure_edge_line(ref)
+		"face_line":
+			return await _ensure_face(str(ref["body"]), int(ref["index"]))
+		"face_axis":
+			return await _ensure_face(str(ref["body"]), int(ref["index"]))
 		"circle_centre":
 			var on_circle := await _ensure_circle(str(ref["body"]), int(ref["index"]))
 			if not on_circle["ok"]:
@@ -482,13 +486,94 @@ func ensure_reference(ref: Dictionary) -> Dictionary:
 	return {"ok": false, "id": "", "message": ""}
 
 
+func _take_in_point(json: Dictionary) -> void:
+	## A point the backend just answered with (a convert route's response): into the local picture at once, pinned and flagged as a helper.
+	var id := str(json["id"])
+	points[id] = Vector2(float(json["x"]), float(json["y"]))
+	point_locked[id] = true
+	if bool(json.get("is_reference", false)):
+		reference_ids[id] = true
+
+
+func _ensure_edge_line(ref: Dictionary) -> Dictionary:
+	## A straight edge of the part as a pinned construction line (convert-entities/edge: two live corner references and the line between them, reused if it
+	## is there). A line already in the picture between the pinned points of its two corners is the answer without asking. Not a line after all (the edge is
+	## round in this plane) is refused: the call is one, so nothing is left half made.
+	var body := str(ref["body"])
+	var key_a := "%s:%d" % [body, int(ref.get("a_vertex", -1))]
+	var key_b := "%s:%d" % [body, int(ref.get("b_vertex", -1))]
+	if _ref_points.has(key_a) and _ref_points.has(key_b):
+		for id in lines:
+			var l: Dictionary = lines[id]
+			if (l["a"] == _ref_points[key_a] and l["b"] == _ref_points[key_b]) or (l["a"] == _ref_points[key_b] and l["b"] == _ref_points[key_a]):
+				return {"ok": true, "id": id, "message": ""}
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": int(ref["index"]), "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
+	var json: Dictionary = made["json"]
+	if not (json.get("line") is Dictionary):
+		await refresh(true) # a round edge came back as a circle or arc: not what was asked for, and the backend made it, so read it in (it is a flagged helper, quiet, and goes with its last user)
+		return {"ok": false, "id": "", "message": "That edge isn't straight in this sketch's plane."}
+	_take_in_point(json["start_point"])
+	_take_in_point(json["end_point"])
+	for end in [json["start_point"], json["end_point"]]:
+		var at := Vector2(float(end["x"]), float(end["y"]))
+		if ref.has("a") and at.distance_to(ref["a"]) < 0.01:
+			_ref_points[key_a] = str(end["id"])
+		elif ref.has("b") and at.distance_to(ref["b"]) < 0.01:
+			_ref_points[key_b] = str(end["id"])
+	var line: Dictionary = json["line"]
+	var id := str(line["id"])
+	lines[id] = {"a": str(line["start_point_id"]), "b": str(line["end_point_id"]), "construction": true}
+	if bool(line.get("is_reference", false)):
+		reference_ids[id] = true
+	changed.emit()
+	return {"ok": true, "id": id, "message": ""}
+
+
+func _ensure_face(body: String, face_index: int) -> Dictionary:
+	## A face of the part as something to point at: a flat face standing square to the sketch becomes a pinned line, a round face with its axis square to it
+	## a live centre (convert-entities/face). {ok, id (the line, or the centre point), kind ("line" | "centre"), centre?, message}.
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/face" % [owner_part_id, feature_id], {"body_id": body, "face_index": face_index, "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that face: %s" % _face_reason(str(made["error"]))}
+	var json: Dictionary = made["json"]
+	if str(json.get("kind", "")) == "centre":
+		_take_in_point(json["center_point"])
+		changed.emit()
+		return {"ok": true, "id": str(json["center_point"]["id"]), "kind": "point", "message": ""}
+	_take_in_point(json["start_point"])
+	_take_in_point(json["end_point"])
+	var line: Dictionary = json["line"]
+	var id := str(line["id"])
+	lines[id] = {"a": str(line["start_point_id"]), "b": str(line["end_point_id"]), "construction": true}
+	if bool(line.get("is_reference", false)):
+		reference_ids[id] = true
+	changed.emit()
+	return {"ok": true, "id": id, "kind": "line", "message": ""}
+
+
+static func _face_reason(error: String) -> String:
+	for known in {"face_not_perpendicular": "it isn't square to the sketch plane.", "face_axis_not_perpendicular": "its axis isn't square to the sketch plane.", "unsupported_face": "that kind of face can't be used.", "face_has_no_circular_edge": "it has no round edge to find its axis from.", "degenerate_face": "it has no width seen from here."}.keys():
+		if error.contains(known):
+			return {"face_not_perpendicular": "it isn't square to the sketch plane.", "face_axis_not_perpendicular": "its axis isn't square to the sketch plane.", "unsupported_face": "that kind of face can't be used.", "face_has_no_circular_edge": "it has no round edge to find its axis from.", "degenerate_face": "it has no width seen from here."}[known]
+	return error
+
+
 func _ensure_circle(body: String, edge_index: int) -> Dictionary:
 	## A circular edge of the part in the sketch plane (a hole's or boss's rim, or an arc of one) as a pinned construction circle / arc in the sketch, and its
 	## centre as a pinned point: convert-entities/edge does both (the centre is a live reference of kind "circle_centre", so it follows the hole when the part
 	## changes and is flagged when the hole is gone). The route is idempotent per edge (a second call answers with the circle already there), so asking again
 	## is the way to find it; it is only read back when the circle is not yet in this session's picture. {ok, id (the circle / arc), kind, centre (its centre point), message}.
 	var key := "%s:c%d" % [body, edge_index]
-	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true})
+	if _ref_points.has(key) and points.has(_ref_points[key]):
+		for cid in circles: # already here: the shape on that pinned centre (nothing remembered about it, it is read off the picture)
+			if circles[cid]["c"] == _ref_points[key]:
+				return {"ok": true, "id": cid, "kind": "circle", "centre": _ref_points[key], "message": ""}
+		for aid in arcs:
+			if arcs[aid]["c"] == _ref_points[key]:
+				return {"ok": true, "id": aid, "kind": "arc", "centre": _ref_points[key], "message": ""}
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true, "reference": true})
 	if not made["ok"]:
 		return {"ok": false, "id": "", "message": "Couldn't use that round edge of the part: %s" % str(made["error"])}
 	var json: Dictionary = made["json"]
@@ -669,12 +754,11 @@ func _ensure_vertex(body: String, index: int) -> Dictionary:
 	var key := "%s:%d" % [body, index]
 	if _ref_points.has(key) and points.has(_ref_points[key]):
 		return {"ok": true, "id": _ref_points[key], "message": ""}
-	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/vertex" % [owner_part_id, feature_id], {"body_id": body, "vertex_index": index})
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/vertex" % [owner_part_id, feature_id], {"body_id": body, "vertex_index": index, "reference": true})
 	if not made["ok"]:
 		return {"ok": false, "id": "", "message": "Couldn't use that corner of the part: %s" % str(made["error"])}
 	var id := str(made["json"]["id"])
-	points[id] = Vector2(float(made["json"]["x"]), float(made["json"]["y"]))
-	point_locked[id] = true
+	_take_in_point(made["json"])
 	_ref_points[key] = id
 	changed.emit()
 	return {"ok": true, "id": id, "message": ""}
@@ -699,6 +783,8 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	var best_d := radius
 	if "point" in kinds:
 		for id in points:
+			if reference_ids.has(id):
+				continue # the sketch's plumbing to the part: picked through the part's own corner / edge / hole (part_references.gd), never as itself
 			var d := uv.distance_to(points[id])
 			if d <= best_d:
 				best_d = d
@@ -707,7 +793,7 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "line" in kinds and not point_hit:
 		for id in lines:
 			var l: Dictionary = lines[id]
-			if not points.has(l["a"]) or not points.has(l["b"]):
+			if reference_ids.has(id) or not points.has(l["a"]) or not points.has(l["b"]):
 				continue
 			var d := uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, points[l["a"]], points[l["b"]]))
 			if d <= best_d:
@@ -716,7 +802,7 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "circle" in kinds and not point_hit:
 		for id in circles:
 			var c: Dictionary = circles[id]
-			if not points.has(c["c"]) or not points.has(c["p"]):
+			if reference_ids.has(id) or not points.has(c["c"]) or not points.has(c["p"]):
 				continue
 			var d := absf(uv.distance_to(points[c["c"]]) - points[c["c"]].distance_to(points[c["p"]]))
 			if d <= best_d:
@@ -725,7 +811,7 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "arc" in kinds and not point_hit:
 		for id in arcs:
 			var a: Dictionary = arcs[id]
-			if not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
+			if reference_ids.has(id) or not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
 				continue
 			var d := _distance_to_arc(uv, points[a["c"]], points[a["s"]], points[a["e"]])
 			if d <= best_d:

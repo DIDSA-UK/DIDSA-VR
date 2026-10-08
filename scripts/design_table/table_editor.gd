@@ -342,6 +342,10 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds) if repick_point == "" else {}
+		if repick_point == "" and "point" in kinds and str(_hover_entity.get("kind", "")) != "point" and part_refs != null and session.references_ok and tool != "revolve":
+			var corner: Dictionary = part_refs.pick(uv, pick_mm, ["point"]) # a point beats a line it is on, and the part's own corner or hole centre is a point (the sketch's helper for it is hidden)
+			if not corner.is_empty():
+				_hover_entity = corner
 		if repick_point != "" and part_refs != null:
 			_hover_entity = part_refs.pick(uv, pick_mm, ["point"]) # re-picking: only the part's own corners and hole centres, whatever the sketch has there
 		if _hover_entity.is_empty() and repick_point == "" and part_refs != null and session.references_ok and tool != "revolve":
