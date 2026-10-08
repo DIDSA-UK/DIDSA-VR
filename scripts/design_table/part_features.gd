@@ -18,75 +18,113 @@ static func edge_ref(body_id: String, index: int) -> Dictionary:
 	return {"body_id": body_id, "shape_type": "edge", "index": index}
 
 
-func extrude(owner_part_id: String, sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array) -> Dictionary:
-	## {ok, id, error}. Boss with no targets starts a new body; a cut must name the bodies it cuts.
+## The *_request builders make and check one feature's create body without sending it: {ok, error, route, body}. A feature tool
+## (features/feature_tool.gd) hands that to `post`, and the editor keeps it so Redo can send the same thing again.
+static func _bad(message: String) -> Dictionary:
+	return {"ok": false, "error": message, "route": "", "body": {}}
+
+
+static func _good(route: String, body: Dictionary) -> Dictionary:
+	return {"ok": true, "error": "", "route": route, "body": body}
+
+
+static func extrude_request(sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array) -> Dictionary:
+	## Boss with no targets starts a new body; a cut must name the bodies it cuts.
 	if not boss and target_body_ids.is_empty():
-		return {"ok": false, "id": "", "error": "There is nothing to cut yet."}
+		return _bad("There is nothing to cut yet.")
 	if is_equal_approx(start_distance, end_distance):
-		return {"ok": false, "id": "", "error": "The depth can't be zero."}
-	var r: Dictionary = await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/extrude-features" % owner_part_id, {
+		return _bad("The depth can't be zero.")
+	return _good("extrude-features", {
 		"sketch_feature_id": sketch_feature_id,
 		"extrude_type": "boss" if boss else "cut",
 		"start_distance": minf(start_distance, end_distance),
 		"end_distance": maxf(start_distance, end_distance),
 		"target_body_ids": target_body_ids})
-	return _result(r)
 
 
-func revolve(owner_part_id: String, sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
-	## {ok, id, error}. Spins the sketch's closed profile `angle` degrees (0-360) about one of the sketch's lines. Same Boss / Cut rule as extrude.
+static func revolve_request(sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
+	## Spins the sketch's closed profile `angle` degrees (0-360) about one of the sketch's lines. Same Boss / Cut rule as extrude.
 	if not boss and target_body_ids.is_empty():
-		return {"ok": false, "id": "", "error": "There is nothing to cut yet."}
+		return _bad("There is nothing to cut yet.")
 	if axis_line_id == "":
-		return {"ok": false, "id": "", "error": "Pick the line to spin it about first."}
+		return _bad("Pick the line to spin it about first.")
 	if angle <= 0.0 or angle > 360.0:
-		return {"ok": false, "id": "", "error": "The angle has to be more than 0 and at most 360 degrees."}
-	var r: Dictionary = await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/revolve-features" % owner_part_id, {
+		return _bad("The angle has to be more than 0 and at most 360 degrees.")
+	return _good("revolve-features", {
 		"sketch_feature_id": sketch_feature_id,
 		"axis_ref": {"sketch_id": sketch_id, "entity_type": "line", "entity_id": axis_line_id},
 		"angle": angle,
 		"mode": "boss" if boss else "cut",
 		"target_body_ids": target_body_ids})
-	return _result(r)
 
 
-func shell(owner_part_id: String, body_id: String, faces: Array, thickness: float, direction: String) -> Dictionary:
-	## {ok, id, error}. Hollows a solid body, opening the given faces (SubShape refs on that body) and leaving walls `thickness` thick,
+static func shell_request(body_id: String, faces: Array, thickness: float, direction: String) -> Dictionary:
+	## Hollows a solid body, opening the given faces (SubShape refs on that body) and leaving walls `thickness` thick,
 	## grown "inward", "outward" or "symmetric".
 	if faces.is_empty():
-		return {"ok": false, "id": "", "error": "Pick the faces to open first."}
+		return _bad("Pick the faces to open first.")
 	if thickness <= 0.0:
-		return {"ok": false, "id": "", "error": "The thickness has to be bigger than zero."}
-	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/shell-features" % owner_part_id, {
-		"body_id": body_id, "faces_to_remove": faces, "thickness": thickness, "thickness_direction": direction}))
+		return _bad("The thickness has to be bigger than zero.")
+	return _good("shell-features", {"body_id": body_id, "faces_to_remove": faces, "thickness": thickness, "thickness_direction": direction})
 
 
-func mirror(owner_part_id: String, body_ids: Array, plane: Dictionary, fuse: bool) -> Dictionary:
-	## {ok, id, error}. Reflects every body across a plane: {fixed_plane: "XY"} or {face_ref: {body_id, shape_type, index}}.
+static func mirror_request(body_ids: Array, plane: Dictionary, fuse: bool) -> Dictionary:
+	## Reflects every body across a plane: {fixed_plane: "XY"} or {face_ref: {body_id, shape_type, index}}.
 	if body_ids.is_empty():
-		return {"ok": false, "id": "", "error": "There is nothing to mirror yet."}
-	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/mirror-features" % owner_part_id, {
-		"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"}))
+		return _bad("There is nothing to mirror yet.")
+	return _good("mirror-features", {"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"})
+
+
+static func fillet_request(edges: Array, radius: float) -> Dictionary:
+	if edges.is_empty():
+		return _bad("Pick the edges to round first.")
+	if radius <= 0.0:
+		return _bad("The radius has to be bigger than zero.")
+	return _good("fillet-features", {"edge_refs": edges, "radius": radius})
+
+
+static func chamfer_request(edges: Array, distance: float) -> Dictionary:
+	if edges.is_empty():
+		return _bad("Pick the edges to chamfer first.")
+	if distance <= 0.0:
+		return _bad("The distance has to be bigger than zero.")
+	return _good("chamfer-features", {"edge_refs": edges, "distance": distance})
+
+
+func post(owner_part_id: String, request: Dictionary) -> Dictionary:
+	## Sends a *_request: {ok, id, error}. A request that did not pass its checks comes back as its own error, nothing is sent.
+	if not bool(request["ok"]):
+		return {"ok": false, "id": "", "error": str(request["error"])}
+	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/%s" % [owner_part_id, request["route"]], request["body"]))
 
 
 static func face_ref(body_id: String, index: int) -> Dictionary:
 	return {"body_id": body_id, "shape_type": "face", "index": index}
 
 
+func extrude(owner_part_id: String, sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array) -> Dictionary:
+	## {ok, id, error}.
+	return await post(owner_part_id, extrude_request(sketch_feature_id, boss, start_distance, end_distance, target_body_ids))
+
+
+func revolve(owner_part_id: String, sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
+	return await post(owner_part_id, revolve_request(sketch_feature_id, sketch_id, axis_line_id, angle, boss, target_body_ids))
+
+
+func shell(owner_part_id: String, body_id: String, faces: Array, thickness: float, direction: String) -> Dictionary:
+	return await post(owner_part_id, shell_request(body_id, faces, thickness, direction))
+
+
+func mirror(owner_part_id: String, body_ids: Array, plane: Dictionary, fuse: bool) -> Dictionary:
+	return await post(owner_part_id, mirror_request(body_ids, plane, fuse))
+
+
 func fillet(owner_part_id: String, edges: Array, radius: float) -> Dictionary:
-	if edges.is_empty():
-		return {"ok": false, "id": "", "error": "Pick the edges to round first."}
-	if radius <= 0.0:
-		return {"ok": false, "id": "", "error": "The radius has to be bigger than zero."}
-	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/fillet-features" % owner_part_id, {"edge_refs": edges, "radius": radius}))
+	return await post(owner_part_id, fillet_request(edges, radius))
 
 
 func chamfer(owner_part_id: String, edges: Array, distance: float) -> Dictionary:
-	if edges.is_empty():
-		return {"ok": false, "id": "", "error": "Pick the edges to chamfer first."}
-	if distance <= 0.0:
-		return {"ok": false, "id": "", "error": "The distance has to be bigger than zero."}
-	return _result(await api.call(HTTPClient.METHOD_POST, "/document/parts/%s/chamfer-features" % owner_part_id, {"edge_refs": edges, "distance": distance}))
+	return await post(owner_part_id, chamfer_request(edges, distance))
 
 
 func delete_feature(owner_part_id: String, feature_id: String) -> Dictionary:

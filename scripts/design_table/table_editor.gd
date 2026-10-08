@@ -34,6 +34,7 @@ const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
+const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
@@ -55,6 +56,7 @@ var api ## cad_api.gd, or anything with request(method, path, body) and fetch_by
 var state := "idle"
 var session: RefCounted = null ## sketch_session.gd while a sketch is open
 var features: RefCounted = null ## part_features.gd
+var tools: Dictionary = FeatureTools.make_all() ## tool id -> features/feature_tool.gd: what each feature tool shows, does on a pick and sends
 var view: Node3D = null ## sketch_view.gd, a child of the table's copy
 var repick_point := "" ## a flagged reference point the user is choosing a replacement corner for ("" = not re-picking)
 var _repick_queue: Array = [] ## the flagged points still to do, in order
@@ -453,13 +455,8 @@ func mirror_across(spec: Dictionary) -> bool:
 		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
 		UiFeedback.haptic(table._right, "error")
 		return false
-	var plane: Dictionary = {}
-	if spec.has("fixed"):
-		plane = {"fixed_plane": str(spec["fixed"])}
-	elif spec.has("face"):
-		plane = {"face_ref": PartFeatures.face_ref(str(spec["face"]["body_id"]), int(spec["face"]["index"]))}
 	table.set_status("Mirroring...")
-	var result: Dictionary = await features.mirror(part_id, body_ids(), plane, bool(options["mirror_fuse"]))
+	var result: Dictionary = await features.post(part_id, tools["mirror"].request(self, {"spec": spec}))
 	if not result["ok"]:
 		table.set_status("Couldn't mirror it: %s" % str(result["error"]))
 		UiFeedback.haptic(table._right, "error")
@@ -946,36 +943,11 @@ func on_tool_changed(tool_id: String) -> void:
 		if tool_id == "revolve" and revolve_axis != "":
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
+	if tools.has(tool_id):
+		tools[tool_id].on_activated(self)
+		_update_options()
+		return
 	match tool_id:
-		"fillet", "chamfer":
-			if state == "sketch" or state == "pick_plane" or state == "pick_edges" or state == "extrude" or state == "pick_faces":
-				edges.clear()
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_edges")
-		"shell":
-			if state in ["sketch", "pick_plane", "pick_edges", "extrude", "pick_faces"]:
-				faces.clear()
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_faces")
-		"mirror":
-			if state == "sketch" or state == "extrude":
-				table.set_status("Finish the sketch first (Done), then mirror the part.")
-			elif state in ["pick_edges", "pick_faces"]:
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_plane")
-		"extrude":
-			if session == null:
-				table.set_status("Draw a closed shape on a plane first.")
-			elif not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to extrude.")
-			set_state("extrude" if session != null else state)
-		"revolve":
-			if session == null:
-				table.set_status("Draw a closed shape and a line on a plane first.")
-			elif not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to revolve (and a line to spin it about).")
-			if state in ["pick_edges", "extrude"]:
-				set_state("sketch" if session != null else "pick_plane") # the laser picks the axis line on the sketch, so the sketch stays live
 		"":
 			if state in ["pick_edges", "pick_faces", "extrude"]:
 				set_state("sketch" if session != null else "pick_plane")
@@ -1000,6 +972,9 @@ func _update_options() -> void:
 			{"id": "fix_clear", "text": "Clear"},
 			{"id": "fix_cancel", "text": "Cancel"}])
 		return
+	if tools.has(tool):
+		table.ui.set_options(tools[tool].options(self))
+		return
 	match tool:
 		SELECT_TOOL:
 			if session != null:
@@ -1015,40 +990,6 @@ func _update_options() -> void:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
 			list = [{"id": "finish_line", "text": "Finish line"}]
-		"extrude":
-			list = [
-				{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(options["boss"])},
-				{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(options["boss"])},
-				{"id": "flip", "text": "Flip", "toggle": true, "pressed": bool(options["flip"])},
-				{"id": "depth", "text": "Depth %.2f mm" % float(options["depth"])},
-				{"id": "apply", "text": "Apply", "disabled": session == null or not session.profile_ok()},
-			]
-			if bool(options["boss"]):
-				list.insert(3, {"id": "new_body", "text": "New body", "toggle": true, "pressed": bool(options["new_body"])})
-		"revolve":
-			list = [
-				{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(options["boss"])},
-				{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(options["boss"])},
-				{"id": "angle", "text": "Angle %s deg" % BuildTree.number(float(options["angle"]))},
-				{"id": "axis", "text": "Axis: set" if revolve_axis != "" else "Axis: pick"},
-				{"id": "apply", "text": "Apply", "disabled": session == null or not session.profile_ok() or revolve_axis == ""},
-			]
-		"shell":
-			list = [
-				{"id": "thickness", "text": "Wall %.2f mm" % float(options["thickness"])},
-				{"id": "shell_in", "text": "Inward", "toggle": true, "pressed": str(options["shell_direction"]) == "inward"},
-				{"id": "shell_out", "text": "Outward", "toggle": true, "pressed": str(options["shell_direction"]) == "outward"},
-				{"id": "clear_faces", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % faces.size(), "disabled": faces.is_empty()},
-			]
-		"mirror":
-			list = [{"id": "mirror_fuse", "text": "Fuse into one", "toggle": true, "pressed": bool(options["mirror_fuse"])}]
-		"fillet":
-			list = [{"id": "radius", "text": "Radius %.2f mm" % float(options["radius"])}, {"id": "clear_edges", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % edges.size(), "disabled": edges.is_empty()}]
-		"chamfer":
-			list = [{"id": "distance", "text": "Distance %.2f mm" % float(options["distance"])}, {"id": "clear_edges", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % edges.size(), "disabled": edges.is_empty()}]
 	table.ui.set_options(list)
 
 
@@ -1106,6 +1047,10 @@ func on_option(option_id: String) -> void:
 			UiFeedback.haptic(table._right, "error")
 		_update_options()
 		return
+	var active_feature = tools.get(table.active_tool)
+	if active_feature != null and option_id != "apply" and active_feature.handle_option(self, option_id):
+		_update_options()
+		return
 	match option_id:
 		"sides_down":
 			if session != null:
@@ -1116,44 +1061,12 @@ func on_option(option_id: String) -> void:
 		"finish_line":
 			if session != null:
 				session.finish_chain()
-		"boss":
-			options["boss"] = true
-		"cut":
-			options["boss"] = false
-		"flip":
-			options["flip"] = not bool(options["flip"])
-		"new_body":
-			options["new_body"] = not bool(options["new_body"])
-		"depth":
-			_type_option("depth", "Depth (mm)")
-		"radius":
-			_type_option("radius", "Radius (mm)")
-		"distance":
-			_type_option("distance", "Distance (mm)")
-		"thickness":
-			_type_option("thickness", "Wall thickness (mm)")
-		"shell_in":
-			options["shell_direction"] = "inward"
-		"shell_out":
-			options["shell_direction"] = "outward"
-		"mirror_fuse":
-			options["mirror_fuse"] = not bool(options["mirror_fuse"])
-		"clear_faces":
-			faces.clear()
-			highlight.set_set(table.table_copy, [])
-		"angle":
-			_type_option("angle", "Angle (deg, up to 360)")
-		"axis":
-			table.set_status("Pull the trigger on a line of the sketch to make it the axis.")
-		"clear_edges":
-			edges.clear()
-			highlight.set_set(table.table_copy, [])
 		"apply":
 			await apply_feature()
 	_update_options()
 
 
-func _type_option(key: String, title: String) -> void:
+func type_option(key: String, title: String) -> void:
 	table._main.open_keyboard_for("%.2f" % float(options[key]), func(text: String) -> void: option_typed(key, text), {"title": title})
 
 
@@ -1351,48 +1264,44 @@ func apply_feature() -> void:
 	var tool: String = table.active_tool
 	var result: Dictionary
 	table.set_status("Working...")
-	match tool:
-		"extrude":
-			if session == null or not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to extrude.")
-				return
-			var d := extrude_distances()
-			result = await features.extrude(part_id, session.feature_id, bool(options["boss"]), d[0], d[1], extrude_targets())
-		"revolve":
-			if session == null or not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to revolve.")
-				return
-			result = await features.revolve(part_id, session.feature_id, session.sketch_id, revolve_axis, float(options["angle"]), bool(options["boss"]), extrude_targets())
-		"shell":
-			if faces.is_empty():
-				table.set_status("Pick the faces to open first.")
-				return
-			result = await features.shell(part_id, str(faces[0]["body_id"]), faces.map(func(f): return PartFeatures.face_ref(str(f["body_id"]), int(f["index"]))), float(options["thickness"]), str(options["shell_direction"]))
-		"fillet":
-			result = await features.fillet(part_id, _edge_refs(), float(options["radius"]))
-		"chamfer":
-			result = await features.chamfer(part_id, _edge_refs(), float(options["distance"]))
-		_:
-			return
+	var feature_tool = tools.get(tool)
+	if feature_tool == null:
+		return
+	result = await features.post(part_id, feature_tool.request(self))
 	if not result["ok"]:
 		table.set_status("Couldn't do that: %s" % str(result["error"]))
 		UiFeedback.haptic(table._right, "error")
 		return
 	feature_stack.append(str(result["id"]))
 	var refreshed: bool = await refresh_geometry()
-	if tool == "extrude" or tool == "revolve":
+	if feature_tool.finishes_sketch():
 		end_sketch()
 	edges.clear()
 	faces.clear()
 	if highlight != null:
 		highlight.set_set(table.table_copy, [])
 	UiFeedback.haptic(table._right, "confirm")
-	table.set_status(("%s done." % tool.capitalize()) if refreshed else "Done, but the new shape couldn't be fetched.")
+	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
 	_update_options()
 
 
-func _edge_refs() -> Array:
+func clear_picks() -> void:
+	## Forgets the picked edges and faces (a feature tool's Clear).
+	edges.clear()
+	faces.clear()
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+
+
+func start_edge_picks() -> void:
+	## Fillet / Chamfer were chosen: pick edges on the part.
+	if state == "sketch" or state == "pick_plane" or state == "pick_edges" or state == "extrude" or state == "pick_faces":
+		clear_picks()
+		set_state("pick_edges")
+
+
+func edge_refs() -> Array:
 	return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))
 
 
