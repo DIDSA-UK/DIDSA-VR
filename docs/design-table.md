@@ -390,3 +390,7 @@ camera-facing ribbons (not built; decide on a headset).
 * **Stale-mate flags** (the warning badges on parts whose mates need redoing) are saved as a VR-only extra, `vr_stale_mates` (occurrence ids); the flat app
   ignores keys it does not know, and opening that file flags those parts again.
 * A normal part that loses its last solid in the Build tree goes blank in the arena (like a new part), instead of keeping the shape that is gone.
+
+### Fix on a flagged feature (Phase 4)
+
+A Build row flagged "lost" or "may have moved" for a fillet, chamfer, shell, mirror or pattern has Fix like a sketch. Fix rolls the part back to what the feature saw, you pick the replacement edge or face (the lost slot first), and Apply PATCHes the feature. Keep confirms the reference as it is. Tested with the fake and a real backend, not in a headset.

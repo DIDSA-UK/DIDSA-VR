@@ -267,6 +267,13 @@ func edit_selected() -> void:
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
 
 
+func fix_selected() -> void:
+	## The Fix button of a flagged row: show the part as the feature saw it and let the laser pick the replacement edge / face (the editor's fix mode).
+	if selected_id == "" or BuildTree.fix_target(row(selected_id)).is_empty():
+		return
+	await _table.editor.begin_fix(selected_id)
+
+
 func edit_typed(feature_id: String, text: String) -> void:
 	## The numeric pad's answer: PATCH the feature, show the result, remember how to take it back.
 	var f := row(feature_id)

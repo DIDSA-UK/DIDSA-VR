@@ -69,6 +69,7 @@ var feature_stack: Array = [] ## what Undo takes back after the sketch is spent,
 var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false}
 var faces: Array = [] ## picked face entities (Shell)
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
+var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
 
 var _hover_uv: Variant = null
@@ -991,6 +992,14 @@ func _update_options() -> void:
 		return
 	var tool: String = table.active_tool
 	var list: Array = []
+	if not fixing.is_empty():
+		var wanted: int = (fixing["paths"] as Array).size()
+		var picked: int = edges.size() if str(fixing["kind"]) == "edge" else faces.size()
+		table.ui.set_options([
+			{"id": "fix_apply", "text": "Apply fix (%d of %d)" % [picked, wanted], "disabled": picked != wanted},
+			{"id": "fix_clear", "text": "Clear"},
+			{"id": "fix_cancel", "text": "Cancel"}])
+		return
 	match tool:
 		SELECT_TOOL:
 			if session != null:
@@ -1054,6 +1063,18 @@ func _menu_options() -> Array:
 
 
 func on_option(option_id: String) -> void:
+	if option_id == "fix_apply":
+		await _finish_fix()
+		return
+	if option_id == "fix_clear":
+		edges.clear()
+		faces.clear()
+		highlight.set_set(table.table_copy, [])
+		_update_options()
+		return
+	if option_id == "fix_cancel":
+		await _end_fix("Fix cancelled. The reference stays flagged.")
+		return
 	if option_id == "refs_fix":
 		_start_repick()
 		return
@@ -1165,6 +1186,15 @@ func _toggle_face() -> void:
 		table.set_status("A shell opens faces of ONE body. Clear to start again on another.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	if not fixing.is_empty():
+		var cap: int = (fixing["paths"] as Array).size()
+		if faces.size() >= cap:
+			faces.clear() # one replacement per flagged reference: a new pick replaces the last one when all are chosen
+		faces.append(_hover_face.duplicate())
+		highlight.set_set(table.table_copy, faces)
+		table.set_status("Picked %d of %d. %s" % [faces.size(), cap, "Apply fix when it is the right one." if faces.size() == cap else "Pick the next."])
+		_update_options()
+		return
 	faces.append(_hover_face.duplicate())
 	highlight.set_set(table.table_copy, faces)
 	table.set_status("%d face(s) will be opened. Set the wall thickness, then Apply." % faces.size())
@@ -1180,9 +1210,100 @@ func _toggle_edge() -> void:
 			highlight.set_set(table.table_copy, edges)
 			_update_options()
 			return
+	if not fixing.is_empty():
+		var cap: int = (fixing["paths"] as Array).size()
+		if edges.size() >= cap:
+			edges.clear()
+		edges.append(_hover_face.duplicate())
+		highlight.set_set(table.table_copy, edges)
+		table.set_status("Picked %d of %d. %s" % [edges.size(), cap, "Apply fix when it is the right one." if edges.size() == cap else "Pick the next."])
+		_update_options()
+		return
 	edges.append(_hover_face.duplicate())
 	highlight.set_set(table.table_copy, edges)
 	table.set_status("%d edge(s) picked. Set the size, then Apply." % edges.size())
+	_update_options()
+
+
+# --- Fixing a flagged feature (Build row > Fix) -------------------------------------------------
+
+func begin_fix(feature_id: String) -> void:
+	## A fillet, chamfer, shell, mirror or create-plane whose reference the backend flagged lost / moved is mended by picking its replacement. The edges and
+	## faces a feature names are numbered on the part AS IT SAW IT (every feature before it built, itself and everything after left out), so the table's copy is
+	## shown that way (the Build tree's roll back, to the row before) and the laser picks on it: edges for a fillet / chamfer, faces for a shell / mirror / plane.
+	## Apply fix PATCHes the feature with the new reference (the backend re-measures it and the flag clears) and rolls forward; Cancel changes nothing.
+	var build = table.build
+	var f: Dictionary = build.row(feature_id)
+	var target: Dictionary = BuildTree.fix_target(f)
+	if target.is_empty() or api == null or table.table_copy == null:
+		return
+	var at: int = build.index_of(feature_id)
+	if at < 1:
+		table.set_status("That feature is the first thing built, so there is nothing before it to pick from.")
+		return
+	if not build.view_filters_ok:
+		table.set_status("This backend can't show the part as it was before that feature, so the replacement can't be picked here.")
+		return
+	if session != null:
+		table.set_status("Finish the sketch first (Done), then fix the reference.")
+		return
+	var state_before := state
+	table.manager.deactivate()
+	build.rollback_to = str(build.features[at - 1].get("id", ""))
+	await refresh_view()
+	fixing = {"feature_id": feature_id, "type": str(target["type"]), "kind": str(target["kind"]), "paths": target["paths"], "state_before": state_before}
+	edges.clear()
+	faces.clear()
+	highlight.set_set(table.table_copy, [])
+	set_state("pick_edges" if str(target["kind"]) == "edge" else "pick_faces")
+	var noun: String = "edge" if str(target["kind"]) == "edge" else "face"
+	table.set_status("%s: the part is shown as it was before %s. Aim at the replacement %s%s and pull the trigger, then Apply fix." % [
+		build.names[at], build.names[at], noun, "s, one for each flagged reference" if (target["paths"] as Array).size() > 1 else ""])
+	build.changed.emit()
+	_update_options()
+
+
+func _finish_fix() -> void:
+	if fixing.is_empty() or api == null:
+		return
+	var build = table.build
+	var f: Dictionary = build.row(str(fixing["feature_id"]))
+	var picked: Array = edges if str(fixing["kind"]) == "edge" else faces
+	var payload: Dictionary = BuildTree.fix_payload(f, fixing["paths"], picked)
+	if payload.is_empty():
+		table.set_status("Pick a replacement for each flagged reference first.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	table.set_status("Working...")
+	var result: Dictionary = await features.update_feature(part_id, str(fixing["type"]), str(fixing["feature_id"]), payload)
+	if not result["ok"]:
+		table.set_status("Couldn't use that: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return # still fixing: pick another
+	await _end_fix("")
+	var refreshed: bool = await refresh_geometry()
+	table.notify_edited(part_id, _edited_nodes)
+	await build.reload()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Reference fixed." if refreshed else "Fixed, but the new shape couldn't be fetched.")
+
+
+func _end_fix(message: String) -> void:
+	## Back from fix mode: the part rolled forward again and the laser as it was. (No undo entry: the old reference was lost, so putting it back would fail.)
+	if fixing.is_empty():
+		return
+	var before: String = str(fixing["state_before"])
+	fixing = {}
+	edges.clear()
+	faces.clear()
+	if highlight != null:
+		highlight.set_set(table.table_copy, [])
+	table.build.rollback_to = ""
+	await refresh_view()
+	set_state(before if before in ["pick_plane", "idle"] else "pick_plane")
+	if message != "":
+		table.set_status(message)
+	table.build.changed.emit()
 	_update_options()
 
 

@@ -70,16 +70,21 @@ func next_id(prefix: String) -> String:
 func handle(method: int, path: String, body) -> Dictionary:
 	var verb: String = {HTTPClient.METHOD_POST: "POST", HTTPClient.METHOD_GET: "GET", HTTPClient.METHOD_DELETE: "DELETE", HTTPClient.METHOD_PATCH: "PATCH"}[method]
 	calls.append([verb + " " + path, body])
-	if fail != "" and path.contains(fail) and verb == "POST":
+	if fail != "" and path.contains(fail) and (verb == "POST" or verb == "PATCH"):
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
 		return _ok(feature_rows.get(path.get_slice("/", 3), []))
-	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/revolve-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/")):
+	if verb == "PATCH" and (path.contains("/extrude-features/") or path.contains("/revolve-features/") or path.contains("/fillet-features/") or path.contains("/chamfer-features/") or path.contains("/shell-features/") or path.contains("/mirror-features/") or path.contains("/create-plane-features/")):
 		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 		for row in rows:
 			if row["id"] == path.get_file():
 				for key in body:
 					row[key] = body[key]
+				# a replacement reference is re-measured by the real backend and its lost / moved flags go (backend/tests/test_reference_reattach_features.py)
+				if body.has("edge_refs") or body.has("faces_to_remove") or body.has("mirror_plane") or body.has("face_refs") or body.has("edge_ref"):
+					row["lost_references"] = []
+					row["moved_references"] = []
+					row["has_lost_reference"] = false
 		return _ok({"id": path.get_file()})
 	if verb == "DELETE" and path.ends_with("/cascade"):
 		var owner := path.get_slice("/", 3)

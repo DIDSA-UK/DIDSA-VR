@@ -251,6 +251,10 @@ func _action_strip(build, id: String, is_hidden: bool) -> Control:
 	var edit := _strip_button("Edit", "settings", func() -> void: build.edit_selected())
 	edit.disabled = not build.can_edit(id)
 	strip.add_child(edit)
+	if not BuildTree.fix_target(build.row(id)).is_empty():
+		var fix := _strip_button("Fix", "settings", func() -> void: build.fix_selected())
+		fix.theme_type_variation = &"ButtonAccent" # a flagged reference: re-pick it
+		strip.add_child(fix)
 	var hide_button := _strip_button("Show" if is_hidden else "Hide", "visibility", func() -> void: build.toggle_hidden_selected())
 	hide_button.disabled = not build.view_filters_ok
 	strip.add_child(hide_button)

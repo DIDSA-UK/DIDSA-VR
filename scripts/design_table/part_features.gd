@@ -103,8 +103,9 @@ func list_features(owner_part_id: String) -> Dictionary:
 
 
 func update_feature(owner_part_id: String, feature_type: String, feature_id: String, payload: Dictionary) -> Dictionary:
-	## Changes the one number of an extrude / fillet / chamfer (PATCH: any feature of the part, not just the last). {ok, id, error}.
-	var route: String = {"extrude": "extrude-features", "revolve": "revolve-features", "shell": "shell-features", "fillet": "fillet-features", "chamfer": "chamfer-features"}.get(feature_type, "")
+	## Changes the one number of an extrude / fillet / chamfer, or swaps a reference (a Build row's Fix: PATCH with a replacement edge or face; any feature of the
+	## part, not just the last). {ok, id, error}.
+	var route: String = {"extrude": "extrude-features", "revolve": "revolve-features", "shell": "shell-features", "fillet": "fillet-features", "chamfer": "chamfer-features", "mirror": "mirror-features", "create_plane": "create-plane-features"}.get(feature_type, "")
 	if route == "":
 		return {"ok": false, "id": "", "error": "That kind of feature can't be edited here."}
 	return _result(await api.call(HTTPClient.METHOD_PATCH, "/document/parts/%s/%s/%s" % [owner_part_id, route, feature_id], payload))

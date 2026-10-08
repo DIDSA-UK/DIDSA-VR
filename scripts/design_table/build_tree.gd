@@ -113,6 +113,81 @@ static func reference_counts(f: Dictionary) -> Dictionary:
 	return {"lost": lost, "moved": moved}
 
 
+const FIXABLE := ["fillet", "chamfer", "shell", "mirror", "create_plane"] ## the features whose flagged reference can be re-picked from the Build row (their PATCH takes a replacement)
+
+
+static func fix_target(f: Dictionary) -> Dictionary:
+	## What a flagged non-sketch feature needs re-picked: {type, kind ("edge" | "face"), paths: [the backend's reference paths, lost first then moved]}, or {}
+	## when nothing is flagged, the feature cannot take a replacement here, or its flagged references are not all edges or all faces. (A sketch is mended in
+	## the sketch: Select > Fix.) Paths look like `edge_refs[1]`, `faces_to_remove[0]`, `mirror_plane.face_ref`, `face_refs[0].face_ref`, `edge_ref`.
+	var type := str(f.get("type", ""))
+	if not FIXABLE.has(type):
+		return {}
+	var paths: Array = []
+	paths.append_array(f.get("lost_references", []))
+	for p in f.get("moved_references", []):
+		if not paths.has(p):
+			paths.append(p)
+	if paths.is_empty():
+		return {}
+	var kind := ""
+	for p in paths:
+		var this_kind := "edge" if str(p).begins_with("edge_ref") else ("face" if str(p).contains("face") else "")
+		if this_kind == "" or (kind != "" and kind != this_kind):
+			return {}
+		kind = this_kind
+	return {"type": type, "kind": kind, "paths": paths}
+
+
+static func fix_payload(f: Dictionary, paths: Array, picked: Array) -> Dictionary:
+	## The PATCH body that swaps the references at `paths` (in order) for the entities `picked` ({body_id, index} each) and keeps every other reference of the
+	## feature as it is. {} if a path is not one this knows how to replace or there is not one pick per path.
+	if paths.size() != picked.size() or paths.is_empty():
+		return {}
+	var type := str(f.get("type", ""))
+	var edge := func(e: Dictionary) -> Dictionary: return {"body_id": str(e["body_id"]), "shape_type": "edge", "index": int(e["index"])}
+	var face := func(e: Dictionary) -> Dictionary: return {"body_id": str(e["body_id"]), "shape_type": "face", "index": int(e["index"])}
+	match type:
+		"fillet", "chamfer":
+			var refs: Array = (f.get("edge_refs", []) as Array).duplicate(true)
+			for i in paths.size():
+				var at := _path_index(str(paths[i]), "edge_refs")
+				if at < 0 or at >= refs.size():
+					return {}
+				refs[at] = edge.call(picked[i])
+			return {"edge_refs": refs}
+		"shell":
+			var faces: Array = (f.get("faces_to_remove", []) as Array).duplicate(true)
+			for i in paths.size():
+				var at := _path_index(str(paths[i]), "faces_to_remove")
+				if at < 0 or at >= faces.size():
+					return {}
+				faces[at] = face.call(picked[i])
+			return {"faces_to_remove": faces}
+		"mirror":
+			if paths.size() != 1 or str(paths[0]) != "mirror_plane.face_ref":
+				return {}
+			return {"mirror_plane": {"face_ref": face.call(picked[0])}}
+		"create_plane":
+			if paths.size() == 1 and str(paths[0]) == "edge_ref":
+				return {"edge_ref": edge.call(picked[0])}
+			var plane_faces: Array = (f.get("face_refs", []) as Array).duplicate(true)
+			for i in paths.size():
+				var at := _path_index(str(paths[i]), "face_refs")
+				if at < 0 or at >= plane_faces.size():
+					return {}
+				plane_faces[at] = {"face_ref": face.call(picked[i])}
+			return {"face_refs": plane_faces}
+	return {}
+
+
+static func _path_index(path: String, name: String) -> int:
+	## The list position in a path like `edge_refs[2]` or `face_refs[1].face_ref`; -1 if the path is not about `name`.
+	if not path.begins_with(name + "["):
+		return -1
+	return int(path.substr(name.length() + 1, path.find("]") - name.length() - 1))
+
+
 static func reference_note(f: Dictionary) -> String:
 	## The short flag on a Build row: "lost reference", "2 lost references", "reference may have moved", "1 lost, 2 may have moved"; "" if all is well.
 	var c := reference_counts(f)
