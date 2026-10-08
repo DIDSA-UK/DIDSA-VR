@@ -19,7 +19,7 @@ func handle_option(ed, option_id: String) -> bool:
 
 func on_activated(ed) -> void:
 	ed.start_face_picks()
-	ed.table.set_status("Pick the faces to delete (the gap is healed), then Apply.")
+	ed.table.set_status("Pick fillet, chamfer, hole or boss faces to delete (a plain wall can not be), then Apply.")
 
 
 func can_apply(ed) -> bool:

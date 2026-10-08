@@ -272,7 +272,7 @@ static func _plain(error: String) -> String:
 	var known := {
 		"non_planar_reference": "That face isn't flat.",
 		"missing_reference": "An edge or face it needs isn't there any more.",
-		"delete_face_failed": "The gap couldn't be healed closed after deleting that face (the neighbours don't meet).",
+		"delete_face_failed": "That face can't be deleted: there is nothing to heal the gap into. Delete Face removes fillets, chamfers, holes and bosses, not a plain wall.",
 	}
 	for key in known:
 		if error.contains(key):

@@ -108,7 +108,7 @@ const HINTS := {
 	"merge": "Pick two or more bodies to join into one, then Apply.",
 	"split": "Pick the body to split, press Pick plane and pick a plane or flat face, then Apply.",
 	"move_face": "Pick the faces to push or pull (of one body), set the distance, then Apply.",
-	"delete_face": "Pick the faces to delete; the gap is healed. Then Apply.",
+	"delete_face": "Pick fillet, chamfer, hole or boss faces to delete; the gap is healed. A plain wall can't be deleted. Then Apply.",
 	"move_body": "Pick the body to move, set X / Y / Z (negative goes the other way), then Apply.",
 	"scale_body": "Pick the body to scale, set the factor, then Apply.",
 	"delete_body": "Pick the bodies to delete, then Apply.",

@@ -79,7 +79,7 @@ func _initialize() -> void:
 	await wait_for(func() -> bool: return not table.is_blank())
 	var box: Vector3 = table.seated.get_aabb().size
 	var minor_now: float = s.points[s.ellipses[eid]["mi"]].distance_to(s.points[s.ellipses[eid]["c"]])
-	print("SMOKE ...and the ellipse extrudes: a solid as wide as its two radii say (60 x 2 * minor x 5; the backend rescaled the minor radius with the major, see the gaps note): ", absf(box.x - 60.0) < 0.6 and absf(box.y - 2.0 * minor_now) < 0.6 and absf(box.z - 5.0) < 0.3, " ", box, " minor ", minor_now)
+	print("SMOKE ...and the ellipse extrudes: a solid as wide as its two radii say (60 x 20 x 5: the minor radius stays 10 when the major is typed): ", absf(box.x - 60.0) < 0.6 and absf(minor_now - 10.0) < 0.05 and absf(box.y - 2.0 * minor_now) < 0.6 and absf(box.z - 5.0) < 0.3, " ", box, " minor ", minor_now)
 
 	# --- Ellipse arc
 	await fresh()
