@@ -27,7 +27,7 @@ var origin_id := ""
 var ref_points := {} ## "body:vertex index" -> the pinned point POST .../convert-entities/vertex made for it (idempotent, like the real route)
 var vertex_positions := {} ## "body:vertex index" -> where that vertex lands in the sketch (default (index, 0))
 var edge_circles := {} ## "body:edge index" -> {c: Vector2, r: float, full: bool}: the circular edges (coplanar with the sketch) POST .../convert-entities/edge turns into a circle / arc
-var circle_made := {} ## "body:edge index" -> the circle / arc id that route made (it adds a new one on every call, like the real one)
+var circle_made := {} ## "body:edge index" -> the circle / arc id that route made (idempotent per edge, like the real route since the references overhaul: a second call answers with the one already made)
 var reference_rows = null ## what GET .../external-references answers with (an Array), or null for "no such route"
 var reattached: Array = [] ## [point id, body, vertex / edge index] of each POST .../reattach
 var confirmed: Array = [] ## point ids of each POST .../confirm
@@ -142,6 +142,16 @@ func handle(method: int, path: String, body) -> Dictionary:
 			entities.append({"type": "line", "id": chord, "start_point_id": chord_a, "end_point_id": chord_b, "construction": bool(body.get("construction", false))})
 			return {"ok": true, "code": 201, "json": {"line": {"id": chord}, "start_point": {"id": chord_a, "x": 0.0, "y": 0.0, "is_locked": true}, "end_point": {"id": chord_b, "x": 10.0, "y": 0.0, "is_locked": true}}, "error": ""}
 		var shape: Dictionary = edge_circles[ekey]
+		if circle_made.has(ekey):
+			for existing in entities:
+				if existing["id"] == circle_made[ekey]:
+					var old_centre: String = existing["center_point_id"]
+					var old_resp := {"id": old_centre, "x": points[old_centre].x, "y": points[old_centre].y, "is_locked": true}
+					if existing["type"] == "circle":
+						return {"ok": true, "code": 201, "json": {"circle": {"id": existing["id"], "center_point_id": old_centre, "radius_point_id": existing["radius_point_id"], "radius": shape["r"]}, "start_point": old_resp, "end_point": old_resp, "center_point": old_resp}, "error": ""}
+					var old_start: String = existing["start_point_id"]
+					var old_end: String = existing["end_point_id"]
+					return {"ok": true, "code": 201, "json": {"arc": {"id": existing["id"], "center_point_id": old_centre, "start_point_id": old_start, "end_point_id": old_end}, "start_point": {"id": old_start, "x": points[old_start].x, "y": points[old_start].y, "is_locked": true}, "end_point": {"id": old_end, "x": points[old_end].x, "y": points[old_end].y, "is_locked": true}, "center_point": old_resp}, "error": ""}
 		var centre_id := next_id("pt")
 		var rim_id := next_id("pt")
 		points[centre_id] = shape["c"]
@@ -151,7 +161,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		ref_points["%s:c%d" % [body["body_id"], int(body["edge_index"])]] = centre_id
 		var shape_id := next_id("ci" if bool(shape["full"]) else "ar")
 		var radius_k := next_id("k")
-		cons[radius_k] = {"type": "distance", "id": radius_k, "point_a_id": centre_id, "point_b_id": rim_id, "distance": shape["r"], "orientation": "linear", "provisional": true}
+		# (the real route drops the provisional radius constraint of a converted shape, every point of which is pinned: it would only be redundant; the id stays on the entity)
 		var centre_resp := {"id": centre_id, "x": points[centre_id].x, "y": points[centre_id].y, "is_locked": true}
 		if bool(shape["full"]):
 			entities.append({"type": "circle", "id": shape_id, "center_point_id": centre_id, "radius_point_id": rim_id, "radius_constraint_id": radius_k, "construction": bool(body.get("construction", false))})

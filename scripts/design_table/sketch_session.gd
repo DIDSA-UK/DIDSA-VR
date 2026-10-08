@@ -64,7 +64,6 @@ var selection: Array = [] ## picked entities for the constraint / dimension tool
 var ghosts: Array = [] ## dimension candidates for the current selection (see _build_ghosts)
 
 var _ref_points := {} ## "body:vertex index" -> the pinned point made for it; "body:c<edge index>" -> the pinned centre of that circular edge
-var _ref_circles := {} ## "body:c<edge index>" -> {id, kind ("circle" | "arc"), centre}: the pinned construction circle / arc made on that circular edge
 var reference_rows: Array = [] ## the backend's health of this sketch's references (GET .../external-references): [{point_id, body_id, kind, vertex_index, status, reason, candidates}]
 var driven: Array = [] ## reference-only (driven) dimensions the user kept between pinned things: [{id, selection: [{kind, id}], key}]. They measure, they never drive: kept here, not on the backend
 var _driven_n := 0
@@ -486,14 +485,9 @@ func ensure_reference(ref: Dictionary) -> Dictionary:
 func _ensure_circle(body: String, edge_index: int) -> Dictionary:
 	## A circular edge of the part in the sketch plane (a hole's or boss's rim, or an arc of one) as a pinned construction circle / arc in the sketch, and its
 	## centre as a pinned point: convert-entities/edge does both (the centre is a live reference of kind "circle_centre", so it follows the hole when the part
-	## changes and is flagged when the hole is gone). Not idempotent on the backend (each call adds a circle), so the answer is remembered, and read back from
-	## the sketch's references when it is reopened (load_references). {ok, id (the circle / arc), kind, centre (its centre point), message}.
+	## changes and is flagged when the hole is gone). The route is idempotent per edge (a second call answers with the circle already there), so asking again
+	## is the way to find it; it is only read back when the circle is not yet in this session's picture. {ok, id (the circle / arc), kind, centre (its centre point), message}.
 	var key := "%s:c%d" % [body, edge_index]
-	if _ref_circles.has(key):
-		var known: Dictionary = _ref_circles[key]
-		if circles.has(known["id"]) or arcs.has(known["id"]):
-			return {"ok": true, "id": known["id"], "kind": known["kind"], "centre": known["centre"], "message": ""}
-		_ref_circles.erase(key) # taken back since
 	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true})
 	if not made["ok"]:
 		return {"ok": false, "id": "", "message": "Couldn't use that round edge of the part: %s" % str(made["error"])}
@@ -506,9 +500,10 @@ func _ensure_circle(body: String, edge_index: int) -> Dictionary:
 		return {"ok": false, "id": "", "message": "That edge isn't a circle in the sketch's plane, so it can't be used here."}
 	var centre := str((json[kind] as Dictionary)["center_point_id"])
 	_ref_points[key] = centre
-	_ref_circles[key] = {"id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre}
-	await refresh(true) # the circle's own points and the circle itself come in with the next read
-	return {"ok": true, "id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre, "message": ""}
+	var shape_id := str((json[kind] as Dictionary)["id"])
+	if not circles.has(shape_id) and not arcs.has(shape_id):
+		await refresh(true) # the circle's own points and the circle itself come in with the next read
+	return {"ok": true, "id": shape_id, "kind": kind, "centre": centre, "message": ""}
 
 
 func _point_on_reference(pick: Dictionary, created: Array) -> String:
@@ -628,7 +623,6 @@ func reattach(point_id: String, ref: Dictionary) -> Dictionary:
 		status.emit(message)
 		return {"ok": false, "message": message}
 	_ref_points.clear()
-	_ref_circles.clear()
 	await refresh(true)
 	await load_references()
 	busy = false
@@ -667,12 +661,6 @@ func load_references() -> void:
 		if str(row.get("kind", "vertex")) == "circle_centre":
 			var key := "%s:c%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]
 			_ref_points[key] = point_id
-			for cid in circles:
-				if circles[cid]["c"] == point_id:
-					_ref_circles[key] = {"id": cid, "kind": "circle", "centre": point_id}
-			for aid in arcs:
-				if arcs[aid]["c"] == point_id:
-					_ref_circles[key] = {"id": aid, "kind": "arc", "centre": point_id}
 		else:
 			_ref_points["%s:%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]] = point_id
 

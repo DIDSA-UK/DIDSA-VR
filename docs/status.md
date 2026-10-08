@@ -2622,3 +2622,29 @@ Session B of `docs/handover-references-overhaul.md`, after Session A's backend l
 * **Lost and moved references.** `BuildTree.reference_note` / `reference_counts` (sketches count point ids, other features reference paths) put a note on the Build row and `table_build.gd` says it once in the status line; `sketch_session.gd` has `reference_rows` (from `load_references`), `reference_status`, `flagged_references`, `reference_warning`, `reattach` and `confirm_reference`; the sketch view marks flagged points red / amber; with nothing picked Select's options row offers **Fix** (walks the flagged points, point at the replacement corner or hole centre, one `reattach` call) and **Keep moved ones** (`confirm`). `tests/e2e_references_lost.gd` moves a fillet to another edge against the real backend: away from the corner the reference follows, onto it the backend flags it lost (`consumed_by_<fillet>`), the table shows it and the re-pick mends it. (An arc made from the fillet's own rim is correctly flagged lost when the fillet moves; that is also what the first draft of that test found.)
 * **Suite:** `tests/run_all.sh` now includes `sketch_clip` and `design_table_references_more`; it ran without script errors and with the same "false" lines as before (one line that looked for `section_enabled` in the edge shader was updated). Run by hand against the local backend: `e2e_references`, `e2e_references_more`, `e2e_references_lost`, `e2e_references_history`, plus `sketch_clip_render` and `sketch_clip_picture` under Xvfb.
 * **Not verified:** all of it in a headset (the clip depth, the flagged colours, the reference weights, how the cut looks); a Quest's compatibility renderer (the software renders here used OpenGL 3 through Xvfb; the project's own renderer is Mobile, and global uniforms are used the same way as the section tool's).
+
+### 2026-10-08 — Implementation plan (`docs/implementation-plan.md`): Step 0 baseline, Phase 1 (R-A, R-E)
+
+Worked by one implementing session on `ccr-b3b16f97-0i1850` in both repos (DIDSA-VR and DIDSA-CAD), Godot 4.7.2, no headset. Everything below is headless, software-rendered (Xvfb + llvmpipe) or against a throwaway real backend; nothing is headset-verified and nothing says how it feels.
+
+**Step 0: environment and baseline (before any change)**
+
+| What | How | Result |
+|---|---|---|
+| Godot 4.7.2 | release zip from GitHub, `Godot_v4.7.2-stable_linux.x86_64` | installed outside the repo |
+| VR headless suite | `tests/ci.sh` | exit 0, check_smoke 0 failures (1583 SMOKE lines) |
+| VR render suite | `tests/ci_render.sh` | 18 SMOKE lines, 0 failures, 0 warnings |
+| Backend env | micromamba (the conda-forge package, `micro.mamba.pm` is blocked) + `backend/environment.yml`: pythonocc-core 7.9.3, py-slvs 1.0.6 | works |
+| Backend pytest baseline | `pytest -n 4 -m "not gears"` (the gear / bevel / planetary suites are slow and untouched by this work, so not run) | 2268 passed |
+| Real-backend e2e | throwaway uvicorn on 127.0.0.1:8000 from the DIDSA-CAD working tree + gitignored `secrets.cfg` | runs |
+| Flutter | SDK `master` channel (the repo's `pubspec.lock` needs Dart 3.13 / Flutter 3.44+; stable 3.27 cannot resolve the lock) cloned from GitHub | see the Phase 2 / 3 entries for whether the widget tests ran |
+| "Before" images of the old options row | `tests/dock_panels_render.gd` with `DOCK_MODE=before` | Extrude, Fillet, Mirror saved |
+
+One environment trap: the backend tests must run with `CAD_API_KEY` **unset** (the test conftest sets its own); with it set every route answers 401.
+
+**Phase 1 (R-A, R-E), done**
+
+* **At-midpoint next to a converted hole (R-A).** Reproduced first in `backend/tests/test_reference_convert_edge_robustness.py` (a plate with a hole; the rim and a straight edge converted as construction; an `at_midpoint` on the pinned line: `converged: false`, the new constraint blamed). Cause, found by dropping constraints one by one: py-slvs reports `result_code` 5 (redundancy) for a converted circle because (1) its radius `DistanceConstraint` and cardinal-point constraints only relate points that are all pinned, and (2) `add_fixed_constraint` listed the radius point twice (it is also the East cardinal point). The backend then trusted `converged` only through an allowlist that happened to apply because the circle's `EqualRadius` constraints were present, and `at_midpoint` is not on it. Fix (DIDSA-CAD `router.py`, `models.py`): `convert-entities/edge` drops those redundant constraints for a pinned Circle / Arc (`_drop_constraints_between_pinned_points`) and `add_fixed_constraint` fixes each point once. The sketch now solves with `result_code` 0.
+* **Idempotent `convert-entities/edge` (R-E).** A second call for the same rim / arc / straight edge answers with the entity already made. pytest for the circle and the line.
+* **VR.** `tests/e2e_references_more.gd` now expects the at-midpoint **held and solved** in the sketch that holds the converted hole (run against the real backend: passes). The take-back path in `sketch_session.gd: _point_on_reference` stays as a safety net for a real solver refusal. The remembered-answer workaround (`_ref_circles`) is gone from `sketch_session.gd`; `_ensure_circle` just asks the route again. `tests/helpers/fake_cad.gd` is idempotent per edge too and no longer makes the radius constraint the real route no longer makes.
+* **Ran:** backend `test_reference_convert_edge_robustness.py` (3 new tests; the first two failed before the fix), the existing convert / circle-centre / reference-identity files, then the full non-gear backend suite (2271 passed); VR `e2e_references_more.gd` against the real backend (all true); VR headless suite (exit 0).
