@@ -9,7 +9,6 @@ extends "res://scripts/diegetic_panel.gd"
 
 signal option_pressed(option_id: String)
 
-const BORDER_TOP := 0 # (kept for a later layout pass)
 
 var table ## design_table.gd
 var _title: Label
@@ -83,6 +82,10 @@ func set_options(options: Array) -> void:
 
 func option_button(option_id: String) -> Button:
 	return _buttons.get(option_id)
+
+
+func has_options() -> bool:
+	return not _options.is_empty()
 
 
 func option_ids() -> Array:

@@ -55,6 +55,7 @@ var _tool_buttons := {}
 var _more_button: Button
 var _pages := {} ## category id -> page shown
 var _options: Array = []
+var options_sink = null ## table_props_window.gd: when set, the active tool's settings go there and this deck's own options row stays hidden
 var _seen_revision := -1
 
 
@@ -387,6 +388,11 @@ func set_options(options: Array) -> void:
 	if options == _options:
 		return
 	_options = options.duplicate(true)
+	if options_sink != null and is_instance_valid(options_sink):
+		_options_row.visible = false
+		options_sink.set_options(_options)
+		activity.emit()
+		return
 	for child in _options_row.get_children():
 		_options_row.remove_child(child)
 		child.queue_free()
@@ -435,6 +441,8 @@ func shown_tool_ids() -> Array:
 
 
 func option_button(option_id: String) -> Button:
+	if options_sink != null and is_instance_valid(options_sink):
+		return options_sink.option_button(option_id)
 	for i in _options.size():
 		if str(_options[i].get("id", "")) == option_id:
 			return _options_row.get_child(i) as Button

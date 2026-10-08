@@ -55,6 +55,7 @@ const TablePose := preload("res://scripts/design_table/table_pose.gd")
 const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
 const TableTree := preload("res://scripts/design_table/table_tree_window.gd")
+const PropsWindow := preload("res://scripts/design_table/table_props_window.gd")
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const EnforceButton := preload("res://scripts/design_table/enforce_button.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
@@ -101,6 +102,7 @@ var snap_enabled := true
 var api ## cad_api.gd: the serial line to the backend
 var editor ## table_editor.gd: the editing session on the seated part
 var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
+var props ## table_props_window.gd: the active tool's settings, docked at the slab's right (the deck's old options row)
 var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
 var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
 var remake_plan: Array = [] ## the mates Enforce turned off that can be remade on the equivalent face (mate_health.gd remake_plan), offered on the button after it
@@ -182,6 +184,12 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	tree.name = "Tree"
 	add_child(tree)
 	tree.setup_for_table(self, left, right, camera, main)
+	props = PropsWindow.new()
+	props.name = "Properties"
+	add_child(props)
+	props.setup_for_table(self, left, right, camera)
+	props.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
+	ui.options_sink = props
 	enforce_button = EnforceButton.new()
 	enforce_button.name = "EnforceMates"
 	main.add_child(enforce_button) # a sibling, not a child: it must stay visible when the table is put away
@@ -227,6 +235,7 @@ func open() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	poke_render()
 	tree.open()
+	props.set_wanted(props.has_options())
 	set_status("Carry a part over the table and let go, or pick one in the tree, to edit it.")
 	UiFeedback.play("open", self)
 	opened.emit()
@@ -240,6 +249,7 @@ func close() -> void:
 	resizer.cancel()
 	if tree.is_open():
 		tree.close()
+	props.set_wanted(false)
 	_open = false
 	visible = false
 	surface.release_all()
@@ -289,13 +299,21 @@ func tool_activated(tool_id: String) -> void:
 	if def != null and def.hint != "":
 		set_status(def.hint)
 	editor.on_tool_changed(tool_id)
+	_show_tool_in_props(tool_id)
 	tool_changed.emit(tool_id)
+
+
+func _show_tool_in_props(tool_id: String) -> void:
+	var def = registry.tool_def(tool_id) if tool_id != "" else null
+	var cat = registry.category_of(tool_id) if def != null else null
+	props.set_tool(def.label if def != null else "", def.hint if def != null else "", cat.accent if cat != null else Color.WHITE)
 
 
 func tool_deactivated(tool_id: String) -> void:
 	if active_tool == tool_id:
 		active_tool = ""
 		editor.on_tool_changed("")
+		_show_tool_in_props("")
 		tool_changed.emit("")
 
 
@@ -444,6 +462,9 @@ func set_slab_size(new_size: Vector2) -> void:
 	var dock_x := -(new_size.x * 0.5 + 0.20)
 	tree.position.x += dock_x - tree.dock_position.x # keeps wherever the tree has been carried to, relative to the slab's left edge
 	tree.dock_position.x = dock_x
+	var props_x := new_size.x * 0.5 + 0.20
+	props.position.x += props_x - props.dock_position.x
+	props.dock_position.x = props_x
 	resizer.layout()
 	poke_render()
 
