@@ -1548,7 +1548,7 @@ func _run_preview() -> void:
 				table.set_status("No preview: %s" % str(patched["error"]))
 				return
 		var fetched: Dictionary = await api.fetch_bytes(glb_path(view_is_filtered(), FeaturePreview.QUALITY))
-		if not fetched["ok"]:
+		if not fetched["ok"] or fetched["bytes"].is_empty():
 			return
 		var parsed: Dictionary = table._main.mesh_from_glb(fetched["bytes"])
 		mesh = parsed["mesh"] if parsed["ok"] else null
@@ -1627,6 +1627,9 @@ func apply_feature() -> void:
 		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	_preview_again = false
+	while _preview_running: # a preview still in flight would make its feature after this one: let it finish (Apply then adopts it)
+		await get_tree().process_frame
 	var tool: String = table.active_tool
 	var result: Dictionary
 	table.set_status("Working...")

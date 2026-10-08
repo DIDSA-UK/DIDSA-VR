@@ -64,6 +64,7 @@ func _initialize() -> void:
 	table.configure_backend(main.backend_url, main.api_key)
 	table.surface.settle_seconds = 0.0
 	var ed = table.editor
+	ed.preview_enabled = false
 
 	await main.new_assembly()
 	await table.new_part()

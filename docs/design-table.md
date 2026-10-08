@@ -407,3 +407,13 @@ A Build row flagged "lost" or "may have moved" for a fillet, chamfer, shell, mir
 ### Pictures of every tool
 
 `TABLE_RENDER_DIR=/tmp/dock xvfb-run -a "$GODOT" --path . --script res://tests/dock_panels_render.gd` saves two PNGs per tool: `NN_category_tool.png` (the console) and `NN_category_tool_panel.png` (the Properties panel close-up, or the deck for a tool with no settings). `DOCK_MODE=before` saves the old options row for Extrude, Fillet and Mirror (`before_*.png`). Software (llvmpipe) renders at 1280x720, a layout check, not a headset view. `TABLE_RENDER_DIR` is not committed; `tests/preview_render.gd` (real backend) saves the translucent Fillet preview.
+
+## The tools added in Phase 6
+
+* **Feature row** (pages of five and More): Extrude, Revolve, Fillet, Chamfer, Shell, Mirror, **Plane**, **Loft**, **Sweep**, **Pattern**, **Boolean**, **Merge**, **Split**. **Sketch row** gains **Ellipse**, **Ellipse Arc**, **Spline**, **Text**, **Trim**, **Offset**. A new **Modify** category (violet): **Move Face**, **Delete Face**, **Move Body**, **Scale Body**, **Delete Body**. Every one has its settings in the Properties panel and its Build row (with Edit).
+* **Making a loft or a sweep.** Draw each section's sketch on its own plane (Plane first), Done each; Loft: pick one line of each sketch (Build row `Lines: on / off` narrows it), Apply. Sweep: finish the path's sketch, draw the profile in a new sketch and leave it open, choose Sweep, pick the path's lines in order, Apply.
+* **Pattern / Boolean / Split** pick whole bodies with the laser (a body lights as a whole); the "Pick" toggles in the panel say which kind of thing the next pull picks (body, sketch line, plane).
+* **Edit** on a Build row of any of the new features opens its tool with the feature's values; Apply changes it as one Undo step.
+* **Text** needs words typed on the full keyboard (Text button), a font from the backend's bundled list (Font steps through them), a height and a turn; the glyph outlines are drawn from the backend's.
+* **Trim cannot be undone**; Offset can.
+* **Ellipse edges** of the part (an elliptical hole's rim or boss in the sketch plane) are offered like circular ones and become a pinned reference ellipse; they do not follow an upstream change (R-F limit).

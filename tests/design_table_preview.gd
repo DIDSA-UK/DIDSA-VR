@@ -23,6 +23,14 @@ class CoarseTool extends "res://scripts/design_table/features/feature_tool.gd":
 		return PartFeatures._good("coarse-test-features", {"count": 3})
 
 
+var _applied := false
+
+
+func _apply_in_background(ed) -> void:
+	await ed.apply_feature()
+	_applied = true
+
+
 func _tetra(scale_by: float = 1.0) -> Dictionary:
 	return {"body_id": "coarse-preview", "source": "coarse", "mesh": {
 		"vertices": [[0, 0, 0], [10 * scale_by, 0, 0], [0, 10 * scale_by, 0], [0, 0, 10 * scale_by]],
@@ -101,6 +109,19 @@ func _initialize() -> void:
 	await rig.settle(func() -> bool: return ed.preview_feature_id == "" or ed.preview_feature_id != third_id)
 	await rig.frames(3)
 	print("SMOKE choosing another tool deletes the unapplied preview feature: ", not rig.calls_to("DELETE /document/parts/PART_BOX/features/" + third_id).is_empty() and (ed.preview_feature_id == "" or ed.preview_feature_id != third_id))
+	# Apply while a preview request is still in flight must wait for it (else the preview makes a SECOND feature afterwards: a real backend answers later than the fake)
+	table.manager.deactivate()
+	await rig.frames(3)
+	table.manager.activate("fillet")
+	ed.edges = [{"kind": "edge", "body_id": body_id, "index": edge_index, "key": "edge:%s:%d" % [body_id, edge_index]}]
+	var posts_now: int = rig.calls_to("POST /document/parts/PART_BOX/fillet-features").size()
+	ed._preview_running = true
+	call_deferred("_apply_in_background", ed)
+	await rig.frames(4)
+	print("SMOKE Apply waits while a preview is in flight (nothing is sent yet): ", rig.calls_to("POST /document/parts/PART_BOX/fillet-features").size() == posts_now)
+	ed._preview_running = false
+	await rig.settle(func() -> bool: return _applied)
+	print("SMOKE ...then it goes ahead: exactly one new fillet is made: ", rig.calls_to("POST /document/parts/PART_BOX/fillet-features").size() == posts_now + 1)
 	# preview off
 	table.manager.deactivate()
 	await rig.frames(3)
