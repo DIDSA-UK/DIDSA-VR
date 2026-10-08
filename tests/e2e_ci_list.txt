@@ -21,3 +21,4 @@ e2e_body_features
 e2e_trim_offset
 e2e_modify
 e2e_curves
+e2e_ellipse_reference

@@ -20,6 +20,7 @@ const COPLANAR_MM := 0.001
 
 var vertices: Array = [] ## [{body, index, uv, depth}] (depth: distance off the plane, mm)
 var edges: Array = [] ## [{body, index, kind, segs (PackedVector2Array of segment pairs), a, b, a_vertex, b_vertex, depth, lo, hi, circle}]
+var ellipse_edges: Array = [] ## the coplanar FULL elliptical edges (reference-overhaul R-F), indices into `edges` ({ellipse: {c, a, b, angle}} is on the entry itself)
 var circles: Array = [] ## the coplanar circular edges, indices into `edges` ({circle: {c, r, full}} is on the entry itself): what a hole or boss is
 var faces: Array = [] ## the faces the sketch can point at without a rim of theirs in the plane: [{body, index, kind ("face_line" | "face_axis"), a, b (a flat face seen edge-on: its ends) | c, r (a round face with its axis square to the plane: the axis point), depth}]
 
@@ -98,6 +99,8 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 			var entry := _edge(str(body_id), int(index), kind, segs, first, last, vertex_at, pts, depth, elo, ehi)
 			if kind == "circle":
 				entry["circle"] = _fit_circle(pts, plane)
+			elif kind == "ellipse":
+				entry["ellipse"] = _fit_ellipse(pts, plane)
 			if seen_edges.has(ekey):
 				if depth < float((edges[seen_edges[ekey]] as Dictionary)["depth"]) - 0.0001:
 					edges[seen_edges[ekey]] = entry
@@ -109,6 +112,8 @@ func _build(topology: Dictionary, plane: Dictionary) -> void:
 	for i in edges.size():
 		if not ((edges[i] as Dictionary).get("circle", {}) as Dictionary).is_empty():
 			circles.append(i)
+		if not ((edges[i] as Dictionary).get("ellipse", {}) as Dictionary).is_empty():
+			ellipse_edges.append(i)
 	_build_faces(topology, plane)
 	if lo.x == INF:
 		return
@@ -245,6 +250,57 @@ static func _fit_circle(pts: PackedVector3Array, plane: Dictionary) -> Dictionar
 	return {"c": centre, "r": radius, "full": full}
 
 
+static func _fit_ellipse(pts: PackedVector3Array, plane: Dictionary) -> Dictionary:
+	## {c (uv), a (major radius), b (minor radius), angle} for a FULL elliptical edge lying in the sketch plane, else {}: the polyline of an ellipse is
+	## evenly spread in its parameter, so its middle is the centre and its covariance has eigenvalues a^2/2 and b^2/2 along the axes.
+	var origin: Vector3 = plane["origin"]
+	var normal: Vector3 = plane["n"]
+	var uvs: Array = []
+	for i in range(0, pts.size(), 1):
+		if absf((pts[i] - origin).dot(normal)) > COPLANAR_MM:
+			return {}
+		if i % 2 == 0 or i == pts.size() - 1:
+			uvs.append(_to_uv(pts[i], plane))
+	if uvs.size() < 8 or (uvs[0] as Vector2).distance_to(uvs[uvs.size() - 1]) > 0.01:
+		return {}
+	uvs.pop_back() # the closing point repeats the first
+	var centre := Vector2.ZERO
+	for p in uvs:
+		centre += p
+	centre /= float(uvs.size())
+	var sxx := 0.0
+	var syy := 0.0
+	var sxy := 0.0
+	for p in uvs:
+		var d: Vector2 = p - centre
+		sxx += d.x * d.x
+		syy += d.y * d.y
+		sxy += d.x * d.y
+	sxx /= float(uvs.size())
+	syy /= float(uvs.size())
+	sxy /= float(uvs.size())
+	var half_trace := (sxx + syy) * 0.5
+	var root := sqrt(maxf(((sxx - syy) * 0.5) * ((sxx - syy) * 0.5) + sxy * sxy, 0.0))
+	var l1 := half_trace + root
+	var l2 := maxf(half_trace - root, 0.0)
+	var a := sqrt(2.0 * l1)
+	var b := sqrt(2.0 * l2)
+	if a < 0.001 or b < 0.001 or absf(a - b) < 0.0005 * a:
+		return {} # (a circle that kind reported as an ellipse is not an ellipse for this)
+	return {"c": centre, "a": a, "b": b, "angle": 0.5 * atan2(2.0 * sxy, sxx - syy)}
+
+
+func nearest_elliptical(uv: Vector2, radius: float) -> Dictionary:
+	## The nearest full elliptical edge lying in the sketch plane, as nearest_edge's entry (with `ellipse` on it). {} if none within `radius`.
+	return _nearest_edge(uv, radius, func(e: Dictionary) -> bool: return not (e.get("ellipse", {}) as Dictionary).is_empty())
+
+
+static func ellipse_ref(e: Dictionary) -> Dictionary:
+	## The reference a picked elliptical edge carries: ensure_reference makes a pinned reference ellipse (convert-entities/edge).
+	var ellipse: Dictionary = e["ellipse"]
+	return {"kind": "ellipse_edge", "body": e["body"], "index": e["index"], "c": ellipse["c"], "a": ellipse["a"], "b": ellipse["b"], "angle": ellipse["angle"]}
+
+
 static func _to_uv(p: Vector3, plane: Dictionary) -> Vector2:
 	var d: Vector3 = p - (plane["origin"] as Vector3)
 	return Vector2(d.dot(plane["x"]), d.dot(plane["y"]))
@@ -322,7 +378,7 @@ func _nearest_edge(uv: Vector2, radius: float, wanted: Callable) -> Dictionary:
 				var d := uv.distance_to(near)
 				if d <= best_d:
 					best_d = d
-					best = {"body": e["body"], "index": e["index"], "kind": e["kind"], "a": e["a"], "b": e["b"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "depth": e["depth"], "distance": d, "point": near, "circle": e.get("circle", {})}
+					best = {"body": e["body"], "index": e["index"], "kind": e["kind"], "a": e["a"], "b": e["b"], "a_vertex": e["a_vertex"], "b_vertex": e["b_vertex"], "depth": e["depth"], "distance": d, "point": near, "circle": e.get("circle", {}), "ellipse": e.get("ellipse", {})}
 	return best
 
 
@@ -452,6 +508,10 @@ func pick(uv: Vector2, radius: float, kinds: Array) -> Dictionary:
 			var full: bool = bool(c["circle"]["full"])
 			if ("circle" in kinds and full) or ("arc" in kinds and not full):
 				rim = {"kind": "circle" if full else "arc", "id": "", "distance": c["distance"], "uv": c["point"], "ref": circle_ref(c)}
+	if "ellipse" in kinds:
+		var oval := nearest_elliptical(uv, radius)
+		if not oval.is_empty() and (rim.is_empty() or float(oval["distance"]) < float(rim["distance"])):
+			rim = {"kind": "ellipse", "id": "", "distance": oval["distance"], "uv": oval["point"], "ref": ellipse_ref(oval)}
 	if not line.is_empty() and not rim.is_empty():
 		return line if float(line["distance"]) <= float(rim["distance"]) else rim
 	if line.is_empty() and rim.is_empty() and "line" in kinds:

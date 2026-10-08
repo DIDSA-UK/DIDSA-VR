@@ -376,7 +376,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
-		var kinds: Array = ["point", "line", "circle", "arc"]
+		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
 		if EDIT_TOOLS.has(tool):

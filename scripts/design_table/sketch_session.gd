@@ -767,7 +767,23 @@ func ensure_reference(ref: Dictionary) -> Dictionary:
 			return {"ok": true, "id": on_circle["centre"], "message": ""}
 		"circle_edge":
 			return await _ensure_circle(str(ref["body"]), int(ref["index"]))
+		"ellipse_edge":
+			return await _ensure_ellipse(str(ref["body"]), int(ref["index"]))
 	return {"ok": false, "id": "", "message": ""}
+
+
+func _ensure_ellipse(body: String, edge_index: int) -> Dictionary:
+	## A full elliptical edge of the part lying in the sketch plane as a pinned reference ellipse (convert-entities/edge, idempotent). Its centre is a plain
+	## pinned point (the backend has no live reference for an ellipse's centre yet: it does not follow an upstream change, see docs/design-table-gaps.md).
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
+	var json: Dictionary = made["json"]
+	if not (json.get("ellipse") is Dictionary):
+		await refresh(true)
+		return {"ok": false, "id": "", "message": "That edge isn't an ellipse in this sketch's plane."}
+	await refresh(true) # the ellipse's five points and its axis lines come in with one read
+	return {"ok": true, "id": str(json["ellipse"]["id"]), "message": ""}
 
 
 func _take_in_point(json: Dictionary) -> void:
@@ -1105,6 +1121,8 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 		if kind in kinds and not point_hit:
 			var source: Dictionary = {"ellipse": ellipses, "ellipse_arc": ellipse_arcs, "spline": splines}[kind]
 			for id in source:
+				if reference_ids.has(id):
+					continue # the part's own elliptical edge: picked through the part (part_references.gd), never as itself
 				var outline: Array = outline_of(kind, id)
 				for i in outline.size() - 1:
 					var d := uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, outline[i], outline[i + 1]))
@@ -1528,7 +1546,9 @@ func _ghosts_raw(picked: Array) -> Array:
 					var cc: Vector2 = points[el["c"]]
 					var ra: float = cc.distance_to(points[el["ma"]])
 					var rb: float = cc.distance_to(points[el["mi"]])
-					if str(el["km"]) != "":
+					if is_reference(str(first["id"])):
+						pass # a pinned reference ellipse: its size is the part's, there is nothing to dimension
+					elif str(el["km"]) != "":
 						out.append(_ghost("major_radius", "Major radius", "mm", ra, cc + (points[el["ma"]] - cc) * 0.5, {"patch_id": el["km"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["ma"]]}))
 					if str(el["kn"]) != "":
 						out.append(_ghost("minor_radius", "Minor radius", "mm", rb, cc + (points[el["mi"]] - cc) * 0.5, {"patch_id": el["kn"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["mi"]]}))

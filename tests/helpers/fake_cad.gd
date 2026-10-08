@@ -28,6 +28,8 @@ var ref_points := {} ## "body:vertex index" -> the pinned point POST .../convert
 var vertex_positions := {} ## "body:vertex index" -> where that vertex lands in the sketch (default (index, 0))
 var edge_circles := {} ## "body:edge index" -> {c: Vector2, r: float, full: bool}: the circular edges (coplanar with the sketch) POST .../convert-entities/edge turns into a circle / arc
 var circle_made := {} ## "body:edge index" -> the circle / arc id that route made (idempotent per edge, like the real route since the references overhaul: a second call answers with the one already made)
+var edge_ellipses := {} ## "body:edge index" -> {c: Vector2, a: float, b: float}: the full elliptical edges POST .../convert-entities/edge turns into a pinned ellipse (idempotent per edge)
+var ellipse_made := {}
 var reference_rows = null ## what GET .../external-references answers with (an Array), or null for "no such route"
 var reattached: Array = [] ## [point id, body, vertex / edge index] of each POST .../reattach
 var confirmed: Array = [] ## point ids of each POST .../confirm
@@ -160,6 +162,28 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
+	if path.ends_with("/convert-entities/edge") and verb == "POST" and edge_ellipses.has("%s:%d" % [body["body_id"], int(body["edge_index"])]):
+		var ellipse_key := "%s:%d" % [body["body_id"], int(body["edge_index"])]
+		if not ellipse_made.has(ellipse_key):
+			var spec: Dictionary = edge_ellipses[ellipse_key]
+			var cid := next_id("pt")
+			var mid := next_id("pt")
+			var nid := next_id("pt")
+			points[cid] = spec["c"]
+			points[mid] = spec["c"] + Vector2(spec["a"], 0)
+			points[nid] = spec["c"] + Vector2(0, spec["b"])
+			for pid in [cid, mid, nid]:
+				pinned[pid] = true
+				if bool(body.get("reference", false)):
+					reference_ids[pid] = true
+			var eid := next_id("el")
+			entities.append({"type": "ellipse", "id": eid, "center_point_id": cid, "major_point_id": mid, "minor_point_id": nid, "major_constraint_id": "", "minor_constraint_id": "", "construction": true})
+			if bool(body.get("reference", false)):
+				reference_ids[eid] = true
+			ellipse_made[ellipse_key] = {"id": eid, "center_point_id": cid, "major_point_id": mid, "minor_point_id": nid}
+		var made: Dictionary = ellipse_made[ellipse_key]
+		var cpt: Dictionary = {"id": made["center_point_id"], "x": points[made["center_point_id"]].x, "y": points[made["center_point_id"]].y, "is_locked": true}
+		return _ok({"ellipse": {"id": made["id"], "is_reference": reference_ids.has(made["id"])}, "start_point": cpt, "end_point": cpt, "center_point": cpt})
 	if path.ends_with("/convert-entities/edge") and verb == "POST":
 		var ekey := "%s:%d" % [body["body_id"], int(body["edge_index"])]
 		var as_reference := bool(body.get("reference", false))

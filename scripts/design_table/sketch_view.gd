@@ -550,6 +550,9 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				var outline: Array = session.outline_of(kind, id)
 				if outline.size() < 2:
 					continue
+				if session.is_reference(id):
+					_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
+					continue
 				var okey: String = "%s:%s" % [kind, id]
 				var olit: bool = selected.has(okey) or okey == hovered
 				var oconstruction: bool = source[id].get("construction", false)
