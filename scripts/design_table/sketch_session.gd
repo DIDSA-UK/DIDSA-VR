@@ -290,6 +290,81 @@ func tap(pick: Dictionary) -> Dictionary:
 	return {"ok": bool(result["ok"]), "done": bool(result["ok"]), "message": str(result["message"])}
 
 
+# --- Trim and Offset (picked entities, not taps) ----------------------------------------------------------
+
+func trim_at(entity: Dictionary, uv: Vector2) -> Dictionary:
+	## Trim / Extend the entity under the laser, at the spot tapped. A line: the part between the two crossings around the tap is cut away (split-trim);
+	## when the tap is not bracketed by two crossings, the nearer end is moved to the next crossing (trim / extend). A circle: the tapped segment between
+	## crossings goes and an arc is left. An arc: its nearer end is moved. NOT undoable here (it moves or replaces what is already drawn).
+	## {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	busy = true
+	var kind := str(entity.get("kind", ""))
+	var id := str(entity.get("id", ""))
+	var message := ""
+	var ok := false
+	if kind == "line" and lines.has(id):
+		var split: Dictionary = await _post(SKETCH + sketch_id + "/lines/" + id + "/split-trim", {"click_x": uv.x, "click_y": uv.y})
+		if split["ok"]:
+			ok = true
+		else:
+			var l: Dictionary = lines[id]
+			var near: String = l["a"] if uv.distance_to(points.get(l["a"], uv)) <= uv.distance_to(points.get(l["b"], uv)) else l["b"]
+			var trimmed: Dictionary = await _post(SKETCH + sketch_id + "/lines/" + id + "/trim", {"moved_point_id": near})
+			ok = bool(trimmed["ok"])
+			message = "" if ok else _trim_reason(trimmed)
+	elif kind == "circle" and circles.has(id):
+		var cut: Dictionary = await _post(SKETCH + sketch_id + "/circles/" + id + "/trim", {"click_x": uv.x, "click_y": uv.y})
+		ok = bool(cut["ok"])
+		message = "" if ok else _trim_reason(cut)
+	elif kind == "arc" and arcs.has(id):
+		var a: Dictionary = arcs[id]
+		var end_id: String = a["s"] if uv.distance_to(points.get(a["s"], uv)) <= uv.distance_to(points.get(a["e"], uv)) else a["e"]
+		var moved: Dictionary = await _post(SKETCH + sketch_id + "/arcs/" + id + "/trim", {"moved_point_id": end_id})
+		ok = bool(moved["ok"])
+		message = "" if ok else _trim_reason(moved)
+	else:
+		message = "Aim at a line, circle or arc to trim."
+	busy = false
+	if ok:
+		await refresh(true)
+		message = "Trimmed. (Trim can't be undone here yet: draw it again if it was wrong.)"
+	if message != "":
+		status.emit(message)
+	return {"ok": ok, "message": message}
+
+
+func _trim_reason(r: Dictionary) -> String:
+	if int(r.get("code", 0)) == 422:
+		return "There is nothing to trim it to there: it needs another line or curve crossing it."
+	return "Couldn't trim that: %s" % str(r.get("error", ""))
+
+
+func offset_entity(entity: Dictionary, distance: float) -> Dictionary:
+	## A line or arc copied `distance` mm to one side (a negative distance the other). One step on Undo. {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	var kind := str(entity.get("kind", ""))
+	var id := str(entity.get("id", ""))
+	if kind != "line" and kind != "arc":
+		return {"ok": false, "message": "Offset takes a line or an arc."}
+	if is_zero_approx(distance):
+		return {"ok": false, "message": "The offset can't be zero."}
+	busy = true
+	var route := "/lines/%s/offset" % id if kind == "line" else "/arcs/%s/offset" % id
+	var r: Dictionary = await _post(SKETCH + sketch_id + route, {"distance": distance, "construction": false})
+	busy = false
+	if not r["ok"]:
+		var message := "Couldn't offset that: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	var made: Dictionary = (r["json"] as Dictionary).get("line", (r["json"] as Dictionary).get("arc", {}))
+	var made_id := str(made.get("id", ""))
+	await _finish("offset", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + ("/lines/" if kind == "line" else "/arcs/") + made_id]])
+	return {"ok": true, "message": ""}
+
+
 func _post(path: String, body) -> Dictionary:
 	return await api.call(HTTPClient.METHOD_POST, path, body)
 

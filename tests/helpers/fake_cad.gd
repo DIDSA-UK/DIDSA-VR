@@ -40,6 +40,8 @@ var face_axes := {} ## "body:face index" -> Vector2: where a round face's axis i
 var reference_dimensions := {} ## id -> {id, kind, refs: [{type, id}]}: the reference (driven) dimensions POST .../reference-dimensions made (value computed on read, like the real backend)
 var face_made := {} ## "body:face index" -> the answer that route gave (idempotent per face, like the real one)
 var coarse_bodies: Array = [] ## what POST .../coarse-preview answers with: [{body_id, source, mesh: {vertices, normals, triangle_indices, ...}}]
+var split_trim_fails := false ## POST .../split-trim answers 422 (the client then falls back to trim)
+var trim_fails := false ## POST .../trim (and a circle / arc trim) answers 422
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
 
@@ -75,6 +77,15 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
 		return _ok(feature_rows.get(path.get_slice("/", 3), []))
+	if verb == "POST" and path.contains("/sketch/sketches/") and (path.ends_with("/split-trim") or path.ends_with("/trim") or path.ends_with("/offset")):
+		var kind := "circle" if path.contains("/circles/") else ("arc" if path.contains("/arcs/") else "line")
+		if path.ends_with("/offset"):
+			return _ok({kind: {"id": next_id("off")}})
+		if path.ends_with("/split-trim") and split_trim_fails:
+			return {"ok": false, "code": 422, "json": {"detail": "no crossings"}, "error": "no crossings"}
+		if trim_fails:
+			return {"ok": false, "code": 422, "json": {"detail": "no crossings"}, "error": "no crossings"}
+		return _ok({"line1": {"id": "t1"}, "line2": {"id": "t2"}, "line": {"id": "t1"}, "arc": {"id": "t1"}})
 	if verb == "POST" and path.contains("/coarse-preview"):
 		return _ok(coarse_bodies)
 	if verb == "PATCH" and path.contains("-features/"):

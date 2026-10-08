@@ -13,12 +13,17 @@ const PatternTool := preload("res://scripts/design_table/features/pattern_tool.g
 const BooleanTool := preload("res://scripts/design_table/features/boolean_tool.gd")
 const MergeTool := preload("res://scripts/design_table/features/merge_tool.gd")
 const SplitTool := preload("res://scripts/design_table/features/split_tool.gd")
+const MoveFaceTool := preload("res://scripts/design_table/features/move_face_tool.gd")
+const DeleteFaceTool := preload("res://scripts/design_table/features/delete_face_tool.gd")
+const MoveBodyTool := preload("res://scripts/design_table/features/move_body_tool.gd")
+const ScaleBodyTool := preload("res://scripts/design_table/features/scale_body_tool.gd")
+const DeleteBodyTool := preload("res://scripts/design_table/features/delete_body_tool.gd")
 const CreatePlaneTool := preload("res://scripts/design_table/features/create_plane_tool.gd")
 
 
 static func make_all() -> Dictionary:
 	var all := {}
-	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new(), LoftTool.new(), SweepTool.new(), PatternTool.new(), BooleanTool.new(), MergeTool.new(), SplitTool.new()]:
+	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new(), LoftTool.new(), SweepTool.new(), PatternTool.new(), BooleanTool.new(), MergeTool.new(), SplitTool.new(), MoveFaceTool.new(), DeleteFaceTool.new(), MoveBodyTool.new(), ScaleBodyTool.new(), DeleteBodyTool.new()]:
 		all[tool.id] = tool
 	return all
 

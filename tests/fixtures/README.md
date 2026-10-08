@@ -52,3 +52,5 @@ and copy it over.
 - `tests/motion_vectors.gd` FAILS if a DIDSA-CAD checkout is reachable (`DIDSA_CAD_DIR`,
   else `../DIDSA-CAD`) and its `docs/motion/vectors.json` differs from this copy, so a
   regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.
+- **`block_60x40x20.step`** — a 60 x 40 x 20 mm box written with pythonocc's STEP writer (`BRepPrimAPI_MakeBox(60, 40, 20)` through `STEPControl_Writer`, from
+  `DIDSA-CAD/backend`'s environment). An IMPORTED part with no sketch or feature history, for the Modify tools in `tests/e2e_modify.gd`.

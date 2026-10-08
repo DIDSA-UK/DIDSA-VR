@@ -140,6 +140,43 @@ static func split_request(target_body_id: String, plane_ref: Dictionary) -> Dict
 	return _good("split-features", {"target_body_id": target_body_id, "tool": {"plane_ref": plane_ref}})
 
 
+static func move_face_request(face_refs: Array, offset: float) -> Dictionary:
+	## Pushes (or pulls) the picked faces of one body along their normals by `offset` mm.
+	if face_refs.is_empty():
+		return _bad("Pick the faces to move first.")
+	if is_zero_approx(offset):
+		return _bad("The distance can't be zero.")
+	return _good("move-face-features", {"face_refs": face_refs, "offset_distance": offset})
+
+
+static func delete_face_request(face_refs: Array) -> Dictionary:
+	if face_refs.is_empty():
+		return _bad("Pick the faces to delete first.")
+	return _good("delete-face-features", {"face_refs": face_refs})
+
+
+static func move_body_request(body_id: String, delta: Array, make_copy: bool) -> Dictionary:
+	if body_id == "":
+		return _bad("Pick the body to move first.")
+	if is_zero_approx(float(delta[0])) and is_zero_approx(float(delta[1])) and is_zero_approx(float(delta[2])):
+		return _bad("Move it by something: set X, Y or Z.")
+	return _good("move-body-features", {"body_id": body_id, "delta": [float(delta[0]), float(delta[1]), float(delta[2])], "make_copy": make_copy})
+
+
+static func scale_body_request(body_id: String, factor: float) -> Dictionary:
+	if body_id == "":
+		return _bad("Pick the body to scale first.")
+	if factor <= 0.0:
+		return _bad("The factor has to be bigger than zero.")
+	return _good("scale-body-features", {"body_id": body_id, "factor": factor})
+
+
+static func delete_body_request(body_ids: Array) -> Dictionary:
+	if body_ids.is_empty():
+		return _bad("Pick the bodies to delete first.")
+	return _good("delete-body-features", {"body_ids": body_ids})
+
+
 static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	if edges.is_empty():
 		return _bad("Pick the edges to round first.")
@@ -235,6 +272,7 @@ static func _plain(error: String) -> String:
 	var known := {
 		"non_planar_reference": "That face isn't flat.",
 		"missing_reference": "An edge or face it needs isn't there any more.",
+		"delete_face_failed": "The gap couldn't be healed closed after deleting that face (the neighbours don't meet).",
 	}
 	for key in known:
 		if error.contains(key):

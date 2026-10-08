@@ -32,6 +32,8 @@ const SKETCH_TOOLS := [
 	["polygon", "Polygon", "tool_polygon"],
 	["point", "Point", "tool_point"],
 	["slot", "Slot", "tool_slot"],
+	["trim", "Trim", "tool_trim"],
+	["offset", "Offset", "tool_offset"],
 ]
 ## DIDSA-CAD's ribbon constraint chips plus its Dimensions tool.
 const CONSTRAIN_TOOLS := [
@@ -59,6 +61,15 @@ const FEATURE_TOOLS := [
 	["split", "Split", "tool_split"],
 ]
 
+## The Modify category (direct editing: no sketch, works on faces and bodies of any solid, an imported STEP part included).
+const MODIFY_TOOLS := [
+	["move_face", "Move Face", "tool_move_face"],
+	["delete_face", "Delete Face", "tool_delete_face"],
+	["move_body", "Move Body", "tool_move_body"],
+	["scale_body", "Scale Body", "tool_scale_body"],
+	["delete_body", "Delete Body", "tool_delete_body"],
+]
+
 const HINTS := {
 	"select": "Pick points, lines and curves. Pick again to let go. Options for what you picked appear below.",
 	"line": "Point at the sheet and pull the trigger to place the start, then the end. Each end starts the next line.",
@@ -68,6 +79,8 @@ const HINTS := {
 	"polygon": "Pick the centre, then the first corner. Sides are set below.",
 	"point": "Pull the trigger to place a point.",
 	"slot": "Pick the two end centres, then a point as far from the centre line as the slot's half width.",
+	"trim": "Aim at the part of a line, circle or arc to cut away (it must cross another line or curve) and pull the trigger. A line's end can also be pulled out to the next crossing.",
+	"offset": "Set the distance below, then pick a line or arc: a copy is made that far to one side (Reverse for the other).",
 	"dimension": "Pick a line, a circle, or two points, then pick the value to type it.",
 	"horizontal": "Pick a line to make it horizontal.",
 	"vertical": "Pick a line to make it vertical.",
@@ -86,6 +99,11 @@ const HINTS := {
 	"boolean": "Pick the body to change (the target), press Pick tool and pick the body to use on it, choose Subtract or Common, then Apply.",
 	"merge": "Pick two or more bodies to join into one, then Apply.",
 	"split": "Pick the body to split, press Pick plane and pick a plane or flat face, then Apply.",
+	"move_face": "Pick the faces to push or pull (of one body), set the distance, then Apply.",
+	"delete_face": "Pick the faces to delete; the gap is healed. Then Apply.",
+	"move_body": "Pick the body to move, set X / Y / Z (negative goes the other way), then Apply.",
+	"scale_body": "Pick the body to scale, set the factor, then Apply.",
+	"delete_body": "Pick the bodies to delete, then Apply.",
 	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
 }
 
@@ -94,6 +112,7 @@ static func register(reg, handler: Object) -> void:
 	_category(reg, handler, "sketch", "Sketch", "cat_sketch", ACCENT_SKETCH, SKETCH_TOOLS)
 	_category(reg, handler, "constrain", "Constrain", "cat_constrain", ACCENT_CONSTRAIN, CONSTRAIN_TOOLS)
 	_category(reg, handler, "feature", "Feature", "cat_feature", ACCENT_FEATURE, FEATURE_TOOLS)
+	_category(reg, handler, "modify", "Modify", "cat_modify", ACCENT_MODIFY, MODIFY_TOOLS)
 
 
 static func _category(reg, handler: Object, id: String, label: String, icon: String, accent: Color, tools: Array) -> void:

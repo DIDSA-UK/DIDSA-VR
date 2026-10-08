@@ -45,11 +45,13 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
 const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## the states where the laser picks things on the part itself
 const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## where choosing a picking tool is allowed to switch the state
 const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
+const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz"] ## settings that may be negative or zero (a move along an axis)
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
@@ -75,7 +77,7 @@ var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "bool_op": "subtract", "bool_consume": true,
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
 	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
 	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
@@ -371,11 +373,13 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
-	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
+	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
+		if EDIT_TOOLS.has(tool):
+			kinds = ["line", "circle", "arc"] if tool == "trim" else ["line", "arc"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds) if repick_point == "" else {}
 		if repick_point == "" and "point" in kinds and str(_hover_entity.get("kind", "")) != "point" and part_refs != null and session.references_ok and tool != "revolve":
 			var corner: Dictionary = part_refs.pick(uv, pick_mm, ["point"]) # a point beats a line it is on, and the part's own corner or hole centre is a point (the sketch's helper for it is hidden)
@@ -600,7 +604,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 	table.orient_to_plane(session.plane)
 	set_state("sketch")
 	_sync_deck()
-	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool in ["dimension", SELECT_TOOL, "revolve"]:
+	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool in ["dimension", SELECT_TOOL, "revolve"] or EDIT_TOOLS.has(table.active_tool):
 		session.set_tool(table.active_tool)
 	elif table.active_tool == "":
 		table.manager.activate(SELECT_TOOL) # a sketch opens ready to pick things; choose a drawing tool to draw
@@ -911,6 +915,14 @@ func _sketch_trigger() -> void:
 			await session.select(_hover_entity)
 		else:
 			session.clear_selection()
+	elif tool == "trim":
+		if not _hover_entity.is_empty() and str(_hover_entity.get("kind", "")) in ["line", "circle", "arc"]:
+			await session.trim_at(_hover_entity, _hover_uv)
+	elif tool == "offset":
+		if not _hover_entity.is_empty():
+			var signed := float(options["offset_dist"]) * (-1.0 if bool(options["offset_flip"]) else 1.0)
+			await session.offset_entity(_hover_entity, signed)
+			sync_undo_redo()
 	elif tool == "revolve":
 		if not _hover_entity.is_empty() and str(_hover_entity.get("kind", "")) == "line":
 			revolve_axis = str(_hover_entity["id"])
@@ -1039,7 +1051,7 @@ func on_tool_changed(tool_id: String) -> void:
 	if state == "idle" and table.table_copy == null:
 		return
 	if session != null:
-		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension" or tool_id == SELECT_TOOL or tool_id == "revolve") else "")
+		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension" or tool_id == SELECT_TOOL or tool_id == "revolve" or EDIT_TOOLS.has(tool_id)) else "")
 		if tool_id == "revolve" and revolve_axis != "":
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
@@ -1059,7 +1071,7 @@ func on_tool_changed(tool_id: String) -> void:
 		_:
 			if state in PICK_STATES or state == "extrude":
 				set_state("sketch" if session != null else "pick_plane")
-			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
+			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or EDIT_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
 				table.set_status("Pick a flat face or a reference plane to sketch on first.")
 	_update_options()
 
@@ -1095,6 +1107,8 @@ func _update_options() -> void:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
 			list = [{"id": "finish_line", "text": "Finish line"}]
+		"offset":
+			list = [{"id": "offset_dist", "text": "Distance %.2f mm" % float(options["offset_dist"])}, {"id": "offset_flip", "text": "Reverse", "toggle": true, "pressed": bool(options["offset_flip"])}]
 	table.ui.set_options(list)
 
 
@@ -1167,6 +1181,10 @@ func on_option(option_id: String) -> void:
 		"finish_line":
 			if session != null:
 				session.finish_chain()
+		"offset_dist":
+			type_option("offset_dist", "Offset distance (mm)")
+		"offset_flip":
+			options["offset_flip"] = not bool(options["offset_flip"])
 		"apply":
 			await apply_feature()
 	_update_options()
@@ -1178,6 +1196,15 @@ func type_option(key: String, title: String) -> void:
 
 func option_typed(key: String, text: String) -> void:
 	var cleaned := text.strip_edges()
+	if SIGNED_OPTIONS.has(key):
+		if not cleaned.is_valid_float():
+			table.set_status("Enter a number (negative goes the other way).")
+			UiFeedback.haptic(table._right, "error")
+			return
+		options[key] = cleaned.to_float()
+		_update_options()
+		schedule_preview()
+		return
 	if not cleaned.is_valid_float() or cleaned.to_float() <= 0.0:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
@@ -1660,6 +1687,17 @@ func start_body_picks(limit := 0) -> void:
 
 func body_refs() -> Array:
 	return bodies.map(func(b): return str(b["body_id"]))
+
+
+func start_face_picks() -> void:
+	## Shell / Move Face / Delete Face were chosen: pick faces of one body.
+	if state in PICK_FROM_STATES:
+		clear_picks()
+		set_state("pick_faces")
+
+
+func face_refs() -> Array:
+	return faces.map(func(f): return PartFeatures.face_ref(str(f["body_id"]), int(f["index"])))
 
 
 func start_edge_picks() -> void:

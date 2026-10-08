@@ -18,3 +18,5 @@ e2e_preview
 e2e_create_plane
 e2e_loft_sweep
 e2e_body_features
+e2e_trim_offset
+e2e_modify
