@@ -155,6 +155,4 @@ No code until a headset session. Named constants to look at: `sketch_tilt_degree
 Decided (John, 2026-10-08):
 1. R-B: a separate list of reference dimensions, not a `driven` flag.
 2. R-C: build it, covering centres, edges and vertices; silent to the user and robust above all.
-
-Still open:
-- R-B needs a flat-app change. Same pass, or VR first behind a backend capability check?
+3. R-B: the flat-app change ships in the same pass, so the two apps stay in step.
