@@ -67,6 +67,38 @@ func preview_route() -> String:
 	return ""
 
 
+func build_type() -> String:
+	## The backend's feature type this tool makes (the Build tree's `type`); the route is "<type with - for _>-features"
+	return id
+
+
+func edits_in_tool() -> bool:
+	## true: the Build row's Edit opens this tool with the feature's settings loaded (load_from_row), and Apply PATCHes it
+	return false
+
+
+func load_from_row(_ed, _row: Dictionary) -> void:
+	pass
+
+
+func patch_keys() -> Array:
+	## the body keys a PATCH of this feature may carry (row_payload picks those out of the row to put the old values back)
+	return []
+
+
+func row_payload(row: Dictionary) -> Dictionary:
+	var out := {}
+	for key in patch_keys():
+		if row.has(key):
+			out[key] = row[key]
+	return out
+
+
+func summary(_f: Dictionary, _features: Array) -> String:
+	## the second line of the feature's Build row
+	return ""
+
+
 func patch_body(req: Dictionary) -> Dictionary:
 	## What a PATCH of the feature made from `req` sends. The update routes ignore fields they do not take, so the create body does (override
 	## when a field must not be sent again).

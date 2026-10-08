@@ -51,6 +51,12 @@ const FEATURE_TOOLS := [
 	["shell", "Shell", "tool_shell"],
 	["mirror", "Mirror", "tool_mirror"],
 	["create_plane", "Plane", "feat_plane"],
+	["loft", "Loft", "tool_loft"],
+	["sweep", "Sweep", "tool_sweep"],
+	["pattern", "Pattern", "tool_pattern"],
+	["boolean", "Boolean", "tool_boolean"],
+	["merge", "Merge", "tool_merge"],
+	["split", "Split", "tool_split"],
 ]
 
 const HINTS := {
@@ -74,6 +80,12 @@ const HINTS := {
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
 	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",
 	"create_plane": "Aim at a flat face or a plane and pull the trigger, set the offset, then Make plane. The new plane can be picked to sketch on.",
+	"loft": "Pick a line of each of two or more sketches (each on its own plane): the loft goes through those sketches in order. Set Boss or Cut, then Apply.",
+	"sweep": "With the profile sketch open, pick the lines of the path in an earlier sketch, in order. Set Boss or Cut, then Apply.",
+	"pattern": "Pick the body to repeat, choose Rectangular or Circular, a direction (X, Y, Z, or a line of an earlier sketch), the count and spacing, then Apply.",
+	"boolean": "Pick the body to change (the target), press Pick tool and pick the body to use on it, choose Subtract or Common, then Apply.",
+	"merge": "Pick two or more bodies to join into one, then Apply.",
+	"split": "Pick the body to split, press Pick plane and pick a plane or flat face, then Apply.",
 	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
 }
 

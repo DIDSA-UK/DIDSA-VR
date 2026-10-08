@@ -5,6 +5,7 @@ extends RefCounted
 ## part's mesh ids, no scene tree, so tests can pin them.
 
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 
 const LABELS := {
 	"sketch": "Sketch", "extrude": "Extrude", "create_plane": "Plane", "fillet": "Fillet", "chamfer": "Chamfer",
@@ -100,7 +101,8 @@ static func summary(features: Array, index: int) -> String:
 			return "%s mm, %d edge(s)" % [number(float(f.get("distance", 0.0))), (f.get("edge_refs", []) as Array).size()]
 		"create_plane":
 			return str(f.get("plane_type", "plane")).replace("_", " ")
-	return ""
+	var tool = FeatureTools.for_type(str(f.get("type", "")))
+	return tool.summary(f, features) if tool != null else ""
 
 
 static func reference_counts(f: Dictionary) -> Dictionary:

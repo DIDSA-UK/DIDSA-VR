@@ -78,7 +78,7 @@ func _initialize() -> void:
 			ids.append(t.id)
 	print("SMOKE categories are Sketch, Constrain, Feature: ", reg.categories().map(func(c): return c.label) == ["Sketch", "Constrain", "Feature"])
 	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point", "slot"])
-	print("SMOKE only Sketch is over the six-slot row (eight tools, so it pages: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
+	print("SMOKE only Sketch and Feature are over the six-slot row (so they page: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch", "feature"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
 	print("SMOKE five category slots are enough: ", reg.categories().size() <= 5)
 	print("SMOKE every tool is a mode tool with a hint: ", reg.mode_tools().size() == ids.size() and ids.all(func(i): return reg.tool_def(i).hint != ""))
 	mgr.activate("line")

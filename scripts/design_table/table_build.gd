@@ -15,6 +15,7 @@ extends RefCounted
 
 signal changed ## the list, the selection or a state flag changed: the window redraws
 
+const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const ARM_MS := 4000 ## how long a Delete stays armed
@@ -254,7 +255,8 @@ func _show(entities: Array) -> void:
 
 func can_edit(feature_id: String) -> bool:
 	var type := str(row(feature_id).get("type", ""))
-	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "")
+	var tool = FeatureTools.for_type(type)
+	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "") or (tool != null and tool.edits_in_tool())
 
 
 func edit_selected() -> void:
@@ -263,6 +265,10 @@ func edit_selected() -> void:
 		return
 	if str(f.get("type", "")) == "sketch":
 		await _table.editor.reopen_sketch(selected_id) # a sketch is edited on the sheet, not with a number
+		return
+	var in_tool = FeatureTools.for_type(str(f.get("type", "")))
+	if in_tool != null and in_tool.edits_in_tool():
+		await _table.editor.begin_tool_edit(selected_id)
 		return
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
 

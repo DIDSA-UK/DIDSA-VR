@@ -75,7 +75,9 @@ var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false}
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "bool_op": "subtract", "bool_consume": true,
+	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
+	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
 var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
@@ -86,6 +88,7 @@ var preview_enabled := true ## off: nothing is created or drawn until Apply
 var preview_feature_id := "" ## the feature an eager preview created (PATCHed as the settings change, deleted on Cancel, kept by Apply)
 var _preview_running := false
 var _preview_again := false
+var editing: Dictionary = {} ## a feature opened from its Build row in its own tool: {id, type, original (the row)}; Apply PATCHes it, Undo puts the old values back
 var plane_base: Dictionary = {} ## what Create Plane offsets from: {fixed} | {face} | {plane_feature_id, plane}
 var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pick over the limit replaces the oldest
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
@@ -127,8 +130,7 @@ func set_state(new_state: String) -> void:
 	if state == new_state:
 		return
 	if state == "pick_curves" and sketch_picks != null and is_instance_valid(sketch_picks):
-		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part
-		curve_picks.clear()
+		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part (a tool that switches between picking kinds keeps its picks)
 	state = new_state
 	state_changed.emit(state)
 	_update_options()
@@ -224,6 +226,7 @@ func on_cleared() -> void:
 
 func _reset() -> void:
 	cancel_preview()
+	editing = {}
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	clip.end()
@@ -1040,6 +1043,8 @@ func on_tool_changed(tool_id: String) -> void:
 		if tool_id == "revolve" and revolve_axis != "":
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
+	if not editing.is_empty() and tool_id != str(editing["type"]):
+		editing = {}
 	if preview_feature_id != "" or preview.is_showing():
 		cancel_preview() # another tool: what the last one was showing goes (a feature it made for the preview is deleted first, in order)
 	if tools.has(tool_id):
@@ -1177,7 +1182,7 @@ func option_typed(key: String, text: String) -> void:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
 		return
-	if key == "angle" and cleaned.to_float() > 360.0:
+	if (key == "angle" or key == "pat_angle") and cleaned.to_float() > 360.0:
 		table.set_status("An angle can't be more than 360 degrees.")
 		UiFeedback.haptic(table._right, "error")
 		return
@@ -1219,20 +1224,54 @@ func _toggle_face() -> void:
 	schedule_preview()
 
 
+func _refresh_lit() -> void:
+	## Lights the picked bodies and curves together (a tool may hold both).
+	highlight.set_set(table.table_copy, bodies + curve_picks)
+
+
+func set_pick_mode(mode: String) -> void:
+	## A tool that picks more than one kind of thing (Pattern: a body, then a line) switches what the laser picks without forgetting what was picked.
+	## "bodies" | "curves" | "plane" (the reference planes and flat faces, for a tool that wants_plane_pick).
+	match mode:
+		"bodies":
+			if state in PICK_FROM_STATES:
+				set_state("pick_bodies")
+		"curves":
+			if state in PICK_FROM_STATES:
+				set_state("pick_curves")
+				if sketch_picks == null or not is_instance_valid(sketch_picks) or sketch_picks.curves.is_empty():
+					await _load_sketch_picks()
+		"plane":
+			if state in PICK_FROM_STATES:
+				set_state("pick_plane")
+	_refresh_lit()
+
+
+func _load_sketch_picks() -> void:
+	if sketch_picks != null and is_instance_valid(sketch_picks):
+		sketch_picks.queue_free()
+	sketch_picks = SketchPicks.new()
+	table.table_copy.add_child(sketch_picks)
+	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else "")
+	if state == "pick_curves":
+		table.set_status("Aim at a line or curve of an earlier sketch and pull the trigger (%d to pick from)." % count if count > 0 else "There is no finished sketch with lines to pick from yet.")
+	_update_options()
+
+
 func _toggle_curve() -> void:
 	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "curve":
 		return
 	for i in curve_picks.size():
 		if curve_picks[i]["key"] == _hover_face["key"]:
 			curve_picks.remove_at(i)
-			highlight.set_set(table.table_copy, curve_picks)
+			_refresh_lit()
 			_update_options()
 			schedule_preview()
 			return
 	curve_picks.append(_hover_face.duplicate())
 	if curve_limit > 0 and curve_picks.size() > curve_limit:
 		curve_picks.pop_front()
-	highlight.set_set(table.table_copy, curve_picks)
+	_refresh_lit()
 	table.set_status("%d curve(s) picked." % curve_picks.size())
 	_update_options()
 	schedule_preview()
@@ -1244,14 +1283,14 @@ func _toggle_body() -> void:
 	for i in bodies.size():
 		if bodies[i]["key"] == _hover_face["key"]:
 			bodies.remove_at(i)
-			highlight.set_set(table.table_copy, bodies)
+			_refresh_lit()
 			_update_options()
 			schedule_preview()
 			return
 	bodies.append(_hover_face.duplicate())
 	if body_limit > 0 and bodies.size() > body_limit:
 		bodies.pop_front()
-	highlight.set_set(table.table_copy, bodies)
+	_refresh_lit()
 	table.set_status("%d bod%s picked." % [bodies.size(), "y" if bodies.size() == 1 else "ies"])
 	_update_options()
 	schedule_preview()
@@ -1424,6 +1463,8 @@ func _run_preview() -> void:
 	if feature_tool == null or not fixing.is_empty() or feature_tool.preview_mode() == "none" or table.build.is_rolled_back_any() or part_id == "":
 		await cancel_preview()
 		return
+	if not editing.is_empty() and feature_tool.preview_mode() == "eager":
+		return # editing a feature that exists: nothing is created for a preview, Apply changes it
 	var req: Dictionary = feature_tool.request(self)
 	if not bool(req["ok"]):
 		await cancel_preview() # nothing valid to show (yet): what an earlier preview made goes
@@ -1462,6 +1503,56 @@ func _run_preview() -> void:
 		table.set_status("The preview is too heavy to draw here (%d triangles over the %d limit). Apply to see the result." % [FeaturePreview.triangle_count(mesh) - FeaturePreview.MAX_TRIANGLES, FeaturePreview.MAX_TRIANGLES])
 
 
+func begin_tool_edit(feature_id: String) -> void:
+	## The Build row's Edit for a feature with several settings: its own tool opens with the feature's settings (and picks) loaded, changes are shown
+	## as the tool shows them, Apply PATCHes the feature (one step on Undo), changing tool leaves it as it was.
+	var row: Dictionary = table.build.row(feature_id)
+	var feature_tool = FeatureTools.for_type(str(row.get("type", "")))
+	if row.is_empty() or feature_tool == null or not feature_tool.edits_in_tool() or session != null:
+		if session != null:
+			table.set_status("Finish the open sketch first (Done), then edit a feature.")
+		return
+	if table.build.is_rolled_back_any():
+		table.set_status("The part is rolled back. Roll forward in the Build tree before editing.")
+		return
+	editing = {}
+	if table.active_tool != feature_tool.id:
+		table.manager.activate(feature_tool.id)
+	else:
+		feature_tool.on_activated(self)
+	editing = {"id": feature_id, "type": feature_tool.id, "original": row.duplicate(true)}
+	feature_tool.load_from_row(self, row)
+	_update_options()
+	schedule_preview()
+	table.set_status("Editing %s. Change what you want, then Apply." % table.build.names[table.build.index_of(feature_id)])
+
+
+func _apply_edit(feature_tool, req: Dictionary) -> void:
+	if not bool(req["ok"]):
+		table.set_status("Couldn't do that: %s" % str(req["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	var body: Dictionary = feature_tool.patch_body(req)
+	var edit := editing
+	var result: Dictionary = await features.update_feature(part_id, str(edit["type"]), str(edit["id"]), body)
+	if not result["ok"]:
+		table.set_status("Couldn't change it: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	feature_stack.append({"kind": "edit", "id": edit["id"], "type": edit["type"], "payload": feature_tool.row_payload(edit["original"]), "redo_payload": body})
+	redo_stack.clear()
+	editing = {}
+	preview.clear()
+	var refreshed: bool = await refresh_geometry()
+	await table.build.reload()
+	table.notify_edited(part_id, _edited_nodes)
+	clear_picks()
+	table.manager.deactivate()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Changed." if refreshed else "Changed, but the new shape couldn't be fetched.")
+	sync_undo_redo()
+
+
 func cancel_preview() -> void:
 	## Takes the preview away: the overlay goes, and a feature an eager preview made is deleted (it is the part's last feature).
 	preview.clear()
@@ -1487,6 +1578,9 @@ func apply_feature() -> void:
 	if feature_tool == null:
 		return
 	var req: Dictionary = feature_tool.request(self)
+	if not editing.is_empty():
+		await _apply_edit(feature_tool, req)
+		return
 	if preview_feature_id != "" and bool(req["ok"]):
 		var patched: Dictionary = await features.update_feature(part_id, tool, preview_feature_id, feature_tool.patch_body(req))
 		result = {"ok": patched["ok"], "id": preview_feature_id, "error": patched["error"]}
@@ -1509,10 +1603,7 @@ func apply_feature() -> void:
 		await table.build.reload()
 	if feature_tool.finishes_sketch():
 		end_sketch()
-	edges.clear()
-	faces.clear()
-	if highlight != null:
-		highlight.set_set(table.table_copy, [])
+	clear_picks()
 	UiFeedback.haptic(table._right, "confirm")
 	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
@@ -1537,15 +1628,7 @@ func start_curve_picks(limit := 0) -> void:
 		return
 	clear_picks()
 	set_state("pick_curves")
-	if sketch_picks != null and is_instance_valid(sketch_picks):
-		sketch_picks.queue_free()
-	sketch_picks = SketchPicks.new()
-	table.table_copy.add_child(sketch_picks)
-	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else "")
-	if state != "pick_curves":
-		return
-	table.set_status("Aim at a line or curve of an earlier sketch and pull the trigger (%d to pick from)." % count if count > 0 else "There is no finished sketch with lines to pick from yet.")
-	_update_options()
+	await _load_sketch_picks()
 
 
 func _plane_for_row(row: Dictionary) -> Dictionary:

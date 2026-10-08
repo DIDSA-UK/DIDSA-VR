@@ -7,11 +7,28 @@ const FilletTool := preload("res://scripts/design_table/features/fillet_tool.gd"
 const ChamferTool := preload("res://scripts/design_table/features/chamfer_tool.gd")
 const ShellTool := preload("res://scripts/design_table/features/shell_tool.gd")
 const MirrorTool := preload("res://scripts/design_table/features/mirror_tool.gd")
+const LoftTool := preload("res://scripts/design_table/features/loft_tool.gd")
+const SweepTool := preload("res://scripts/design_table/features/sweep_tool.gd")
+const PatternTool := preload("res://scripts/design_table/features/pattern_tool.gd")
+const BooleanTool := preload("res://scripts/design_table/features/boolean_tool.gd")
+const MergeTool := preload("res://scripts/design_table/features/merge_tool.gd")
+const SplitTool := preload("res://scripts/design_table/features/split_tool.gd")
 const CreatePlaneTool := preload("res://scripts/design_table/features/create_plane_tool.gd")
 
 
 static func make_all() -> Dictionary:
 	var all := {}
-	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new()]:
+	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new(), LoftTool.new(), SweepTool.new(), PatternTool.new(), BooleanTool.new(), MergeTool.new(), SplitTool.new()]:
 		all[tool.id] = tool
 	return all
+
+
+static var _by_type := {}
+
+
+static func for_type(type: String):
+	## The tool that makes backend feature type `type` (the Build tree asks for its summary and Edit), or null.
+	if _by_type.is_empty():
+		for tool in make_all().values():
+			_by_type[tool.build_type()] = tool
+	return _by_type.get(type)

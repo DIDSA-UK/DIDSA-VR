@@ -93,6 +93,53 @@ static func create_plane_request(base: Dictionary, offset: float) -> Dictionary:
 	return _good("create-plane-features", {"plane_type": "offset_face", "face_refs": [ref], "offset": offset})
 
 
+static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array) -> Dictionary:
+	## A loft through two or more sections, each the closed profile of a sketch (on its own plane).
+	if section_sketch_ids.size() < 2:
+		return _bad("A loft needs at least two sections: pick a line of each of two different sketches.")
+	if not boss and target_body_ids.is_empty():
+		return _bad("There is nothing to cut yet.")
+	return _good("loft-features", {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
+		"ruled": ruled, "target_body_ids": target_body_ids})
+
+
+static func sweep_request(sketch_feature_id: String, path_refs: Array, boss: bool, target_body_ids: Array) -> Dictionary:
+	## The closed profile of a sketch swept along an ordered chain of lines / arcs of other sketches.
+	if sketch_feature_id == "":
+		return _bad("Draw the profile in a sketch first.")
+	if path_refs.is_empty():
+		return _bad("Pick the lines of the path first.")
+	if not boss and target_body_ids.is_empty():
+		return _bad("There is nothing to cut yet.")
+	return _good("sweep-features", {"sketch_feature_id": sketch_feature_id, "path_refs": path_refs, "mode": "boss" if boss else "cut", "target_body_ids": target_body_ids})
+
+
+static func boolean_request(operation: String, target_ids: Array, tool_ids: Array, consume: bool) -> Dictionary:
+	if target_ids.is_empty():
+		return _bad("Pick the body to change first.")
+	if tool_ids.is_empty():
+		return _bad("Pick the body to %s it with." % ("cut" if operation == "subtract" else "intersect"))
+	for id in tool_ids:
+		if target_ids.has(id):
+			return _bad("A body can't be both the target and the tool.")
+	return _good("boolean-features", {"operation": operation, "target_body_ids": target_ids, "tool_body_ids": tool_ids, "consume_tool_bodies": consume})
+
+
+static func merge_request(body_ids: Array) -> Dictionary:
+	if body_ids.size() < 2:
+		return _bad("Pick at least two bodies to merge.")
+	return _good("merge-features", {"body_ids": body_ids})
+
+
+static func split_request(target_body_id: String, plane_ref: Dictionary) -> Dictionary:
+	## Divides a body in two along a plane ({fixed_plane} | {face_ref} | {plane_feature_id}).
+	if target_body_id == "":
+		return _bad("Pick the body to split first.")
+	if plane_ref.is_empty():
+		return _bad("Pick the plane or flat face to split along.")
+	return _good("split-features", {"target_body_id": target_body_id, "tool": {"plane_ref": plane_ref}})
+
+
 static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	if edges.is_empty():
 		return _bad("Pick the edges to round first.")
@@ -161,8 +208,8 @@ func list_features(owner_part_id: String) -> Dictionary:
 func update_feature(owner_part_id: String, feature_type: String, feature_id: String, payload: Dictionary) -> Dictionary:
 	## Changes the one number of an extrude / fillet / chamfer, or swaps a reference (a Build row's Fix: PATCH with a replacement edge or face; any feature of the
 	## part, not just the last). {ok, id, error}.
-	var route: String = {"extrude": "extrude-features", "revolve": "revolve-features", "shell": "shell-features", "fillet": "fillet-features", "chamfer": "chamfer-features", "mirror": "mirror-features", "create_plane": "create-plane-features"}.get(feature_type, "")
-	if route == "":
+	var route: String = "%s-features" % feature_type.replace("_", "-") # every feature type's routes are named after it
+	if feature_type == "":
 		return {"ok": false, "id": "", "error": "That kind of feature can't be edited here."}
 	return _result(await api.call(HTTPClient.METHOD_PATCH, "/document/parts/%s/%s/%s" % [owner_part_id, route, feature_id], payload))
 
