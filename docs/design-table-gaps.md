@@ -149,3 +149,7 @@ backend's `candidates` for an ambiguous reference (the re-pick is free: aim at a
 
 See "Open items at a glance" at the top. The order: a headset session (1) before anything is tuned (the clip depth, the flagged colours and the reference weights
 among the numbers), then the backend's solver for 2 and driven constraints for 3, then 4, 5, 6 and 7.
+
+## Candidate (backend-led): Delete Face on a face that cannot heal
+
+Delete Face refuses a plain wall (`delete_face_failed`) and now says so in words. Whether to offer Delete and Fill or an explicit "delete without healing -> surface body" option is a CAD-side decision; it is written up in DIDSA-CAD `docs/roadmap.md` ("Candidate: Delete Face that cannot heal"). VR would then need a visible surface-body marker and clear refusals in the tools that need a solid. Not started.
