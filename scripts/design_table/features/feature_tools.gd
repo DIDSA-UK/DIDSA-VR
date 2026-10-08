@@ -7,10 +7,11 @@ const FilletTool := preload("res://scripts/design_table/features/fillet_tool.gd"
 const ChamferTool := preload("res://scripts/design_table/features/chamfer_tool.gd")
 const ShellTool := preload("res://scripts/design_table/features/shell_tool.gd")
 const MirrorTool := preload("res://scripts/design_table/features/mirror_tool.gd")
+const CreatePlaneTool := preload("res://scripts/design_table/features/create_plane_tool.gd")
 
 
 static func make_all() -> Dictionary:
 	var all := {}
-	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new()]:
+	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new()]:
 		all[tool.id] = tool
 	return all

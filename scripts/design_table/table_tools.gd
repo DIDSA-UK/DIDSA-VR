@@ -50,6 +50,7 @@ const FEATURE_TOOLS := [
 	["chamfer", "Chamfer", "tool_chamfer"],
 	["shell", "Shell", "tool_shell"],
 	["mirror", "Mirror", "tool_mirror"],
+	["create_plane", "Plane", "feat_plane"],
 ]
 
 const HINTS := {
@@ -72,6 +73,7 @@ const HINTS := {
 	"fillet": "Pick edges on the part, set the radius, then Apply.",
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
 	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",
+	"create_plane": "Aim at a flat face or a plane and pull the trigger, set the offset, then Make plane. The new plane can be picked to sketch on.",
 	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
 }
 

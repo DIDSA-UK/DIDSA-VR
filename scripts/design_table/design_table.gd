@@ -204,6 +204,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	build = TableBuild.new()
 	build.setup(self)
 	tree.attach_build(build)
+	build.changed.connect(editor.sync_plane_markers)
 	resizer = TableResize.new()
 	resizer.setup(self)
 	manip = TableManip.new()

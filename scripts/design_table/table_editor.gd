@@ -75,7 +75,7 @@ var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false}
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false}
 var faces: Array = [] ## picked face entities (Shell)
 var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
@@ -86,6 +86,7 @@ var preview_enabled := true ## off: nothing is created or drawn until Apply
 var preview_feature_id := "" ## the feature an eager preview created (PATCHed as the settings change, deleted on Cancel, kept by Apply)
 var _preview_running := false
 var _preview_again := false
+var plane_base: Dictionary = {} ## what Create Plane offsets from: {fixed} | {face} | {plane_feature_id, plane}
 var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pick over the limit replaces the oldest
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
@@ -490,7 +491,10 @@ func _on_right_pressed(action: String) -> void:
 
 func _pick_plane() -> void:
 	var spec := {}
-	if _hover_plane != "":
+	if _hover_plane.begins_with("plane:"):
+		var made: Dictionary = table.build.row(_hover_plane.substr(6))
+		spec = {"plane_feature_id": _hover_plane.substr(6), "plane": SketchMath.basis_from_plane_response(made)}
+	elif _hover_plane != "":
 		spec = {"fixed": _hover_plane}
 	elif not _hover_face.is_empty():
 		var body := str(_hover_face["body_id"])
@@ -502,10 +506,34 @@ func _pick_plane() -> void:
 		spec = {"face": {"body_id": body, "index": index}}
 	else:
 		return
-	if table.active_tool == "mirror":
-		await mirror_across(spec)
+	var feature_tool = tools.get(table.active_tool)
+	if feature_tool != null and feature_tool.wants_plane_pick():
+		await feature_tool.on_plane_picked(self, spec)
 		return
 	await begin_sketch(spec)
+
+
+func sync_plane_markers() -> void:
+	## The planes the user made (Create Plane, or any plane not just sitting on a face a sketch was started on) are drawn with the three reference planes.
+	if markers == null or not is_instance_valid(markers) or table == null or table.build == null:
+		return
+	var wanted := {}
+	for row in table.build.features:
+		if str(row.get("type", "")) != "create_plane":
+			continue
+		if str(row.get("plane_type", "")) == "offset_face" and is_zero_approx(float(row.get("offset", 0.0))):
+			continue # the plane a sketch on a face made, lying on the face itself
+		var basis: Dictionary = SketchMath.basis_from_plane_response(row)
+		if not basis.is_empty():
+			wanted["plane:%s" % str(row["id"])] = [basis, BuildTree.name_of(table.build.features, str(row["id"]))]
+	var stale := false
+	for key in markers._custom.keys():
+		if not wanted.has(key):
+			stale = true
+	if stale:
+		markers.clear_custom()
+	for key in wanted:
+		markers.add_plane(key, wanted[key][0], str(wanted[key][1]))
 
 
 func mirror_across(spec: Dictionary) -> bool:
@@ -545,6 +573,9 @@ func begin_sketch(spec: Dictionary) -> bool:
 		chosen_plane = ""
 	elif spec.has("fixed"):
 		chosen_plane = str(spec["fixed"])
+		chosen_face = {}
+	elif spec.has("plane_feature_id"):
+		chosen_plane = "plane:%s" % str(spec["plane_feature_id"])
 		chosen_face = {}
 	set_state("opening")
 	table.set_status("Opening a sketch...")
@@ -1474,6 +1505,8 @@ func apply_feature() -> void:
 	created_requests[str(result["id"])] = {"type": tool, "route": req["route"], "body": req["body"]}
 	redo_stack.clear() # a new action: what was taken back can't be put back any more
 	var refreshed: bool = await refresh_geometry()
+	if feature_tool.reload_build_after():
+		await table.build.reload()
 	if feature_tool.finishes_sketch():
 		end_sketch()
 	edges.clear()
@@ -1657,6 +1690,7 @@ func _rebuild_markers() -> void:
 	markers.set_markers_visible(was_visible)
 	if chosen_before != "":
 		markers.set_chosen(chosen_before)
+	sync_plane_markers()
 
 
 func end_sketch() -> void:

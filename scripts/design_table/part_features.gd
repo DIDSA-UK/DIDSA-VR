@@ -75,6 +75,24 @@ static func mirror_request(body_ids: Array, plane: Dictionary, fuse: bool) -> Di
 	return _good("mirror-features", {"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"})
 
 
+static func create_plane_request(base: Dictionary, offset: float) -> Dictionary:
+	## A plane offset from a reference plane ({"fixed": "XY"}), a flat face ({"face": {body_id, index}}) or a plane already made ({"plane_feature_id": id}).
+	if base.is_empty():
+		return _bad("Pick a face or a plane to offset from first.")
+	if is_zero_approx(offset):
+		return _bad("The offset can't be zero.")
+	var ref := {}
+	if base.has("fixed"):
+		ref = {"fixed_plane": str(base["fixed"])}
+	elif base.has("face"):
+		ref = {"face_ref": face_ref(str(base["face"]["body_id"]), int(base["face"]["index"]))}
+	elif base.has("plane_feature_id"):
+		ref = {"plane_feature_id": str(base["plane_feature_id"])}
+	else:
+		return _bad("Pick a face or a plane to offset from first.")
+	return _good("create-plane-features", {"plane_type": "offset_face", "face_refs": [ref], "offset": offset})
+
+
 static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	if edges.is_empty():
 		return _bad("Pick the edges to round first.")

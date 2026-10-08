@@ -37,8 +37,22 @@ func request(_ed, _extra: Dictionary = {}) -> Dictionary:
 	return {"ok": false, "error": "That tool can't make a feature yet.", "route": "", "body": {}}
 
 
+func wants_plane_pick() -> bool:
+	## true: a pull on a reference plane, a made plane or a flat face is this tool's pick (on_plane_picked) instead of starting a sketch there
+	return false
+
+
+func on_plane_picked(_ed, _spec: Dictionary) -> void:
+	pass
+
+
 func can_apply(_ed) -> bool:
 	return true
+
+
+func reload_build_after() -> bool:
+	## true: the Build tree is read again after Apply (the feature is not seen in the part's mesh, e.g. a plane)
+	return false
 
 
 func finishes_sketch() -> bool:

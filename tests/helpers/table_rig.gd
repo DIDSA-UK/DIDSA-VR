@@ -58,6 +58,8 @@ func boot(p_tree: SceneTree, seat := true) -> void:
 	fake.origin = true
 	fake.feature_rows = {"PART_BOX": []}
 	fake.plane_for = func(body: Dictionary) -> Dictionary:
+		if not (body["face_refs"][0] as Dictionary).has("face_ref"):
+			return {"origin": [0, 0, 0], "normal": [0, 0, 1], "x_axis": [1, 0, 0], "y_axis": [0, 1, 0]} # offset from a plane, not a face
 		var ref: Dictionary = body["face_refs"][0]["face_ref"]
 		var plane := SketchMath.plane_from_face_triangles(TopologyPick.face_triangles(table.table_copy, ref["body_id"], int(ref["index"])))
 		return {"origin": [plane["origin"].x, plane["origin"].y, plane["origin"].z], "normal": [plane["n"].x, plane["n"].y, plane["n"].z],
