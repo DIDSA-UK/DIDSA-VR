@@ -38,8 +38,8 @@ valuable item here because every later piece depends on it.
 1. **Body picking.** Boolean, Merge, Split, Pattern and the direct-edit tools act on bodies. The Build tree can select a body (`select_body`) but the laser cannot pick one on the
    part. Extend `laser_pick.gd` / the highlight with a "pick a body" mode.
 2. **Reference picks beyond edges and faces:** a sketch line from an *earlier* sketch (Sweep path, Loft guide, Pattern direction, Revolve-like axes), and fixed axes X / Y / Z as chips.
-3. **A properties surface.** The options row holds six buttons plus More. Pattern (type, direction, count, spacing, reverse, second direction, axis, angle, merge) needs
-   more. Options: a second options page, or a small docked panel like the tree window. Decision below.
+3. **A properties panel (decided: docked).** The options row holds six buttons plus More. Pattern (type, direction, count, spacing, reverse, second direction, axis, angle, merge) needs
+   more, and Loft and Sweep more again. Decided (John, 2026-10-08): a docked panel like the tree window, holding all of the active tool's settings at once. Its place on the console is part of the deck reorganisation (see the roadmap item).
 4. **Preview before Apply.** See below.
 5. **Mate and reference health.** Every new feature goes through `notify_edited`. Pattern and Boolean add or remove faces and bodies, so check `mate_health.gd` and
    `dirty_mates.gd` against them (a pattern adds bodies; a boolean consumes some).
@@ -51,13 +51,15 @@ valuable item here because every later piece depends on it.
   every feature, shows the real result. Cost: a backend round trip per adjustment, and the document changes while the user is still deciding. VR already serialises requests (one in flight).
 - *Coarse-preview endpoints*: nothing is created. Exists only for Pattern and Loft.
 
-**Recommendation:** use coarse-preview where it exists (Pattern, Loft); use eager create + PATCH for the rest; render the result as a translucent body (the flat app's `isPreviewMesh` idea). Measure on a
+**Decided (John, 2026-10-08): both mechanisms.** Use coarse-preview where it exists (Pattern, Loft, which are the heavy ones: it skips the slow fuse and persists nothing); use eager create + PATCH for the rest; render the result as a translucent body (the flat app's `isPreviewMesh` idea). Measure on a
 Quest before trusting it for large parts.
 
 **Redo.** Undo pops the last feature or sketch step. Redo for features is feasible (store the create payload, recreate on redo; the id changes, but LIFO order means nothing later
-depends on it). Redo for *sketch steps* means replaying entity creation. Recommend features only at first, sketches later if it is wanted. Decision below.
+depends on it). Redo for *sketch steps* means replaying entity creation. **Decided (John, 2026-10-08): features only.** Sketch steps later if it is wanted. Mechanism: keep the create payload on a redo stack when a feature is undone, resend it on redo (the id changes, harmlessly, because undo is LIFO), clear the redo stack on any new action; Build-tree edits reapply the new value. Decision below.
 
-## Features, in suggested order
+## Features, grouped by readiness
+
+The tiers describe how ready the backend and VR are, not the build order. The build order is under "Order of work" (Sweep and Loft first).
 
 ### Tier 1: most-used, backend ready
 
@@ -95,16 +97,19 @@ Edit for the new features (pattern count and spacing, boolean operation, loft / 
 
 ## Order of work
 
+Decided (John, 2026-10-08): Sweep and Loft come first. Both need Create Plane and a way to pick a profile or line from an earlier sketch, so those come with them. Loft precedes Sweep because it already has a preview endpoint.
+
 | Phase | Content | Exit criterion |
 |---|---|---|
-| M0 | Per-feature interface (step 0), body pick, properties surface | Existing six features run through it, tests unchanged |
-| M1 | Pattern, Boolean, Merge, preview (eager + coarse), Build-tree edit | Pattern and Boolean made and edited on the table against the real backend; mates flagged correctly |
-| M2 | Create Plane, Trim, Offset, redo for features | Plane then sketch on it; trim a rectangle; undo then redo a feature |
-| M3 | Modify category (direct edit), Split | Move a face on an imported STEP part |
-| M4 | Sweep, Loft | A swept pipe and a two-section loft |
-| M5 | Ellipse, Spline, Text | Each draws, dimensions and extrudes |
+| M0 | Per-feature interface (step 0), docked properties panel, body pick, picking a sketch profile or line from an earlier sketch, preview plumbing (both mechanisms), redo for features | Existing six features run through it, tests unchanged; undo then redo of a feature works |
+| M1 | Create Plane (offset from a plane or face first) | Make a plane, sketch on it |
+| M2 | Loft | A two-section loft with coarse preview, edited from the Build tree |
+| M3 | Sweep | A swept pipe: path in one sketch, profile in another |
+| M4 | Pattern, Boolean, Merge, Split | Pattern and Boolean made and edited on the table against the real backend; mates flagged correctly |
+| M5 | Trim, Offset; Modify category (direct edit) | Trim a rectangle; move a face on an imported STEP part |
+| M6 | Ellipse, Spline, Text | Each draws, dimensions and extrudes |
 
-M1 is the first point where the table reaches parity for most everyday parts.
+Pattern and Boolean move later than first proposed, so the table reaches parity for everyday patterned parts after Sweep and Loft, not before.
 
 ## Tests
 
@@ -120,9 +125,10 @@ M1 is the first point where the table reaches parity for most everyday parts.
 - **Untested feel.** The deck, laser picking and numeric pad have had one headset session. More tools multiply the surface that is unverified.
 - **Flat-app parity.** Features created in VR must be editable in the flat app. Every new feature should be opened there as part of its test (the design table's "flat app has not opened a VR-saved file" gap already applies).
 
-## Decisions for John
+## Decisions
 
-1. Properties surface: second options page on the deck, or a docked panel?
-2. Preview: eager create + PATCH for everything except Pattern and Loft (recommended), or only previews where a coarse-preview endpoint exists?
-3. Redo: features only (recommended), or sketch steps too?
-4. Is Tier 3 (direct edit) worth doing before Sweep and Loft? It is cheaper and matters for imported parts, but it is less central to building from scratch.
+Decided (John, 2026-10-08):
+1. Properties surface: a docked panel.
+2. Preview: both mechanisms (coarse-preview for Pattern and Loft; eager create + PATCH for the rest).
+3. Redo: features only.
+4. Sweep and Loft before Pattern, Boolean and direct edit.
