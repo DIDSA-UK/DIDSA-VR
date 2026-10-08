@@ -43,7 +43,7 @@ const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
-const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot"]
+const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
@@ -51,11 +51,12 @@ const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular",
 const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## the states where the laser picks things on the part itself
 const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## where choosing a picking tool is allowed to switch the state
 const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
-const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz"] ## settings that may be negative or zero (a move along an axis)
+const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot"] ## settings that may be negative or zero (a move along an axis)
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
 const GHOST_RADIUS := 0.030
+const FONTS := ["Open Sans", "Roboto", "Lato", "Fira Sans", "Barlow", "PT Sans", "IBM Plex Serif", "IBM Plex Mono", "Space Mono", "Rajdhani"] ## the backend's bundled fonts (app/sketch/text_fonts.py FONT_ALLOWLIST)
 const MENU_SLOTS := 6 ## buttons in the options row
 
 var table ## design_table.gd
@@ -77,7 +78,7 @@ var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
 	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
 	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
@@ -597,6 +598,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 			set_state("pick_plane")
 		return false
 	session = new_session
+	_sync_text_settings()
 	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
 	_light_chosen_plane()
@@ -902,6 +904,8 @@ func _sketch_trigger() -> void:
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
+		if tool == "spline":
+			_update_options() # the Finish button counts the points
 	elif tool == SELECT_TOOL and repick_point != "":
 		await _do_repick()
 	elif tool == "dimension" or tool == SELECT_TOOL:
@@ -1107,6 +1111,12 @@ func _update_options() -> void:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
 			list = [{"id": "finish_line", "text": "Finish line"}]
+		"spline":
+			list = [{"id": "finish_spline", "text": "Finish spline (%d points)" % (session.pending.size() if session != null else 0), "disabled": session == null or session.pending.size() < 2}]
+		"text":
+			list = [{"id": "text_edit", "text": "Text: %s" % (session.text_content if session != null and session.text_content != "" else "type it")},
+				{"id": "text_font", "text": "Font: %s" % str(options["text_font"])}, {"id": "text_size", "text": "Size %.1f mm" % float(options["text_size"])},
+				{"id": "text_rot", "text": "Turn %s deg" % BuildTree.number(float(options["text_rot"]))}]
 		"offset":
 			list = [{"id": "offset_dist", "text": "Distance %.2f mm" % float(options["offset_dist"])}, {"id": "offset_flip", "text": "Reverse", "toggle": true, "pressed": bool(options["offset_flip"])}]
 	table.ui.set_options(list)
@@ -1181,6 +1191,23 @@ func on_option(option_id: String) -> void:
 		"finish_line":
 			if session != null:
 				session.finish_chain()
+		"finish_spline":
+			if session != null:
+				await session.finish_spline()
+		"text_edit":
+			if session != null:
+				table._main.open_keyboard_for(session.text_content, func(text: String) -> void:
+					session.text_content = text.strip_edges()
+					_update_options(), {"title": "Text to place"})
+		"text_font":
+			var fonts: Array = FONTS
+			options["text_font"] = fonts[(fonts.find(str(options["text_font"])) + 1) % fonts.size()]
+			if session != null:
+				session.text_font = str(options["text_font"])
+		"text_size":
+			type_option("text_size", "Text height (mm)")
+		"text_rot":
+			type_option("text_rot", "Turn the text (degrees, negative the other way)")
 		"offset_dist":
 			type_option("offset_dist", "Offset distance (mm)")
 		"offset_flip":
@@ -1202,6 +1229,7 @@ func option_typed(key: String, text: String) -> void:
 			UiFeedback.haptic(table._right, "error")
 			return
 		options[key] = cleaned.to_float()
+		_sync_text_settings()
 		_update_options()
 		schedule_preview()
 		return
@@ -1214,6 +1242,7 @@ func option_typed(key: String, text: String) -> void:
 		UiFeedback.haptic(table._right, "error")
 		return
 	options[key] = cleaned.to_float()
+	_sync_text_settings()
 	_update_options()
 	schedule_preview()
 
@@ -1635,6 +1664,13 @@ func apply_feature() -> void:
 	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
 	_update_options()
+
+
+func _sync_text_settings() -> void:
+	if session != null:
+		session.text_font = str(options["text_font"])
+		session.text_size = float(options["text_size"])
+		session.text_rotation = float(options["text_rot"])
 
 
 func clear_picks() -> void:

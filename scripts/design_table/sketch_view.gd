@@ -544,6 +544,24 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var ac: Vector2 = session.points[a["c"]]
 			_ribbon(verts, colors, ac + Vector2(-arm, 0), ac + Vector2(arm, 0), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
 			_ribbon(verts, colors, ac + Vector2(0, -arm), ac + Vector2(0, arm), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
+		for kind in ["ellipse", "ellipse_arc", "spline"]:
+			var source: Dictionary = {"ellipse": session.ellipses, "ellipse_arc": session.ellipse_arcs, "spline": session.splines}[kind]
+			for id in source:
+				var outline: Array = session.outline_of(kind, id)
+				if outline.size() < 2:
+					continue
+				var okey: String = "%s:%s" % [kind, id]
+				var olit: bool = selected.has(okey) or okey == hovered
+				var oconstruction: bool = source[id].get("construction", false)
+				var ocolour: Color = warn if olit else (CONSTRUCTION_COLOUR if oconstruction else OBJECT_COLOUR)
+				_stroke(verts, colors, outline, kind == "ellipse", oconstruction, ocolour, olit)
+		for id in session.texts:
+			var tkey: String = "text:" + id
+			var tlit: bool = selected.has(tkey) or tkey == hovered
+			var tconstruction: bool = session.texts[id].get("construction", false)
+			var tcolour: Color = warn if tlit else (CONSTRUCTION_COLOUR if tconstruction else OBJECT_COLOUR)
+			for poly in session.text_outlines.get(id, []):
+				_stroke(verts, colors, poly, true, tconstruction, tcolour, tlit)
 		for id in session.points:
 			var key: String = "point:" + id
 			if session.is_reference(id) and not session.is_origin(id):
@@ -640,6 +658,21 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 					var width: float = c.distance_to(Geometry2D.get_closest_point_to_segment(c, first, second))
 					_polyline(verts, colors, slot_outline(first, second, width, 16), LINE_WIDTH, colour, true, 1.2)
 					_ribbon(verts, colors, first, second, LINE_WIDTH * 0.5, colour, 1.2)
+			"ellipse", "ellipse_arc":
+				if taps.size() == 1:
+					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
+				else:
+					var major: Vector2 = taps[1]
+					var a_len := first.distance_to(major)
+					var u := (major - first) / maxf(a_len, 0.0001)
+					var b_len := clampf(absf((c - first).cross(u)), a_len * 0.02, a_len) if taps.size() == 2 else clampf(absf(((taps[2] as Vector2) - first).cross(u)), a_len * 0.02, a_len)
+					var minor_pt := first + Vector2(-u.y, u.x) * b_len
+					_polyline(verts, colors, session_ellipse_points(first, major, minor_pt), LINE_WIDTH, colour, true, 1.2)
+					_ribbon(verts, colors, first, major, LINE_WIDTH * 0.5, colour, 1.2)
+			"spline":
+				var through: Array = taps.duplicate()
+				through.append(c)
+				_polyline(verts, colors, through, LINE_WIDTH, colour, false, 1.2)
 			"polygon":
 				var r2 := first.distance_to(c)
 				var a0 := (c - first).angle()
@@ -649,6 +682,10 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 					corners.append(first + Vector2(cos(a), sin(a)) * r2)
 				_polyline(verts, colors, corners, LINE_WIDTH, colour, true, 1.2)
 	_set_surface(_preview, verts, colors)
+
+
+static func session_ellipse_points(centre: Vector2, major: Vector2, minor: Vector2) -> Array:
+	return preload("res://scripts/design_table/sketch_session.gd").ellipse_points(centre, major, minor, 0.0, TAU, 48)
 
 
 # --- Dimensions ---------------------------------------------------------------------------

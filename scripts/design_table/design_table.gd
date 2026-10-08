@@ -1163,8 +1163,9 @@ func notify_edited(edited_part_id: String, nodes: Array = []) -> void:
 	## A feature was added or taken back on this part: every arena instance of it (they share one definition) has stale
 	## mates now. They are flagged, and the Enforce button follows the one on the table.
 	for node in nodes:
-		DirtyMates.mark(node)
-	if seated != null:
+		if is_instance_valid(node): # (an arena instance can be gone by now: a New assembly while the part was being edited)
+			DirtyMates.mark(node)
+	if seated != null and is_instance_valid(seated):
 		DirtyMates.mark(seated)
 	_main.mark_dirty()
 	part_edited.emit(edited_part_id)

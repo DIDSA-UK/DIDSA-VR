@@ -86,6 +86,12 @@ func handle(method: int, path: String, body) -> Dictionary:
 		if trim_fails:
 			return {"ok": false, "code": 422, "json": {"detail": "no crossings"}, "error": "no crossings"}
 		return _ok({"line1": {"id": "t1"}, "line2": {"id": "t2"}, "line": {"id": "t1"}, "arc": {"id": "t1"}})
+	if verb == "POST" and path.contains("/sketch/sketches/") and (path.ends_with("/ellipses") or path.ends_with("/ellipse-arcs") or path.ends_with("/splines") or path.ends_with("/texts")):
+		return _ok({"id": next_id("crv")})
+	if verb == "GET" and path.contains("/sketch/sketches/") and path.ends_with("/preview") and path.contains("/texts/"):
+		return _ok({"contours": [{"outer": [[0, 0], [5, 0], [5, 8], [0, 8]], "holes": []}]})
+	if verb == "PATCH" and path.contains("/sketch/sketches/") and (path.contains("/ellipses/") or path.contains("/ellipse-arcs/") or path.contains("/splines/") or path.contains("/texts/")):
+		return _ok({"id": path.get_file()})
 	if verb == "POST" and path.contains("/coarse-preview"):
 		return _ok(coarse_bodies)
 	if verb == "PATCH" and path.contains("-features/"):

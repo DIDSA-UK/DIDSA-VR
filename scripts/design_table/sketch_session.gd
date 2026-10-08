@@ -29,7 +29,9 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 
 const SKETCH := "/sketch/sketches/"
 const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
-const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3}
+const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3, "ellipse": 3, "ellipse_arc": 5, "spline": 9999, "text": 1} ## (a spline takes any number: Finish makes it)
+const CURVE_KINDS := ["ellipse", "ellipse_arc", "spline"] ## entities drawn from a sampled outline
+const OUTLINE_SEGMENTS := 64
 const SELECT_NEEDED := {"horizontal": 1, "vertical": 1, "parallel": 2, "perpendicular": 2, "coincident": 2}
 const PARALLEL_COS := 0.9998 ## two lines closer than ~1.1 degrees to parallel are measured as a distance, not an angle
 const AXIS_SNAP_DEGREES := 4.0 ## a line within this of horizontal / vertical is made exactly so
@@ -53,6 +55,16 @@ var point_locked := {} ## id -> bool
 var reference_ids := {} ## id -> true: the points and shapes the backend says are reference helpers (made only to point the sketch at the part's own corner, edge, hole or face). Drawn quietly, never offered for selection or deletion
 var lines := {} ## id -> {a, b, construction}
 var circles := {} ## id -> {c, p, k, construction} (centre point, radius point, radius constraint id)
+var ellipses := {} ## id -> {c, ma (major point), mi (minor point), km / kn (the size constraints), construction}
+var ellipse_arcs := {} ## id -> {c, ma, mi, s, e, construction}
+var splines := {} ## id -> {through: [point ids], control: [handle point ids], construction}
+var texts := {} ## id -> {anchor, content, font, size, rot, construction}
+var text_outlines := {} ## text id -> [glyph polylines], fetched from the backend (its font outlines), keyed by what they were made from
+var _text_keys := {}
+var text_content := "" ## what the Text tool places next
+var text_font := "Open Sans"
+var text_size := 10.0
+var text_rotation := 0.0
 var arcs := {} ## id -> {c, s, e, k, construction}
 var shapes := {} ## rectangle / polygon id -> {kind, point_ids}
 var constraints := {} ## id -> the backend's constraint dictionary
@@ -181,6 +193,8 @@ func refresh(with_entities: bool = true) -> bool:
 		var exported: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id + "/export", null)
 		if exported["ok"]:
 			_ingest_entities(exported["json"])
+			if not texts.is_empty() or not text_outlines.is_empty():
+				await _fetch_text_outlines()
 	changed.emit()
 	return true
 
@@ -210,6 +224,10 @@ func _ingest_entities(json: Dictionary) -> void:
 	lines.clear()
 	circles.clear()
 	arcs.clear()
+	ellipses.clear()
+	ellipse_arcs.clear()
+	splines.clear()
+	texts.clear()
 	shapes.clear()
 	reference_ids.clear()
 	for id in json.get("reference_ids", []):
@@ -223,12 +241,83 @@ func _ingest_entities(json: Dictionary) -> void:
 				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"arc":
 				arcs[id] = {"c": str(e["center_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
+			"ellipse":
+				ellipses[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "km": str(e.get("major_constraint_id", "")), "kn": str(e.get("minor_constraint_id", "")), "construction": bool(e.get("construction", false))}
+			"ellipse_arc":
+				ellipse_arcs[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
+			"spline":
+				splines[id] = {"through": e.get("through_point_ids", []), "control": e.get("control_point_ids", []), "construction": bool(e.get("construction", false))}
+			"text":
+				texts[id] = {"anchor": str(e["anchor_point_id"]), "content": str(e.get("content", "")), "font": str(e.get("font", "")), "size": float(e.get("size", 10.0)), "rot": float(e.get("rotation_degrees", 0.0)), "construction": bool(e.get("construction", false))}
 			"rectangle":
 				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
 			"polygon":
 				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", [])}
 			"slot":
 				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
+
+
+func outline_of(kind: String, id: String) -> Array:
+	## The sampled outline (Vector2s) of an ellipse, partial ellipse or spline, from its points; [] if a point is missing.
+	match kind:
+		"ellipse":
+			var e: Dictionary = ellipses.get(id, {})
+			if not points.has(e.get("c", "")) or not points.has(e.get("ma", "")) or not points.has(e.get("mi", "")):
+				return []
+			return ellipse_points(points[e["c"]], points[e["ma"]], points[e["mi"]], 0.0, TAU, OUTLINE_SEGMENTS)
+		"ellipse_arc":
+			var a: Dictionary = ellipse_arcs.get(id, {})
+			for k in ["c", "ma", "mi", "s", "e"]:
+				if not points.has(a.get(k, "")):
+					return []
+			var t0 := ellipse_param(points[a["c"]], points[a["ma"]], points[a["mi"]], points[a["s"]])
+			var t1 := ellipse_param(points[a["c"]], points[a["ma"]], points[a["mi"]], points[a["e"]])
+			var sweep := fposmod(t1 - t0, TAU)
+			if sweep < 0.00001:
+				sweep = TAU
+			return ellipse_points(points[a["c"]], points[a["ma"]], points[a["mi"]], t0, t0 + sweep, OUTLINE_SEGMENTS)
+		"spline":
+			var sp: Dictionary = splines.get(id, {})
+			var through: Array = sp.get("through", [])
+			var control: Array = sp.get("control", [])
+			var out: Array = []
+			for i in through.size() - 1:
+				if not points.has(through[i]) or not points.has(through[i + 1]):
+					return []
+				var p0: Vector2 = points[through[i]]
+				var p3: Vector2 = points[through[i + 1]]
+				var h1 := p0.lerp(p3, 1.0 / 3.0)
+				var h2 := p0.lerp(p3, 2.0 / 3.0)
+				if control.size() >= 2 * i + 2 and points.has(control[2 * i]) and points.has(control[2 * i + 1]):
+					h1 = points[control[2 * i]]
+					h2 = points[control[2 * i + 1]]
+				for k in 17:
+					if i > 0 and k == 0:
+						continue
+					out.append(p0.bezier_interpolate(h1, h2, p3, float(k) / 16.0))
+			return out
+	return []
+
+
+static func ellipse_points(centre: Vector2, major: Vector2, minor: Vector2, from_t: float, to_t: float, segments: int) -> Array:
+	## Points of an ellipse (centre, the end of the major axis, the end of the minor axis) from parameter `from_t` to `to_t` (radians).
+	var a_vec := major - centre
+	var b_vec := minor - centre
+	var out: Array = []
+	for i in segments + 1:
+		var t := from_t + (to_t - from_t) * float(i) / float(segments)
+		out.append(centre + a_vec * cos(t) + b_vec * sin(t))
+	return out
+
+
+static func ellipse_param(centre: Vector2, major: Vector2, minor: Vector2, p: Vector2) -> float:
+	## The parameter t (radians) at which the ellipse passes the point p (or the point's direction).
+	var a_vec := major - centre
+	var b_vec := minor - centre
+	var rel := p - centre
+	var u := rel.dot(a_vec.normalized()) / maxf(a_vec.length(), 0.000001)
+	var v := rel.dot(b_vec.normalized()) / maxf(b_vec.length(), 0.000001)
+	return atan2(v, u)
 
 
 func is_reference(id: String) -> bool:
@@ -283,6 +372,9 @@ func tap(pick: Dictionary) -> Dictionary:
 		"arc": result = await _make_arc(taps)
 		"polygon": result = await _make_polygon(taps)
 		"slot": result = await _make_slot(taps)
+		"ellipse": result = await _make_ellipse(taps)
+		"ellipse_arc": result = await _make_ellipse_arc(taps)
+		"text": result = await _make_text(taps)
 		_: result = {"ok": false, "message": ""}
 	busy = false
 	if not result["ok"] and str(result["message"]) != "":
@@ -363,6 +455,123 @@ func offset_entity(entity: Dictionary, distance: float) -> Dictionary:
 	var made_id := str(made.get("id", ""))
 	await _finish("offset", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + ("/lines/" if kind == "line" else "/arcs/") + made_id]])
 	return {"ok": true, "message": ""}
+
+
+func _ellipse_frame(taps: Array, created: Array) -> Dictionary:
+	## The centre and major-axis points of the first two taps and the minor radius from the third (its distance off the major axis), or {}.
+	var centre_id := await _point(taps[0], created)
+	var major_id := await _point(taps[1], created)
+	if centre_id == "" or major_id == "":
+		return {}
+	var c: Vector2 = points.get(centre_id, taps[0]["uv"])
+	var m: Vector2 = points.get(major_id, taps[1]["uv"])
+	var a := c.distance_to(m)
+	if a < 0.001:
+		return {}
+	var dir := (m - c) / a
+	var b: float = absf(((taps[2]["uv"] as Vector2) - c).cross(dir))
+	return {"centre": centre_id, "major": major_id, "a": a, "b": clampf(b, a * 0.02, a), "c": c, "m": m, "dir": dir}
+
+
+func _make_ellipse(taps: Array) -> Dictionary:
+	var created: Array = []
+	var f := await _ellipse_frame(taps, created)
+	if f.is_empty():
+		await _cleanup(created)
+		return {"ok": false, "message": "Pick the centre, the end of the long axis, then a point for the short radius."}
+	var r := await _post(SKETCH + sketch_id + "/ellipses", {"center_point_id": f["centre"], "major_point_id": f["major"], "minor_radius": f["b"]})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that ellipse: %s" % str(r["error"])}
+	return await _finish("ellipse", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/ellipses/" + str(r["json"]["id"])]])
+
+
+func _make_ellipse_arc(taps: Array) -> Dictionary:
+	var created: Array = []
+	var f := await _ellipse_frame(taps, created)
+	if f.is_empty():
+		await _cleanup(created)
+		return {"ok": false, "message": "Pick the centre, the end of the long axis, a point for the short radius, then the start and the end."}
+	var c: Vector2 = f["c"]
+	var dir: Vector2 = f["dir"]
+	var minor_dir := Vector2(-dir.y, dir.x)
+	var minor_pt: Vector2 = c + minor_dir * float(f["b"])
+	var t0 := ellipse_param(c, f["m"], minor_pt, taps[3]["uv"])
+	var t1 := ellipse_param(c, f["m"], minor_pt, taps[4]["uv"])
+	var r := await _post(SKETCH + sketch_id + "/ellipse-arcs", {"center_point_id": f["centre"], "major_point_id": f["major"], "minor_radius": f["b"], "start_angle": fposmod(t0, TAU), "end_angle": fposmod(t1, TAU)})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that partial ellipse: %s" % str(r["error"])}
+	return await _finish("ellipse arc", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/ellipse-arcs/" + str(r["json"]["id"])]])
+
+
+func finish_spline() -> Dictionary:
+	## Makes the spline through the points tapped so far (two or more, in order). {ok, message}.
+	if busy or tool != "spline":
+		return {"ok": false, "message": ""}
+	if pending.size() < 2:
+		var message := "A spline needs at least two points."
+		status.emit(message)
+		return {"ok": false, "message": message}
+	busy = true
+	var taps := pending.duplicate()
+	pending.clear()
+	var created: Array = []
+	var ids: Array = []
+	for t in taps:
+		var id := await _point(t, created)
+		if id == "":
+			await _cleanup(created)
+			busy = false
+			return {"ok": false, "message": "Couldn't place those points."}
+		ids.append(id)
+	var r := await _post(SKETCH + sketch_id + "/splines", {"through_point_ids": ids})
+	var result: Dictionary
+	if not r["ok"]:
+		await _cleanup(created)
+		result = {"ok": false, "message": "Couldn't make that spline: %s" % str(r["error"])}
+		status.emit(str(result["message"]))
+	else:
+		result = await _finish("spline", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/splines/" + str(r["json"]["id"])]])
+	busy = false
+	return result
+
+
+func _make_text(taps: Array) -> Dictionary:
+	if text_content.strip_edges() == "":
+		return {"ok": false, "message": "Type the text first (the Text button), then place it."}
+	var created: Array = []
+	var anchor := await _point(taps[0], created)
+	if anchor == "":
+		return {"ok": false, "message": "Couldn't place the text there."}
+	var r := await _post(SKETCH + sketch_id + "/texts", {"content": text_content, "anchor_point_id": anchor, "font": text_font, "size": text_size, "rotation_degrees": text_rotation})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that text: %s" % str(r["error"])}
+	return await _finish("text", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/texts/" + str(r["json"]["id"])]])
+
+
+func _fetch_text_outlines() -> void:
+	## The glyph outlines of every text, from the backend (it owns the fonts), once per content / font / size / rotation / place.
+	for id in texts:
+		var t: Dictionary = texts[id]
+		var key := "%s|%s|%s|%s|%s" % [t["content"], t["font"], t["size"], t["rot"], str(points.get(t["anchor"], Vector2.ZERO))]
+		if _text_keys.get(id, "") == key and text_outlines.has(id):
+			continue
+		var r: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id + "/texts/" + id + "/preview", null)
+		if not r["ok"] or not (r["json"] is Dictionary):
+			continue
+		var polys: Array = []
+		for contour in (r["json"] as Dictionary).get("contours", []):
+			polys.append((contour["outer"] as Array).map(func(p): return Vector2(float(p[0]), float(p[1]))))
+			for hole in contour.get("holes", []):
+				polys.append((hole as Array).map(func(p): return Vector2(float(p[0]), float(p[1]))))
+		text_outlines[id] = polys
+		_text_keys[id] = key
+	for id in text_outlines.keys():
+		if not texts.has(id):
+			text_outlines.erase(id)
+			_text_keys.erase(id)
 
 
 func _post(path: String, body) -> Dictionary:
@@ -852,7 +1061,7 @@ func nearest_point(uv: Vector2, radius: float) -> String:
 	return best
 
 
-func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line", "circle", "arc"]) -> Dictionary:
+func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]) -> Dictionary:
 	## The nearest thing to a sheet position: {kind, id, distance} or {}. A point beats a line it's on.
 	var best := {}
 	var best_d := radius
@@ -892,6 +1101,28 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 			if d <= best_d:
 				best_d = d
 				best = {"kind": "arc", "id": id, "distance": d}
+	for kind in CURVE_KINDS:
+		if kind in kinds and not point_hit:
+			var source: Dictionary = {"ellipse": ellipses, "ellipse_arc": ellipse_arcs, "spline": splines}[kind]
+			for id in source:
+				var outline: Array = outline_of(kind, id)
+				for i in outline.size() - 1:
+					var d := uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, outline[i], outline[i + 1]))
+					if d <= best_d:
+						best_d = d
+						best = {"kind": kind, "id": id, "distance": d}
+	if "text" in kinds and not point_hit:
+		for id in texts:
+			var t: Dictionary = texts[id]
+			var d := INF
+			for poly in text_outlines.get(id, []):
+				for i in (poly as Array).size():
+					d = minf(d, uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, poly[i], poly[(i + 1) % poly.size()])))
+			if d == INF and points.has(t["anchor"]):
+				d = uv.distance_to(points[t["anchor"]])
+			if d <= best_d:
+				best_d = d
+				best = {"kind": "text", "id": id, "distance": d}
 	return best
 
 
@@ -1148,6 +1379,14 @@ func delete_selection() -> Dictionary:
 				paths.append(SKETCH + sketch_id + "/circles/" + id)
 			"arc":
 				paths.append(SKETCH + sketch_id + "/arcs/" + id)
+			"ellipse":
+				paths.append(SKETCH + sketch_id + "/ellipses/" + id)
+			"ellipse_arc":
+				paths.append(SKETCH + sketch_id + "/ellipse-arcs/" + id)
+			"spline":
+				paths.append(SKETCH + sketch_id + "/splines/" + id)
+			"text":
+				paths.append(SKETCH + sketch_id + "/texts/" + id)
 	for e in selection: # points last: deleting a line may already have taken one
 		if str(e["kind"]) == "point" and not is_origin(str(e["id"])):
 			paths.append(SKETCH + sketch_id + "/points/" + str(e["id"]))
@@ -1192,6 +1431,18 @@ func toggle_construction() -> Dictionary:
 			"arc":
 				path = SKETCH + sketch_id + "/arcs/" + id
 				was = bool(arcs.get(id, {}).get("construction", false))
+			"ellipse":
+				path = SKETCH + sketch_id + "/ellipses/" + id
+				was = bool(ellipses.get(id, {}).get("construction", false))
+			"ellipse_arc":
+				path = SKETCH + sketch_id + "/ellipse-arcs/" + id
+				was = bool(ellipse_arcs.get(id, {}).get("construction", false))
+			"spline":
+				path = SKETCH + sketch_id + "/splines/" + id
+				was = bool(splines.get(id, {}).get("construction", false))
+			"text":
+				path = SKETCH + sketch_id + "/texts/" + id
+				was = bool(texts.get(id, {}).get("construction", false))
 		if path != "":
 			requests.append([path, not make_solid])
 			calls.append([HTTPClient.METHOD_PATCH, path, {"construction": was}])
@@ -1218,7 +1469,7 @@ func _select_for_dimension(entity: Dictionary) -> Dictionary:
 	var kind := str(entity["kind"])
 	if selection.size() >= 2:
 		selection.clear()
-	if kind == "circle" or kind == "arc":
+	if kind == "circle" or kind == "arc" or kind == "ellipse":
 		selection.clear() # a round thing is dimensioned on its own
 	elif not selection.is_empty() and str(selection[0]["kind"]) in ["circle", "arc"]:
 		selection.clear()
@@ -1271,6 +1522,16 @@ func _ghosts_raw(picked: Array) -> Array:
 					var d: float = points[pts[0]].distance_to(points[pts[1]])
 					out.append(_ghost("length", "Length", "mm", d, (points[pts[0]] + points[pts[1]]) * 0.5,
 						_distance_apply(pts[0], pts[1], "linear"), {"kind": "linear", "a": points[pts[0]], "b": points[pts[1]]}))
+			"ellipse":
+				var el: Dictionary = ellipses.get(first["id"], {})
+				if points.has(el.get("c", "")) and points.has(el.get("ma", "")) and points.has(el.get("mi", "")):
+					var cc: Vector2 = points[el["c"]]
+					var ra: float = cc.distance_to(points[el["ma"]])
+					var rb: float = cc.distance_to(points[el["mi"]])
+					if str(el["km"]) != "":
+						out.append(_ghost("major_radius", "Major radius", "mm", ra, cc + (points[el["ma"]] - cc) * 0.5, {"patch_id": el["km"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["ma"]]}))
+					if str(el["kn"]) != "":
+						out.append(_ghost("minor_radius", "Minor radius", "mm", rb, cc + (points[el["mi"]] - cc) * 0.5, {"patch_id": el["kn"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["mi"]]}))
 			"circle", "arc":
 				var c: Dictionary = circles.get(first["id"], arcs.get(first["id"], {}))
 				var rim: String = c.get("p", c.get("s", ""))

@@ -34,6 +34,8 @@ static func counts(selection: Array) -> Dictionary:
 		out[kind] = int(out.get(kind, 0)) + 1
 		if kind == "circle" or kind == "arc":
 			out["curve"] += 1
+		if kind in ["ellipse", "ellipse_arc", "spline", "text"]:
+			out["other"] = int(out.get("other", 0)) + 1
 	return out
 
 
@@ -79,7 +81,7 @@ static func options(selection: Array, session = null, ghosts: Array = []) -> Arr
 		out.append({"id": id, "text": TEXT[id]})
 	out.append({"id": "fix", "text": TEXT["fix"]})
 	var c := counts(selection)
-	if int(c["line"]) + int(c["curve"]) > 0:
+	if int(c["line"]) + int(c["curve"]) + int(c.get("other", 0)) > 0:
 		out.append({"id": "construction", "text": "Solid" if all_construction(selection, session) else "Construction"})
 	if session == null or not only_origin(selection, session):
 		out.append({"id": "delete", "text": TEXT["delete"]})
@@ -100,6 +102,14 @@ static func all_construction(selection: Array, session) -> bool:
 				entity = session.circles.get(str(e["id"]), {})
 			"arc":
 				entity = session.arcs.get(str(e["id"]), {})
+			"ellipse":
+				entity = session.ellipses.get(str(e["id"]), {})
+			"ellipse_arc":
+				entity = session.ellipse_arcs.get(str(e["id"]), {})
+			"spline":
+				entity = session.splines.get(str(e["id"]), {})
+			"text":
+				entity = session.texts.get(str(e["id"]), {})
 			_:
 				continue
 		any = true
