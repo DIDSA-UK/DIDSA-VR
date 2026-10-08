@@ -136,6 +136,17 @@ func _initialize() -> void:
 	ed.options["boss"] = true
 	ed.options["depth"] = 3.0
 	await ed.apply_feature()
-	var extruded: bool = await wait_for(func() -> bool: return not table.is_blank(), 1800)
-	print("SMOKE ...and the letters extrude into a solid (3 mm thick): ", extruded and absf(table.seated.get_aabb().size.z - 3.0) < 0.3, " ", table.seated.get_aabb().size if extruded else "")
+	var extruded: bool = await wait_for(func() -> bool: return not table.is_blank(), 400)
+	print("SMOKE ...and the letters extrude into a solid (3 mm thick): ", extruded and absf(table.seated.get_aabb().size.z - 3.0) < 0.3, " ", table.seated.get_aabb().size if extruded else "status: " + table.status() + " | " + await _glb_probe(ed))
 	quit()
+
+
+func _glb_probe(ed) -> String:
+	## Why a part's mesh could not be put on the table: the backend's own answer for the same fetch and what the table's glb reader makes of it
+	## (a failure there is otherwise just "couldn't be fetched").
+	var fetched: Dictionary = await ed.api.fetch_bytes(ed.glb_path(false))
+	var text := "fetch ok=%s error=%s bytes=%d" % [str(fetched.get("ok")), str(fetched.get("error", "")), (fetched.get("bytes", PackedByteArray()) as PackedByteArray).size()]
+	if fetched.get("ok", false):
+		var parsed: Dictionary = ed.table._main.mesh_from_glb(fetched["bytes"])
+		text += " | glb ok=%s mesh=%s" % [str(parsed["ok"]), str(parsed["mesh"] != null)]
+	return text
