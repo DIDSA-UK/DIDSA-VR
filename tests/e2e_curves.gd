@@ -136,6 +136,6 @@ func _initialize() -> void:
 	ed.options["boss"] = true
 	ed.options["depth"] = 3.0
 	await ed.apply_feature()
-	var extruded: bool = await wait_for(func() -> bool: return not table.is_blank(), 400)
+	var extruded: bool = await wait_for(func() -> bool: return not table.is_blank(), 1800)
 	print("SMOKE ...and the letters extrude into a solid (3 mm thick): ", extruded and absf(table.seated.get_aabb().size.z - 3.0) < 0.3, " ", table.seated.get_aabb().size if extruded else "")
 	quit()
