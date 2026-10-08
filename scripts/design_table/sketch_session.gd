@@ -66,8 +66,7 @@ var ghosts: Array = [] ## dimension candidates for the current selection (see _b
 
 var _ref_points := {} ## "body:vertex index" -> the pinned point made for it; "body:c<edge index>" -> the pinned centre of that circular edge
 var reference_rows: Array = [] ## the backend's health of this sketch's references (GET .../external-references): [{point_id, body_id, kind, vertex_index, status, reason, candidates}]
-var driven: Array = [] ## reference-only (driven) dimensions the user kept between pinned things: [{id, selection: [{kind, id}], key}]. They measure, they never drive: kept here, not on the backend
-var _driven_n := 0
+var ref_dims: Array = [] ## the sketch's persistent reference-only (driven) dimensions, as the backend last said (every solve brings them fresh, so a value follows the part): [{id, kind, refs: [{type, id}], value}]. They measure, they never drive: the solver does not see them
 var _undo: Array = [] ## [{label, calls: [[method, path]]}]
 
 
@@ -200,6 +199,7 @@ func _ingest_state(json: Dictionary) -> void:
 	constraints.clear()
 	for c in json.get("constraints", []):
 		constraints[str(c["id"])] = c
+	ref_dims = json.get("reference_dimensions", [])
 	var solve: Dictionary = json.get("solve", {})
 	dof = int(solve.get("dof", -1))
 	converged = bool(solve.get("converged", true))
@@ -1174,7 +1174,7 @@ func _ghosts_for(picked: Array) -> Array:
 	## a line -> their distance; two lines -> a distance if parallel, else an angle. Each: {key, label, unit,
 	## value, uv (where the label floats), apply: {patch_id?, create?, factor}}. When everything picked is already pinned (pieces of the part, the origin,
 	## or Fixed) nothing a dimension could say would move anything, so each candidate is a DRIVEN (reference-only) one: `driven` true, it only measures,
-	## and keeping it (keep_driven) adds no constraint.
+	## and keeping it (keep_driven) adds no constraint: it becomes a persistent reference dimension on the backend.
 	var out: Array = _ghosts_raw(picked)
 	if not out.is_empty() and _all_pinned(picked):
 		for g in out:
@@ -1387,22 +1387,60 @@ func dimension_items() -> Array:
 
 
 func driven_items() -> Array:
-	## The reference dimensions kept between pinned things, measured now from where those things are: [{id, spec, text: "(12.5)", driven: true}]. One whose
-	## entities have gone is dropped.
+	## The reference dimensions the backend holds for this sketch, as drawn items: [{id, spec, text: "(12.5)", driven: true}]. The number is the backend's own
+	## (calculated from where the things are now, so it follows the part); one whose entities are not in the picture is left out.
 	var out: Array = []
-	var keep: Array = []
-	for d in driven:
-		var g := {}
-		for candidate in _ghosts_raw(d["selection"]):
-			if candidate["key"] == d["key"]:
-				g = candidate
-		if g.is_empty() or (g.get("spec", {}) as Dictionary).is_empty():
+	for d in ref_dims:
+		var spec := _ref_dim_spec(d)
+		if spec.is_empty() or d.get("value") == null:
 			continue
-		keep.append(d)
-		out.append({"id": d["id"], "spec": g["spec"], "text": "(%s)" % dimension_text(_dimension_kind(str(g["key"])), float(g["value"])), "driven": true})
-	if keep.size() != driven.size():
-		driven = keep
+		out.append({"id": str(d["id"]), "spec": spec, "text": "(%s)" % dimension_text(_dimension_kind(_ref_dim_key(d)), float(d["value"])), "driven": true})
 	return out
+
+
+static func _ref_dim_key(d: Dictionary) -> String:
+	## The ghost key a stored reference dimension is laid out like (radius, diameter, angle, linear...): what dimension_layout draws it as.
+	var types: Array = (d.get("refs", []) as Array).map(func(r): return str(r.get("type", "")))
+	match str(d.get("kind", "")):
+		"radius", "diameter", "angle":
+			return str(d["kind"])
+		"horizontal", "vertical":
+			return str(d["kind"])
+		"distance":
+			if types == ["line"]:
+				return "length"
+			if types == ["point", "point"]:
+				return "linear"
+			if types == ["line", "line"]:
+				return "line_distance"
+			return "point_line"
+	return "linear"
+
+
+func _ref_dim_spec(d: Dictionary) -> Dictionary:
+	## How dimension_layout draws a stored reference dimension: the same spec a ghost of the same entities carries. {} if what it measures is not here.
+	var refs: Array = d.get("refs", [])
+	var selected: Array = refs.map(func(r): return {"kind": str(r["type"]), "id": str(r["id"])})
+	var key := _ref_dim_key(d)
+	for g in _ghosts_raw(selected):
+		if g["key"] == key and not (g.get("spec", {}) as Dictionary).is_empty():
+			return g["spec"]
+	if refs.size() == 1 and str(refs[0]["type"]) == "line" and str(d.get("kind", "")) in ["horizontal", "vertical"]:
+		var ends := _line_points(str(refs[0]["id"])) # a line's own horizontal / vertical extent: not a candidate VR offers, but the flat app can make one
+		if points.has(ends[0]) and points.has(ends[1]):
+			return {"kind": str(d["kind"]), "a": points[ends[0]], "b": points[ends[1]]}
+	return {}
+
+
+static func _ref_dim_request(selected: Array, key: String) -> Dictionary:
+	## {kind, refs} for the backend's reference-dimensions route, from what the Dimension tool picked and the candidate the user kept ({} if it is not one).
+	var refs: Array = selected.map(func(e): return {"type": str(e["kind"]), "id": str(e["id"])})
+	match key:
+		"length", "linear", "line_distance", "point_line":
+			return {"kind": "distance", "refs": refs}
+		"horizontal", "vertical", "radius", "diameter", "angle":
+			return {"kind": key, "refs": refs}
+	return {}
 
 
 static func _dimension_kind(key: String) -> String:
@@ -1410,18 +1448,25 @@ static func _dimension_kind(key: String) -> String:
 
 
 func keep_driven(key: String) -> Dictionary:
-	## The user pointed at a driven candidate: keep it as a reference dimension. It measures the two pinned things and is drawn in brackets; nothing is
-	## sent to the backend (it has no driven dimension), so it lasts as long as the sketch is open. Undo takes it back.
+	## The user pointed at a driven candidate: keep it as a reference dimension. The backend stores it (POST .../reference-dimensions: it measures the pinned
+	## things and never reaches the solver), so it lasts: closing and reopening the sketch, saving and opening the file, the flat app. It is drawn in brackets and
+	## follows the part. Undo deletes it (and the backend frees a helper only it kept). A refusal (the backend's reason) leaves nothing.
 	var g := ghost(key)
 	if g.is_empty() or not bool(g.get("driven", false)):
 		return {"ok": false, "message": ""}
-	_driven_n += 1
-	var id := "driven%d" % _driven_n
-	driven.append({"id": id, "selection": selection.duplicate(true), "key": key})
-	_undo.append({"label": "reference dimension", "calls": [], "driven_id": id})
+	var request := _ref_dim_request(selection, key)
+	if request.is_empty():
+		return {"ok": false, "message": ""}
+	var made := await _post(SKETCH + sketch_id + "/reference-dimensions", request)
+	if not made["ok"]:
+		var message := "Couldn't keep that dimension: %s" % str(made["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	var id := str((made["json"] as Dictionary)["id"])
+	_undo.append({"label": "reference dimension", "calls": [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/reference-dimensions/" + id]]})
 	selection.clear()
 	ghosts.clear()
-	changed.emit()
+	await refresh(false)
 	return {"ok": true, "message": ""}
 
 
@@ -1450,7 +1495,7 @@ func confirm_ghost(key: String, value: float) -> Dictionary:
 	if g.is_empty():
 		return {"ok": false, "message": ""}
 	if bool(g.get("driven", false)):
-		return keep_driven(key) # a reference dimension has no value to type: it measures
+		return await keep_driven(key) # a reference dimension has no value to type: it measures
 	if value <= 0.0:
 		var msg := "A dimension has to be bigger than zero."
 		status.emit(msg)
@@ -1508,8 +1553,6 @@ func undo() -> bool:
 	var step: Dictionary = _undo.pop_back()
 	var was_busy := busy
 	busy = true
-	if step.has("driven_id"):
-		driven = driven.filter(func(d) -> bool: return d["id"] != step["driven_id"])
 	for entry in step["calls"]:
 		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
 	pending.clear()

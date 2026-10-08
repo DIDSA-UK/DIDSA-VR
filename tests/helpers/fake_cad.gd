@@ -37,6 +37,7 @@ var reference_ids := {} ## id -> true: what a convert route asked to be a refere
 var edge_vertices_for: Callable = Callable() ## Callable(body id, edge index) -> [vertex index a, vertex index b]: the two corners of a STRAIGHT edge, for POST .../convert-entities/edge on one
 var face_lines := {} ## "body:face index" -> [vertex index a, vertex index b]: a flat face seen edge-on, for POST .../convert-entities/face
 var face_axes := {} ## "body:face index" -> Vector2: where a round face's axis is, for POST .../convert-entities/face
+var reference_dimensions := {} ## id -> {id, kind, refs: [{type, id}]}: the reference (driven) dimensions POST .../reference-dimensions made (value computed on read, like the real backend)
 var face_made := {} ## "body:face index" -> the answer that route gave (idempotent per face, like the real one)
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
@@ -229,6 +230,10 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var id := next_id("pt")
 		points[id] = Vector2(body["x"], body["y"])
 		return _ok({"id": id, "x": body["x"], "y": body["y"], "is_locked": false})
+	if path.contains("/reference-dimensions/") and verb == "DELETE":
+		reference_dimensions.erase(path.get_file())
+		_prune_reference_helpers()
+		return _ok({})
 	if verb == "DELETE":
 		var tail: String = path.get_file()
 		points.erase(tail)
@@ -296,10 +301,63 @@ func handle(method: int, path: String, body) -> Dictionary:
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": pinned.has(id), "is_reference": reference_ids.has(id)})
 		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
-		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}})
+		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}, "reference_dimensions": _reference_dimension_rows()})
 	if path.ends_with("/export"):
-		return _ok({"entities": entities, "reference_ids": reference_ids.keys()})
+		return _ok({"entities": entities, "reference_ids": reference_ids.keys(), "reference_dimensions": _reference_dimension_rows()})
+	if path.ends_with("/reference-dimensions") and verb == "POST":
+		for existing in reference_dimensions.values():
+			if existing["kind"] == body["kind"] and existing["refs"] == body["refs"]:
+				return _ok(_reference_dimension_row(existing))
+		var rid := next_id("rd")
+		reference_dimensions[rid] = {"id": rid, "kind": body["kind"], "refs": (body["refs"] as Array).duplicate(true)}
+		return {"ok": true, "code": 201, "json": _reference_dimension_row(reference_dimensions[rid]), "error": ""}
 	return {"ok": false, "code": 404, "json": null, "error": "unrouted " + path}
+
+func _reference_dimension_rows() -> Array:
+	return reference_dimensions.values().map(func(d): return _reference_dimension_row(d))
+
+
+func _reference_dimension_row(d: Dictionary) -> Dictionary:
+	## {id, kind, refs, value}: the value as the real backend computes it from where the points are now.
+	var out: Dictionary = d.duplicate(true)
+	out["value"] = _reference_dimension_value(d)
+	return out
+
+
+func _reference_dimension_value(d: Dictionary) -> Variant:
+	var refs: Array = d["refs"]
+	var types: Array = refs.map(func(r): return r["type"])
+	var ids: Array = refs.map(func(r): return r["id"])
+	match str(d["kind"]):
+		"radius", "diameter":
+			for e in entities:
+				if e["id"] == ids[0] and points.has(e["center_point_id"]):
+					var far: String = e.get("radius_point_id", e.get("start_point_id", ""))
+					var r: float = (points[e["center_point_id"]] as Vector2).distance_to(points[far])
+					return r if d["kind"] == "radius" else r * 2.0
+			return null
+		"distance", "horizontal", "vertical":
+			var a: Vector2
+			var b: Vector2
+			if types == ["point", "point"] and points.has(ids[0]) and points.has(ids[1]):
+				a = points[ids[0]]
+				b = points[ids[1]]
+			elif types == ["line"]:
+				for e in entities:
+					if e["id"] == ids[0]:
+						a = points[e["start_point_id"]]
+						b = points[e["end_point_id"]]
+			elif types.has("point") and types.has("line"):
+				var p: Vector2 = points[ids[types.find("point")]]
+				for e in entities:
+					if e["id"] == ids[types.find("line")]:
+						return (Geometry2D.get_closest_point_to_segment(p, points[e["start_point_id"]], points[e["end_point_id"]])).distance_to(p) # (the real one is to the infinite line; the fake's lines are used within their length)
+				return null
+			else:
+				return null
+			return {"distance": a.distance_to(b), "horizontal": absf(b.x - a.x), "vertical": absf(b.y - a.y)}[str(d["kind"])]
+	return 0.0
+
 
 func _vertex_point(body_id: String, index: int, as_reference: bool) -> String:
 	## The pinned point for a body vertex (idempotent, like the real route); flagged as a helper only when it is made for the first time and asked for as one.
@@ -330,6 +388,10 @@ func _prune_reference_helpers() -> void:
 				continue
 			var own: Array = [e.get("start_point_id", ""), e.get("end_point_id", ""), e.get("center_point_id", ""), e.get("radius_point_id", "")]
 			var used := false
+			for rd in reference_dimensions.values():
+				for r in rd["refs"]:
+					if own.has(str(r["id"])) or str(r["id"]) == e["id"]:
+						used = true
 			for k in cons.values():
 				for key in ["point_id", "point_a_id", "point_b_id", "line_id", "start_point_id"]:
 					if own.has(str(k.get(key, "x"))) or str(k.get(key, "")) == e["id"]:
@@ -347,6 +409,10 @@ func _prune_reference_helpers() -> void:
 			if not reference_ids.has(id):
 				continue
 			var held := false
+			for rd in reference_dimensions.values():
+				for r in rd["refs"]:
+					if str(r["id"]) == id:
+						held = true
 			for e in entities:
 				for key in ["start_point_id", "end_point_id", "center_point_id", "radius_point_id"]:
 					if str(e.get(key, "x")) == id:

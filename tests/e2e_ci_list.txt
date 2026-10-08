@@ -3,6 +3,7 @@
 e2e_references
 e2e_references_more
 e2e_references_face
+e2e_reference_dimensions
 e2e_references_lost
 e2e_references_history
 e2e_build_tree

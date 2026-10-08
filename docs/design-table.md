@@ -53,7 +53,8 @@ This page is what was decided and built, what the code turned out to say, and wh
          corners; it is offered only where no straight edge of the part is under the laser. Cones, spheres, ellipses and silhouette lines are not offered.
        * **A driven dimension.** Two things that are both pinned (two corners, an edge, a hole's circle, the origin) cannot be driven by a dimension, so pointing
          Dimension at them offers a **reference dimension** instead (label in brackets): point at it and it is kept as `(12.5)` in a quiet colour; it measures live
-         and changes nothing. It lives in the editor only until the reference-dimension change (below, phase 3) and Undo takes it back.
+         and changes nothing. The backend stores it (a persistent **reference dimension**: kind and the entities measured, the value calculated on read, never seen by the solver), so it
+         survives closing and reopening the sketch, saving and opening the file, and shows in the flat app; the value follows the part when the part is edited. Undo deletes it.
      The backend keeps each reference tied to its vertex or hole and says when it cannot find it again after an upstream edit (below). The references are the part as
      the backend resolves the sketch against it, which is the part at the sketch's place in the history: for a reopened sketch with features after it, or a part
      with something hidden or rolled back, the part is fetched again that way and only its topology is used (the picture on the table is unchanged).

@@ -261,10 +261,10 @@ func _initialize() -> void:
 	var constraints_before := calls_to("POST /sketch/sketches/sk1/constraints").size()
 	var kept: Dictionary = await ed.session.confirm_ghost("diameter", 0.0)
 	var items: Array = ed.session.dimension_items()
-	print("SMOKE keeping the diameter adds a reference dimension in brackets, measured (60), and sends NOTHING to the backend: ", kept["ok"] and ed.session.driven.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").size() == constraints_before and calls_to("PATCH").is_empty() and items.size() == 1 and items[0]["text"] == "(⌀60)" and items[0]["driven"])
+	print("SMOKE keeping the diameter stores a reference dimension on the backend (POST .../reference-dimensions, diameter of the circle), shows it in brackets, measured (60), and adds NO constraint: ", kept["ok"] and ed.session.ref_dims.size() == 1 and fake.reference_dimensions.size() == 1 and calls_to("POST /sketch/sketches/sk1/reference-dimensions")[0][1]["kind"] == "diameter" and calls_to("POST /sketch/sketches/sk1/constraints").size() == constraints_before and calls_to("PATCH").is_empty() and items.size() == 1 and items[0]["text"] == "(⌀60)" and items[0]["driven"])
 	print("SMOKE ...and the view draws it (a label on the sheet, in brackets): ", ed.view.label_texts().has("(⌀60)"))
 	var undone: bool = await ed.session.undo()
-	print("SMOKE undo takes the reference dimension back: ", undone and ed.session.driven.is_empty() and ed.session.dimension_items().is_empty())
+	print("SMOKE undo takes the reference dimension back (a DELETE on the backend): ", undone and ed.session.ref_dims.is_empty() and fake.reference_dimensions.is_empty() and ed.session.dimension_items().is_empty())
 	# two pinned things: the hole's centre and the origin
 	await aim_uv(hole + Vector2(1.5, 0.5))
 	await pull()
@@ -298,8 +298,8 @@ func _initialize() -> void:
 	var label_uv: Vector2 = ed.view._ghost_text_uv["radius"]
 	await aim_uv(label_uv)
 	await pull()
-	await settle(func() -> bool: return not ed.session.driven.is_empty() or not ed.session.busy)
-	print("SMOKE pulling the trigger on a driven candidate keeps it (in brackets, R30) with no constraint call: ", ed.session.driven.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").is_empty() and ed.session.dimension_items()[0]["text"] == "(R30)")
+	await settle(func() -> bool: return not ed.session.ref_dims.is_empty() or not ed.session.busy)
+	print("SMOKE pulling the trigger on a driven candidate keeps it (in brackets, R30) with no constraint call: ", ed.session.ref_dims.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").is_empty() and ed.session.dimension_items()[0]["text"] == "(R30)")
 	table.manager.deactivate()
 	table.close()
 
