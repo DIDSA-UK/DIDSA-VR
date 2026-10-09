@@ -23,7 +23,7 @@ const EDIT_IDS := ["trim", "offset"]
 const FEATURE_GROUPS := [ ## the Feature tab's groups, each a colour and the tools it holds (in FEATURE_TOOLS order within it)
 	["create", "Create", Color(0.31, 0.77, 1.00), ["extrude", "revolve", "loft", "sweep", "create_plane"]],
 	["refine", "Refine", Color(0.96, 0.69, 0.25), ["fillet", "chamfer", "shell", "mirror"]],
-	["combine", "Combine", Color(0.78, 0.55, 0.98), ["pattern", "boolean", "merge", "split"]],
+	["combine", "Modify", Color(0.78, 0.55, 0.98), ["pattern", "boolean", "merge", "split"]],
 ]
 const ACCENT_FEATURE := ACCENT_SKETCH
 const ACCENT_MODIFY := ACCENT_SKETCH
@@ -140,7 +140,7 @@ static func register(reg, handler: Object) -> void:
 	for t in SKETCH_TOOLS:
 		if EDIT_IDS.has(t[0]):
 			_tool(reg, handler, "sketch", t, "edit")
-	## The Feature tab sets its tools apart the same way: Create (from a sketch), Refine (edges, faces) and Combine (bodies).
+	## The Feature tab sets its tools apart the same way: Create (from a sketch), Refine (edges, faces) and Modify (bodies).
 	reg.add_category("feature", "Feature", "cat_feature", ACCENT_FEATURE)
 	for g in FEATURE_GROUPS:
 		reg.add_group("feature", g[0], g[1], g[2])

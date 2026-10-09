@@ -5,7 +5,7 @@ extends Control
 ##     that category's colour, joined to the tab by a caret, holding the tool list (three rows of
 ##     small buttons that scrolls sideways when there are more than fit). A category can set groups of
 ##     tools apart: Sketch has Draw (cyan), Constrain (amber) and Edit (violet), Feature has Create, Refine and
-##     Combine, each in its own panel. The tool tip and the active
+##     Modify, each in its own panel. The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
 ##     New sketch (the way in, larger than a tool button) heads the Sketch and Constrain tabs with
