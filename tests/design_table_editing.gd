@@ -236,7 +236,7 @@ func _initialize() -> void:
 	var spot: Vector2 = ed.plane_uv_at(l.global_position) # the sketch spot under the hand when it took hold
 	l.global_position = table.to_global(c1 + Vector3(0.12, 0.05, 0.0)) # across, and a little off the plane
 	await frames(20)
-	print("SMOKE one hand on the sheet (Part: Locked) slides the PART under the window: the sketch spot that was under the hand stays under it: ", ed.plane_uv_at(l.global_position).distance_to(spot) < 0.15 * 0.3 / table.effective_scale() * 0.01 + 0.5 and ed.view.sheet_centre.distance_to(centre_start) > 1.0)
+	print("SMOKE one hand on the sheet (Orbit lock) slides the PART under the window: the sketch spot that was under the hand stays under it: ", ed.plane_uv_at(l.global_position).distance_to(spot) < 0.15 * 0.3 / table.effective_scale() * 0.01 + 0.5 and ed.view.sheet_centre.distance_to(centre_start) > 1.0)
 	print("SMOKE ...in the plane only (the off-plane part of the hand's movement is not followed), with no turn and no scale: ", absf(table.window_anchor_normal.dot(table.pivot.position + table.pivot.basis * (table.table_copy.transform * (plane_g["origin"] as Vector3)) - table.window_anchor)) < 0.002 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked) and is_equal_approx(table.user_scale, 1.0))
 	print("SMOKE ...the window itself did not move: the sheet is still where it was in the world, now over a different spot of the sketch: ", ed.view._sheet.global_position.distance_to(anchor_world) < 0.002)
 	l.button_released.emit("grip_click")
@@ -249,7 +249,7 @@ func _initialize() -> void:
 	l.button_pressed.emit("grip_click")
 	r.button_pressed.emit("grip_click")
 	await frames(3)
-	print("SMOKE two hands on the sheet with a sketch open (Part: Locked): ", table.manip.grip_count() == 2 and table.sketch_locked())
+	print("SMOKE two hands on the sheet with a sketch open (Orbit lock): ", table.manip.grip_count() == 2 and table.sketch_locked())
 	r.global_position = table.to_global(c2 + Vector3(0.10, 0.0, -0.20)) # swing the line between the hands
 	await frames(20)
 	print("SMOKE swinging the hands turns nothing: the part keeps its tilt: ", table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
@@ -279,9 +279,9 @@ func _initialize() -> void:
 	var fit_scale_w: float = minf(table.sheet_window_m.x * 0.8 / bounds.size.x, table.sheet_window_m.y * 0.8 / bounds.size.y)
 	print("SMOKE Fit zooms the part so the sketch fills most of the window, and slides it so the sketch is in the middle: ", absf(table.effective_scale() / fit_scale_w - 1.0) < 0.03 and ed.view.sheet_centre.distance_to(bounds.get_center()) < 1.0 and table.pivot.basis.orthonormalized().is_equal_approx(rot_locked))
 
-	# --- Part: Free hands the grips to the part again
+	# --- Orbit lock Off hands the grips to the part again
 	table.ui.lock_button().button_pressed = false
-	print("SMOKE Part: Free unlocks it: ", not table.part_locked and not table.sketch_locked() and table.ui.lock_button().text == "Part: Free")
+	print("SMOKE Orbit lock Off unlocks it: ", not table.part_locked and not table.sketch_locked() and table.ui.lock_button().text == "Orbit lock: Off")
 	var c3: Vector3 = table.pivot.position
 	l.global_position = table.to_global(c3)
 	await physics_frame

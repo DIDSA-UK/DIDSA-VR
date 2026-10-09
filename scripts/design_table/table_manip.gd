@@ -9,7 +9,7 @@ extends RefCounted
 ##     as they spread or close, all about the midpoint (table_pose.gd). The second grip may be anywhere over the table.
 ##   * The right STICK spins it about the slab's up axis and tips it; A pulls it nearer, B pushes it farther. These
 ##     belong to the table only while it is ENGAGED.
-##   * WITH A SKETCH OPEN and "Part: Locked" the grips drive the sketch CANVAS instead (the part and its tilt stay put): one hand on the
+##   * WITH A SKETCH OPEN and "Orbit lock" the grips drive the sketch CANVAS instead (the part and its tilt stay put): one hand on the
 ##     sheet pans the canvas, two hands zoom it about the midpoint between them (table_editor.gd: canvas_set).
 ##   * LETTING GO over the slab leaves it on the table; letting go beyond it sends the real part back to the arena
 ##     where you let go (design_table.gd: send_to_arena).

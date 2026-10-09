@@ -237,7 +237,7 @@ func open() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	poke_render()
 	tree.open()
-	props.set_wanted(props.has_options())
+	props.set_wanted(true)
 	set_status("Carry a part over the table and let go, or pick one in the tree, to edit it.")
 	UiFeedback.play("open", self)
 	opened.emit()
@@ -286,6 +286,8 @@ func set_status(text: String) -> void:
 	_status = text
 	if ui:
 		ui.set_status(text)
+	if props != null:
+		props.set_tip(text)
 	status_changed.emit(text)
 
 
@@ -415,7 +417,7 @@ func _build_deck() -> void:
 
 func deck_width_for(slab_width: float) -> float:
 	## The tool deck is as wide as the slab it sits in front of, never narrower than the original 0.6 m or wider than 1 m: a wider slab
-	## gives the buttons (Part: Locked, Fit, Done, Reset...) more room.
+	## gives the buttons (Orbit lock, Fit, Done, Reset...) more room.
 	return clampf(slab_width, DECK_MIN_WIDTH, DECK_MAX_WIDTH)
 
 
@@ -690,7 +692,7 @@ func editing_sketch() -> bool:
 
 
 func sketch_locked() -> bool:
-	## The part's turn is locked to the sketch tilt: a sketch is open and "Part: Locked" is on.
+	## The part's turn is locked to the sketch tilt: a sketch is open and "Orbit lock" is on.
 	return part_locked and editing_sketch()
 
 

@@ -45,9 +45,9 @@ the sketch's coordinates (sketch mm = part mm), which is what dimensioning to ex
 sketch plane, anchored in the console when the sketch opens (`design_table.window_anchor`), 0.8 x 0.4 m of world whatever the zoom. Panning and
 zooming slide and scale the part under it, so it works as a viewport, and the drawing is clipped to it by `sketch_lines.gdshader`. While a sketch is open:
 
-1. With **Part: Locked** (the default) the grips slide the part **along the sketch plane** (whatever would move it off the plane is taken back out,
+1. With **Orbit lock** (the default) the grips slide the part **along the sketch plane** (whatever would move it off the plane is taken back out,
    `pin_sketch_plane`) and two hands zoom it about the point between them; nothing turns, the stick does not spin or tip it, Reset restores the tilt.
-   **Part: Free** gives the part its ordinary move / turn / scale back, anywhere.
+   **Orbit lock Off** gives the part its ordinary move / turn / scale back, anywhere.
 2. Letting go beyond the slab does **not** send the real part back to the arena (that would end the sketch); it is held back over the slab.
 3. A grip inside the window's rectangle takes the part, not only one near its bounding sphere.
 4. The zoom range is 1/50 to 200x (everyday handling: 0.4 to 3x, or the Settings limit); Fit slides and zooms the part so the sketch fills the window.

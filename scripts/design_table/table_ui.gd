@@ -3,11 +3,10 @@ extends Control
 ## kinds of control, kept apart:
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
-##     small buttons that scrolls sideways when there are more than fit), then the tool tip
-##     (or what is selected) and Exit sketch (leaves the open sketch). The active
+##     small buttons that scrolls sideways when there are more than fit), then Exit sketch (leaves the open sketch). The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
-##     (table_props_window.gd), or in a row inside the frame when there is none.
-##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked. Undo, Redo and Close are in the top right. They are not
+##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
+##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Orbit lock. Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
 ## Glyphs carry colour (green Exit sketch, red Close, amber Undo...) so a button reads without its label.
@@ -25,7 +24,7 @@ signal snap_toggled(on: bool)
 signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
-signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
+signal part_lock_toggled(locked: bool) ## "Orbit lock On / Off" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
 signal done_pressed ## "Exit sketch": leave the open sketch (the part is refreshed if it was changed)
 signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
 signal return_pressed ## "To arena": the real part goes back where it came from
@@ -70,7 +69,7 @@ var _scroll_left: Button
 var _scroll_right: Button
 var _connector: Control
 var _options_row: HBoxContainer
-var _status_label: Label
+var _status := "" ## the tool tip text: shown in the side panel (table_props_window.gd), kept here for the host and tests
 var _snap_button: Button
 var _undo_button: Button
 var _redo_button: Button
@@ -163,28 +162,15 @@ func _build_shell() -> void:
 	bottom.add_theme_constant_override("separation", tokens.gap)
 	bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	frame_column.add_child(bottom)
-	var status_panel := PanelContainer.new()
-	status_panel.theme_type_variation = &"PanelRaised"
-	status_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN ## a narrow tip, not the whole frame
-	status_panel.custom_minimum_size = Vector2(380, 0)
-	_status_label = Label.new()
-	_status_label.theme_type_variation = &"LabelDim"
-	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status_label.custom_minimum_size = Vector2(300, 0)
-	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var status_row := HBoxContainer.new()
-	status_row.add_theme_constant_override("separation", tokens.gap)
 	_active_chip = Label.new()
 	_active_chip.text = "TABLE ACTIVE"
 	_active_chip.theme_type_variation = &"LabelSmall"
 	_active_chip.visible = false
+	_active_chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_active_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_active_chip.add_theme_color_override("font_color", tokens.accent)
 	_active_chip.add_theme_font_size_override("font_size", tokens.font_small + 3)
-	status_row.add_child(_active_chip)
-	status_row.add_child(_status_label)
-	status_panel.add_child(status_row)
-	bottom.add_child(status_panel)
+	bottom.add_child(_active_chip)
 	_done_button = _utility("enforce", "Exit sketch", false) ## tool-specific: it leaves the sketch that is open
 	_done_button.disabled = true
 	_done_button.visible = false
@@ -264,13 +250,13 @@ func _build_shell() -> void:
 	var lock_row := HBoxContainer.new()
 	lock_row.add_theme_constant_override("separation", tokens.gap)
 	generic.add_child(lock_row)
-	_lock_button = _utility("lock", "Part: Locked", true)
+	_lock_button = _utility("lock", "Orbit lock: On", true)
 	_lock_button.custom_minimum_size.x = GENERIC_LABEL_BUTTON.x * 2.0 + tokens.gap
 	_lock_button.set_pressed_no_signal(true)
 	_lock_button.disabled = true
 	_lock_button.visible = false
 	_lock_button.toggled.connect(func(on: bool) -> void:
-		_lock_button.text = "Part: Locked" if on else "Part: Free"
+		_lock_button.text = "Orbit lock: On" if on else "Orbit lock: Off"
 		feedback.emit("press")
 		part_lock_toggled.emit(on))
 	lock_row.add_child(_lock_button)
@@ -481,8 +467,8 @@ func _process(_delta: float) -> void:
 # --- What the host sets -------------------------------------------------------------
 
 func set_status(text: String) -> void:
-	if _status_label.text != text:
-		_status_label.text = text
+	if _status != text:
+		_status = text
 		activity.emit()
 
 
@@ -513,7 +499,7 @@ func set_part_present(on: bool) -> void:
 
 
 func set_sketching(on: bool) -> void:
-	## Part: Locked / Free and Fit only mean something while a sketch is open.
+	## Orbit lock On / Off and Fit only mean something while a sketch is open.
 	if _lock_button.disabled == on:
 		_lock_button.disabled = not on
 		_fit_button.disabled = not on
@@ -526,7 +512,7 @@ func set_sketching(on: bool) -> void:
 
 func set_part_locked(on: bool) -> void:
 	_lock_button.set_pressed_no_signal(on)
-	_lock_button.text = "Part: Locked" if on else "Part: Free"
+	_lock_button.text = "Orbit lock: On" if on else "Orbit lock: Off"
 
 
 func lock_button() -> Button:
@@ -633,4 +619,4 @@ func chip_visible() -> bool:
 
 
 func status_text() -> String:
-	return _status_label.text
+	return _status
