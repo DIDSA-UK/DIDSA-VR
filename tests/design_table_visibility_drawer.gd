@@ -56,7 +56,7 @@ func _initialize() -> void:
 	print("SMOKE Show all brings every one back (the file's hidden list is empty): ", win.row_state(Vis.BODIES)["state"] == "all" and win.row_state(Vis.PLANES)["state"] == "all" and table.build.visibility.is_on(Vis.CONSTRUCTION) and rig.main.hidden_feature_ids().is_empty())
 	var vm = rig.main.view_modes
 	var wire: Button = win._mode_buttons[2]
-	print("SMOKE a partitioned column holds Shaded / Edges / Wire, with the app's current Display mode pressed, and no Edge lines tile: ", win._mode_buttons.size() == 3 and win._mode_buttons[vm.mode].button_pressed and not win._buttons.has("edge_lines"))
+	print("SMOKE a partitioned column holds Shaded / Shaded + Edges / Wireframe, with the app's current Display mode pressed, and no Edge lines tile: ", win._mode_buttons.size() == 3 and win._mode_buttons[vm.mode].button_pressed and not win._buttons.has("edge_lines"))
 	wire.pressed.emit()
 	await rig.frames(2)
 	print("SMOKE pressing Wire sets Display to Wireframe everywhere and the tile shows it: ", vm.mode == vm.Mode.WIREFRAME and wire.button_pressed and not win._mode_buttons[0].button_pressed and rig.main._settings.view_render_mode == 2)

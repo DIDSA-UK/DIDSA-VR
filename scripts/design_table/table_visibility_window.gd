@@ -22,7 +22,7 @@ const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.CONSTRUCTION, "Constr."],
 ]
 
-const MODES := [["eye_shaded", "Shaded"], ["eye_shaded_edges", "Edges"], ["eye_wireframe", "Wire"]] ## view_modes.gd Mode order; the icon names are ui_icons.gd's
+const MODES := [["eye_shaded", "Shaded"], ["eye_shaded_edges", "Shaded + Edges"], ["eye_wireframe", "Wireframe"]] ## view_modes.gd Mode order; the icon names are ui_icons.gd's
 
 var table ## design_table.gd
 var _mode_buttons: Array = []
@@ -107,7 +107,7 @@ func _tile() -> Button:
 	var name_label := Label.new()
 	name_label.name = "Name"
 	name_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	name_label.offset_top = TILE * 0.52
+	name_label.offset_top = TILE * 0.40
 	name_label.offset_left = 4
 	name_label.offset_right = -4
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -160,7 +160,7 @@ func row_state(id: String) -> Dictionary:
 		return {"state": st["state"], "label": st["label"] if st["total"] > 0 else ""}
 	if Visibility.SESSION_CATEGORIES.has(id):
 		return {"state": "all" if table.build.visibility.is_on(id) else "none", "label": ""}
-	return {"state": "soon", "label": "coming soon"}
+	return {"state": "soon", "label": "soon"}
 
 
 func tile_name(id: String) -> String:
