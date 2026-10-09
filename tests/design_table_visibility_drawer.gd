@@ -3,7 +3,7 @@ extends SceneTree
 ## the eye sits in the generic column next to Snap and opens the drawer, stationary against the deck's right edge; the rows show an eye / half eye /
 ## eye-off and "3 of 5" counts that follow the Build tree's hidden ids; a row press is the batch rule (all visible -> hide all, else show
 ## all); an empty category and Centre of gravity are dimmed and do nothing; the session rows flip their switch; Show all / Hide all act on
-## every row; the X lets the eye go; closing the table puts the drawer away; widening the slab keeps it flush with the deck.
+## every row; the eye closes it again, no title bar; closing the table puts the drawer away; widening the slab keeps it flush with the deck.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_visibility_drawer.gd  (see tests/README.md)
 
 const Rig := preload("res://tests/helpers/table_rig.gd")
@@ -52,9 +52,10 @@ func _initialize() -> void:
 	win._show_all.pressed.emit()
 	await rig.frames(3)
 	print("SMOKE Show all brings every one back (the file's hidden list is empty): ", win.row_state(Vis.BODIES)["state"] == "all" and win.row_state(Vis.PLANES)["state"] == "all" and table.build.visibility.is_on(Vis.EDGE_LINES) and rig.main.hidden_feature_ids().is_empty())
-	win.close()
+	print("SMOKE the drawer has no title bar (the eye is its switch): ", not win._header.visible)
+	eye.button_pressed = false
 	await rig.frames(2)
-	print("SMOKE closing the drawer with its X lets the eye go: ", not win.is_open() and not eye.button_pressed)
+	print("SMOKE pressing the eye again closes the drawer: ", not win.is_open() and not eye.button_pressed)
 	eye.button_pressed = true
 	await rig.frames(2)
 	var before: float = win.position.x

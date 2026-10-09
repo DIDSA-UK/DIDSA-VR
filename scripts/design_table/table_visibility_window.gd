@@ -8,19 +8,19 @@ extends "res://scripts/diegetic_panel.gd"
 
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 
-const COLUMNS := 6 ## two rows of tiles: the drawer is as tall as the deck
-const TILE := 150.0 ## px, a square button
+const COLUMNS := 4
+const TILE := 134.0 ## px, a square button: about two of the deck's buttons (52 px tall) high, at the deck's text size
 const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.SKETCHES, "Sketches"],
 	[Visibility.BODIES, "Bodies"],
 	[Visibility.SURFACES, "Surfaces"],
 	[Visibility.CURVES, "3D curves"],
-	[Visibility.PLANES, "Created planes"],
-	[Visibility.REFERENCE_PLANES, "Reference planes"],
-	[Visibility.ORIGIN_AXES, "Origin and axes"],
-	["centre_of_gravity", "Centre of gravity"],
-	[Visibility.DIMENSIONS, "Sketch dimensions"],
-	[Visibility.CONSTRUCTION, "Construction geometry"],
+	[Visibility.PLANES, "Planes"],
+	[Visibility.REFERENCE_PLANES, "Ref. planes"],
+	[Visibility.ORIGIN_AXES, "Origin, axes"],
+	["centre_of_gravity", "Gravity"],
+	[Visibility.DIMENSIONS, "Dimensions"],
+	[Visibility.CONSTRUCTION, "Construction"],
 	[Visibility.EDGE_LINES, "Edge lines"],
 ]
 
@@ -34,10 +34,10 @@ const GAP := 0.012 ## metres between the deck's right edge and the drawer
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	table = p_table
 	panel_title = "Visibility"
-	panel_size = Vector2(0.46, p_table.tools_size.y) # as tall as the deck it sits against
+	panel_size = Vector2(0.33, p_table.tools_size.y) # as tall as the deck it sits against
 	viewport_size = Vector2i((panel_size * p_table.pixels_per_metre).round()) # the deck's own density: the same text size
 	setup(left, right, camera)
-	set_title("Visibility")
+	_header.visible = false # no title and no X: the eye button on the deck opens and closes it
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
 	# Stationary: it is a child of the deck, flush against its right edge, so it has no grab handle and its corners do not resize it.
@@ -72,7 +72,7 @@ func _build_content() -> Control:
 		b.expand_icon = false
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.custom_minimum_size = Vector2(TILE, TILE)
-		b.add_theme_font_size_override("font_size", tokens.font_small)
+		b.add_theme_font_size_override("font_size", tokens.font_small) # the deck buttons' text size
 		b.pressed.connect(func() -> void:
 			UiFeedback.haptic(_right, "tick")
 			_row_pressed(id))
@@ -85,7 +85,7 @@ func _build_content() -> Control:
 func _plain(text: String, callback: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(TILE * 1.3, TILE) # one per grid row, a little wider than a tile
+	b.custom_minimum_size = Vector2(150.0, (TILE * 3.0 + 20.0) * 0.5 - 6.0) # as wide as the deck's labelled buttons; the two share the grid's height # one per grid row, a little wider than a tile
 	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	b.add_theme_font_size_override("font_size", tokens.font_small)
 	b.pressed.connect(func() -> void:
@@ -116,13 +116,13 @@ func _row_pressed(id: String) -> void:
 
 
 func row_state(id: String) -> Dictionary:
-	## {state: "all" | "some" | "none" | "empty" | "coming soon", label: "3 of 5" or ""} for one row.
+	## {state: "all" | "some" | "none" | "empty" | "soon", label: "3 of 5" or ""} for one row.
 	if Visibility.FEATURE_CATEGORIES.has(id):
 		var st: Dictionary = table.build.category_state(id)
 		return {"state": st["state"], "label": st["label"] if st["total"] > 0 else ""}
 	if Visibility.SESSION_CATEGORIES.has(id):
 		return {"state": "all" if table.build.visibility.is_on(id) else "none", "label": ""}
-	return {"state": "coming soon", "label": "coming soon"}
+	return {"state": "soon", "label": "coming soon"}
 
 
 func button_for(id: String) -> Button:
@@ -136,9 +136,9 @@ func refresh() -> void:
 			continue
 		var st := row_state(r[0])
 		b.text = "%s\n%s" % [r[1], st["label"]]
-		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 40)
-		b.disabled = st["state"] in ["empty", "coming soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
-		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "coming soon", "none"] else Color.WHITE
+		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 32)
+		b.disabled = st["state"] in ["empty", "soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
+		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "soon", "none"] else Color.WHITE
 
 
 func set_wanted(wanted: bool) -> void:
@@ -154,4 +154,4 @@ func _on_opened() -> void:
 
 
 func _on_closed() -> void:
-	table.ui.set_eye(false) # closed with its X (or with the table): the eye lets go
+	table.ui.set_eye(false) # closed (by the eye or with the table): the eye lets go
