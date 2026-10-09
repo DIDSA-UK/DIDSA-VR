@@ -355,12 +355,17 @@ func edit_typed(feature_id: String, text: String) -> void:
 # --- Hide / Show, roll back -----------------------------------------------------------------
 
 func toggle_hidden_selected() -> void:
-	if selected_id == "" or not view_filters_ok:
+	await toggle_hidden(selected_id)
+
+
+func toggle_hidden(feature_id: String) -> void:
+	## Hide or show one feature (the strip's button, or the eye on its row, which needs no selecting first).
+	if feature_id == "" or not view_filters_ok or index_of(feature_id) < 0:
 		return
-	var now_hidden := not is_hidden(selected_id)
-	_table._main.set_feature_hidden(selected_id, now_hidden)
+	var now_hidden := not is_hidden(feature_id)
+	_table._main.set_feature_hidden(feature_id, now_hidden)
 	await _table.editor.refresh_view()
-	_table.set_status("%s %s." % [names[index_of(selected_id)], "hidden on the table" if now_hidden else "shown again"])
+	_table.set_status("%s %s." % [names[index_of(feature_id)], "hidden on the table" if now_hidden else "shown again"])
 	changed.emit()
 
 
