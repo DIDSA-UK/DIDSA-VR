@@ -1701,6 +1701,59 @@ func _is_internal_angle(c: Dictionary) -> bool:
 	return false
 
 
+const CONSTRAINT_GLYPHS := {"horizontal": "H", "vertical": "V", "parallel": "//", "perpendicular": "|_", "equal_length": "=", "equal_radius": "=", "collinear": "co",
+	"concentric": "(o)", "point_on_line": "on", "point_on_circle": "on", "at_midpoint": "M", "tangent": "T", "curve_tangent": "T", "fixed": "F"} ## plain letters: they always have a glyph in the font
+
+
+func constraint_items() -> Array:
+	## The sketch's constraints as glyphs to draw beside what they hold: [{id, text, uv, normal, owner}] (owner: the entity the glyph sits on, so
+	## several on one line stack). Coincident points are left out (the shared point is the glyph) and dimensions are dimension_items()'s.
+	var out: Array = []
+	for id in constraints:
+		var c: Dictionary = constraints[id]
+		var type := str(c.get("type", ""))
+		if not CONSTRAINT_GLYPHS.has(type):
+			continue
+		var text: String = CONSTRAINT_GLYPHS[type]
+		var owners: Array = []
+		match type:
+			"horizontal", "vertical":
+				owners = [str(c.get("line_id", ""))]
+			"parallel", "perpendicular", "equal_length", "collinear":
+				owners = [str(c.get("line1_id", "")), str(c.get("line2_id", ""))]
+			"concentric", "equal_radius":
+				owners = [str(c.get("entity1_id", "")), str(c.get("entity2_id", ""))]
+			"point_on_line", "at_midpoint", "point_on_circle":
+				owners = [str(c.get("point_id", ""))]
+			"tangent":
+				owners = [str(c.get("line_id", ""))]
+			"curve_tangent":
+				owners = [str(c.get("shared_point_id", ""))]
+			"fixed":
+				owners = [str(c.get("entity_id", ""))]
+		for owner in owners:
+			var spot := _glyph_spot(owner)
+			if not spot.is_empty():
+				out.append({"id": id, "text": text, "uv": spot["uv"], "normal": spot["normal"], "owner": owner})
+	return out
+
+
+func _glyph_spot(entity_id: String) -> Dictionary:
+	## Where a constraint glyph on this entity sits: a line's middle (pushed off to its side), a point, a circle's or arc's centre.
+	if lines.has(entity_id):
+		var l: Dictionary = lines[entity_id]
+		if points.has(l["a"]) and points.has(l["b"]):
+			var d: Vector2 = (points[l["b"]] - points[l["a"]]).normalized()
+			return {"uv": (points[l["a"]] + points[l["b"]]) * 0.5, "normal": Vector2(-d.y, d.x)}
+	elif points.has(entity_id):
+		return {"uv": points[entity_id], "normal": Vector2(0.7, 0.7)}
+	elif circles.has(entity_id) and points.has(circles[entity_id]["c"]):
+		return {"uv": points[circles[entity_id]["c"]], "normal": Vector2(0.7, 0.7)}
+	elif arcs.has(entity_id) and points.has(arcs[entity_id]["c"]):
+		return {"uv": points[arcs[entity_id]["c"]], "normal": Vector2(0.7, 0.7)}
+	return {}
+
+
 func dimension_items() -> Array:
 	## What the sketch's existing (typed, not provisional) dimensions look like: [{id, spec, text}], for sketch_view.gd to draw as a drawing
 	## draws them. A circle's / arc's own size dimension is a radius; a distance between two points is linear, horizontal or vertical.

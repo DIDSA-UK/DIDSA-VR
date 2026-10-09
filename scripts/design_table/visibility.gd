@@ -17,8 +17,9 @@ const FEATURE_CATEGORIES := [SKETCHES, BODIES, SURFACES, CURVES, PLANES]
 const REFERENCE_PLANES := "reference_planes"
 const ORIGIN_AXES := "origin_axes"
 const DIMENSIONS := "dimensions"
-const CONSTRUCTION := "construction"
-const SESSION_CATEGORIES := [REFERENCE_PLANES, ORIGIN_AXES, DIMENSIONS, CONSTRUCTION]
+const CONSTRAINTS := "constraints"
+const SESSION_CATEGORIES := [REFERENCE_PLANES, ORIGIN_AXES, DIMENSIONS, CONSTRAINTS]
+const SKETCH_GLYPHS := [DIMENSIONS, CONSTRAINTS] ## on by default: they are how a sketch is defined; they show only in the sketch they belong to (while it is open)
 
 const CURVE_TYPES := ["curve", "curve_3d", "spline_3d"] ## the backend's 3D curve rows (no tool makes them yet: matched by name)
 
@@ -32,10 +33,11 @@ func _init() -> void:
 
 
 func reset() -> void:
-	## The load rule for the session switches: everything off.
+	## The load rule for the session switches: everything off, except the sketch glyphs (dimensions and constraints), which are on: they only ever
+	## show in the sketch that is open.
 	_on = {}
 	for c in SESSION_CATEGORIES:
-		_on[c] = false
+		_on[c] = SKETCH_GLYPHS.has(c)
 	changed.emit()
 
 

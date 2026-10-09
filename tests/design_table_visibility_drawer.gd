@@ -50,10 +50,10 @@ func _initialize() -> void:
 	win.button_for("centre_of_gravity").pressed.emit()
 	win._hide_all.pressed.emit()
 	await rig.frames(3)
-	print("SMOKE Hide all hides every feature row and switches every session row off: ", win.row_state(Vis.BODIES)["state"] == "none" and win.row_state(Vis.PLANES)["state"] == "none" and not table.build.visibility.is_on(Vis.REFERENCE_PLANES) and not table.build.visibility.is_on(Vis.CONSTRUCTION))
+	print("SMOKE Hide all hides every feature row and switches every session row off: ", win.row_state(Vis.BODIES)["state"] == "none" and win.row_state(Vis.PLANES)["state"] == "none" and not table.build.visibility.is_on(Vis.REFERENCE_PLANES) and not table.build.visibility.is_on(Vis.CONSTRAINTS) and not table.build.visibility.is_on(Vis.DIMENSIONS))
 	win._show_all.pressed.emit()
 	await rig.frames(3)
-	print("SMOKE Show all brings every one back (the file's hidden list is empty): ", win.row_state(Vis.BODIES)["state"] == "all" and win.row_state(Vis.PLANES)["state"] == "all" and table.build.visibility.is_on(Vis.CONSTRUCTION) and rig.main.hidden_feature_ids().is_empty())
+	print("SMOKE Show all brings every one back (the file's hidden list is empty): ", win.row_state(Vis.BODIES)["state"] == "all" and win.row_state(Vis.PLANES)["state"] == "all" and table.build.visibility.is_on(Vis.CONSTRAINTS) and table.build.visibility.is_on(Vis.DIMENSIONS) and rig.main.hidden_feature_ids().is_empty())
 	var vm = rig.main.view_modes
 	var wire: Button = win._mode_buttons[2]
 	print("SMOKE a partitioned column holds Shaded / Shaded + Edges / Wireframe, with the app's current Display mode pressed, and no Edge lines tile: ", win._mode_buttons.size() == 3 and win._mode_buttons[vm.mode].button_pressed and not win._buttons.has("edge_lines"))

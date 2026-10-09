@@ -19,7 +19,7 @@ const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.ORIGIN_AXES, "Origin, axes"],
 	["centre_of_gravity", "CofG"],
 	[Visibility.DIMENSIONS, "Dims"],
-	[Visibility.CONSTRUCTION, "Constr."],
+	[Visibility.CONSTRAINTS, "Constr."],
 ]
 
 const MODES := [["eye_shaded", "Shaded"], ["eye_shaded_edges", "Shaded + Edges"], ["eye_wireframe", "Wireframe"]] ## view_modes.gd Mode order; the icon names are ui_icons.gd's

@@ -45,6 +45,9 @@ const MOVED_COLOUR := Color(1.0, 0.72, 0.25, 0.95) ## ...one that may have moved
 const POINT_SIZE := 0.0036
 const LIFT := 0.0012 ## world metres the drawing floats off the sheet, so it never z-fights it
 const CIRCLE_SEGMENTS := 56
+const GLYPH_OFFSET := 0.008 ## how far a constraint glyph stands off the entity it holds, in world metres
+const GLYPH_STEP := 0.007 ## and the extra for each further glyph on the same entity
+const CONSTRAINT_GLYPH_COLOUR := Color(0.55, 0.95, 0.80, 1.0)
 const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
 
@@ -73,6 +76,9 @@ var _cursor: MeshInstance3D
 var _cursor_material: StandardMaterial3D
 var _dims: MeshInstance3D
 var _labels: Node3D
+var _constraint_labels: Node3D
+var show_dimensions := true ## the Visibility drawer's Dims / Constr. tiles: the open sketch's existing dimensions and constraint glyphs (a dimension candidate of the Dimension tool always shows)
+var show_constraints := true
 var _ghost_text_uv := {} ## ghost key -> where its text sits on the drawing (what pointing at it means)
 var _line_material: ShaderMaterial
 var _tokens: Resource
@@ -130,6 +136,9 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_labels = Node3D.new()
 	_labels.name = "Labels"
 	_canvas.add_child(_labels)
+	_constraint_labels = Node3D.new()
+	_constraint_labels.name = "ConstraintGlyphs"
+	_canvas.add_child(_constraint_labels)
 	_readout = Label3D.new()
 	_readout.name = "Readout"
 	_readout.font_size = 32
@@ -169,6 +178,8 @@ func _apply_frame() -> void:
 	_ring.outer_radius = 0.0085 / canvas_scale
 	for label in _labels.get_children():
 		label.visible = contains(label.get_meta("uv"))
+	for glyph in _constraint_labels.get_children():
+		glyph.visible = contains(glyph.get_meta("uv"))
 	_update_grid()
 	_update_readout()
 
@@ -747,7 +758,12 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 	_ghost_text_uv.clear()
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
-	if session != null:
+	for child in _constraint_labels.get_children():
+		_constraint_labels.remove_child(child)
+		child.queue_free()
+	if session != null and show_constraints:
+		_draw_constraint_glyphs(session)
+	if session != null and show_dimensions:
 		for item in session.dimension_items():
 			var layout := _layout_for(item["spec"], str(item["text"]), session)
 			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
@@ -768,6 +784,37 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 		_label_on_sheet(text, layout, _tokens.warn)
 		_ghost_text_uv[str(g["key"])] = layout["text_uv"]
 	_set_surface(_dims, verts, colors)
+
+
+func _draw_constraint_glyphs(session) -> void:
+	## A short letter beside what each constraint holds (H, V, //, |_, =, T, F...), flat in the sketch plane, stacked when an entity has several.
+	var stacked := {}
+	var k := 1.0 / canvas_scale
+	for item in session.constraint_items():
+		var owner := str(item["owner"])
+		var n: int = int(stacked.get(owner, 0))
+		stacked[owner] = n + 1
+		var uv: Vector2 = item["uv"] + (item["normal"] as Vector2) * (GLYPH_OFFSET + GLYPH_STEP * n) * k
+		var label := Label3D.new()
+		label.text = str(item["text"])
+		label.font_size = LABEL_FONT
+		label.pixel_size = LABEL_PIXEL * 0.7 / canvas_scale
+		label.modulate = CONSTRAINT_GLYPH_COLOUR
+		label.outline_size = 10
+		label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
+		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		label.double_sided = true
+		label.shaded = false
+		label.no_depth_test = true
+		label.render_priority = 4
+		label.transform = Transform3D(Basis.IDENTITY, canvas_point(uv, 3.0))
+		label.set_meta("uv", uv)
+		label.visible = contains(uv)
+		_constraint_labels.add_child(label)
+
+
+func constraint_glyph_texts() -> Array:
+	return _constraint_labels.get_children().map(func(l): return (l as Label3D).text)
 
 
 func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> void:

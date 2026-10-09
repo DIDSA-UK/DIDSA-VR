@@ -22,7 +22,8 @@ func _initialize() -> void:
 	var sk: String = ed.session.feature_id
 	var sketch_id: String = ed.session.sketch_id
 	fake.sketch_plane = "XY"
-	fake.feature_rows["PART_BOX"] = [{"id": sk, "type": "sketch", "sketch_id": sketch_id, "plane_feature_id": null}]
+	fake.entities[0]["construction"] = true # one of the lines is a construction line: an ordinary line for picking
+	fake.feature_rows["PART_BOX"] = [{"id": sk, "type": "sketch", "sketch_id": sketch_id, "plane_feature_id": null}, {"id": "sk_b", "type": "sketch", "sketch_id": "skb_internal", "plane_feature_id": null}]
 	rig.main.visibility_ruled_parts.append("PART_BOX")
 	await b.reload()
 	table.manager.deactivate()
@@ -68,9 +69,25 @@ func _initialize() -> void:
 	print("SMOKE Apply revolves the picked sketch about that line: ", posted.size() == 1 and posted[0][1]["sketch_feature_id"] == sk and posted[0][1]["axis_ref"]["entity_id"] == lines[1]["entity_id"])
 	print("SMOKE ...the profile sketch is auto-hidden and the editor is ready for the next (no axis kept): ", b.is_hidden(sk) and b.auto_note(sk) == "seed of Revolve 1" and ed.seed_sketch == "" and ed.revolve_axis == "")
 
-	# leaving the tool forgets the axis; another tool is unaffected
+	# the axis can be a line of ANOTHER sketch, a construction line counts, and Clear forgets both picks
 	await b.toggle_hidden(sk)
 	await rig.frames(4)
+	var of_a: Array = ed.rest_sketches.candidates().filter(func(c): return c["sketch_feature_id"] == sk)
+	var of_b: Array = ed.rest_sketches.candidates().filter(func(c): return c["sketch_feature_id"] == "sk_b")
+	ed._hover_face = of_a[1].duplicate()
+	ed._pick_sketch()
+	ed._hover_face = of_b[0].duplicate()
+	ed._pick_sketch()
+	print("SMOKE with the profile picked, a line of ANOTHER sketch is the axis (the profile stays): ", ed.seed_sketch == sk and ed.revolve_axis == of_b[0]["entity_id"] and ed.revolve_axis_sketch == "skb_internal")
+	var other: Dictionary = ed.tools["revolve"].request(ed)
+	print("SMOKE ...and the request's axis_ref names that sketch: ", other["ok"] and other["body"]["axis_ref"]["sketch_id"] == "skb_internal" and other["body"]["sketch_feature_id"] == sk)
+	var construction_line: Dictionary = of_a.filter(func(c): return c["construction"])[0]
+	ed._hover_face = construction_line.duplicate()
+	ed._pick_sketch()
+	print("SMOKE a construction line is pickable as the axis like any line: ", ed.revolve_axis == construction_line["entity_id"] and ed.revolve_axis_sketch == sketch_id)
+	print("SMOKE Revolve offers Clear once a profile is picked, and it forgets profile and axis: ", table.props.option_button("clear_seed") != null)
+	await ed.on_option("clear_seed")
+	print("SMOKE ...Clear leaves nothing picked: ", ed.seed_sketch == "" and ed.revolve_axis == "" and ed.revolve_axis_sketch == "" and table.props.option_button("clear_seed") == null)
 	ed._hover_face = ed.rest_sketches.candidates()[0].duplicate()
 	ed._pick_sketch()
 	ed._hover_face = ed.rest_sketches.candidates()[1].duplicate()

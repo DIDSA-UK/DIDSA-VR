@@ -73,10 +73,10 @@ func _initialize() -> void:
 	print("SMOKE rolled-back features are not counted (rolling back the loft takes its row out of Bodies, 5 of 5): ", Vis.category_state(rows, [], Vis.BODIES, ["lo_1"])["label"] == "5 of 5" and Vis.category_state(rows, ["fi_1"], Vis.BODIES, ["lo_1"])["label"] == "4 of 5")
 
 	var vis := Vis.new()
-	print("SMOKE session switches all start off (edge lines are View > Display, not a switch): ", not vis.is_on(Vis.REFERENCE_PLANES) and not vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on(Vis.DIMENSIONS) and not vis.is_on(Vis.CONSTRUCTION))
+	print("SMOKE session switches start off, except Dims and Constr. (the sketch glyphs, which only ever show in the open sketch) which start on: ", not vis.is_on(Vis.REFERENCE_PLANES) and not vis.is_on(Vis.ORIGIN_AXES) and vis.is_on(Vis.DIMENSIONS) and vis.is_on(Vis.CONSTRAINTS))
 	vis.toggle(Vis.ORIGIN_AXES)
 	vis.set_on("nonsense", true)
-	print("SMOKE ...they toggle, unknown names are ignored, set_all and reset work: ", vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on("nonsense") and (func(): vis.set_all(false); return not vis.is_on(Vis.ORIGIN_AXES)).call() and (func(): vis.set_all(true); vis.reset(); return not vis.is_on(Vis.CONSTRUCTION)).call())
+	print("SMOKE ...they toggle, unknown names are ignored, set_all and reset work: ", vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on("nonsense") and (func(): vis.set_all(false); return not vis.is_on(Vis.ORIGIN_AXES)).call() and (func(): vis.set_all(true); vis.reset(); return vis.is_on(Vis.CONSTRAINTS) and not vis.is_on(Vis.ORIGIN_AXES)).call())
 
 	# --- scene: the rule and the button over the Build tree
 	main = load("res://scenes/main.tscn").instantiate()

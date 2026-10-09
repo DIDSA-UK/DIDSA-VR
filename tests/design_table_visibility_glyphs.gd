@@ -1,7 +1,8 @@
 extends SceneTree
-## The drawer's last three tiles (plan step 7): ORIGIN AND AXES (a ball and three coloured axes on the copy), SKETCH DIMENSIONS (the finished sketches'
-## typed dimensions drawn at rest, laid out by dimension_layout.gd, with their values) and CONSTRUCTION GEOMETRY (construction lines are drawn and offered
-## at rest only with the tile on; Revolve's axis picking shows them). Each follows its switch, and the tile's state is not saved. Fake backend.
+## The drawer's tiles for the part and the sketch glyphs (plan step 7, as corrected): ORIGIN AND AXES (a ball and three coloured axes on the copy,
+## shown only with the tile on); SKETCH DIMENSIONS and CONSTRAINTS, two tiles that start ON: they show ONLY in the sketch that is open (never on a finished
+## sketch at rest) and each follows its tile there; the Dimension tool's own candidates always show; construction lines are ordinary lines (drawn and offered
+## at rest like the rest). None of it is saved. Fake backend.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_visibility_glyphs.gd  (see tests/README.md)
 
 const Rig := preload("res://tests/helpers/table_rig.gd")
@@ -19,16 +20,42 @@ func _initialize() -> void:
 	await rig.draw_rectangle()
 	var sk: String = ed.session.feature_id
 	fake.sketch_plane = "XY"
-	# one of the four lines is a construction line, and the sketch carries a typed 40 mm dimension
+	# one of the four lines is a construction line; the sketch carries a typed 40 mm dimension and two constraints
 	fake.entities[0]["construction"] = true
+	var line_ids: Array = fake.entities.filter(func(e): return e["type"] == "line").map(func(e): return e["id"])
 	var pids: Array = fake.points.keys()
 	fake.cons["dim1"] = {"type": "distance", "id": "dim1", "point_a_id": pids[0], "point_b_id": pids[1], "distance": 40.0, "orientation": "linear", "provisional": false}
+	fake.cons["c_h"] = {"type": "horizontal", "id": "c_h", "line_id": line_ids[1]}
+	fake.cons["c_par"] = {"type": "parallel", "id": "c_par", "line1_id": line_ids[1], "line2_id": line_ids[3]}
 	fake.feature_rows["PART_BOX"] = [{"id": sk, "type": "sketch", "sketch_id": ed.session.sketch_id, "plane_feature_id": null}]
 	rig.main.visibility_ruled_parts.append("PART_BOX")
 	await b.reload()
 	table.manager.deactivate()
-	ed.end_sketch()
+
+	# --- the glyphs show in the open sketch, by default
+	ed.end_sketch() # (the rig's sketch is still open from drawing: leave it, then open it again as a finished sketch is)
+	await rig.frames(3)
+	await ed.reopen_sketch(sk)
+	await rig.frames(4)
+	var view = ed.view
+	print("SMOKE both tiles start on, so the open sketch shows its dimension and its constraint glyphs: ", b.visibility.is_on(Vis.DIMENSIONS) and b.visibility.is_on(Vis.CONSTRAINTS) and view.label_texts().any(func(t): return str(t).contains("40")) and view.constraint_glyph_texts().has("H") and view.constraint_glyph_texts().count("//") == 2, " ", view.label_texts(), " ", view.constraint_glyph_texts())
+	b.visibility.set_on(Vis.DIMENSIONS, false)
+	await rig.frames(3)
+	print("SMOKE the Dims tile off takes the sketch's dimension away and keeps its constraints: ", not ed.view.label_texts().any(func(t): return str(t).contains("40")) and ed.view.constraint_glyph_texts().has("H"))
+	b.visibility.set_on(Vis.CONSTRAINTS, false)
+	await rig.frames(3)
+	print("SMOKE the Constr. tile off takes the constraint glyphs away: ", ed.view.constraint_glyph_texts().is_empty())
+	b.visibility.set_on(Vis.DIMENSIONS, true)
+	b.visibility.set_on(Vis.CONSTRAINTS, true)
+	await rig.frames(3)
+	print("SMOKE ...and both come back with their tiles: ", ed.view.label_texts().any(func(t): return str(t).contains("40")) and not ed.view.constraint_glyph_texts().is_empty())
+	ed.finish_sketch()
 	await rig.frames(8)
+
+	# --- never on a finished sketch at rest
+	var rest = ed.rest_sketches
+	print("SMOKE a finished sketch at rest shows neither dimensions nor constraint glyphs, whatever the tiles say: ", rest != null and rest.get_node_or_null("SketchDimensions") == null and rest.get_node_or_null("SketchDimensionValues") == null)
+	print("SMOKE ...and its construction line is an ordinary line: drawn and offered like the other three (4 of 4): ", rest.candidates().size() == 4 and rest.curves.filter(func(c): return c["construction"]).size() == 1)
 
 	# --- origin and axes
 	var axes = ed.origin_axes
@@ -39,42 +66,7 @@ func _initialize() -> void:
 	b.visibility.set_on(Vis.ORIGIN_AXES, false)
 	await rig.frames(2)
 	print("SMOKE ...and switching it off hides them again: ", not ed.origin_axes.visible)
-
-	# --- construction geometry
-	var rest = ed.rest_sketches
-	print("SMOKE with the Constr. tile off the sketch is drawn without its construction line (3 of 4 lines): ", rest != null and rest.candidates().size() == 3 and rest.curves.size() == 4 and not rest.show_construction)
-	b.visibility.set_on(Vis.CONSTRUCTION, true)
-	await rig.frames(3)
-	print("SMOKE ...with it on the construction line is drawn and offered too: ", ed.rest_sketches.candidates().size() == 4 and ed.rest_sketches.show_construction)
-	b.visibility.set_on(Vis.CONSTRUCTION, false)
-	await rig.frames(3)
-	table.manager.activate("revolve")
-	await rig.frames(6)
-	print("SMOKE while Revolve picks (its axis is often a construction line) they are shown whatever the tile says: ", ed.state == "pick_sketch" and ed.rest_sketches.candidates().size() == 4)
-	table.manager.deactivate()
-	await rig.frames(4)
-	print("SMOKE ...and hidden again afterwards: ", ed.rest_sketches.candidates().size() == 3)
-
-	# --- sketch dimensions
-	rest = ed.rest_sketches
-	var glyph: Dictionary = rest.dims.get(sk, {})
-	print("SMOKE the sketch's typed dimension was laid out (lines and a value) when it was read: ", glyph.has("points") and (glyph["points"] as PackedVector3Array).size() > 0 and glyph["labels"].size() == 1 and str(glyph["labels"][0]["text"]).contains("40"), " ", glyph.get("labels", []).map(func(l): return l["text"]))
-	print("SMOKE with the Dims tile off nothing of it is drawn: ", not rest.dims_on and rest.get_node_or_null("SketchDimensions") == null and rest.get_node_or_null("SketchDimensionValues") == null)
-	b.visibility.set_on(Vis.DIMENSIONS, true)
-	await rig.frames(3)
-	rest = ed.rest_sketches
-	print("SMOKE with it on the dimension lines and the value are drawn on the part: ", rest.dims_on and rest.get_node_or_null("SketchDimensions") != null and rest.get_node_or_null("SketchDimensionValues") != null and rest.get_node("SketchDimensionValues").get_child_count() == 1)
-	rig.main.set_feature_hidden(sk, true)
-	b.changed.emit()
-	await rig.frames(4)
-	print("SMOKE hiding the sketch takes its dimensions away too: ", ed.rest_sketches.get_node_or_null("SketchDimensions") == null and ed.rest_sketches.get_node_or_null("SketchDimensionValues") == null)
-	rig.main.set_feature_hidden(sk, false)
-	b.changed.emit()
-	await rig.frames(4)
-	b.visibility.set_on(Vis.DIMENSIONS, false)
-	await rig.frames(3)
-	print("SMOKE ...and switching the tile off clears them: ", ed.rest_sketches.get_node_or_null("SketchDimensions") == null)
-	print("SMOKE none of the tiles is saved: ", rig.main.native_extras_to_add({}).keys().filter(func(k): return str(k).contains("axes") or str(k).contains("dimension") or str(k).contains("construction")).is_empty())
+	print("SMOKE none of the tiles is saved: ", rig.main.native_extras_to_add({}).keys().filter(func(k): return str(k).contains("axes") or str(k).contains("dimension") or str(k).contains("constraint")).is_empty())
 	table.close()
 	await rig.frames(2)
 	quit()

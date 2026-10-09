@@ -7,7 +7,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 
 | # | Gap | Step | Notes |
 |---|---|---|---|
-| V1 | **3D curve feature type names are a guess** (`curve`, `curve_3d`, `spline_3d`, in `visibility.gd` `CURVE_TYPES`). No test makes a 3D curve, so the Curves tile may stay empty on real files. | 1 | Check DIDSA-CAD's feature type for 3D curves, add a real-backend test. |
+| V1 | **3D curve feature type names are a guess** (`curve`, `curve_3d`, `spline_3d`, in `visibility.gd` `CURVE_TYPES`). | 1 | **Roadmap:** 3D curves do not exist yet. Verify the type name and the Curves tile after they roll out (see "Roadmap" below). |
 | V2 | **Plan section 8's open question is still open:** the load rule keeps bodies, surfaces, curves and planes hidden when the file's `hidden_feature_ids` lists them. Only checked on the fake backend and one real part. | 1 | Confirm against a file saved by the flat app. |
 | V3 | **Nothing has been seen in a headset.** Tile sizes, drawer placement beside the deck, text size and the at-rest sketch line weight were judged from desktop renders. | 2 to 6 | Same caveat as `design-table-gaps.md` item 1. |
 | V4 | Real-backend coverage: the load rule, category buttons, auto-hide, Undo and Redo are covered by `e2e_visibility.gd` and `e2e_visibility_auto.gd`. **Not covered:** drawing sketches at rest, the Visibility drawer, the tree eyes, picking a sketch as the Extrude seed. | 3, 4, 6 | Add `e2e_sketch_seed.gd` once Revolve, Sweep and Loft are in. |
@@ -16,7 +16,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 
 | # | Gap | Step | Notes |
 |---|---|---|---|
-| B1 | **Show all also switches on the session tiles** (Ref. planes, Origin, Dims, Constr.), so the reference planes appear when you press it. Matches the plan's "every category" wording. | 2 | Could limit Show all to feature categories. |
+| B1 | **Show all also switches on the session tiles** (Ref. planes, Origin, Dims, Constr.), so the reference planes and the origin axes appear when you press it; **Hide all** also hides the open sketch's dimensions and constraints. Matches the plan's "every category" wording. | 2 | Could limit Show all to feature categories. |
 | B2 | **Created planes start hidden** (load rule). After making a plane in the session it stays visible until the file is reloaded. | 1, 3 | The rule only runs on load. |
 | B3 | **Other sketches are not drawn inside an open sketch** (the sheet is the drawing) nor while curves are picked (the picking lines replace them). | 3 | Could draw them faintly in the 3D view. |
 | B4 | **Rolled-back features:** category counts skip them, and a sketch hidden by a rolled-back feature shows again. Features that were hidden by hand stay hidden while rolled back. | 1, 5 | Matches the plan. |
@@ -30,8 +30,8 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | # | Gap | Step | Notes |
 |---|---|---|---|
 | U1 | **Drawer is a fixed 4 by 3 grid with abbreviated names** ("Dims", "Constr.", "CofG"). Two cells are empty. | 2 | Names were shortened to fit the deck's text size. |
-| U2 | **Centre of gravity is a disabled placeholder** (backend feature, plan section 9). | 2 | Roadmap. |
-| U3 | ~~Origin, Dims and Constr. tiles only stored their switch~~ **Closed (step 7).** Origin and axes draw on the copy, dimensions and construction lines draw on at-rest sketches. | 2, 7 | See G1 to G5. |
+| U2 | **Centre of gravity is a disabled placeholder** (backend feature, plan section 9). | 2 | **Roadmap:** test after it rolls out (see "Roadmap" below). |
+| U3 | ~~Origin, Dims and Constr. tiles only stored their switch~~ **Closed (step 7, as corrected).** Origin and axes draw on the copy; Dims and Constr. (dimensions and constraints) govern the open sketch only. | 2, 7 | See G1 to G5. |
 | U4 | **Build rows have less room** (the eye takes about 60 px), so long summaries clip earlier. | 4 | Could shrink the eye or wrap. |
 | U5 | **No eyes on the Bodies list.** A body does not map back to the feature that made it. The Bodies group heading and the per-feature eyes cover it. | 4 | Plan section 5 asked for body eyes. |
 | U6 | **Group headings are a strip above the list, not headings inside it**, because regrouping would break build order and rollback. | 4 | |
@@ -46,8 +46,8 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | S3 | **A picked finished sketch has no "sketched-on face"**, so a Boss fuses only with a single-body part and a Cut cuts every body. | 6 | Could infer the face from the sketch plane. |
 | S4 | **Sketches on turned or flipped planes are not offered** (`_plane_for_row` returns nothing for them), the same limit as Loft and Sweep picking. | 6 | |
 | S5 | ~~Only Extrude takes a picked sketch~~ **Closed.** Revolve (profile, then a line of it as the axis), Sweep (profile, then the path lines of other sketches) and Loft (sections in pick order) all take picked sketches now. | 6 | |
-| S7 | **Revolve's axis can only be a line of the profile sketch.** The plan also allows a reference axis (X, Y, Z); that needs the origin and axes markers (step 7). | 6 | |
-| S8 | **The axis line is not lit separately**: the whole picked sketch is lit and the axis shows only as "Axis: set" in Selected. | 6 | Light it in a second colour. |
+| S7 | **Revolve's axis can be any visible sketch's line (a construction line counts), but not yet a reference axis (X, Y, Z).** DIDSA-CAD's Revolve takes a sketch `Line` only (`axis_ref`, "Point/Circle invalid", no fixed axes), so the origin axes cannot be sent as they are. A profile with no line to spin about still cannot be revolved. | 6, 7 | **Open decision:** (a) a backend change so `axis_ref` can name a fixed axis, or (b) a VR workaround that makes a construction line on the axis in a new sketch on a reference plane (adds a sketch to the history). Not built. |
+| S8 | ~~The axis line is not lit separately~~ **Closed.** The picked axis line is lit with the profile. | 6 | |
 | S9 | **Sweep: the profile cannot be changed without choosing Sweep again** (the editor is in path picking). A "Back to profile" option is missing. | 6 | |
 | S10 | **Sweep's path is still picked line by line** (as before), not as a whole sketch. | 6 | Could take a sketch as the path in one pull. |
 | S11 | **Loft and Sweep with a sketch open keep the old picking** (Loft ignores an open sketch; Sweep uses it as the profile), and **a Build row's Edit keeps line picking** for both. | 6 | By design: the open-sketch flow and Edit are unchanged. |
@@ -62,12 +62,21 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | T2 | Running a design-table test by hand without `DIDSA_SETTINGS_PATH=user://settings_test.cfg` saves a slab size that fails the next run of `design_table_scene.gd`; `run_all.sh` sets it. | Worth a line in `tests/README.md`. |
 | T3 | `e2e_build_tree.gd` had to expect the auto-hidden sketch in the hidden list. Other e2e tests that assert the exact hidden list would need the same. | Only `e2e_design_table.gd` sets one by hand; it passes. |
 
-## Step 7: origin and axes, dimensions, construction geometry
+## Step 7: origin and axes, dimensions, constraints (as corrected)
 
 | # | Gap | Notes |
 |---|---|---|
-| G1 | **The Dims and Constr. tiles do not touch the OPEN sketch.** While you sketch, its dimensions and construction lines are always shown (hiding the line you just drew, or the value the Dimension tool needs, would break sketching). The tiles govern finished sketches drawn at rest, and Revolve's axis picking always shows construction lines. | Plan section 2 says "hidden on load" without saying which sketch; decide if the open sketch should obey too. |
-| G2 | **Dimension glyphs at rest are a simplified drawing**: lines, arcs, two-barb arrowheads and a billboard value, sized as a fraction of the sketch (not the sheet's canvas scale). Reference (driven) dimensions are not drawn. | `sketch_picks.gd` `_dimension_glyphs`. |
-| G3 | **Origin and axes are a marker only**: a ball, three axes and X, Y, Z labels on the part's own origin. Not pickable, so Revolve still cannot use a reference axis (S7). | |
-| G4 | **Dimension glyph colour (amber) and axis colours are my choice**, matching the flat app's X red, Y green, Z blue by memory. | Check against the flat app. |
-| G5 | **Centre of gravity stays a placeholder** (roadmap, backend feature). | |
+| G1 | **Dims and Constr. are two tiles, both on by default, and they govern the OPEN sketch only.** Dimensions and constraints never show on a finished sketch at rest. Hide all turns them off in the open sketch too. | Decided with John 2026-10-09. |
+| G2 | **The Dimension tool's own candidate values always show** (they are its interface), whatever the Dims tile says. | |
+| G3 | **Constraint glyphs are new**: the sheet drew none before. They are plain letters beside what they hold (H, V, //, \|_, =, co, (o), on, M, T, F), stacked when an entity has several. Coincident points get none (the shared point is the glyph), and only the constraint types the session already creates are covered. | `sketch_session.gd` `constraint_items`, `sketch_view.gd`. Letters were chosen so they never miss a glyph in the font. |
+| G4 | **Origin and axes are a marker only** (a ball, X, Y, Z axes and labels on the part's origin). Not pickable yet (S7). | |
+| G5 | **Axis colours are my choice** (X red, Y green, Z blue, from memory of the flat app). | Check against the flat app. |
+| G6 | **Construction lines are ordinary lines for visibility**: drawn and offered at rest like the rest; the earlier construction tile and filter were removed. | |
+
+## Roadmap (verify when shipped)
+
+| Item | What to verify when it ships |
+|---|---|
+| **3D curves** | The backend's feature type name (the guess in `visibility.gd` `CURVE_TYPES`), that the Curves tile counts and hides them, and a real-backend test that makes one. |
+| **Centre of gravity** (all clients, backend mass properties) | Enable the CofG tile, a marker and readout, and test it against the real backend. |
+| **Reference axes for Revolve** | If the backend gains a fixed-axis `axis_ref`, make the origin axes pickable and send them (S7). |

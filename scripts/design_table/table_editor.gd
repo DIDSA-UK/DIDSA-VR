@@ -105,6 +105,7 @@ var _preview_again := false
 var editing: Dictionary = {} ## a feature opened from its Build row in its own tool: {id, type, original (the row)}; Apply PATCHes it, Undo puts the old values back
 var plane_base: Dictionary = {} ## what Create Plane offsets from: {fixed} | {face} | {plane_feature_id, plane}
 var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pick over the limit replaces the oldest
+var revolve_axis_sketch := "" ## the sketch (its own id) the picked axis line is in, "" = the profile's own sketch
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
@@ -275,6 +276,7 @@ func _reset() -> void:
 	chosen_face = {}
 	chosen_plane = ""
 	revolve_axis = ""
+	revolve_axis_sketch = ""
 	edges.clear()
 	faces.clear()
 	feature_stack.clear()
@@ -630,6 +632,7 @@ func _end_sketch_pick(new_state := "") -> void:
 		seed_sketches.clear()
 		if session == null:
 			revolve_axis = ""
+			revolve_axis_sketch = ""
 	if rest_sketches != null and is_instance_valid(rest_sketches):
 		rest_sketches.set_tint(false)
 	if highlight != null and is_instance_valid(highlight) and table.table_copy != null:
@@ -662,8 +665,8 @@ func _pick_sketch() -> void:
 	if table.active_tool == "loft":
 		_toggle_section(id, name)
 		return
-	if table.active_tool == "revolve" and seed_sketch == id:
-		_pick_axis() # Revolve: the sketch is the profile, a second pull on one of ITS lines is the axis
+	if table.active_tool == "revolve" and seed_sketch != "":
+		_pick_axis() # Revolve: the first sketch is the profile; after that a pull on any visible sketch's line is the axis
 		return
 	if seed_sketch == id:
 		seed_sketch = ""
@@ -677,6 +680,7 @@ func _pick_sketch() -> void:
 		seed_sketch = id
 		_seed_tool = str(table.active_tool)
 		revolve_axis = ""
+		revolve_axis_sketch = ""
 		highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return str(c["sketch_feature_id"]) == id))
 		if table.active_tool == "revolve":
 			table.set_status("%s: closed shape ready. Now pull the trigger on a line of it to spin it about." % name)
@@ -709,14 +713,42 @@ func _toggle_section(id: String, name: String) -> void:
 
 
 func _pick_axis() -> void:
-	## Revolve with a picked sketch: the hovered line of that sketch is the axis (the same line again lets it go). A circle or arc cannot be one.
+	## Revolve with a picked profile: the hovered line (of ANY visible sketch, the profile's or another) is the axis, the same line again lets it go.
+	## A circle or arc cannot be one. (The reference axes X, Y, Z are not offered: the backend takes a sketch line only.)
 	if str(_hover_face.get("entity_type", "")) != "line":
-		table.set_status("The axis has to be a straight line of the sketch.")
+		table.set_status("The axis has to be a straight line of a sketch.")
 		UiFeedback.haptic(table._right, "error")
 		return
 	var line := str(_hover_face["entity_id"])
-	revolve_axis = "" if revolve_axis == line else line
-	table.set_status("Axis set. Set the angle, then Apply." if revolve_axis != "" else "Axis let go. Pull the trigger on a line of the sketch to spin it about.")
+	var line_sketch := str(_hover_face["sketch_id"])
+	if revolve_axis == line and seed_axis_sketch_id() == line_sketch:
+		revolve_axis = ""
+		revolve_axis_sketch = ""
+	else:
+		revolve_axis = line
+		revolve_axis_sketch = line_sketch
+	var lit: Array = rest_sketches.candidates().filter(func(c): return str(c["sketch_feature_id"]) == seed_sketch)
+	if revolve_axis != "":
+		lit.append(_hover_face.duplicate())
+	highlight.set_set(table.table_copy, lit)
+	table.set_status("Axis set. Set the angle, then Apply." if revolve_axis != "" else "Axis let go. Pull the trigger on a line of a sketch to spin it about.")
+	_update_options()
+	schedule_preview()
+
+
+func seed_axis_sketch_id() -> String:
+	## The own id of the sketch the axis line is in: the one it was picked from, else the profile's.
+	return revolve_axis_sketch if revolve_axis_sketch != "" else seed_sketch_internal_id()
+
+
+func clear_seed() -> void:
+	## Revolve's Clear: forget the profile and the axis and offer the sketches again.
+	seed_sketch = ""
+	revolve_axis = ""
+	revolve_axis_sketch = ""
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+	table.set_status(_sketch_pick_hint())
 	_update_options()
 	schedule_preview()
 
@@ -778,9 +810,6 @@ func sync_rest_sketches() -> void:
 			rest_sketches.queue_free()
 		rest_sketches = fresh
 	rest_sketches.apply_hidden(table.build.hidden_ids())
-	# the Visibility drawer's tiles: construction lines and dimension glyphs at rest (Revolve's axis is often a construction line: shown while it picks)
-	rest_sketches.set_show_construction(table.build.visibility.is_on(Visibility.CONSTRUCTION) or (state == "pick_sketch" and table.active_tool == "revolve"))
-	rest_sketches.set_dimensions(table.build.visibility.is_on(Visibility.DIMENSIONS))
 	rest_sketches.visible = not (state in ["sketch", "pick_curves"])
 	if state == "pick_sketch":
 		if seed_sketch != "" and not bool(rest_sketches.sketches.get(seed_sketch, {}).get("included", false)):
@@ -1149,6 +1178,8 @@ func _on_session_changed() -> void:
 func _refresh_view() -> void:
 	if view == null or session == null:
 		return
+	view.show_dimensions = table.build.visibility.is_on(Visibility.DIMENSIONS) # the drawer's Dims / Constr. tiles: only this open sketch's own glyphs
+	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
 	view.rebuild(session, session.selection, _hover_entity)
 	view.show_ghosts(session.ghosts)
 
@@ -1955,6 +1986,7 @@ func apply_feature() -> void:
 		seed_sketch = "" # the sketch(es) were the seed of this feature: ready for the next
 		seed_sketches.clear()
 		revolve_axis = ""
+		revolve_axis_sketch = ""
 		highlight.set_set(table.table_copy, [])
 	clear_picks()
 	if seeded and session == null and tool in ["extrude", "revolve", "sweep", "loft"]:
@@ -1982,7 +2014,7 @@ func selection_summary() -> Array:
 	if seed_sketch != "" and session == null:
 		lines.append("%s: closed shape ready" % table.build.name_of_feature(seed_sketch) if state == "pick_sketch" else "Profile: %s" % table.build.name_of_feature(seed_sketch))
 		if table.active_tool == "revolve":
-			lines.append("Axis: %s" % ("set" if revolve_axis != "" else "not picked yet"))
+			lines.append("Axis: %s" % ("a sketch line, set" if revolve_axis != "" else "not picked yet"))
 	if not edges.is_empty():
 		lines.append("Edges: %d" % edges.size())
 	if not faces.is_empty():
@@ -2208,6 +2240,7 @@ func end_sketch() -> void:
 	_sync_deck()
 	set_state("pick_plane" if state != "pick_plane" else state)
 	revolve_axis = ""
+	revolve_axis_sketch = ""
 	if table.active_tool in ["extrude", "revolve"]:
 		table.manager.deactivate()
 	_say_pick_plane()

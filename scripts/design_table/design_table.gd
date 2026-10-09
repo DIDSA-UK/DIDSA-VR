@@ -209,7 +209,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	build.changed.connect(editor.sync_plane_markers)
 	build.changed.connect(editor.sync_rest_sketches) # a coroutine: the finished sketches the Visibility model shows are drawn at rest
 	build.visibility.changed.connect(editor.sync_plane_markers)
-	build.visibility.changed.connect(editor.sync_rest_sketches)
+	build.visibility.changed.connect(editor._refresh_view) # the open sketch's dimensions and constraint glyphs follow their tiles
 	visibility_window = VisibilityWindow.new()
 	visibility_window.name = "Visibility"
 	_deck.add_child(visibility_window) # on the deck's right: it tips and moves with it
