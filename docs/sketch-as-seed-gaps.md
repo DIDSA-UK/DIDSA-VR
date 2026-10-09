@@ -51,7 +51,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | S9 | **Sweep: the profile cannot be changed without choosing Sweep again** (the editor is in path picking). A "Back to profile" option is missing. | 6 | |
 | S10 | **Sweep's path is still picked line by line** (as before), not as a whole sketch. | 6 | Could take a sketch as the path in one pull. |
 | S11 | **Loft and Sweep with a sketch open keep the old picking** (Loft ignores an open sketch; Sweep uses it as the profile), and **a Build row's Edit keeps line picking** for both. | 6 | By design: the open-sketch flow and Edit are unchanged. |
-| S12 | **Existing tests changed for Loft:** `design_table_loft_sweep.gd` expects `pick_sketch` on activation and `e2e_loft_sweep.gd` picks sections with sketch picks. The e2e change is unverified until CI runs it. | 6 | |
+| S12 | **Existing tests changed for Loft:** `design_table_loft_sweep.gd` expects `pick_sketch` on activation and `e2e_loft_sweep.gd` picks sections with sketch picks. `e2e_loft_sweep.gd` passed on CI after the change; `e2e_visibility.gd` used the old Loft picking too and was fixed the same way. | 6 | |
 | S6 | The hover highlight for a sketch line lights that one line; the **picked** sketch lights all its lines in the pick colour. | 6 | |
 
 ## Test and tooling notes

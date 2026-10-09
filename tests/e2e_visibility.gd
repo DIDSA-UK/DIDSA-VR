@@ -27,11 +27,12 @@ func rect(ed, a: Vector2, b: Vector2) -> void:
 	await ed.session.tap({"uv": b})
 
 
-func pick_first_curve_of(ed, sketch_feature_id: String) -> void:
-	for c in ed.sketch_picks.candidates():
+func pick_section(ed, sketch_feature_id: String) -> void:
+	## Loft with no sketch open: a pull on a line of the sketch makes it the next section.
+	for c in ed.rest_sketches.candidates():
 		if str(c["sketch_feature_id"]) == sketch_feature_id:
 			ed._hover_face = c
-			ed._toggle_curve()
+			ed._pick_sketch()
 			return
 
 
@@ -83,9 +84,9 @@ func _initialize() -> void:
 	await wait_for(func() -> bool: return ed.state == "pick_plane")
 	await table.build.reload()
 	table.manager.activate("loft")
-	await wait_for(func() -> bool: return ed.sketch_picks != null and is_instance_valid(ed.sketch_picks) and ed.sketch_picks.candidates().size() >= 8)
-	pick_first_curve_of(ed, sketch_a)
-	pick_first_curve_of(ed, sketch_b)
+	await wait_for(func() -> bool: return ed.rest_sketches != null and is_instance_valid(ed.rest_sketches) and ed.rest_sketches.candidates().size() >= 8)
+	pick_section(ed, sketch_a)
+	pick_section(ed, sketch_b)
 	ed.options["boss"] = true
 	await ed.apply_feature()
 	await wait_for(func() -> bool: return not table.is_blank())
