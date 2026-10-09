@@ -64,6 +64,7 @@ func _initialize() -> void:
 	table.configure_backend(main.backend_url, main.api_key)
 	table.surface.settle_seconds = 0.0
 	var ed = table.editor
+	ed.preview_enabled = false
 
 	await main.new_assembly()
 	await table.new_part()
@@ -120,7 +121,7 @@ func _initialize() -> void:
 
 	# --- Dimension on the rim: a driven radius
 	s.set_tool("dimension")
-	var rim_pick: Dictionary = s.nearest_entity(centre_uv + Vector2(6.0, 0.0), 1.5, ["circle"])
+	var rim_pick: Dictionary = refs.pick(centre_uv + Vector2(-6.0, 0.0), 1.5, ["circle"]) # the rim is the part's own (the sketch's helper circle on it is hidden): picked through the part, found again by the session
 	var picked: Dictionary = await s.select(rim_pick if not rim_pick.is_empty() else {})
 	var keys: Array = s.ghosts.map(func(g): return g["key"])
 	print("SMOKE picking the hole's circle offers radius and diameter as driven candidates, 6 and 12: ", picked["ok"] and keys == ["radius", "diameter"] and s.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(s.ghosts[0]["value"]) - 6.0) < 0.01, " ", keys)
@@ -147,14 +148,13 @@ func _initialize() -> void:
 		if str(s.constraints[cid].get("type", "")) == "point_on_line":
 			on_line = str(s.constraints[cid]["point_id"])
 	print("SMOKE a snap along the edge holds a new point ON it with a point-on-line constraint (solved, exactly where aimed): ", along_snap["kind"] == "edge_point" and on_line != "" and s.converged and s.points[on_line].distance_to(along_snap["uv"]) < 0.05, " ", s.points.get(on_line, "-"), " vs ", along_snap["uv"])
-	# the middle: in THIS sketch (a converted hole in it already makes the solver report a redundancy, and the backend distrusts an at-midpoint then) it is
-	# either held or taken straight back out, never left half done
+	# the middle, in a sketch that already holds a converted hole: the backend used to report a redundancy and distrust the at-midpoint (R-A); the converted
+	# circle no longer carries a redundant radius constraint, so it is held. (The session still takes a refused one back out completely: see _point_on_reference.)
 	var points_before: int = s.points.size()
 	var constraints_now: int = s.constraints.size()
 	await s.tap({"uv": mid_snap["uv"], "id": "", "ref": mid_snap["ref"]})
 	var held_here: bool = s.constraints.size() == constraints_now + 1 and s.points.size() == points_before + 1
-	var refused_here: bool = s.constraints.size() == constraints_now and s.points.size() == points_before
-	print("SMOKE an at-midpoint in a sketch that already holds a converted hole is held, or refused and taken back out completely (and the sketch still solves): ", (held_here or refused_here) and s.converged, " held=", held_here, " refused=", refused_here)
+	print("SMOKE an at-midpoint in a sketch that already holds a converted hole is now held (solved, not taken back): ", held_here and s.converged, " held=", held_here)
 
 	# --- the hole's centre and the edge's pinned line: nothing to drive, a driven distance
 	s.set_tool("dimension")

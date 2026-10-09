@@ -15,6 +15,7 @@ extends RefCounted
 
 signal changed ## the list, the selection or a state flag changed: the window redraws
 
+const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const ARM_MS := 4000 ## how long a Delete stays armed
@@ -254,7 +255,8 @@ func _show(entities: Array) -> void:
 
 func can_edit(feature_id: String) -> bool:
 	var type := str(row(feature_id).get("type", ""))
-	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "")
+	var tool = FeatureTools.for_type(type)
+	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "") or (tool != null and tool.edits_in_tool())
 
 
 func edit_selected() -> void:
@@ -264,7 +266,18 @@ func edit_selected() -> void:
 	if str(f.get("type", "")) == "sketch":
 		await _table.editor.reopen_sketch(selected_id) # a sketch is edited on the sheet, not with a number
 		return
+	var in_tool = FeatureTools.for_type(str(f.get("type", "")))
+	if in_tool != null and in_tool.edits_in_tool():
+		await _table.editor.begin_tool_edit(selected_id)
+		return
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
+
+
+func fix_selected() -> void:
+	## The Fix button of a flagged row: show the part as the feature saw it and let the laser pick the replacement edge / face (the editor's fix mode).
+	if selected_id == "" or BuildTree.fix_target(row(selected_id)).is_empty():
+		return
+	await _table.editor.begin_fix(selected_id)
 
 
 func edit_typed(feature_id: String, text: String) -> void:
@@ -284,11 +297,12 @@ func edit_typed(feature_id: String, text: String) -> void:
 		_table.set_status("Couldn't change it: %s" % str(result["error"]))
 		UiFeedback.haptic(_table._right, "error")
 		return
-	editor.feature_stack.append({"kind": "edit", "id": feature_id, "type": str(f["type"]), "payload": undo_payload})
+	editor.feature_stack.append({"kind": "edit", "id": feature_id, "type": str(f["type"]), "payload": undo_payload, "redo_payload": payload})
+	editor.redo_stack.clear() # a new action: what was taken back can't be put back any more
 	var refreshed: bool = await editor.refresh_geometry()
 	_table.notify_edited(editor.part_id, editor._edited_nodes)
 	await reload()
-	_table.ui.set_undo_enabled(editor.can_undo())
+	editor.sync_undo_redo()
 	UiFeedback.haptic(_table._right, "confirm")
 	_table.set_status(("%s is now %s mm." % [names[index_of(feature_id)], BuildTree.number(cleaned.to_float())]) if refreshed else "Changed, but the new shape couldn't be fetched.")
 

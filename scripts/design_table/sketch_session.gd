@@ -29,7 +29,9 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 
 const SKETCH := "/sketch/sketches/"
 const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
-const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3}
+const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3, "ellipse": 3, "ellipse_arc": 5, "spline": 9999, "text": 1} ## (a spline takes any number: Finish makes it)
+const CURVE_KINDS := ["ellipse", "ellipse_arc", "spline"] ## entities drawn from a sampled outline
+const OUTLINE_SEGMENTS := 64
 const SELECT_NEEDED := {"horizontal": 1, "vertical": 1, "parallel": 2, "perpendicular": 2, "coincident": 2}
 const PARALLEL_COS := 0.9998 ## two lines closer than ~1.1 degrees to parallel are measured as a distance, not an angle
 const AXIS_SNAP_DEGREES := 4.0 ## a line within this of horizontal / vertical is made exactly so
@@ -50,8 +52,19 @@ var busy := false
 
 var points := {} ## id -> Vector2 (sheet mm)
 var point_locked := {} ## id -> bool
+var reference_ids := {} ## id -> true: the points and shapes the backend says are reference helpers (made only to point the sketch at the part's own corner, edge, hole or face). Drawn quietly, never offered for selection or deletion
 var lines := {} ## id -> {a, b, construction}
 var circles := {} ## id -> {c, p, k, construction} (centre point, radius point, radius constraint id)
+var ellipses := {} ## id -> {c, ma (major point), mi (minor point), km / kn (the size constraints), construction}
+var ellipse_arcs := {} ## id -> {c, ma, mi, s, e, construction}
+var splines := {} ## id -> {through: [point ids], control: [handle point ids], construction}
+var texts := {} ## id -> {anchor, content, font, size, rot, construction}
+var text_outlines := {} ## text id -> [glyph polylines], fetched from the backend (its font outlines), keyed by what they were made from
+var _text_keys := {}
+var text_content := "" ## what the Text tool places next
+var text_font := "Open Sans"
+var text_size := 10.0
+var text_rotation := 0.0
 var arcs := {} ## id -> {c, s, e, k, construction}
 var shapes := {} ## rectangle / polygon id -> {kind, point_ids}
 var constraints := {} ## id -> the backend's constraint dictionary
@@ -64,10 +77,8 @@ var selection: Array = [] ## picked entities for the constraint / dimension tool
 var ghosts: Array = [] ## dimension candidates for the current selection (see _build_ghosts)
 
 var _ref_points := {} ## "body:vertex index" -> the pinned point made for it; "body:c<edge index>" -> the pinned centre of that circular edge
-var _ref_circles := {} ## "body:c<edge index>" -> {id, kind ("circle" | "arc"), centre}: the pinned construction circle / arc made on that circular edge
 var reference_rows: Array = [] ## the backend's health of this sketch's references (GET .../external-references): [{point_id, body_id, kind, vertex_index, status, reason, candidates}]
-var driven: Array = [] ## reference-only (driven) dimensions the user kept between pinned things: [{id, selection: [{kind, id}], key}]. They measure, they never drive: kept here, not on the backend
-var _driven_n := 0
+var ref_dims: Array = [] ## the sketch's persistent reference-only (driven) dimensions, as the backend last said (every solve brings them fresh, so a value follows the part): [{id, kind, refs: [{type, id}], value}]. They measure, they never drive: the solver does not see them
 var _undo: Array = [] ## [{label, calls: [[method, path]]}]
 
 
@@ -182,6 +193,8 @@ func refresh(with_entities: bool = true) -> bool:
 		var exported: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id + "/export", null)
 		if exported["ok"]:
 			_ingest_entities(exported["json"])
+			if not texts.is_empty() or not text_outlines.is_empty():
+				await _fetch_text_outlines()
 	changed.emit()
 	return true
 
@@ -193,9 +206,14 @@ func _ingest_state(json: Dictionary) -> void:
 	for p in json.get("points", []):
 		points[str(p["id"])] = Vector2(float(p["x"]), float(p["y"]))
 		point_locked[str(p["id"])] = bool(p.get("is_locked", false))
+		if bool(p.get("is_reference", false)):
+			reference_ids[str(p["id"])] = true
+		else:
+			reference_ids.erase(str(p["id"]))
 	constraints.clear()
 	for c in json.get("constraints", []):
 		constraints[str(c["id"])] = c
+	ref_dims = json.get("reference_dimensions", [])
 	var solve: Dictionary = json.get("solve", {})
 	dof = int(solve.get("dof", -1))
 	converged = bool(solve.get("converged", true))
@@ -206,7 +224,14 @@ func _ingest_entities(json: Dictionary) -> void:
 	lines.clear()
 	circles.clear()
 	arcs.clear()
+	ellipses.clear()
+	ellipse_arcs.clear()
+	splines.clear()
+	texts.clear()
 	shapes.clear()
+	reference_ids.clear()
+	for id in json.get("reference_ids", []):
+		reference_ids[str(id)] = true
 	for e in json.get("entities", []):
 		var id := str(e.get("id", ""))
 		match str(e.get("type", "")):
@@ -216,12 +241,88 @@ func _ingest_entities(json: Dictionary) -> void:
 				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"arc":
 				arcs[id] = {"c": str(e["center_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
+			"ellipse":
+				ellipses[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "km": str(e.get("major_constraint_id", "")), "kn": str(e.get("minor_constraint_id", "")), "construction": bool(e.get("construction", false))}
+			"ellipse_arc":
+				ellipse_arcs[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
+			"spline":
+				splines[id] = {"through": e.get("through_point_ids", []), "control": e.get("control_point_ids", []), "construction": bool(e.get("construction", false))}
+			"text":
+				texts[id] = {"anchor": str(e["anchor_point_id"]), "content": str(e.get("content", "")), "font": str(e.get("font", "")), "size": float(e.get("size", 10.0)), "rot": float(e.get("rotation_degrees", 0.0)), "construction": bool(e.get("construction", false))}
 			"rectangle":
 				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
 			"polygon":
 				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", [])}
 			"slot":
 				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
+
+
+func outline_of(kind: String, id: String) -> Array:
+	## The sampled outline (Vector2s) of an ellipse, partial ellipse or spline, from its points; [] if a point is missing.
+	match kind:
+		"ellipse":
+			var e: Dictionary = ellipses.get(id, {})
+			if not points.has(e.get("c", "")) or not points.has(e.get("ma", "")) or not points.has(e.get("mi", "")):
+				return []
+			return ellipse_points(points[e["c"]], points[e["ma"]], points[e["mi"]], 0.0, TAU, OUTLINE_SEGMENTS)
+		"ellipse_arc":
+			var a: Dictionary = ellipse_arcs.get(id, {})
+			for k in ["c", "ma", "mi", "s", "e"]:
+				if not points.has(a.get(k, "")):
+					return []
+			var t0 := ellipse_param(points[a["c"]], points[a["ma"]], points[a["mi"]], points[a["s"]])
+			var t1 := ellipse_param(points[a["c"]], points[a["ma"]], points[a["mi"]], points[a["e"]])
+			var sweep := fposmod(t1 - t0, TAU)
+			if sweep < 0.00001:
+				sweep = TAU
+			return ellipse_points(points[a["c"]], points[a["ma"]], points[a["mi"]], t0, t0 + sweep, OUTLINE_SEGMENTS)
+		"spline":
+			var sp: Dictionary = splines.get(id, {})
+			var through: Array = sp.get("through", [])
+			var control: Array = sp.get("control", [])
+			var out: Array = []
+			for i in through.size() - 1:
+				if not points.has(through[i]) or not points.has(through[i + 1]):
+					return []
+				var p0: Vector2 = points[through[i]]
+				var p3: Vector2 = points[through[i + 1]]
+				var h1 := p0.lerp(p3, 1.0 / 3.0)
+				var h2 := p0.lerp(p3, 2.0 / 3.0)
+				if control.size() >= 2 * i + 2 and points.has(control[2 * i]) and points.has(control[2 * i + 1]):
+					h1 = points[control[2 * i]]
+					h2 = points[control[2 * i + 1]]
+				for k in 17:
+					if i > 0 and k == 0:
+						continue
+					out.append(p0.bezier_interpolate(h1, h2, p3, float(k) / 16.0))
+			return out
+	return []
+
+
+static func ellipse_points(centre: Vector2, major: Vector2, minor: Vector2, from_t: float, to_t: float, segments: int) -> Array:
+	## Points of an ellipse (centre, the end of the major axis, the end of the minor axis) from parameter `from_t` to `to_t` (radians).
+	var a_vec := major - centre
+	var b_vec := minor - centre
+	var out: Array = []
+	for i in segments + 1:
+		var t := from_t + (to_t - from_t) * float(i) / float(segments)
+		out.append(centre + a_vec * cos(t) + b_vec * sin(t))
+	return out
+
+
+static func ellipse_param(centre: Vector2, major: Vector2, minor: Vector2, p: Vector2) -> float:
+	## The parameter t (radians) at which the ellipse passes the point p (or the point's direction).
+	var a_vec := major - centre
+	var b_vec := minor - centre
+	var rel := p - centre
+	var u := rel.dot(a_vec.normalized()) / maxf(a_vec.length(), 0.000001)
+	var v := rel.dot(b_vec.normalized()) / maxf(b_vec.length(), 0.000001)
+	return atan2(v, u)
+
+
+func is_reference(id: String) -> bool:
+	## A reference helper (see reference_ids): the sketch's plumbing to the part's own geometry, not the user's.
+	return reference_ids.has(id)
 
 
 func profile_ok() -> bool:
@@ -271,11 +372,206 @@ func tap(pick: Dictionary) -> Dictionary:
 		"arc": result = await _make_arc(taps)
 		"polygon": result = await _make_polygon(taps)
 		"slot": result = await _make_slot(taps)
+		"ellipse": result = await _make_ellipse(taps)
+		"ellipse_arc": result = await _make_ellipse_arc(taps)
+		"text": result = await _make_text(taps)
 		_: result = {"ok": false, "message": ""}
 	busy = false
 	if not result["ok"] and str(result["message"]) != "":
 		status.emit(str(result["message"]))
 	return {"ok": bool(result["ok"]), "done": bool(result["ok"]), "message": str(result["message"])}
+
+
+# --- Trim and Offset (picked entities, not taps) ----------------------------------------------------------
+
+func trim_at(entity: Dictionary, uv: Vector2) -> Dictionary:
+	## Trim / Extend the entity under the laser, at the spot tapped. A line: the part between the two crossings around the tap is cut away (split-trim);
+	## when the tap is not bracketed by two crossings, the nearer end is moved to the next crossing (trim / extend). A circle: the tapped segment between
+	## crossings goes and an arc is left. An arc: its nearer end is moved. NOT undoable here (it moves or replaces what is already drawn).
+	## {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	busy = true
+	var kind := str(entity.get("kind", ""))
+	var id := str(entity.get("id", ""))
+	var message := ""
+	var ok := false
+	if kind == "line" and lines.has(id):
+		var split: Dictionary = await _post(SKETCH + sketch_id + "/lines/" + id + "/split-trim", {"click_x": uv.x, "click_y": uv.y})
+		if split["ok"]:
+			ok = true
+		else:
+			var l: Dictionary = lines[id]
+			var near: String = l["a"] if uv.distance_to(points.get(l["a"], uv)) <= uv.distance_to(points.get(l["b"], uv)) else l["b"]
+			var trimmed: Dictionary = await _post(SKETCH + sketch_id + "/lines/" + id + "/trim", {"moved_point_id": near})
+			ok = bool(trimmed["ok"])
+			message = "" if ok else _trim_reason(trimmed)
+	elif kind == "circle" and circles.has(id):
+		var cut: Dictionary = await _post(SKETCH + sketch_id + "/circles/" + id + "/trim", {"click_x": uv.x, "click_y": uv.y})
+		ok = bool(cut["ok"])
+		message = "" if ok else _trim_reason(cut)
+	elif kind == "arc" and arcs.has(id):
+		var a: Dictionary = arcs[id]
+		var end_id: String = a["s"] if uv.distance_to(points.get(a["s"], uv)) <= uv.distance_to(points.get(a["e"], uv)) else a["e"]
+		var moved: Dictionary = await _post(SKETCH + sketch_id + "/arcs/" + id + "/trim", {"moved_point_id": end_id})
+		ok = bool(moved["ok"])
+		message = "" if ok else _trim_reason(moved)
+	else:
+		message = "Aim at a line, circle or arc to trim."
+	busy = false
+	if ok:
+		await refresh(true)
+		message = "Trimmed. (Trim can't be undone here yet: draw it again if it was wrong.)"
+	if message != "":
+		status.emit(message)
+	return {"ok": ok, "message": message}
+
+
+func _trim_reason(r: Dictionary) -> String:
+	if int(r.get("code", 0)) == 422:
+		return "There is nothing to trim it to there: it needs another line or curve crossing it."
+	return "Couldn't trim that: %s" % str(r.get("error", ""))
+
+
+func offset_entity(entity: Dictionary, distance: float) -> Dictionary:
+	## A line or arc copied `distance` mm to one side (a negative distance the other). One step on Undo. {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	var kind := str(entity.get("kind", ""))
+	var id := str(entity.get("id", ""))
+	if kind != "line" and kind != "arc":
+		return {"ok": false, "message": "Offset takes a line or an arc."}
+	if is_zero_approx(distance):
+		return {"ok": false, "message": "The offset can't be zero."}
+	busy = true
+	var route := "/lines/%s/offset" % id if kind == "line" else "/arcs/%s/offset" % id
+	var r: Dictionary = await _post(SKETCH + sketch_id + route, {"distance": distance, "construction": false})
+	busy = false
+	if not r["ok"]:
+		var message := "Couldn't offset that: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	var made: Dictionary = (r["json"] as Dictionary).get("line", (r["json"] as Dictionary).get("arc", {}))
+	var made_id := str(made.get("id", ""))
+	await _finish("offset", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + ("/lines/" if kind == "line" else "/arcs/") + made_id]])
+	return {"ok": true, "message": ""}
+
+
+func _ellipse_frame(taps: Array, created: Array) -> Dictionary:
+	## The centre and major-axis points of the first two taps and the minor radius from the third (its distance off the major axis), or {}.
+	var centre_id := await _point(taps[0], created)
+	var major_id := await _point(taps[1], created)
+	if centre_id == "" or major_id == "":
+		return {}
+	var c: Vector2 = points.get(centre_id, taps[0]["uv"])
+	var m: Vector2 = points.get(major_id, taps[1]["uv"])
+	var a := c.distance_to(m)
+	if a < 0.001:
+		return {}
+	var dir := (m - c) / a
+	var b: float = absf(((taps[2]["uv"] as Vector2) - c).cross(dir))
+	return {"centre": centre_id, "major": major_id, "a": a, "b": clampf(b, a * 0.02, a), "c": c, "m": m, "dir": dir}
+
+
+func _make_ellipse(taps: Array) -> Dictionary:
+	var created: Array = []
+	var f := await _ellipse_frame(taps, created)
+	if f.is_empty():
+		await _cleanup(created)
+		return {"ok": false, "message": "Pick the centre, the end of the long axis, then a point for the short radius."}
+	var r := await _post(SKETCH + sketch_id + "/ellipses", {"center_point_id": f["centre"], "major_point_id": f["major"], "minor_radius": f["b"]})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that ellipse: %s" % str(r["error"])}
+	return await _finish("ellipse", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/ellipses/" + str(r["json"]["id"])]])
+
+
+func _make_ellipse_arc(taps: Array) -> Dictionary:
+	var created: Array = []
+	var f := await _ellipse_frame(taps, created)
+	if f.is_empty():
+		await _cleanup(created)
+		return {"ok": false, "message": "Pick the centre, the end of the long axis, a point for the short radius, then the start and the end."}
+	var c: Vector2 = f["c"]
+	var dir: Vector2 = f["dir"]
+	var minor_dir := Vector2(-dir.y, dir.x)
+	var minor_pt: Vector2 = c + minor_dir * float(f["b"])
+	var t0 := ellipse_param(c, f["m"], minor_pt, taps[3]["uv"])
+	var t1 := ellipse_param(c, f["m"], minor_pt, taps[4]["uv"])
+	var r := await _post(SKETCH + sketch_id + "/ellipse-arcs", {"center_point_id": f["centre"], "major_point_id": f["major"], "minor_radius": f["b"], "start_angle": fposmod(t0, TAU), "end_angle": fposmod(t1, TAU)})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that partial ellipse: %s" % str(r["error"])}
+	return await _finish("ellipse arc", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/ellipse-arcs/" + str(r["json"]["id"])]])
+
+
+func finish_spline() -> Dictionary:
+	## Makes the spline through the points tapped so far (two or more, in order). {ok, message}.
+	if busy or tool != "spline":
+		return {"ok": false, "message": ""}
+	if pending.size() < 2:
+		var message := "A spline needs at least two points."
+		status.emit(message)
+		return {"ok": false, "message": message}
+	busy = true
+	var taps := pending.duplicate()
+	pending.clear()
+	var created: Array = []
+	var ids: Array = []
+	for t in taps:
+		var id := await _point(t, created)
+		if id == "":
+			await _cleanup(created)
+			busy = false
+			return {"ok": false, "message": "Couldn't place those points."}
+		ids.append(id)
+	var r := await _post(SKETCH + sketch_id + "/splines", {"through_point_ids": ids})
+	var result: Dictionary
+	if not r["ok"]:
+		await _cleanup(created)
+		result = {"ok": false, "message": "Couldn't make that spline: %s" % str(r["error"])}
+		status.emit(str(result["message"]))
+	else:
+		result = await _finish("spline", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/splines/" + str(r["json"]["id"])]])
+	busy = false
+	return result
+
+
+func _make_text(taps: Array) -> Dictionary:
+	if text_content.strip_edges() == "":
+		return {"ok": false, "message": "Type the text first (the Text button), then place it."}
+	var created: Array = []
+	var anchor := await _point(taps[0], created)
+	if anchor == "":
+		return {"ok": false, "message": "Couldn't place the text there."}
+	var r := await _post(SKETCH + sketch_id + "/texts", {"content": text_content, "anchor_point_id": anchor, "font": text_font, "size": text_size, "rotation_degrees": text_rotation})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make that text: %s" % str(r["error"])}
+	return await _finish("text", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/texts/" + str(r["json"]["id"])]])
+
+
+func _fetch_text_outlines() -> void:
+	## The glyph outlines of every text, from the backend (it owns the fonts), once per content / font / size / rotation / place.
+	for id in texts:
+		var t: Dictionary = texts[id]
+		var key := "%s|%s|%s|%s|%s" % [t["content"], t["font"], t["size"], t["rot"], str(points.get(t["anchor"], Vector2.ZERO))]
+		if _text_keys.get(id, "") == key and text_outlines.has(id):
+			continue
+		var r: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id + "/texts/" + id + "/preview", null)
+		if not r["ok"] or not (r["json"] is Dictionary):
+			continue
+		var polys: Array = []
+		for contour in (r["json"] as Dictionary).get("contours", []):
+			polys.append((contour["outer"] as Array).map(func(p): return Vector2(float(p[0]), float(p[1]))))
+			for hole in contour.get("holes", []):
+				polys.append((hole as Array).map(func(p): return Vector2(float(p[0]), float(p[1]))))
+		text_outlines[id] = polys
+		_text_keys[id] = key
+	for id in text_outlines.keys():
+		if not texts.has(id):
+			text_outlines.erase(id)
+			_text_keys.erase(id)
 
 
 func _post(path: String, body) -> Dictionary:
@@ -447,32 +743,23 @@ func _make_polygon(taps: Array) -> Dictionary:
 # --- The part's own geometry as references ----------------------------------------------------
 
 func ensure_reference(ref: Dictionary) -> Dictionary:
-	## Makes a part vertex or straight edge usable in this sketch and returns {ok, id, message}: a vertex becomes a pinned point that follows the
-	## part (the backend re-resolves it whenever the part changes, and flags the sketch if it can't), an edge becomes a pinned construction line
-	## between two such points. Idempotent: asking again for the same vertex gives the same point, and an edge whose two points are already joined
-	## by a line gives that line. Nothing for the user to convert, fix or mark as construction.
+	## Makes a part vertex, edge, hole or face usable in this sketch and returns {ok, id, message}: a vertex becomes a pinned point that follows the
+	## part (the backend re-resolves it whenever the part changes, and flags the sketch if it can't), an edge a pinned construction line between two such
+	## points, a hole's rim a pinned circle with a live centre, a face (standing square to the sketch, or round with its axis square to it) a pinned
+	## line or a live centre. Everything made is flagged as a reference helper by the backend (`reference: true`), so it is drawn quietly, never offered for
+	## selection or deletion, and cleaned up when nothing depends on it. Every route is idempotent: asking again gives the same thing. Nothing for the
+	## user to convert, fix or mark as construction, and a failure leaves nothing half made (one call each).
 	if not references_ok:
 		return {"ok": false, "id": "", "message": "This sketch can't use the part's own geometry (the part shown isn't the one the backend sketches on)."}
 	match str(ref.get("kind", "")):
 		"vertex":
 			return await _ensure_vertex(str(ref["body"]), int(ref["index"]))
 		"edge":
-			var a := await _ensure_vertex(str(ref["body"]), int(ref["a_vertex"]))
-			if not a["ok"]:
-				return a
-			var b := await _ensure_vertex(str(ref["body"]), int(ref["b_vertex"]))
-			if not b["ok"]:
-				return b
-			for id in lines:
-				var l: Dictionary = lines[id]
-				if (l["a"] == a["id"] and l["b"] == b["id"]) or (l["a"] == b["id"] and l["b"] == a["id"]):
-					return {"ok": true, "id": id, "message": ""}
-			var made := await _post(SKETCH + sketch_id + "/lines", {"start_point_id": a["id"], "end_point_id": b["id"], "construction": true})
-			if not made["ok"]:
-				return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
-			lines[str(made["json"]["id"])] = {"a": a["id"], "b": b["id"], "construction": true}
-			changed.emit()
-			return {"ok": true, "id": str(made["json"]["id"]), "message": ""}
+			return await _ensure_edge_line(ref)
+		"face_line":
+			return await _ensure_face(str(ref["body"]), int(ref["index"]))
+		"face_axis":
+			return await _ensure_face(str(ref["body"]), int(ref["index"]))
 		"circle_centre":
 			var on_circle := await _ensure_circle(str(ref["body"]), int(ref["index"]))
 			if not on_circle["ok"]:
@@ -480,21 +767,113 @@ func ensure_reference(ref: Dictionary) -> Dictionary:
 			return {"ok": true, "id": on_circle["centre"], "message": ""}
 		"circle_edge":
 			return await _ensure_circle(str(ref["body"]), int(ref["index"]))
+		"ellipse_edge":
+			return await _ensure_ellipse(str(ref["body"]), int(ref["index"]))
 	return {"ok": false, "id": "", "message": ""}
+
+
+func _ensure_ellipse(body: String, edge_index: int) -> Dictionary:
+	## A full elliptical edge of the part lying in the sketch plane as a pinned reference ellipse (convert-entities/edge, idempotent). Its centre is a plain
+	## pinned point (the backend has no live reference for an ellipse's centre yet: it does not follow an upstream change, see docs/design-table-gaps.md).
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
+	var json: Dictionary = made["json"]
+	if not (json.get("ellipse") is Dictionary):
+		await refresh(true)
+		return {"ok": false, "id": "", "message": "That edge isn't an ellipse in this sketch's plane."}
+	await refresh(true) # the ellipse's five points and its axis lines come in with one read
+	return {"ok": true, "id": str(json["ellipse"]["id"]), "message": ""}
+
+
+func _take_in_point(json: Dictionary) -> void:
+	## A point the backend just answered with (a convert route's response): into the local picture at once, pinned and flagged as a helper.
+	var id := str(json["id"])
+	points[id] = Vector2(float(json["x"]), float(json["y"]))
+	point_locked[id] = true
+	if bool(json.get("is_reference", false)):
+		reference_ids[id] = true
+
+
+func _ensure_edge_line(ref: Dictionary) -> Dictionary:
+	## A straight edge of the part as a pinned construction line (convert-entities/edge: two live corner references and the line between them, reused if it
+	## is there). A line already in the picture between the pinned points of its two corners is the answer without asking. Not a line after all (the edge is
+	## round in this plane) is refused: the call is one, so nothing is left half made.
+	var body := str(ref["body"])
+	var key_a := "%s:%d" % [body, int(ref.get("a_vertex", -1))]
+	var key_b := "%s:%d" % [body, int(ref.get("b_vertex", -1))]
+	if _ref_points.has(key_a) and _ref_points.has(key_b):
+		for id in lines:
+			var l: Dictionary = lines[id]
+			if (l["a"] == _ref_points[key_a] and l["b"] == _ref_points[key_b]) or (l["a"] == _ref_points[key_b] and l["b"] == _ref_points[key_a]):
+				return {"ok": true, "id": id, "message": ""}
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": int(ref["index"]), "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that edge: %s" % str(made["error"])}
+	var json: Dictionary = made["json"]
+	if not (json.get("line") is Dictionary):
+		await refresh(true) # a round edge came back as a circle or arc: not what was asked for, and the backend made it, so read it in (it is a flagged helper, quiet, and goes with its last user)
+		return {"ok": false, "id": "", "message": "That edge isn't straight in this sketch's plane."}
+	_take_in_point(json["start_point"])
+	_take_in_point(json["end_point"])
+	for end in [json["start_point"], json["end_point"]]:
+		var at := Vector2(float(end["x"]), float(end["y"]))
+		if ref.has("a") and at.distance_to(ref["a"]) < 0.01:
+			_ref_points[key_a] = str(end["id"])
+		elif ref.has("b") and at.distance_to(ref["b"]) < 0.01:
+			_ref_points[key_b] = str(end["id"])
+	var line: Dictionary = json["line"]
+	var id := str(line["id"])
+	lines[id] = {"a": str(line["start_point_id"]), "b": str(line["end_point_id"]), "construction": true}
+	if bool(line.get("is_reference", false)):
+		reference_ids[id] = true
+	changed.emit()
+	return {"ok": true, "id": id, "message": ""}
+
+
+func _ensure_face(body: String, face_index: int) -> Dictionary:
+	## A face of the part as something to point at: a flat face standing square to the sketch becomes a pinned line, a round face with its axis square to it
+	## a live centre (convert-entities/face). {ok, id (the line, or the centre point), kind ("line" | "centre"), centre?, message}.
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/face" % [owner_part_id, feature_id], {"body_id": body, "face_index": face_index, "construction": true, "reference": true})
+	if not made["ok"]:
+		return {"ok": false, "id": "", "message": "Couldn't use that face: %s" % _face_reason(str(made["error"]))}
+	var json: Dictionary = made["json"]
+	if str(json.get("kind", "")) == "centre":
+		_take_in_point(json["center_point"])
+		changed.emit()
+		return {"ok": true, "id": str(json["center_point"]["id"]), "kind": "point", "message": ""}
+	_take_in_point(json["start_point"])
+	_take_in_point(json["end_point"])
+	var line: Dictionary = json["line"]
+	var id := str(line["id"])
+	lines[id] = {"a": str(line["start_point_id"]), "b": str(line["end_point_id"]), "construction": true}
+	if bool(line.get("is_reference", false)):
+		reference_ids[id] = true
+	changed.emit()
+	return {"ok": true, "id": id, "kind": "line", "message": ""}
+
+
+static func _face_reason(error: String) -> String:
+	for known in {"face_not_perpendicular": "it isn't square to the sketch plane.", "face_axis_not_perpendicular": "its axis isn't square to the sketch plane.", "unsupported_face": "that kind of face can't be used.", "face_has_no_circular_edge": "it has no round edge to find its axis from.", "degenerate_face": "it has no width seen from here."}.keys():
+		if error.contains(known):
+			return {"face_not_perpendicular": "it isn't square to the sketch plane.", "face_axis_not_perpendicular": "its axis isn't square to the sketch plane.", "unsupported_face": "that kind of face can't be used.", "face_has_no_circular_edge": "it has no round edge to find its axis from.", "degenerate_face": "it has no width seen from here."}[known]
+	return error
 
 
 func _ensure_circle(body: String, edge_index: int) -> Dictionary:
 	## A circular edge of the part in the sketch plane (a hole's or boss's rim, or an arc of one) as a pinned construction circle / arc in the sketch, and its
 	## centre as a pinned point: convert-entities/edge does both (the centre is a live reference of kind "circle_centre", so it follows the hole when the part
-	## changes and is flagged when the hole is gone). Not idempotent on the backend (each call adds a circle), so the answer is remembered, and read back from
-	## the sketch's references when it is reopened (load_references). {ok, id (the circle / arc), kind, centre (its centre point), message}.
+	## changes and is flagged when the hole is gone). The route is idempotent per edge (a second call answers with the circle already there), so asking again
+	## is the way to find it; it is only read back when the circle is not yet in this session's picture. {ok, id (the circle / arc), kind, centre (its centre point), message}.
 	var key := "%s:c%d" % [body, edge_index]
-	if _ref_circles.has(key):
-		var known: Dictionary = _ref_circles[key]
-		if circles.has(known["id"]) or arcs.has(known["id"]):
-			return {"ok": true, "id": known["id"], "kind": known["kind"], "centre": known["centre"], "message": ""}
-		_ref_circles.erase(key) # taken back since
-	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true})
+	if _ref_points.has(key) and points.has(_ref_points[key]):
+		for cid in circles: # already here: the shape on that pinned centre (nothing remembered about it, it is read off the picture)
+			if circles[cid]["c"] == _ref_points[key]:
+				return {"ok": true, "id": cid, "kind": "circle", "centre": _ref_points[key], "message": ""}
+		for aid in arcs:
+			if arcs[aid]["c"] == _ref_points[key]:
+				return {"ok": true, "id": aid, "kind": "arc", "centre": _ref_points[key], "message": ""}
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/edge" % [owner_part_id, feature_id], {"body_id": body, "edge_index": edge_index, "construction": true, "reference": true})
 	if not made["ok"]:
 		return {"ok": false, "id": "", "message": "Couldn't use that round edge of the part: %s" % str(made["error"])}
 	var json: Dictionary = made["json"]
@@ -506,9 +885,10 @@ func _ensure_circle(body: String, edge_index: int) -> Dictionary:
 		return {"ok": false, "id": "", "message": "That edge isn't a circle in the sketch's plane, so it can't be used here."}
 	var centre := str((json[kind] as Dictionary)["center_point_id"])
 	_ref_points[key] = centre
-	_ref_circles[key] = {"id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre}
-	await refresh(true) # the circle's own points and the circle itself come in with the next read
-	return {"ok": true, "id": str((json[kind] as Dictionary)["id"]), "kind": kind, "centre": centre, "message": ""}
+	var shape_id := str((json[kind] as Dictionary)["id"])
+	if not circles.has(shape_id) and not arcs.has(shape_id):
+		await refresh(true) # the circle's own points and the circle itself come in with the next read
+	return {"ok": true, "id": shape_id, "kind": kind, "centre": centre, "message": ""}
 
 
 func _point_on_reference(pick: Dictionary, created: Array) -> String:
@@ -628,7 +1008,6 @@ func reattach(point_id: String, ref: Dictionary) -> Dictionary:
 		status.emit(message)
 		return {"ok": false, "message": message}
 	_ref_points.clear()
-	_ref_circles.clear()
 	await refresh(true)
 	await load_references()
 	busy = false
@@ -667,12 +1046,6 @@ func load_references() -> void:
 		if str(row.get("kind", "vertex")) == "circle_centre":
 			var key := "%s:c%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]
 			_ref_points[key] = point_id
-			for cid in circles:
-				if circles[cid]["c"] == point_id:
-					_ref_circles[key] = {"id": cid, "kind": "circle", "centre": point_id}
-			for aid in arcs:
-				if arcs[aid]["c"] == point_id:
-					_ref_circles[key] = {"id": aid, "kind": "arc", "centre": point_id}
 		else:
 			_ref_points["%s:%d" % [str(row.get("body_id", "")), int(row.get("vertex_index", -1))]] = point_id
 
@@ -681,12 +1054,11 @@ func _ensure_vertex(body: String, index: int) -> Dictionary:
 	var key := "%s:%d" % [body, index]
 	if _ref_points.has(key) and points.has(_ref_points[key]):
 		return {"ok": true, "id": _ref_points[key], "message": ""}
-	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/vertex" % [owner_part_id, feature_id], {"body_id": body, "vertex_index": index})
+	var made := await _post("/document/parts/%s/features/sketch/%s/convert-entities/vertex" % [owner_part_id, feature_id], {"body_id": body, "vertex_index": index, "reference": true})
 	if not made["ok"]:
 		return {"ok": false, "id": "", "message": "Couldn't use that corner of the part: %s" % str(made["error"])}
 	var id := str(made["json"]["id"])
-	points[id] = Vector2(float(made["json"]["x"]), float(made["json"]["y"]))
-	point_locked[id] = true
+	_take_in_point(made["json"])
 	_ref_points[key] = id
 	changed.emit()
 	return {"ok": true, "id": id, "message": ""}
@@ -705,12 +1077,14 @@ func nearest_point(uv: Vector2, radius: float) -> String:
 	return best
 
 
-func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line", "circle", "arc"]) -> Dictionary:
+func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]) -> Dictionary:
 	## The nearest thing to a sheet position: {kind, id, distance} or {}. A point beats a line it's on.
 	var best := {}
 	var best_d := radius
 	if "point" in kinds:
 		for id in points:
+			if reference_ids.has(id):
+				continue # the sketch's plumbing to the part: picked through the part's own corner / edge / hole (part_references.gd), never as itself
 			var d := uv.distance_to(points[id])
 			if d <= best_d:
 				best_d = d
@@ -719,7 +1093,7 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "line" in kinds and not point_hit:
 		for id in lines:
 			var l: Dictionary = lines[id]
-			if not points.has(l["a"]) or not points.has(l["b"]):
+			if reference_ids.has(id) or not points.has(l["a"]) or not points.has(l["b"]):
 				continue
 			var d := uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, points[l["a"]], points[l["b"]]))
 			if d <= best_d:
@@ -728,7 +1102,7 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "circle" in kinds and not point_hit:
 		for id in circles:
 			var c: Dictionary = circles[id]
-			if not points.has(c["c"]) or not points.has(c["p"]):
+			if reference_ids.has(id) or not points.has(c["c"]) or not points.has(c["p"]):
 				continue
 			var d := absf(uv.distance_to(points[c["c"]]) - points[c["c"]].distance_to(points[c["p"]]))
 			if d <= best_d:
@@ -737,12 +1111,36 @@ func nearest_entity(uv: Vector2, radius: float, kinds: Array = ["point", "line",
 	if "arc" in kinds and not point_hit:
 		for id in arcs:
 			var a: Dictionary = arcs[id]
-			if not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
+			if reference_ids.has(id) or not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
 				continue
 			var d := _distance_to_arc(uv, points[a["c"]], points[a["s"]], points[a["e"]])
 			if d <= best_d:
 				best_d = d
 				best = {"kind": "arc", "id": id, "distance": d}
+	for kind in CURVE_KINDS:
+		if kind in kinds and not point_hit:
+			var source: Dictionary = {"ellipse": ellipses, "ellipse_arc": ellipse_arcs, "spline": splines}[kind]
+			for id in source:
+				if reference_ids.has(id):
+					continue # the part's own elliptical edge: picked through the part (part_references.gd), never as itself
+				var outline: Array = outline_of(kind, id)
+				for i in outline.size() - 1:
+					var d := uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, outline[i], outline[i + 1]))
+					if d <= best_d:
+						best_d = d
+						best = {"kind": kind, "id": id, "distance": d}
+	if "text" in kinds and not point_hit:
+		for id in texts:
+			var t: Dictionary = texts[id]
+			var d := INF
+			for poly in text_outlines.get(id, []):
+				for i in (poly as Array).size():
+					d = minf(d, uv.distance_to(Geometry2D.get_closest_point_to_segment(uv, poly[i], poly[(i + 1) % poly.size()])))
+			if d == INF and points.has(t["anchor"]):
+				d = uv.distance_to(points[t["anchor"]])
+			if d <= best_d:
+				best_d = d
+				best = {"kind": "text", "id": id, "distance": d}
 	return best
 
 
@@ -999,6 +1397,14 @@ func delete_selection() -> Dictionary:
 				paths.append(SKETCH + sketch_id + "/circles/" + id)
 			"arc":
 				paths.append(SKETCH + sketch_id + "/arcs/" + id)
+			"ellipse":
+				paths.append(SKETCH + sketch_id + "/ellipses/" + id)
+			"ellipse_arc":
+				paths.append(SKETCH + sketch_id + "/ellipse-arcs/" + id)
+			"spline":
+				paths.append(SKETCH + sketch_id + "/splines/" + id)
+			"text":
+				paths.append(SKETCH + sketch_id + "/texts/" + id)
 	for e in selection: # points last: deleting a line may already have taken one
 		if str(e["kind"]) == "point" and not is_origin(str(e["id"])):
 			paths.append(SKETCH + sketch_id + "/points/" + str(e["id"]))
@@ -1043,6 +1449,18 @@ func toggle_construction() -> Dictionary:
 			"arc":
 				path = SKETCH + sketch_id + "/arcs/" + id
 				was = bool(arcs.get(id, {}).get("construction", false))
+			"ellipse":
+				path = SKETCH + sketch_id + "/ellipses/" + id
+				was = bool(ellipses.get(id, {}).get("construction", false))
+			"ellipse_arc":
+				path = SKETCH + sketch_id + "/ellipse-arcs/" + id
+				was = bool(ellipse_arcs.get(id, {}).get("construction", false))
+			"spline":
+				path = SKETCH + sketch_id + "/splines/" + id
+				was = bool(splines.get(id, {}).get("construction", false))
+			"text":
+				path = SKETCH + sketch_id + "/texts/" + id
+				was = bool(texts.get(id, {}).get("construction", false))
 		if path != "":
 			requests.append([path, not make_solid])
 			calls.append([HTTPClient.METHOD_PATCH, path, {"construction": was}])
@@ -1069,7 +1487,7 @@ func _select_for_dimension(entity: Dictionary) -> Dictionary:
 	var kind := str(entity["kind"])
 	if selection.size() >= 2:
 		selection.clear()
-	if kind == "circle" or kind == "arc":
+	if kind == "circle" or kind == "arc" or kind == "ellipse":
 		selection.clear() # a round thing is dimensioned on its own
 	elif not selection.is_empty() and str(selection[0]["kind"]) in ["circle", "arc"]:
 		selection.clear()
@@ -1100,7 +1518,7 @@ func _ghosts_for(picked: Array) -> Array:
 	## a line -> their distance; two lines -> a distance if parallel, else an angle. Each: {key, label, unit,
 	## value, uv (where the label floats), apply: {patch_id?, create?, factor}}. When everything picked is already pinned (pieces of the part, the origin,
 	## or Fixed) nothing a dimension could say would move anything, so each candidate is a DRIVEN (reference-only) one: `driven` true, it only measures,
-	## and keeping it (keep_driven) adds no constraint.
+	## and keeping it (keep_driven) adds no constraint: it becomes a persistent reference dimension on the backend.
 	var out: Array = _ghosts_raw(picked)
 	if not out.is_empty() and _all_pinned(picked):
 		for g in out:
@@ -1122,6 +1540,18 @@ func _ghosts_raw(picked: Array) -> Array:
 					var d: float = points[pts[0]].distance_to(points[pts[1]])
 					out.append(_ghost("length", "Length", "mm", d, (points[pts[0]] + points[pts[1]]) * 0.5,
 						_distance_apply(pts[0], pts[1], "linear"), {"kind": "linear", "a": points[pts[0]], "b": points[pts[1]]}))
+			"ellipse":
+				var el: Dictionary = ellipses.get(first["id"], {})
+				if points.has(el.get("c", "")) and points.has(el.get("ma", "")) and points.has(el.get("mi", "")):
+					var cc: Vector2 = points[el["c"]]
+					var ra: float = cc.distance_to(points[el["ma"]])
+					var rb: float = cc.distance_to(points[el["mi"]])
+					if is_reference(str(first["id"])):
+						pass # a pinned reference ellipse: its size is the part's, there is nothing to dimension
+					elif str(el["km"]) != "":
+						out.append(_ghost("major_radius", "Major radius", "mm", ra, cc + (points[el["ma"]] - cc) * 0.5, {"patch_id": el["km"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["ma"]]}))
+					if str(el["kn"]) != "":
+						out.append(_ghost("minor_radius", "Minor radius", "mm", rb, cc + (points[el["mi"]] - cc) * 0.5, {"patch_id": el["kn"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["mi"]]}))
 			"circle", "arc":
 				var c: Dictionary = circles.get(first["id"], arcs.get(first["id"], {}))
 				var rim: String = c.get("p", c.get("s", ""))
@@ -1313,22 +1743,60 @@ func dimension_items() -> Array:
 
 
 func driven_items() -> Array:
-	## The reference dimensions kept between pinned things, measured now from where those things are: [{id, spec, text: "(12.5)", driven: true}]. One whose
-	## entities have gone is dropped.
+	## The reference dimensions the backend holds for this sketch, as drawn items: [{id, spec, text: "(12.5)", driven: true}]. The number is the backend's own
+	## (calculated from where the things are now, so it follows the part); one whose entities are not in the picture is left out.
 	var out: Array = []
-	var keep: Array = []
-	for d in driven:
-		var g := {}
-		for candidate in _ghosts_raw(d["selection"]):
-			if candidate["key"] == d["key"]:
-				g = candidate
-		if g.is_empty() or (g.get("spec", {}) as Dictionary).is_empty():
+	for d in ref_dims:
+		var spec := _ref_dim_spec(d)
+		if spec.is_empty() or d.get("value") == null:
 			continue
-		keep.append(d)
-		out.append({"id": d["id"], "spec": g["spec"], "text": "(%s)" % dimension_text(_dimension_kind(str(g["key"])), float(g["value"])), "driven": true})
-	if keep.size() != driven.size():
-		driven = keep
+		out.append({"id": str(d["id"]), "spec": spec, "text": "(%s)" % dimension_text(_dimension_kind(_ref_dim_key(d)), float(d["value"])), "driven": true})
 	return out
+
+
+static func _ref_dim_key(d: Dictionary) -> String:
+	## The ghost key a stored reference dimension is laid out like (radius, diameter, angle, linear...): what dimension_layout draws it as.
+	var types: Array = (d.get("refs", []) as Array).map(func(r): return str(r.get("type", "")))
+	match str(d.get("kind", "")):
+		"radius", "diameter", "angle":
+			return str(d["kind"])
+		"horizontal", "vertical":
+			return str(d["kind"])
+		"distance":
+			if types == ["line"]:
+				return "length"
+			if types == ["point", "point"]:
+				return "linear"
+			if types == ["line", "line"]:
+				return "line_distance"
+			return "point_line"
+	return "linear"
+
+
+func _ref_dim_spec(d: Dictionary) -> Dictionary:
+	## How dimension_layout draws a stored reference dimension: the same spec a ghost of the same entities carries. {} if what it measures is not here.
+	var refs: Array = d.get("refs", [])
+	var selected: Array = refs.map(func(r): return {"kind": str(r["type"]), "id": str(r["id"])})
+	var key := _ref_dim_key(d)
+	for g in _ghosts_raw(selected):
+		if g["key"] == key and not (g.get("spec", {}) as Dictionary).is_empty():
+			return g["spec"]
+	if refs.size() == 1 and str(refs[0]["type"]) == "line" and str(d.get("kind", "")) in ["horizontal", "vertical"]:
+		var ends := _line_points(str(refs[0]["id"])) # a line's own horizontal / vertical extent: not a candidate VR offers, but the flat app can make one
+		if points.has(ends[0]) and points.has(ends[1]):
+			return {"kind": str(d["kind"]), "a": points[ends[0]], "b": points[ends[1]]}
+	return {}
+
+
+static func _ref_dim_request(selected: Array, key: String) -> Dictionary:
+	## {kind, refs} for the backend's reference-dimensions route, from what the Dimension tool picked and the candidate the user kept ({} if it is not one).
+	var refs: Array = selected.map(func(e): return {"type": str(e["kind"]), "id": str(e["id"])})
+	match key:
+		"length", "linear", "line_distance", "point_line":
+			return {"kind": "distance", "refs": refs}
+		"horizontal", "vertical", "radius", "diameter", "angle":
+			return {"kind": key, "refs": refs}
+	return {}
 
 
 static func _dimension_kind(key: String) -> String:
@@ -1336,18 +1804,25 @@ static func _dimension_kind(key: String) -> String:
 
 
 func keep_driven(key: String) -> Dictionary:
-	## The user pointed at a driven candidate: keep it as a reference dimension. It measures the two pinned things and is drawn in brackets; nothing is
-	## sent to the backend (it has no driven dimension), so it lasts as long as the sketch is open. Undo takes it back.
+	## The user pointed at a driven candidate: keep it as a reference dimension. The backend stores it (POST .../reference-dimensions: it measures the pinned
+	## things and never reaches the solver), so it lasts: closing and reopening the sketch, saving and opening the file, the flat app. It is drawn in brackets and
+	## follows the part. Undo deletes it (and the backend frees a helper only it kept). A refusal (the backend's reason) leaves nothing.
 	var g := ghost(key)
 	if g.is_empty() or not bool(g.get("driven", false)):
 		return {"ok": false, "message": ""}
-	_driven_n += 1
-	var id := "driven%d" % _driven_n
-	driven.append({"id": id, "selection": selection.duplicate(true), "key": key})
-	_undo.append({"label": "reference dimension", "calls": [], "driven_id": id})
+	var request := _ref_dim_request(selection, key)
+	if request.is_empty():
+		return {"ok": false, "message": ""}
+	var made := await _post(SKETCH + sketch_id + "/reference-dimensions", request)
+	if not made["ok"]:
+		var message := "Couldn't keep that dimension: %s" % str(made["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	var id := str((made["json"] as Dictionary)["id"])
+	_undo.append({"label": "reference dimension", "calls": [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/reference-dimensions/" + id]]})
 	selection.clear()
 	ghosts.clear()
-	changed.emit()
+	await refresh(false)
 	return {"ok": true, "message": ""}
 
 
@@ -1376,7 +1851,7 @@ func confirm_ghost(key: String, value: float) -> Dictionary:
 	if g.is_empty():
 		return {"ok": false, "message": ""}
 	if bool(g.get("driven", false)):
-		return keep_driven(key) # a reference dimension has no value to type: it measures
+		return await keep_driven(key) # a reference dimension has no value to type: it measures
 	if value <= 0.0:
 		var msg := "A dimension has to be bigger than zero."
 		status.emit(msg)
@@ -1434,8 +1909,6 @@ func undo() -> bool:
 	var step: Dictionary = _undo.pop_back()
 	var was_busy := busy
 	busy = true
-	if step.has("driven_id"):
-		driven = driven.filter(func(d) -> bool: return d["id"] != step["driven_id"])
 	for entry in step["calls"]:
 		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
 	pending.clear()

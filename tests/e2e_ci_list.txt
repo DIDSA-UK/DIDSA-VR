@@ -2,6 +2,8 @@
 # (they share one backend and a document session each; never in parallel). Add a test here once it is stable.
 e2e_references
 e2e_references_more
+e2e_references_face
+e2e_reference_dimensions
 e2e_references_lost
 e2e_references_history
 e2e_build_tree
@@ -11,3 +13,12 @@ e2e_sketch_select
 e2e_new_part
 e2e_design_table
 e2e_design_table_mates
+e2e_references_fix_feature
+e2e_preview
+e2e_create_plane
+e2e_loft_sweep
+e2e_body_features
+e2e_trim_offset
+e2e_modify
+e2e_curves
+e2e_ellipse_reference

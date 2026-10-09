@@ -30,24 +30,33 @@ const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const SketchClip := preload("res://scripts/design_table/sketch_clip.gd")
+const SketchPicks := preload("res://scripts/design_table/sketch_picks.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
+const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
+const FeaturePreview := preload("res://scripts/design_table/feature_preview.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
-const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot"]
+const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
+const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## the states where the laser picks things on the part itself
+const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## where choosing a picking tool is allowed to switch the state
+const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
+const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot"] ## settings that may be negative or zero (a move along an axis)
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
 const GHOST_RADIUS := 0.030
+const FONTS := ["Open Sans", "Roboto", "Lato", "Fira Sans", "Barlow", "PT Sans", "IBM Plex Serif", "IBM Plex Mono", "Space Mono", "Rajdhani"] ## the backend's bundled fonts (app/sketch/text_fonts.py FONT_ALLOWLIST)
 const MENU_SLOTS := 6 ## buttons in the options row
 
 var table ## design_table.gd
@@ -55,6 +64,7 @@ var api ## cad_api.gd, or anything with request(method, path, body) and fetch_by
 var state := "idle"
 var session: RefCounted = null ## sketch_session.gd while a sketch is open
 var features: RefCounted = null ## part_features.gd
+var tools: Dictionary = FeatureTools.make_all() ## tool id -> features/feature_tool.gd: what each feature tool shows, does on a pick and sends
 var view: Node3D = null ## sketch_view.gd, a child of the table's copy
 var repick_point := "" ## a flagged reference point the user is choosing a replacement corner for ("" = not re-picking)
 var _repick_queue: Array = [] ## the flagged points still to do, in order
@@ -65,10 +75,27 @@ var part_id := "" ## the PART DEFINITION being edited (every instance of it chan
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
 var chosen_plane := "" ## "XY" | "XZ" | "YZ" when it's on a reference plane
 var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
+var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
+var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false}
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
+	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
+	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
+var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
+var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
+var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
+var sketch_picks: Node3D = null ## sketch_picks.gd while curves are being picked: the lines and curves of the finished sketches, on the copy
+var preview := FeaturePreview.new() ## the translucent result before Apply
+var preview_enabled := true ## off: nothing is created or drawn until Apply
+var preview_feature_id := "" ## the feature an eager preview created (PATCHed as the settings change, deleted on Cancel, kept by Apply)
+var _preview_running := false
+var _preview_again := false
+var editing: Dictionary = {} ## a feature opened from its Build row in its own tool: {id, type, original (the row)}; Apply PATCHes it, Undo puts the old values back
+var plane_base: Dictionary = {} ## what Create Plane offsets from: {fixed} | {face} | {plane_feature_id, plane}
+var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pick over the limit replaces the oldest
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
+var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
 
 var _hover_uv: Variant = null
@@ -105,6 +132,8 @@ func _call(method: int, path: String, body) -> Dictionary:
 func set_state(new_state: String) -> void:
 	if state == new_state:
 		return
+	if state == "pick_curves" and sketch_picks != null and is_instance_valid(sketch_picks):
+		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part (a tool that switches between picking kinds keeps its picks)
 	state = new_state
 	state_changed.emit(state)
 	_update_options()
@@ -199,6 +228,8 @@ func on_cleared() -> void:
 
 
 func _reset() -> void:
+	cancel_preview()
+	editing = {}
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	clip.end()
@@ -225,7 +256,10 @@ func _reset() -> void:
 	_hover_face = {}
 	_sheet_vertices.clear()
 	_last_view_key = ""
+	redo_stack.clear()
+	created_requests.clear()
 	table.ui.set_undo_enabled(false)
+	table.ui.set_redo_enabled(false)
 	table.ui.set_options([])
 	table.ui.set_sketching(false)
 
@@ -258,6 +292,10 @@ func _process(_delta: float) -> void:
 			_hover_edges(origin, dir)
 		"pick_faces":
 			_hover_faces(origin, dir)
+		"pick_bodies":
+			_hover_bodies(origin, dir)
+		"pick_curves":
+			_hover_curves(origin, dir)
 	if state != "pick_plane" and markers != null:
 		markers.set_hover("")
 
@@ -336,12 +374,18 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
-	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve":
+	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
-		var kinds: Array = ["point", "line", "circle", "arc"]
+		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
+		if EDIT_TOOLS.has(tool):
+			kinds = ["line", "circle", "arc"] if tool == "trim" else ["line", "arc"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds) if repick_point == "" else {}
+		if repick_point == "" and "point" in kinds and str(_hover_entity.get("kind", "")) != "point" and part_refs != null and session.references_ok and tool != "revolve":
+			var corner: Dictionary = part_refs.pick(uv, pick_mm, ["point"]) # a point beats a line it is on, and the part's own corner or hole centre is a point (the sketch's helper for it is hidden)
+			if not corner.is_empty():
+				_hover_entity = corner
 		if repick_point != "" and part_refs != null:
 			_hover_entity = part_refs.pick(uv, pick_mm, ["point"]) # re-picking: only the part's own corners and hole centres, whatever the sketch has there
 		if _hover_entity.is_empty() and repick_point == "" and part_refs != null and session.references_ok and tool != "revolve":
@@ -387,6 +431,36 @@ func _hover_faces(origin: Vector3, dir: Vector3) -> void:
 	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
 
 
+func _hover_bodies(origin: Vector3, dir: Vector3) -> void:
+	var hit := _copy_ray(origin, dir)
+	_hover_face = {}
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	hovering = _claim(float(hit["distance"]))
+	if not hovering:
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	_hover_face = TopologyPick.body_entity(table.table_copy, int(hit.get("face_index", -1)))
+	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
+
+
+func _hover_curves(origin: Vector3, dir: Vector3) -> void:
+	_hover_face = {}
+	if sketch_picks == null or not is_instance_valid(sketch_picks):
+		return
+	var hit: Dictionary = sketch_picks.nearest(origin, dir, CURVE_REACH)
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	hovering = _claim(float(hit["distance"]))
+	if not hovering:
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	_hover_face = hit
+	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
+
+
 func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 	var hit := _copy_ray(origin, dir)
 	_hover_face = {}
@@ -417,11 +491,18 @@ func _on_right_pressed(action: String) -> void:
 			_toggle_edge()
 		"pick_faces":
 			_toggle_face()
+		"pick_bodies":
+			_toggle_body()
+		"pick_curves":
+			_toggle_curve()
 
 
 func _pick_plane() -> void:
 	var spec := {}
-	if _hover_plane != "":
+	if _hover_plane.begins_with("plane:"):
+		var made: Dictionary = table.build.row(_hover_plane.substr(6))
+		spec = {"plane_feature_id": _hover_plane.substr(6), "plane": SketchMath.basis_from_plane_response(made)}
+	elif _hover_plane != "":
 		spec = {"fixed": _hover_plane}
 	elif not _hover_face.is_empty():
 		var body := str(_hover_face["body_id"])
@@ -433,10 +514,34 @@ func _pick_plane() -> void:
 		spec = {"face": {"body_id": body, "index": index}}
 	else:
 		return
-	if table.active_tool == "mirror":
-		await mirror_across(spec)
+	var feature_tool = tools.get(table.active_tool)
+	if feature_tool != null and feature_tool.wants_plane_pick():
+		await feature_tool.on_plane_picked(self, spec)
 		return
 	await begin_sketch(spec)
+
+
+func sync_plane_markers() -> void:
+	## The planes the user made (Create Plane, or any plane not just sitting on a face a sketch was started on) are drawn with the three reference planes.
+	if markers == null or not is_instance_valid(markers) or table == null or table.build == null:
+		return
+	var wanted := {}
+	for row in table.build.features:
+		if str(row.get("type", "")) != "create_plane":
+			continue
+		if str(row.get("plane_type", "")) == "offset_face" and is_zero_approx(float(row.get("offset", 0.0))):
+			continue # the plane a sketch on a face made, lying on the face itself
+		var basis: Dictionary = SketchMath.basis_from_plane_response(row)
+		if not basis.is_empty():
+			wanted["plane:%s" % str(row["id"])] = [basis, BuildTree.name_of(table.build.features, str(row["id"]))]
+	var stale := false
+	for key in markers._custom.keys():
+		if not wanted.has(key):
+			stale = true
+	if stale:
+		markers.clear_custom()
+	for key in wanted:
+		markers.add_plane(key, wanted[key][0], str(wanted[key][1]))
 
 
 func mirror_across(spec: Dictionary) -> bool:
@@ -448,18 +553,16 @@ func mirror_across(spec: Dictionary) -> bool:
 		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
 		UiFeedback.haptic(table._right, "error")
 		return false
-	var plane: Dictionary = {}
-	if spec.has("fixed"):
-		plane = {"fixed_plane": str(spec["fixed"])}
-	elif spec.has("face"):
-		plane = {"face_ref": PartFeatures.face_ref(str(spec["face"]["body_id"]), int(spec["face"]["index"]))}
 	table.set_status("Mirroring...")
-	var result: Dictionary = await features.mirror(part_id, body_ids(), plane, bool(options["mirror_fuse"]))
+	var mirror_request: Dictionary = tools["mirror"].request(self, {"spec": spec})
+	var result: Dictionary = await features.post(part_id, mirror_request)
 	if not result["ok"]:
 		table.set_status("Couldn't mirror it: %s" % str(result["error"]))
 		UiFeedback.haptic(table._right, "error")
 		return false
 	feature_stack.append(str(result["id"]))
+	created_requests[str(result["id"])] = {"type": "mirror", "route": mirror_request["route"], "body": mirror_request["body"]}
+	redo_stack.clear()
 	var refreshed: bool = await refresh_geometry()
 	UiFeedback.haptic(table._right, "confirm")
 	table.set_status("Mirrored." if refreshed else "Mirrored, but the new shape couldn't be fetched.")
@@ -479,6 +582,9 @@ func begin_sketch(spec: Dictionary) -> bool:
 	elif spec.has("fixed"):
 		chosen_plane = str(spec["fixed"])
 		chosen_face = {}
+	elif spec.has("plane_feature_id"):
+		chosen_plane = "plane:%s" % str(spec["plane_feature_id"])
+		chosen_face = {}
 	set_state("opening")
 	table.set_status("Opening a sketch...")
 	var new_session := SketchSession.new(Callable(self, "_call"))
@@ -492,6 +598,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 			set_state("pick_plane")
 		return false
 	session = new_session
+	_sync_text_settings()
 	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
 	_light_chosen_plane()
@@ -499,7 +606,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 	table.orient_to_plane(session.plane)
 	set_state("sketch")
 	_sync_deck()
-	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool in ["dimension", SELECT_TOOL, "revolve"]:
+	if SKETCH_TOOLS.has(table.active_tool) or CONSTRAIN_TOOLS.has(table.active_tool) or table.active_tool in ["dimension", SELECT_TOOL, "revolve"] or EDIT_TOOLS.has(table.active_tool):
 		session.set_tool(table.active_tool)
 	elif table.active_tool == "":
 		table.manager.activate(SELECT_TOOL) # a sketch opens ready to pick things; choose a drawing tool to draw
@@ -765,7 +872,7 @@ func _on_session_changed() -> void:
 		_menu_page = 0 # a different selection starts its menu on the first page
 	_refresh_view()
 	_update_options()
-	table.ui.set_undo_enabled(can_undo())
+	sync_undo_redo()
 
 
 func _refresh_view() -> void:
@@ -797,6 +904,8 @@ func _sketch_trigger() -> void:
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)
+		if tool == "spline":
+			_update_options() # the Finish button counts the points
 	elif tool == SELECT_TOOL and repick_point != "":
 		await _do_repick()
 	elif tool == "dimension" or tool == SELECT_TOOL:
@@ -810,6 +919,14 @@ func _sketch_trigger() -> void:
 			await session.select(_hover_entity)
 		else:
 			session.clear_selection()
+	elif tool == "trim":
+		if not _hover_entity.is_empty() and str(_hover_entity.get("kind", "")) in ["line", "circle", "arc"]:
+			await session.trim_at(_hover_entity, _hover_uv)
+	elif tool == "offset":
+		if not _hover_entity.is_empty():
+			var signed := float(options["offset_dist"]) * (-1.0 if bool(options["offset_flip"]) else 1.0)
+			await session.offset_entity(_hover_entity, signed)
+			sync_undo_redo()
 	elif tool == "revolve":
 		if not _hover_entity.is_empty() and str(_hover_entity.get("kind", "")) == "line":
 			revolve_axis = str(_hover_entity["id"])
@@ -817,6 +934,7 @@ func _sketch_trigger() -> void:
 			session.changed.emit()
 			table.set_status("That line is the axis. Set Boss or Cut and the angle, then Apply.")
 			_update_options()
+			schedule_preview()
 	elif CONSTRAIN_TOOLS.has(tool):
 		if not _hover_entity.is_empty():
 			await session.select(_hover_entity)
@@ -937,47 +1055,27 @@ func on_tool_changed(tool_id: String) -> void:
 	if state == "idle" and table.table_copy == null:
 		return
 	if session != null:
-		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension" or tool_id == SELECT_TOOL or tool_id == "revolve") else "")
+		session.set_tool(tool_id if (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id == "dimension" or tool_id == SELECT_TOOL or tool_id == "revolve" or EDIT_TOOLS.has(tool_id)) else "")
 		if tool_id == "revolve" and revolve_axis != "":
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
+	if not editing.is_empty() and tool_id != str(editing["type"]):
+		editing = {}
+	if preview_feature_id != "" or preview.is_showing():
+		cancel_preview() # another tool: what the last one was showing goes (a feature it made for the preview is deleted first, in order)
+	if tools.has(tool_id):
+		tools[tool_id].on_activated(self)
+		_update_options()
+		schedule_preview()
+		return
 	match tool_id:
-		"fillet", "chamfer":
-			if state == "sketch" or state == "pick_plane" or state == "pick_edges" or state == "extrude" or state == "pick_faces":
-				edges.clear()
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_edges")
-		"shell":
-			if state in ["sketch", "pick_plane", "pick_edges", "extrude", "pick_faces"]:
-				faces.clear()
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_faces")
-		"mirror":
-			if state == "sketch" or state == "extrude":
-				table.set_status("Finish the sketch first (Done), then mirror the part.")
-			elif state in ["pick_edges", "pick_faces"]:
-				highlight.set_set(table.table_copy, [])
-				set_state("pick_plane")
-		"extrude":
-			if session == null:
-				table.set_status("Draw a closed shape on a plane first.")
-			elif not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to extrude.")
-			set_state("extrude" if session != null else state)
-		"revolve":
-			if session == null:
-				table.set_status("Draw a closed shape and a line on a plane first.")
-			elif not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to revolve (and a line to spin it about).")
-			if state in ["pick_edges", "extrude"]:
-				set_state("sketch" if session != null else "pick_plane") # the laser picks the axis line on the sketch, so the sketch stays live
 		"":
-			if state in ["pick_edges", "pick_faces", "extrude"]:
+			if state in PICK_STATES or state == "extrude":
 				set_state("sketch" if session != null else "pick_plane")
 		_:
-			if state in ["pick_edges", "pick_faces", "extrude"]:
+			if state in PICK_STATES or state == "extrude":
 				set_state("sketch" if session != null else "pick_plane")
-			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
+			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or EDIT_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
 				table.set_status("Pick a flat face or a reference plane to sketch on first.")
 	_update_options()
 
@@ -987,6 +1085,17 @@ func _update_options() -> void:
 		return
 	var tool: String = table.active_tool
 	var list: Array = []
+	if not fixing.is_empty():
+		var wanted: int = (fixing["paths"] as Array).size()
+		var picked: int = edges.size() if str(fixing["kind"]) == "edge" else faces.size()
+		table.ui.set_options([
+			{"id": "fix_apply", "text": "Apply fix (%d of %d)" % [picked, wanted], "disabled": picked != wanted},
+			{"id": "fix_clear", "text": "Clear"},
+			{"id": "fix_cancel", "text": "Cancel"}])
+		return
+	if tools.has(tool):
+		table.ui.set_options(tools[tool].options(self))
+		return
 	match tool:
 		SELECT_TOOL:
 			if session != null:
@@ -1002,40 +1111,14 @@ func _update_options() -> void:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
 			list = [{"id": "finish_line", "text": "Finish line"}]
-		"extrude":
-			list = [
-				{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(options["boss"])},
-				{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(options["boss"])},
-				{"id": "flip", "text": "Flip", "toggle": true, "pressed": bool(options["flip"])},
-				{"id": "depth", "text": "Depth %.2f mm" % float(options["depth"])},
-				{"id": "apply", "text": "Apply", "disabled": session == null or not session.profile_ok()},
-			]
-			if bool(options["boss"]):
-				list.insert(3, {"id": "new_body", "text": "New body", "toggle": true, "pressed": bool(options["new_body"])})
-		"revolve":
-			list = [
-				{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(options["boss"])},
-				{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(options["boss"])},
-				{"id": "angle", "text": "Angle %s deg" % BuildTree.number(float(options["angle"]))},
-				{"id": "axis", "text": "Axis: set" if revolve_axis != "" else "Axis: pick"},
-				{"id": "apply", "text": "Apply", "disabled": session == null or not session.profile_ok() or revolve_axis == ""},
-			]
-		"shell":
-			list = [
-				{"id": "thickness", "text": "Wall %.2f mm" % float(options["thickness"])},
-				{"id": "shell_in", "text": "Inward", "toggle": true, "pressed": str(options["shell_direction"]) == "inward"},
-				{"id": "shell_out", "text": "Outward", "toggle": true, "pressed": str(options["shell_direction"]) == "outward"},
-				{"id": "clear_faces", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % faces.size(), "disabled": faces.is_empty()},
-			]
-		"mirror":
-			list = [{"id": "mirror_fuse", "text": "Fuse into one", "toggle": true, "pressed": bool(options["mirror_fuse"])}]
-		"fillet":
-			list = [{"id": "radius", "text": "Radius %.2f mm" % float(options["radius"])}, {"id": "clear_edges", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % edges.size(), "disabled": edges.is_empty()}]
-		"chamfer":
-			list = [{"id": "distance", "text": "Distance %.2f mm" % float(options["distance"])}, {"id": "clear_edges", "text": "Clear"},
-				{"id": "apply", "text": "Apply (%d)" % edges.size(), "disabled": edges.is_empty()}]
+		"spline":
+			list = [{"id": "finish_spline", "text": "Finish spline (%d points)" % (session.pending.size() if session != null else 0), "disabled": session == null or session.pending.size() < 2}]
+		"text":
+			list = [{"id": "text_edit", "text": "Text: %s" % (session.text_content if session != null and session.text_content != "" else "type it")},
+				{"id": "text_font", "text": "Font: %s" % str(options["text_font"])}, {"id": "text_size", "text": "Size %.1f mm" % float(options["text_size"])},
+				{"id": "text_rot", "text": "Turn %s deg" % BuildTree.number(float(options["text_rot"]))}]
+		"offset":
+			list = [{"id": "offset_dist", "text": "Distance %.2f mm" % float(options["offset_dist"])}, {"id": "offset_flip", "text": "Reverse", "toggle": true, "pressed": bool(options["offset_flip"])}]
 	table.ui.set_options(list)
 
 
@@ -1050,6 +1133,18 @@ func _menu_options() -> Array:
 
 
 func on_option(option_id: String) -> void:
+	if option_id == "fix_apply":
+		await _finish_fix()
+		return
+	if option_id == "fix_clear":
+		edges.clear()
+		faces.clear()
+		highlight.set_set(table.table_copy, [])
+		_update_options()
+		return
+	if option_id == "fix_cancel":
+		await _end_fix("Fix cancelled. The reference stays flagged.")
+		return
 	if option_id == "refs_fix":
 		_start_repick()
 		return
@@ -1081,6 +1176,11 @@ func on_option(option_id: String) -> void:
 			UiFeedback.haptic(table._right, "error")
 		_update_options()
 		return
+	var active_feature = tools.get(table.active_tool)
+	if active_feature != null and option_id != "apply" and active_feature.handle_option(self, option_id):
+		_update_options()
+		schedule_preview()
+		return
 	match option_id:
 		"sides_down":
 			if session != null:
@@ -1091,59 +1191,60 @@ func on_option(option_id: String) -> void:
 		"finish_line":
 			if session != null:
 				session.finish_chain()
-		"boss":
-			options["boss"] = true
-		"cut":
-			options["boss"] = false
-		"flip":
-			options["flip"] = not bool(options["flip"])
-		"new_body":
-			options["new_body"] = not bool(options["new_body"])
-		"depth":
-			_type_option("depth", "Depth (mm)")
-		"radius":
-			_type_option("radius", "Radius (mm)")
-		"distance":
-			_type_option("distance", "Distance (mm)")
-		"thickness":
-			_type_option("thickness", "Wall thickness (mm)")
-		"shell_in":
-			options["shell_direction"] = "inward"
-		"shell_out":
-			options["shell_direction"] = "outward"
-		"mirror_fuse":
-			options["mirror_fuse"] = not bool(options["mirror_fuse"])
-		"clear_faces":
-			faces.clear()
-			highlight.set_set(table.table_copy, [])
-		"angle":
-			_type_option("angle", "Angle (deg, up to 360)")
-		"axis":
-			table.set_status("Pull the trigger on a line of the sketch to make it the axis.")
-		"clear_edges":
-			edges.clear()
-			highlight.set_set(table.table_copy, [])
+		"finish_spline":
+			if session != null:
+				await session.finish_spline()
+		"text_edit":
+			if session != null:
+				table._main.open_keyboard_for(session.text_content, func(text: String) -> void:
+					session.text_content = text.strip_edges()
+					_update_options(), {"title": "Text to place"})
+		"text_font":
+			var fonts: Array = FONTS
+			options["text_font"] = fonts[(fonts.find(str(options["text_font"])) + 1) % fonts.size()]
+			if session != null:
+				session.text_font = str(options["text_font"])
+		"text_size":
+			type_option("text_size", "Text height (mm)")
+		"text_rot":
+			type_option("text_rot", "Turn the text (degrees, negative the other way)")
+		"offset_dist":
+			type_option("offset_dist", "Offset distance (mm)")
+		"offset_flip":
+			options["offset_flip"] = not bool(options["offset_flip"])
 		"apply":
 			await apply_feature()
 	_update_options()
 
 
-func _type_option(key: String, title: String) -> void:
+func type_option(key: String, title: String) -> void:
 	table._main.open_keyboard_for("%.2f" % float(options[key]), func(text: String) -> void: option_typed(key, text), {"title": title})
 
 
 func option_typed(key: String, text: String) -> void:
 	var cleaned := text.strip_edges()
+	if SIGNED_OPTIONS.has(key):
+		if not cleaned.is_valid_float():
+			table.set_status("Enter a number (negative goes the other way).")
+			UiFeedback.haptic(table._right, "error")
+			return
+		options[key] = cleaned.to_float()
+		_sync_text_settings()
+		_update_options()
+		schedule_preview()
+		return
 	if not cleaned.is_valid_float() or cleaned.to_float() <= 0.0:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
 		return
-	if key == "angle" and cleaned.to_float() > 360.0:
+	if (key == "angle" or key == "pat_angle") and cleaned.to_float() > 360.0:
 		table.set_status("An angle can't be more than 360 degrees.")
 		UiFeedback.haptic(table._right, "error")
 		return
 	options[key] = cleaned.to_float()
+	_sync_text_settings()
 	_update_options()
+	schedule_preview()
 
 
 # --- Edges (Fillet / Chamfer) -----------------------------------------------------------------
@@ -1156,15 +1257,99 @@ func _toggle_face() -> void:
 			faces.remove_at(i)
 			highlight.set_set(table.table_copy, faces)
 			_update_options()
+			schedule_preview()
 			return
 	if not faces.is_empty() and str(faces[0]["body_id"]) != str(_hover_face["body_id"]):
 		table.set_status("A shell opens faces of ONE body. Clear to start again on another.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	if not fixing.is_empty():
+		var cap: int = (fixing["paths"] as Array).size()
+		if faces.size() >= cap:
+			faces.clear() # one replacement per flagged reference: a new pick replaces the last one when all are chosen
+		faces.append(_hover_face.duplicate())
+		highlight.set_set(table.table_copy, faces)
+		table.set_status("Picked %d of %d. %s" % [faces.size(), cap, "Apply fix when it is the right one." if faces.size() == cap else "Pick the next."])
+		_update_options()
+		schedule_preview()
+		return
 	faces.append(_hover_face.duplicate())
 	highlight.set_set(table.table_copy, faces)
 	table.set_status("%d face(s) will be opened. Set the wall thickness, then Apply." % faces.size())
 	_update_options()
+	schedule_preview()
+
+
+func _refresh_lit() -> void:
+	## Lights the picked bodies and curves together (a tool may hold both).
+	highlight.set_set(table.table_copy, bodies + curve_picks)
+
+
+func set_pick_mode(mode: String) -> void:
+	## A tool that picks more than one kind of thing (Pattern: a body, then a line) switches what the laser picks without forgetting what was picked.
+	## "bodies" | "curves" | "plane" (the reference planes and flat faces, for a tool that wants_plane_pick).
+	match mode:
+		"bodies":
+			if state in PICK_FROM_STATES:
+				set_state("pick_bodies")
+		"curves":
+			if state in PICK_FROM_STATES:
+				set_state("pick_curves")
+				if sketch_picks == null or not is_instance_valid(sketch_picks) or sketch_picks.curves.is_empty():
+					await _load_sketch_picks()
+		"plane":
+			if state in PICK_FROM_STATES:
+				set_state("pick_plane")
+	_refresh_lit()
+
+
+func _load_sketch_picks() -> void:
+	if sketch_picks != null and is_instance_valid(sketch_picks):
+		sketch_picks.queue_free()
+	sketch_picks = SketchPicks.new()
+	table.table_copy.add_child(sketch_picks)
+	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else "")
+	if state == "pick_curves":
+		table.set_status("Aim at a line or curve of an earlier sketch and pull the trigger (%d to pick from)." % count if count > 0 else "There is no finished sketch with lines to pick from yet.")
+	_update_options()
+
+
+func _toggle_curve() -> void:
+	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "curve":
+		return
+	for i in curve_picks.size():
+		if curve_picks[i]["key"] == _hover_face["key"]:
+			curve_picks.remove_at(i)
+			_refresh_lit()
+			_update_options()
+			schedule_preview()
+			return
+	curve_picks.append(_hover_face.duplicate())
+	if curve_limit > 0 and curve_picks.size() > curve_limit:
+		curve_picks.pop_front()
+	_refresh_lit()
+	table.set_status("%d curve(s) picked." % curve_picks.size())
+	_update_options()
+	schedule_preview()
+
+
+func _toggle_body() -> void:
+	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "body":
+		return
+	for i in bodies.size():
+		if bodies[i]["key"] == _hover_face["key"]:
+			bodies.remove_at(i)
+			_refresh_lit()
+			_update_options()
+			schedule_preview()
+			return
+	bodies.append(_hover_face.duplicate())
+	if body_limit > 0 and bodies.size() > body_limit:
+		bodies.pop_front()
+	_refresh_lit()
+	table.set_status("%d bod%s picked." % [bodies.size(), "y" if bodies.size() == 1 else "ies"])
+	_update_options()
+	schedule_preview()
 
 
 func _toggle_edge() -> void:
@@ -1175,10 +1360,104 @@ func _toggle_edge() -> void:
 			edges.remove_at(i)
 			highlight.set_set(table.table_copy, edges)
 			_update_options()
+			schedule_preview()
 			return
+	if not fixing.is_empty():
+		var cap: int = (fixing["paths"] as Array).size()
+		if edges.size() >= cap:
+			edges.clear()
+		edges.append(_hover_face.duplicate())
+		highlight.set_set(table.table_copy, edges)
+		table.set_status("Picked %d of %d. %s" % [edges.size(), cap, "Apply fix when it is the right one." if edges.size() == cap else "Pick the next."])
+		_update_options()
+		schedule_preview()
+		return
 	edges.append(_hover_face.duplicate())
 	highlight.set_set(table.table_copy, edges)
 	table.set_status("%d edge(s) picked. Set the size, then Apply." % edges.size())
+	_update_options()
+	schedule_preview()
+
+
+# --- Fixing a flagged feature (Build row > Fix) -------------------------------------------------
+
+func begin_fix(feature_id: String) -> void:
+	## A fillet, chamfer, shell, mirror or create-plane whose reference the backend flagged lost / moved is mended by picking its replacement. The edges and
+	## faces a feature names are numbered on the part AS IT SAW IT (every feature before it built, itself and everything after left out), so the table's copy is
+	## shown that way (the Build tree's roll back, to the row before) and the laser picks on it: edges for a fillet / chamfer, faces for a shell / mirror / plane.
+	## Apply fix PATCHes the feature with the new reference (the backend re-measures it and the flag clears) and rolls forward; Cancel changes nothing.
+	var build = table.build
+	var f: Dictionary = build.row(feature_id)
+	var target: Dictionary = BuildTree.fix_target(f)
+	if target.is_empty() or api == null or table.table_copy == null:
+		return
+	var at: int = build.index_of(feature_id)
+	if at < 1:
+		table.set_status("That feature is the first thing built, so there is nothing before it to pick from.")
+		return
+	if not build.view_filters_ok:
+		table.set_status("This backend can't show the part as it was before that feature, so the replacement can't be picked here.")
+		return
+	if session != null:
+		table.set_status("Finish the sketch first (Done), then fix the reference.")
+		return
+	var state_before := state
+	table.manager.deactivate()
+	build.rollback_to = str(build.features[at - 1].get("id", ""))
+	await refresh_view()
+	fixing = {"feature_id": feature_id, "type": str(target["type"]), "kind": str(target["kind"]), "paths": target["paths"], "state_before": state_before}
+	edges.clear()
+	faces.clear()
+	highlight.set_set(table.table_copy, [])
+	set_state("pick_edges" if str(target["kind"]) == "edge" else "pick_faces")
+	var noun: String = "edge" if str(target["kind"]) == "edge" else "face"
+	table.set_status("%s: the part is shown as it was before %s. Aim at the replacement %s%s and pull the trigger, then Apply fix." % [
+		build.names[at], build.names[at], noun, "s, one for each flagged reference" if (target["paths"] as Array).size() > 1 else ""])
+	build.changed.emit()
+	_update_options()
+
+
+func _finish_fix() -> void:
+	if fixing.is_empty() or api == null:
+		return
+	var build = table.build
+	var f: Dictionary = build.row(str(fixing["feature_id"]))
+	var picked: Array = edges if str(fixing["kind"]) == "edge" else faces
+	var payload: Dictionary = BuildTree.fix_payload(f, fixing["paths"], picked)
+	if payload.is_empty():
+		table.set_status("Pick a replacement for each flagged reference first.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	table.set_status("Working...")
+	var result: Dictionary = await features.update_feature(part_id, str(fixing["type"]), str(fixing["feature_id"]), payload)
+	if not result["ok"]:
+		table.set_status("Couldn't use that: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return # still fixing: pick another
+	await _end_fix("")
+	var refreshed: bool = await refresh_geometry()
+	table.notify_edited(part_id, _edited_nodes)
+	await build.reload()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Reference fixed." if refreshed else "Fixed, but the new shape couldn't be fetched.")
+
+
+func _end_fix(message: String) -> void:
+	## Back from fix mode: the part rolled forward again and the laser as it was. (No undo entry: the old reference was lost, so putting it back would fail.)
+	if fixing.is_empty():
+		return
+	var before: String = str(fixing["state_before"])
+	fixing = {}
+	edges.clear()
+	faces.clear()
+	if highlight != null:
+		highlight.set_set(table.table_copy, [])
+	table.build.rollback_to = ""
+	await refresh_view()
+	set_state(before if before in ["pick_plane", "idle"] else "pick_plane")
+	if message != "":
+		table.set_status(message)
+	table.build.changed.emit()
 	_update_options()
 
 
@@ -1216,6 +1495,131 @@ func extrude_distances() -> Array:
 	return [0.0, depth * sign]
 
 
+# --- Preview before Apply ---------------------------------------------------------------------------
+
+func schedule_preview() -> void:
+	## Something the active tool shows changed (a setting, a pick): refresh the translucent result. One request at a time; changes that come
+	## while one is running are folded into one more run afterwards.
+	if not preview_enabled or api == null or table == null or table.table_copy == null:
+		return
+	if _preview_running:
+		_preview_again = true
+		return
+	_preview_running = true
+	while true:
+		_preview_again = false
+		await _run_preview()
+		if not _preview_again:
+			break
+	_preview_running = false
+
+
+func _run_preview() -> void:
+	var feature_tool = tools.get(table.active_tool)
+	if feature_tool == null or not fixing.is_empty() or feature_tool.preview_mode() == "none" or table.build.is_rolled_back_any() or part_id == "":
+		await cancel_preview()
+		return
+	if not editing.is_empty() and feature_tool.preview_mode() == "eager":
+		return # editing a feature that exists: nothing is created for a preview, Apply changes it
+	var req: Dictionary = feature_tool.request(self)
+	if not bool(req["ok"]):
+		await cancel_preview() # nothing valid to show (yet): what an earlier preview made goes
+		return
+	var tool_id := str(table.active_tool)
+	var mesh: Mesh = null
+	if feature_tool.preview_mode() == "coarse":
+		var coarse: Dictionary = await _call(HTTPClient.METHOD_POST, "/document/parts/%s/%s?quality=%s" % [part_id, feature_tool.preview_route(), str(FeaturePreview.QUALITY)], req["body"])
+		if not coarse["ok"] or not (coarse["json"] is Array):
+			preview.clear()
+			table.set_status("No preview: %s" % PartFeatures._plain(str(coarse["error"])))
+			return
+		mesh = FeaturePreview.mesh_from_bodies(coarse["json"])
+	else:
+		if preview_feature_id == "":
+			var made: Dictionary = await features.post(part_id, req)
+			if not made["ok"]:
+				preview.clear()
+				table.set_status("No preview: %s" % str(made["error"]))
+				return
+			preview_feature_id = str(made["id"])
+		else:
+			var patched: Dictionary = await features.update_feature(part_id, tool_id, preview_feature_id, feature_tool.patch_body(req))
+			if not patched["ok"]:
+				table.set_status("No preview: %s" % str(patched["error"]))
+				return
+		var fetched: Dictionary = await api.fetch_bytes(glb_path(view_is_filtered(), FeaturePreview.QUALITY))
+		if not fetched["ok"] or fetched["bytes"].is_empty():
+			return
+		var parsed: Dictionary = table._main.mesh_from_glb(fetched["bytes"])
+		mesh = parsed["mesh"] if parsed["ok"] else null
+	if table.active_tool != tool_id or table.table_copy == null:
+		await cancel_preview() # the tool changed while it was being fetched
+		return
+	if not preview.show(table.table_copy, mesh) and preview.skipped_over_budget:
+		table.set_status("The preview is too heavy to draw here (%d triangles over the %d limit). Apply to see the result." % [FeaturePreview.triangle_count(mesh) - FeaturePreview.MAX_TRIANGLES, FeaturePreview.MAX_TRIANGLES])
+
+
+func begin_tool_edit(feature_id: String) -> void:
+	## The Build row's Edit for a feature with several settings: its own tool opens with the feature's settings (and picks) loaded, changes are shown
+	## as the tool shows them, Apply PATCHes the feature (one step on Undo), changing tool leaves it as it was.
+	var row: Dictionary = table.build.row(feature_id)
+	var feature_tool = FeatureTools.for_type(str(row.get("type", "")))
+	if row.is_empty() or feature_tool == null or not feature_tool.edits_in_tool() or session != null:
+		if session != null:
+			table.set_status("Finish the open sketch first (Done), then edit a feature.")
+		return
+	if table.build.is_rolled_back_any():
+		table.set_status("The part is rolled back. Roll forward in the Build tree before editing.")
+		return
+	editing = {}
+	if table.active_tool != feature_tool.id:
+		table.manager.activate(feature_tool.id)
+	else:
+		feature_tool.on_activated(self)
+	editing = {"id": feature_id, "type": feature_tool.id, "original": row.duplicate(true)}
+	feature_tool.load_from_row(self, row)
+	_update_options()
+	schedule_preview()
+	table.set_status("Editing %s. Change what you want, then Apply." % table.build.names[table.build.index_of(feature_id)])
+
+
+func _apply_edit(feature_tool, req: Dictionary) -> void:
+	if not bool(req["ok"]):
+		table.set_status("Couldn't do that: %s" % str(req["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	var body: Dictionary = feature_tool.patch_body(req)
+	var edit := editing
+	var result: Dictionary = await features.update_feature(part_id, str(edit["type"]), str(edit["id"]), body)
+	if not result["ok"]:
+		table.set_status("Couldn't change it: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	feature_stack.append({"kind": "edit", "id": edit["id"], "type": edit["type"], "payload": feature_tool.row_payload(edit["original"]), "redo_payload": body})
+	redo_stack.clear()
+	editing = {}
+	preview.clear()
+	var refreshed: bool = await refresh_geometry()
+	await table.build.reload()
+	table.notify_edited(part_id, _edited_nodes)
+	clear_picks()
+	table.manager.deactivate()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Changed." if refreshed else "Changed, but the new shape couldn't be fetched.")
+	sync_undo_redo()
+
+
+func cancel_preview() -> void:
+	## Takes the preview away: the overlay goes, and a feature an eager preview made is deleted (it is the part's last feature).
+	preview.clear()
+	if preview_feature_id == "":
+		return
+	var id := preview_feature_id
+	preview_feature_id = ""
+	if api != null and part_id != "":
+		await features.delete_feature(part_id, id)
+
+
 func apply_feature() -> void:
 	if table.table_copy == null or api == null:
 		return
@@ -1223,57 +1627,132 @@ func apply_feature() -> void:
 		table.set_status("The part is rolled back. Roll forward in the Build tree before adding to it.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	_preview_again = false
+	while _preview_running: # a preview still in flight would make its feature after this one: let it finish (Apply then adopts it)
+		await get_tree().process_frame
 	var tool: String = table.active_tool
 	var result: Dictionary
 	table.set_status("Working...")
-	match tool:
-		"extrude":
-			if session == null or not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to extrude.")
-				return
-			var d := extrude_distances()
-			result = await features.extrude(part_id, session.feature_id, bool(options["boss"]), d[0], d[1], extrude_targets())
-		"revolve":
-			if session == null or not session.profile_ok():
-				table.set_status("The sketch needs a closed shape to revolve.")
-				return
-			result = await features.revolve(part_id, session.feature_id, session.sketch_id, revolve_axis, float(options["angle"]), bool(options["boss"]), extrude_targets())
-		"shell":
-			if faces.is_empty():
-				table.set_status("Pick the faces to open first.")
-				return
-			result = await features.shell(part_id, str(faces[0]["body_id"]), faces.map(func(f): return PartFeatures.face_ref(str(f["body_id"]), int(f["index"]))), float(options["thickness"]), str(options["shell_direction"]))
-		"fillet":
-			result = await features.fillet(part_id, _edge_refs(), float(options["radius"]))
-		"chamfer":
-			result = await features.chamfer(part_id, _edge_refs(), float(options["distance"]))
-		_:
-			return
+	var feature_tool = tools.get(tool)
+	if feature_tool == null:
+		return
+	var req: Dictionary = feature_tool.request(self)
+	if not editing.is_empty():
+		await _apply_edit(feature_tool, req)
+		return
+	if preview_feature_id != "" and bool(req["ok"]):
+		var patched: Dictionary = await features.update_feature(part_id, tool, preview_feature_id, feature_tool.patch_body(req))
+		result = {"ok": patched["ok"], "id": preview_feature_id, "error": patched["error"]}
+		if patched["ok"]:
+			preview_feature_id = "" # the feature the preview made is the real one now
+	else:
+		if preview_feature_id != "":
+			await cancel_preview()
+		result = await features.post(part_id, req)
+	preview.clear()
 	if not result["ok"]:
 		table.set_status("Couldn't do that: %s" % str(result["error"]))
 		UiFeedback.haptic(table._right, "error")
 		return
 	feature_stack.append(str(result["id"]))
+	created_requests[str(result["id"])] = {"type": tool, "route": req["route"], "body": req["body"]}
+	redo_stack.clear() # a new action: what was taken back can't be put back any more
 	var refreshed: bool = await refresh_geometry()
-	if tool == "extrude" or tool == "revolve":
+	if feature_tool.reload_build_after():
+		await table.build.reload()
+	if feature_tool.finishes_sketch():
 		end_sketch()
-	edges.clear()
-	faces.clear()
-	if highlight != null:
-		highlight.set_set(table.table_copy, [])
+	clear_picks()
 	UiFeedback.haptic(table._right, "confirm")
-	table.set_status(("%s done." % tool.capitalize()) if refreshed else "Done, but the new shape couldn't be fetched.")
+	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
 	_update_options()
 
 
-func _edge_refs() -> Array:
+func _sync_text_settings() -> void:
+	if session != null:
+		session.text_font = str(options["text_font"])
+		session.text_size = float(options["text_size"])
+		session.text_rotation = float(options["text_rot"])
+
+
+func clear_picks() -> void:
+	## Forgets the picked edges, faces and bodies (a feature tool's Clear).
+	edges.clear()
+	faces.clear()
+	bodies.clear()
+	curve_picks.clear()
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+
+
+func start_curve_picks(limit := 0) -> void:
+	## A tool that works on lines of earlier sketches was chosen (Loft, Sweep, Pattern): the finished sketches' curves are read and drawn on the
+	## part, and the laser picks them. `limit` 0 = any number.
+	curve_limit = limit
+	if not state in PICK_FROM_STATES or table.table_copy == null or api == null:
+		return
+	clear_picks()
+	set_state("pick_curves")
+	await _load_sketch_picks()
+
+
+func _plane_for_row(row: Dictionary) -> Dictionary:
+	## The plane of a finished sketch (a Build row) as a basis in the part's frame, or {} when it can't be placed (flipped or turned in the flat app).
+	var described: Dictionary = await _call(HTTPClient.METHOD_GET, "/sketch/sketches/%s" % str(row["sketch_id"]), null)
+	if not described["ok"] or not (described["json"] is Dictionary):
+		return {}
+	var info: Dictionary = described["json"]
+	if bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
+		return {}
+	if info.get("plane") is String:
+		return SketchMath.fixed_basis(str(info["plane"]))
+	if row.get("plane_feature_id") != null:
+		return SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"])))
+	return {}
+
+
+func curve_refs() -> Array:
+	return curve_picks.map(func(c): return sketch_picks.entity_ref(c) if sketch_picks != null and is_instance_valid(sketch_picks) else {"sketch_id": c["sketch_id"], "entity_type": c["entity_type"], "entity_id": c["entity_id"]})
+
+
+func start_body_picks(limit := 0) -> void:
+	## A tool that works on whole bodies was chosen: the laser lights and picks a body.
+	body_limit = limit
+	if state in PICK_FROM_STATES:
+		clear_picks()
+		set_state("pick_bodies")
+
+
+func body_refs() -> Array:
+	return bodies.map(func(b): return str(b["body_id"]))
+
+
+func start_face_picks() -> void:
+	## Shell / Move Face / Delete Face were chosen: pick faces of one body.
+	if state in PICK_FROM_STATES:
+		clear_picks()
+		set_state("pick_faces")
+
+
+func face_refs() -> Array:
+	return faces.map(func(f): return PartFeatures.face_ref(str(f["body_id"]), int(f["index"])))
+
+
+func start_edge_picks() -> void:
+	## Fillet / Chamfer were chosen: pick edges on the part.
+	if state in PICK_FROM_STATES:
+		clear_picks()
+		set_state("pick_edges")
+
+
+func edge_refs() -> Array:
 	return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))
 
 
-func glb_path(filtered: bool) -> String:
+func glb_path(filtered: bool, quality := 0.5) -> String:
 	## The part's own assembly-mesh.glb; `filtered` adds the Build tree's Hide / Show and rollback sets (DIDSA-CAD, 2026-10-03).
-	var path := "/document/parts/%s/assembly-mesh.glb?quality=0.5" % part_id
+	var path := "/document/parts/%s/assembly-mesh.glb?quality=%s" % [part_id, str(quality)]
 	if filtered:
 		for id in table.build.hidden_ids():
 			path += "&hidden_feature_ids=%s" % str(id).uri_encode()
@@ -1303,6 +1782,7 @@ func refresh_view() -> void:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
 	faces.clear()
+	bodies.clear()
 	view_changed.emit()
 
 
@@ -1313,7 +1793,7 @@ func forget_features(ids: Array) -> void:
 		return not ids.has(entry_id))
 	if session != null and ids.has(session.feature_id):
 		end_sketch() # the sketch it was drawing on is gone
-	table.ui.set_undo_enabled(can_undo())
+	sync_undo_redo()
 
 
 func refresh_geometry() -> bool:
@@ -1349,6 +1829,7 @@ func refresh_geometry() -> bool:
 		highlight.invalidate(table.table_copy)
 	edges.clear()
 	faces.clear()
+	bodies.clear()
 	geometry_changed.emit()
 	return true
 
@@ -1369,10 +1850,12 @@ func _rebuild_markers() -> void:
 	markers.set_markers_visible(was_visible)
 	if chosen_before != "":
 		markers.set_chosen(chosen_before)
+	sync_plane_markers()
 
 
 func end_sketch() -> void:
 	## The sketch is spent (extruded): back to choosing a plane.
+	cancel_preview()
 	repick_point = ""
 	_repick_queue.clear()
 	session = null
@@ -1388,7 +1871,7 @@ func end_sketch() -> void:
 		markers.set_markers_visible(true)
 	if highlight != null:
 		highlight.set_picks([])
-	table.ui.set_undo_enabled(can_undo())
+	sync_undo_redo()
 	_sync_deck()
 	set_state("pick_plane" if state != "pick_plane" else state)
 	revolve_axis = ""
@@ -1399,14 +1882,23 @@ func end_sketch() -> void:
 
 # --- Undo -------------------------------------------------------------------------------------
 
+func sync_undo_redo() -> void:
+	table.ui.set_undo_enabled(can_undo())
+	table.ui.set_redo_enabled(can_redo())
+
+
 func can_undo() -> bool:
 	return (session != null and session.can_undo()) or not feature_stack.is_empty()
+
+
+func can_redo() -> bool:
+	return not redo_stack.is_empty()
 
 
 func undo() -> void:
 	if session != null and session.can_undo():
 		await session.undo()
-		table.ui.set_undo_enabled(can_undo())
+		sync_undo_redo()
 		return
 	if feature_stack.is_empty() or api == null:
 		return
@@ -1420,7 +1912,46 @@ func undo() -> void:
 		feature_stack.append(entry)
 		table.set_status("Couldn't take that back: %s" % str(result["error"]))
 		return
+	if entry is Dictionary:
+		if entry.has("redo_payload"):
+			redo_stack.append({"kind": "edit", "entry": entry})
+	elif created_requests.has(str(entry)):
+		var made: Dictionary = created_requests[str(entry)]
+		redo_stack.append({"kind": "create", "type": made["type"], "route": made["route"], "body": made["body"]})
+		created_requests.erase(str(entry))
 	await refresh_geometry()
 	table.notify_edited(part_id, _edited_nodes)
-	table.ui.set_undo_enabled(can_undo())
+	sync_undo_redo()
 	table.set_status("Put the old value back." if entry is Dictionary else "Took the last feature back.")
+
+
+func redo() -> void:
+	## Puts back what Undo took back (features and Build-tree edits only; a sketch step is not redone). A feature is made again from the request it
+	## was made with and gets a new id, which is harmless because Undo is last-in first-out and nothing later depends on it.
+	if redo_stack.is_empty() or api == null or table.table_copy == null:
+		return
+	if table.build.is_rolled_back_any():
+		table.set_status("The part is rolled back. Roll forward in the Build tree before doing it again.")
+		return
+	var entry: Dictionary = redo_stack.pop_back()
+	var result: Dictionary
+	if str(entry["kind"]) == "create":
+		result = await features.post(part_id, {"ok": true, "error": "", "route": entry["route"], "body": entry["body"]})
+		if result["ok"]:
+			feature_stack.append(str(result["id"]))
+			created_requests[str(result["id"])] = {"type": entry["type"], "route": entry["route"], "body": entry["body"]}
+	else:
+		var edit: Dictionary = entry["entry"]
+		result = await features.update_feature(part_id, str(edit["type"]), str(edit["id"]), edit["redo_payload"])
+		if result["ok"]:
+			feature_stack.append(edit)
+	if not result["ok"]:
+		redo_stack.append(entry)
+		table.set_status("Couldn't do that again: %s" % str(result["error"]))
+		UiFeedback.haptic(table._right, "error")
+		return
+	await refresh_geometry()
+	table.notify_edited(part_id, _edited_nodes)
+	sync_undo_redo()
+	UiFeedback.haptic(table._right, "confirm")
+	table.set_status("Did it again." if str(entry["kind"]) == "create" else "Put the new value back.")

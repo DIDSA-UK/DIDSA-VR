@@ -33,6 +33,7 @@ const DIM_OVERSHOOT := 0.006
 const REF_COLOUR := Color(0.62, 0.78, 0.98, 0.95) ## the part's own edges and corners, seen through the sketch: reference geometry, quieter than the sketch
 const REF_FAR_COLOUR := Color(0.62, 0.78, 0.98, 0.50) ## ...those that lie off the sketch plane, projected onto it
 const REF_WIDTH := 0.0018
+const REF_USED_COLOUR := Color(0.55, 0.85, 1.0, 1.0) ## a part corner / edge / hole the sketch actually uses (a dimension or constraint goes to it): the part's own geometry, lit a little
 const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
@@ -498,6 +499,10 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var l: Dictionary = session.lines[id]
 			if not session.points.has(l["a"]) or not session.points.has(l["b"]):
 				continue
+			if session.is_reference(id):
+				# the sketch's plumbing to the part's own edge: no line of its own is drawn, the part's edge is lit instead
+				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.0008, REF_USED_COLOUR, 0.6)
+				continue
 			var key: String = "line:" + id
 			var lit: bool = selected.has(key) or key == hovered
 			var construction: bool = l.get("construction", false)
@@ -507,6 +512,10 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var c: Dictionary = session.circles[id]
 			if not session.points.has(c["c"]) or not session.points.has(c["p"]):
 				continue
+			if session.is_reference(id):
+				var rim_centre: Vector2 = session.points[c["c"]]
+				_stroke(verts, colors, circle_points(rim_centre, rim_centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS), true, false, REF_USED_COLOUR, false)
+				continue # the part's hole is lit; no construction circle, no centre cross of its own
 			var key: String = "circle:" + id
 			var lit: bool = selected.has(key) or key == hovered
 			var construction: bool = c.get("construction", false)
@@ -522,6 +531,9 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var a: Dictionary = session.arcs[id]
 			if not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 				continue
+			if session.is_reference(id):
+				_stroke(verts, colors, arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32), false, false, REF_USED_COLOUR, false)
+				continue
 			var key: String = "arc:" + id
 			var lit: bool = selected.has(key) or key == hovered
 			var construction: bool = a.get("construction", false)
@@ -532,8 +544,36 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var ac: Vector2 = session.points[a["c"]]
 			_ribbon(verts, colors, ac + Vector2(-arm, 0), ac + Vector2(arm, 0), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
 			_ribbon(verts, colors, ac + Vector2(0, -arm), ac + Vector2(0, arm), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
+		for kind in ["ellipse", "ellipse_arc", "spline"]:
+			var source: Dictionary = {"ellipse": session.ellipses, "ellipse_arc": session.ellipse_arcs, "spline": session.splines}[kind]
+			for id in source:
+				var outline: Array = session.outline_of(kind, id)
+				if outline.size() < 2:
+					continue
+				if session.is_reference(id):
+					_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
+					continue
+				var okey: String = "%s:%s" % [kind, id]
+				var olit: bool = selected.has(okey) or okey == hovered
+				var oconstruction: bool = source[id].get("construction", false)
+				var ocolour: Color = warn if olit else (CONSTRUCTION_COLOUR if oconstruction else OBJECT_COLOUR)
+				_stroke(verts, colors, outline, kind == "ellipse", oconstruction, ocolour, olit)
+		for id in session.texts:
+			var tkey: String = "text:" + id
+			var tlit: bool = selected.has(tkey) or tkey == hovered
+			var tconstruction: bool = session.texts[id].get("construction", false)
+			var tcolour: Color = warn if tlit else (CONSTRUCTION_COLOUR if tconstruction else OBJECT_COLOUR)
+			for poly in session.text_outlines.get(id, []):
+				_stroke(verts, colors, poly, true, tconstruction, tcolour, tlit)
 		for id in session.points:
 			var key: String = "point:" + id
+			if session.is_reference(id) and not session.is_origin(id):
+				# a corner or hole centre of the part the sketch uses: the part's own corner is lit; no sketch point of its own to see or pick
+				var flagged: String = session.reference_status(id)
+				if flagged != "lost" and flagged != "potentially_moved":
+					_marker(verts, colors, session.points[id], REF_POINT + 0.0018, UNDERLAY, 0.45)
+					_marker(verts, colors, session.points[id], REF_POINT, REF_USED_COLOUR, 0.5)
+					continue
 			if session.is_origin(id):
 				# The sketch origin: a bigger, brighter marker than an ordinary point (it is where every dimension can start from).
 				var origin_colour: Color = warn if (selected.has(key) or key == hovered) else ORIGIN_COLOUR
@@ -580,7 +620,7 @@ func set_cursor(uv: Variant, kind: String = "free") -> void:
 	var colour: Color = _tokens.text
 	match kind:
 		"point": colour = Color(0.45, 1.0, 0.6)
-		"vertex", "midpoint", "curve", "centre", "edge_midpoint", "edge_point": colour = _tokens.accent
+		"vertex", "midpoint", "curve", "centre", "edge_midpoint", "edge_point", "face_axis": colour = _tokens.accent
 		"origin": colour = ORIGIN_COLOUR
 		"hover": colour = _tokens.warn
 	_cursor_material.albedo_color = colour
@@ -621,6 +661,21 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 					var width: float = c.distance_to(Geometry2D.get_closest_point_to_segment(c, first, second))
 					_polyline(verts, colors, slot_outline(first, second, width, 16), LINE_WIDTH, colour, true, 1.2)
 					_ribbon(verts, colors, first, second, LINE_WIDTH * 0.5, colour, 1.2)
+			"ellipse", "ellipse_arc":
+				if taps.size() == 1:
+					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
+				else:
+					var major: Vector2 = taps[1]
+					var a_len := first.distance_to(major)
+					var u := (major - first) / maxf(a_len, 0.0001)
+					var b_len := clampf(absf((c - first).cross(u)), a_len * 0.02, a_len) if taps.size() == 2 else clampf(absf(((taps[2] as Vector2) - first).cross(u)), a_len * 0.02, a_len)
+					var minor_pt := first + Vector2(-u.y, u.x) * b_len
+					_polyline(verts, colors, session_ellipse_points(first, major, minor_pt), LINE_WIDTH, colour, true, 1.2)
+					_ribbon(verts, colors, first, major, LINE_WIDTH * 0.5, colour, 1.2)
+			"spline":
+				var through: Array = taps.duplicate()
+				through.append(c)
+				_polyline(verts, colors, through, LINE_WIDTH, colour, false, 1.2)
 			"polygon":
 				var r2 := first.distance_to(c)
 				var a0 := (c - first).angle()
@@ -630,6 +685,10 @@ func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 
 					corners.append(first + Vector2(cos(a), sin(a)) * r2)
 				_polyline(verts, colors, corners, LINE_WIDTH, colour, true, 1.2)
 	_set_surface(_preview, verts, colors)
+
+
+static func session_ellipse_points(centre: Vector2, major: Vector2, minor: Vector2) -> Array:
+	return preload("res://scripts/design_table/sketch_session.gd").ellipse_points(centre, major, minor, 0.0, TAU, 48)
 
 
 # --- Dimensions ---------------------------------------------------------------------------

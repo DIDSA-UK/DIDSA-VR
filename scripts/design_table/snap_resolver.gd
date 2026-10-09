@@ -9,6 +9,7 @@ extends RefCounted
 ##      along the plane's normal): the pick carries a `ref` and the session makes it a pinned point that follows the part when it is used;
 ##      ...or the CENTRE of one of the part's circular edges (a hole or boss in the sketch plane): the pick carries a `ref` of kind "circle_centre", and
 ##      the session makes the pinned centre point (a construction circle on the hole, whose centre is a live reference);
+##      ...or the AXIS of one of the part's round faces (a blind hole's wall, whose rim is not in the sketch plane): a `ref` of kind "face_axis", made a live centre;
 ##   3. a line's MIDPOINT, or the midpoint of a straight edge of the part (a `ref` of kind "edge_midpoint": a new point held at the middle of a pinned
 ##      construction line by an at-midpoint constraint);
 ##   4. the nearest spot ON a line, circle or arc (position only), or on an edge of the part (a `ref` of kind "edge_point": a new point on the pinned
@@ -25,10 +26,10 @@ const AXIS_DEGREES := 4.0
 
 const EDGE_POINT_REACH := 0.6 ## along-an-edge snaps only within this fraction of the snap radius, like the sketch's own curves: a stray aim near an edge should not grab it
 
-enum Kind { FREE, POINT, VERTEX, MIDPOINT, CURVE, ORIGIN, CENTRE, EDGE_MIDPOINT, EDGE_POINT }
+enum Kind { FREE, POINT, VERTEX, MIDPOINT, CURVE, ORIGIN, CENTRE, EDGE_MIDPOINT, EDGE_POINT, FACE_AXIS }
 
 const NAMES := {Kind.FREE: "free", Kind.POINT: "point", Kind.VERTEX: "vertex", Kind.MIDPOINT: "midpoint", Kind.CURVE: "curve", Kind.ORIGIN: "origin",
-	Kind.CENTRE: "centre", Kind.EDGE_MIDPOINT: "edge_midpoint", Kind.EDGE_POINT: "edge_point"}
+	Kind.CENTRE: "centre", Kind.EDGE_MIDPOINT: "edge_midpoint", Kind.EDGE_POINT: "edge_point", Kind.FACE_AXIS: "face_axis"}
 
 
 static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null, refs: Variant = null) -> Dictionary:
@@ -41,6 +42,8 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 
 	var best := radius
 	for id in session.points:
+		if session.is_reference(id):
+			continue # plumbing to the part: the corner / centre it stands for is snapped to below as the part's own, whether or not it has been made yet
 		var d: float = uv.distance_to(session.points[id])
 		if d <= best:
 			best = d
@@ -66,7 +69,11 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		if not rc.is_empty() and float(rc["distance"]) <= best:
 			best = float(rc["distance"])
 			out = {"uv": rc["uv"], "id": "", "kind": NAMES[Kind.CENTRE], "infer": "", "ref": {"kind": "circle_centre", "body": rc["body"], "index": rc["index"]}}
-	if out["kind"] == NAMES[Kind.VERTEX] or out["kind"] == NAMES[Kind.CENTRE]:
+	if refs != null and session.references_ok and out["kind"] != NAMES[Kind.VERTEX] and out["kind"] != NAMES[Kind.CENTRE]:
+		var fa: Dictionary = refs.nearest_face_axis(uv, radius)
+		if not fa.is_empty():
+			out = {"uv": fa["uv"], "id": "", "kind": NAMES[Kind.FACE_AXIS], "infer": "", "ref": refs.face_axis_ref(fa)}
+	if out["kind"] == NAMES[Kind.VERTEX] or out["kind"] == NAMES[Kind.CENTRE] or out["kind"] == NAMES[Kind.FACE_AXIS]:
 		return out
 
 	best = radius
@@ -89,7 +96,7 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 	best = radius * EDGE_POINT_REACH
 	for id in session.lines:
 		var l: Dictionary = session.lines[id]
-		if not session.points.has(l["a"]) or not session.points.has(l["b"]):
+		if session.is_reference(id) or not session.points.has(l["a"]) or not session.points.has(l["b"]):
 			continue
 		var near: Vector2 = Geometry2D.get_closest_point_to_segment(uv, session.points[l["a"]], session.points[l["b"]])
 		var d := uv.distance_to(near)
@@ -98,7 +105,7 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 			out = {"uv": near, "id": "", "kind": NAMES[Kind.CURVE], "infer": ""}
 	for id in session.circles:
 		var c: Dictionary = session.circles[id]
-		if not session.points.has(c["c"]) or not session.points.has(c["p"]):
+		if session.is_reference(id) or not session.points.has(c["c"]) or not session.points.has(c["p"]):
 			continue
 		var centre: Vector2 = session.points[c["c"]]
 		var r: float = centre.distance_to(session.points[c["p"]])

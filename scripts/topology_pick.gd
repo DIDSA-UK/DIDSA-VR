@@ -38,6 +38,19 @@ static func face_entity(part: Node3D, face_index: int) -> Dictionary:
 		"key": entity_key("face", str(ref["body_id"]), int(ref["index"]))}
 
 
+static func body_entity(part: Node3D, face_index: int) -> Dictionary:
+	## The whole body the triangle belongs to (a body pick: Pattern, Boolean, Merge...). Its key is "solid:<body>", which face_highlight.gd lights as every triangle of the body.
+	var ref := MeshIdentity.subshape_ref_for_hit(part, face_index)
+	if ref.is_empty():
+		return {}
+	var body_id := str(ref["body_id"])
+	return {"kind": "body", "body_id": body_id, "index": -1, "face_index": face_index, "key": body_key(body_id)}
+
+
+static func body_key(body_id: String) -> String:
+	return "solid:%s" % body_id
+
+
 static func reach_for(part: MeshInstance3D, hit_distance: float) -> float:
 	## World-space reach for a hit this far from the laser.
 	var reach := clampf(hit_distance * REACH_PER_METRE, REACH_MIN, REACH_MAX)
