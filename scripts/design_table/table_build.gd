@@ -196,6 +196,15 @@ func toggle_category(category: String) -> void:
 	changed.emit()
 
 
+func set_all_visible(show: bool) -> void:
+	## The drawer's Show all / Hide all: every feature category (hidden ids) and every session switch.
+	visibility.set_all(show)
+	if view_filters_ok and not features.is_empty():
+		_table._main.set_hidden_feature_ids(Visibility.set_all_features(features, _table._main.hidden_feature_ids(), not show, rollback_excluded()))
+		await _table.editor.refresh_view()
+	changed.emit()
+
+
 func rollback_excluded() -> Array:
 	## The ids the table's copy is built without: everything after the rollback row.
 	if rollback_to == "" or index_of(rollback_to) < 0:

@@ -23,6 +23,8 @@ const SESSION_CATEGORIES := [REFERENCE_PLANES, ORIGIN_AXES, DIMENSIONS, CONSTRUC
 
 const CURVE_TYPES := ["curve", "curve_3d", "spline_3d"] ## the backend's 3D curve rows (no tool makes them yet: matched by name)
 
+signal changed ## a switch moved: the drawer redraws
+
 var _on := {} ## session category -> bool
 
 
@@ -36,6 +38,7 @@ func reset(edge_lines_on: bool) -> void:
 	for c in SESSION_CATEGORIES:
 		_on[c] = false
 	_on[EDGE_LINES] = edge_lines_on
+	changed.emit()
 
 
 func is_on(category: String) -> bool:
@@ -43,8 +46,9 @@ func is_on(category: String) -> bool:
 
 
 func set_on(category: String, on: bool) -> void:
-	if _on.has(category):
+	if _on.has(category) and _on[category] != on:
 		_on[category] = on
+		changed.emit()
 
 
 func toggle(category: String) -> bool:
@@ -55,6 +59,7 @@ func toggle(category: String) -> bool:
 func set_all(on: bool) -> void:
 	for c in SESSION_CATEGORIES:
 		_on[c] = on
+	changed.emit()
 
 
 # --- Feature categories ---------------------------------------------------------------------
@@ -158,4 +163,20 @@ static func toggle_category(features: Array, hidden: Array, category: String, ex
 		for id in ids:
 			if not out.has(id):
 				out.append(id)
+	return out
+
+
+static func set_all_features(features: Array, hidden: Array, hide: bool, excluded: Array = []) -> Array:
+	## "Show all" / "Hide all" over every feature category: the new hidden list (other parts' ids untouched).
+	var mine := {}
+	for f in features:
+		if not excluded.has(str(f.get("id", ""))):
+			mine[str(f.get("id", ""))] = true
+	var out: Array = []
+	for id in hidden:
+		if not mine.has(str(id)):
+			out.append(str(id))
+	if hide:
+		for id in mine:
+			out.append(id)
 	return out

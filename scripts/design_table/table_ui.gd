@@ -25,6 +25,7 @@ extends Control
 
 signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
+signal visibility_toggled(on: bool) ## the eye: the Visibility drawer opens or closes
 signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
@@ -86,6 +87,7 @@ var _connector: Control
 var _options_row: HBoxContainer
 var _status := "" ## the tool tip text: shown in the side panel (table_props_window.gd), kept here for the host and tests
 var _snap_button: Button
+var _eye_button: Button
 var _undo_button: Button
 var _redo_button: Button
 var _close_button: Button
@@ -257,6 +259,12 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		snap_toggled.emit(on))
 	view_row.add_child(_snap_button)
+	_eye_button = _utility("eye", "", true)
+	_eye_button.tooltip_text = "Visibility"
+	_eye_button.toggled.connect(func(on: bool) -> void:
+		feedback.emit("press")
+		visibility_toggled.emit(on))
+	view_row.add_child(_eye_button)
 	_fit_button = _utility("fit", "Fit", false)
 	_fit_button.disabled = true
 	_fit_button.visible = false
@@ -347,6 +355,7 @@ func _tint_glyphs() -> void:
 	_tint(_reset_button, tokens.warn)
 	_tint(_lock_button, tokens.warn)
 	_tint(_snap_button, tokens.accent)
+	_tint(_eye_button, tokens.accent)
 	_tint(_fit_button, tokens.accent)
 	_tint(_return_button, VIOLET)
 
@@ -625,6 +634,14 @@ func set_engaged(on: bool) -> void:
 
 func set_snap(on: bool) -> void:
 	_snap_button.set_pressed_no_signal(on)
+
+
+func set_eye(on: bool) -> void:
+	_eye_button.set_pressed_no_signal(on)
+
+
+func eye_button() -> Button:
+	return _eye_button
 
 
 func snap_on() -> bool:
