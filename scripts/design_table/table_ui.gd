@@ -4,10 +4,10 @@ extends Control
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
 ##     small buttons that scrolls sideways when there are more than fit), then the tool tip
-##     (or what is selected) and the tool-specific buttons (Done, Part: Locked...). The active
+##     (or what is selected) and the tool-specific buttons (Done). The active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd), or in a row inside the frame when there is none.
-##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena. They are not
+##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
 ## Glyphs carry colour (green Done, red Close, amber Undo...) so a button reads without its label.
@@ -39,7 +39,7 @@ const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 
 const TOOL_BUTTON := Vector2(140, 52) ## a tool-list button: small enough that most categories fit without scrolling
 const GENERIC_ICON_BUTTON := Vector2(70, 52)
-const GENERIC_LABEL_BUTTON := Vector2(128, 52)
+const GENERIC_LABEL_BUTTON := Vector2(150, 52)
 const VIOLET := Color(0.78, 0.55, 0.98)
 
 
@@ -69,7 +69,7 @@ var _tool_columns: HBoxContainer
 var _scroll_left: Button
 var _scroll_right: Button
 var _connector: Control
-var _tool_buttons_box: HBoxContainer ## the tool-specific buttons (Done, Part: Locked)
+var _tool_buttons_box: HBoxContainer ## the tool-specific buttons (Done)
 var _options_row: HBoxContainer
 var _status_label: Label
 var _snap_button: Button
@@ -166,12 +166,13 @@ func _build_shell() -> void:
 	frame_column.add_child(bottom)
 	var status_panel := PanelContainer.new()
 	status_panel.theme_type_variation = &"PanelRaised"
-	status_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	status_panel.custom_minimum_size = Vector2(260, 0)
+	status_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN ## a narrow tip, not the whole frame
+	status_panel.custom_minimum_size = Vector2(380, 0)
 	_status_label = Label.new()
 	_status_label.theme_type_variation = &"LabelDim"
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.custom_minimum_size = Vector2(300, 0)
 	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var status_row := HBoxContainer.new()
 	status_row.add_theme_constant_override("separation", tokens.gap)
@@ -197,16 +198,6 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		done_pressed.emit())
 	_tool_buttons_box.add_child(_done_button)
-	_lock_button = _utility("lock", "Part: Locked", true)
-	_lock_button.custom_minimum_size.x = 176
-	_lock_button.set_pressed_no_signal(true)
-	_lock_button.disabled = true
-	_lock_button.visible = false
-	_lock_button.toggled.connect(func(on: bool) -> void:
-		_lock_button.text = "Part: Locked" if on else "Part: Free"
-		feedback.emit("press")
-		part_lock_toggled.emit(on))
-	_tool_buttons_box.add_child(_lock_button)
 
 	# --- Right: the generic controls ---
 	var generic_divider := VSeparator.new()
@@ -269,6 +260,20 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		return_pressed.emit())
 	part_row.add_child(_return_button)
+
+	var lock_row := HBoxContainer.new()
+	lock_row.add_theme_constant_override("separation", tokens.gap)
+	generic.add_child(lock_row)
+	_lock_button = _utility("lock", "Part: Locked", true)
+	_lock_button.custom_minimum_size.x = GENERIC_LABEL_BUTTON.x * 2.0 + tokens.gap
+	_lock_button.set_pressed_no_signal(true)
+	_lock_button.disabled = true
+	_lock_button.visible = false
+	_lock_button.toggled.connect(func(on: bool) -> void:
+		_lock_button.text = "Part: Locked" if on else "Part: Free"
+		feedback.emit("press")
+		part_lock_toggled.emit(on))
+	lock_row.add_child(_lock_button)
 
 	_tint_glyphs()
 	_style_frame()

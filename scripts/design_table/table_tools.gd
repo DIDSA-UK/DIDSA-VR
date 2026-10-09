@@ -14,10 +14,10 @@ extends RefCounted
 
 const TabletRegistry := preload("res://scripts/ui/tablet_registry.gd")
 
-const ACCENT_SKETCH := Color(0.31, 0.77, 1.00) ## cyan, the same as the wrist tablet's View
-const ACCENT_CONSTRAIN := Color(0.96, 0.69, 0.25) ## amber
-const ACCENT_FEATURE := Color(0.40, 0.90, 0.60) ## green
-const ACCENT_MODIFY := Color(0.78, 0.55, 0.98) ## violet
+const ACCENT_SKETCH := Color(0.31, 0.77, 1.00) ## cyan, the same as the wrist tablet's View; every tab uses it (test round 9 Oct: one colour for all, no green in Feature)
+const ACCENT_CONSTRAIN := ACCENT_SKETCH
+const ACCENT_FEATURE := ACCENT_SKETCH
+const ACCENT_MODIFY := ACCENT_SKETCH
 const ACCENT_INSPECT := Color(0.95, 0.50, 0.65) ## rose
 
 ## id, label, icon. DIDSA-CAD's SketchTool enum, in the order the flat app shows
