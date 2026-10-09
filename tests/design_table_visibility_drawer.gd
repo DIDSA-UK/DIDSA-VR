@@ -1,9 +1,9 @@
 extends SceneTree
 ## The Visibility DRAWER and its eye button (scripts/design_table/table_visibility_window.gd, plan step 2) on the rig's fake backend:
-## the eye sits in the generic column next to Snap and opens the drawer beside the Properties dock; the rows show an eye / half eye /
+## the eye sits in the generic column next to Snap and opens the drawer, stationary against the deck's right edge; the rows show an eye / half eye /
 ## eye-off and "3 of 5" counts that follow the Build tree's hidden ids; a row press is the batch rule (all visible -> hide all, else show
 ## all); an empty category and Centre of gravity are dimmed and do nothing; the session rows flip their switch; Show all / Hide all act on
-## every row; the X lets the eye go; closing the table puts the drawer away; resizing the slab moves it.
+## every row; the X lets the eye go; closing the table puts the drawer away; widening the slab keeps it flush with the deck.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_visibility_drawer.gd  (see tests/README.md)
 
 const Rig := preload("res://tests/helpers/table_rig.gd")
@@ -30,7 +30,7 @@ func _initialize() -> void:
 	print("SMOKE the eye button sits in the generic column beside Snap, and the drawer starts closed: ", eye != null and eye.is_visible_in_tree() and eye.get_parent() == table.ui._snap_button.get_parent() and not win.is_open() and not eye.button_pressed)
 	eye.button_pressed = true
 	await rig.frames(2)
-	print("SMOKE pressing the eye opens the drawer, docked beside the Properties dock: ", win.is_open() and win.dock_position.x > table.props.dock_position.x)
+	print("SMOKE pressing the eye opens the drawer on the deck's right edge, level with its top, a child of the deck with no grab handle: ", win.is_open() and win.get_parent() == table._deck and is_equal_approx(win.position.x, table.tools_size.x * 0.5 + win.panel_size.x * 0.5 + win.GAP) and is_equal_approx(win.position.y + win.panel_size.y * 0.5, table.tools_size.y * 0.5) and win._handle == null and win.handle_in_reach(rig.r) == false)
 	var sk: Button = win.button_for(Vis.SKETCHES)
 	print("SMOKE Sketches shows '2 of 3' after the load rule (the extrude consumed one): ", sk.text.contains("Sketches") and sk.text.contains("2 of 3"), " ", sk.text)
 	print("SMOKE Bodies is a full eye '1 of 1', Created planes is eye-off '0 of 1' (hidden by the load rule): ", win.row_state(Vis.BODIES) == {"state": "all", "label": "1 of 1"} and win.row_state(Vis.PLANES) == {"state": "none", "label": "0 of 1"})
@@ -59,7 +59,7 @@ func _initialize() -> void:
 	await rig.frames(2)
 	var before: float = win.position.x
 	table.set_slab_size(table.slab_size + Vector2(0.2, 0.0))
-	print("SMOKE resizing the slab moves the drawer out with the dock: ", is_equal_approx(win.position.x - before, 0.1))
+	print("SMOKE widening the slab widens the deck, and the drawer stays flush against its right edge: ", win.position.x > before and is_equal_approx(win.position.x, table.tools_size.x * 0.5 + win.panel_size.x * 0.5 + win.GAP))
 	table.close()
 	await rig.frames(2)
 	print("SMOKE closing the table puts the drawer away and releases the eye: ", not win.is_open() and not eye.button_pressed)

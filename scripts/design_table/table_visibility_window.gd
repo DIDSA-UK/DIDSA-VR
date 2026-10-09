@@ -1,5 +1,5 @@
 extends "res://scripts/diegetic_panel.gd"
-## The VISIBILITY drawer (docs/sketch-as-seed-plan.md section 3): a panel beside the Properties dock, opened by the eye button in the
+## The VISIBILITY drawer (docs/sketch-as-seed-plan.md section 3): a drawer on the right of the tool deck, opened by the eye button in the
 ## generic column. A grid of square buttons, one per category: an eye (all visible), half eye (some) or eye-off (none) over the name and,
 ## for the categories that are features, how many are visible ("3 of 5"). Show all / Hide all are the two large buttons down the far left and act on
 ## every category. The logic is visibility.gd (the rules) and
@@ -28,8 +28,7 @@ var table ## design_table.gd
 var _buttons := {} ## row id -> Button
 var _show_all: Button
 var _hide_all: Button
-@export var dock_position := Vector3(0.88, 0.20, 0.06) ## in the console's frame, beside the Properties dock
-@export var dock_yaw_degrees: float = -14.0
+const GAP := 0.012 ## metres between the deck's right edge and the drawer
 
 
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
@@ -41,6 +40,11 @@ func setup_for_table(p_table, left: XRController3D, right: XRController3D, camer
 	set_title("Visibility")
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
+	# Stationary: it is a child of the deck, flush against its right edge, so it has no grab handle and its corners do not resize it.
+	handle.node.queue_free()
+	handle.node = null
+	for c in _corners:
+		c.visible = false
 	table.build.changed.connect(refresh)
 	table.build.visibility.changed.connect(refresh)
 
@@ -91,7 +95,17 @@ func _plain(text: String, callback: Callable) -> Button:
 
 
 func _place_in_front_of_camera() -> void:
-	transform = Transform3D(Basis(Vector3.UP, deg_to_rad(dock_yaw_degrees)), dock_position)
+	dock_to_deck()
+
+
+func dock_to_deck() -> void:
+	## In the deck's frame (the deck is a quad centred on its origin): its right edge plus the gap, top edges level.
+	position = Vector3(table.tools_size.x * 0.5 + panel_size.x * 0.5 + GAP, (table.tools_size.y - panel_size.y) * 0.5, 0.0)
+	rotation = Vector3.ZERO
+
+
+func _corner_at(_p: Vector2) -> int:
+	return -1
 
 
 func _row_pressed(id: String) -> void:

@@ -209,7 +209,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	build.changed.connect(editor.sync_plane_markers)
 	visibility_window = VisibilityWindow.new()
 	visibility_window.name = "Visibility"
-	add_child(visibility_window)
+	_deck.add_child(visibility_window) # on the deck's right: it tips and moves with it
 	visibility_window.setup_for_table(self, left, right, camera)
 	ui.visibility_toggled.connect(func(on: bool) -> void:
 		if _open:
@@ -444,6 +444,8 @@ func _apply_deck_width() -> void:
 	ui.size = Vector2(viewport_size)
 	(_deck_quad.mesh as QuadMesh).size = tools_size
 	surface.panel_size = tools_size
+	if visibility_window != null:
+		visibility_window.dock_to_deck()
 
 
 func apply_settings(settings) -> void:
@@ -482,8 +484,7 @@ func set_slab_size(new_size: Vector2) -> void:
 	var props_x := new_size.x * 0.5 + 0.20
 	props.position.x += props_x - props.dock_position.x
 	props.dock_position.x = props_x
-	visibility_window.position.x += props_x + 0.38 - visibility_window.dock_position.x
-	visibility_window.dock_position.x = props_x + 0.38
+	visibility_window.dock_to_deck()
 	resizer.layout()
 	poke_render()
 
