@@ -126,7 +126,8 @@ func _initialize() -> void:
 	await b.set_all_visible(false)
 	print("SMOKE Hide all hides every feature of the part (sketches, planes and the body): ", b.category_state(Vis.SKETCHES)["state"] == "none" and b.category_state(Vis.PLANES)["state"] == "none" and b.category_state(Vis.BODIES)["state"] == "none", " ", main.hidden_feature_ids())
 	var extras_keys: Array = main.native_extras_to_add({}).keys()
-	print("SMOKE ...and the file's only visibility key is hidden_feature_ids: ", extras_keys.filter(func(k): return str(k).contains("hid") or str(k).contains("visib") or str(k).begins_with("vr_")) == ["hidden_feature_ids"], " ", extras_keys)
+	# vr_stale_mates is the mates feature's own key (it was there before visibility): not a visibility key
+	print("SMOKE ...and the file's only visibility key is hidden_feature_ids (no vr_ visibility keys): ", extras_keys.filter(func(k): return str(k).contains("hid") or str(k).contains("visib") or (str(k).begins_with("vr_") and str(k) != "vr_stale_mates")) == ["hidden_feature_ids"], " ", extras_keys)
 	await b.set_all_visible(true)
 	print("SMOKE Show all brings everything back: ", main.hidden_feature_ids().is_empty() and table.table_copy.layers == 1)
 	quit()
