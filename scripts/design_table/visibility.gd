@@ -18,8 +18,7 @@ const REFERENCE_PLANES := "reference_planes"
 const ORIGIN_AXES := "origin_axes"
 const DIMENSIONS := "dimensions"
 const CONSTRUCTION := "construction"
-const EDGE_LINES := "edge_lines"
-const SESSION_CATEGORIES := [REFERENCE_PLANES, ORIGIN_AXES, DIMENSIONS, CONSTRUCTION, EDGE_LINES]
+const SESSION_CATEGORIES := [REFERENCE_PLANES, ORIGIN_AXES, DIMENSIONS, CONSTRUCTION]
 
 const CURVE_TYPES := ["curve", "curve_3d", "spline_3d"] ## the backend's 3D curve rows (no tool makes them yet: matched by name)
 
@@ -28,16 +27,15 @@ signal changed ## a switch moved: the drawer redraws
 var _on := {} ## session category -> bool
 
 
-func _init(edge_lines_on := true) -> void:
-	reset(edge_lines_on)
+func _init() -> void:
+	reset()
 
 
-func reset(edge_lines_on: bool) -> void:
-	## The load rule for the session switches: everything off except edge lines, which follow View > Display.
+func reset() -> void:
+	## The load rule for the session switches: everything off.
 	_on = {}
 	for c in SESSION_CATEGORIES:
 		_on[c] = false
-	_on[EDGE_LINES] = edge_lines_on
 	changed.emit()
 
 

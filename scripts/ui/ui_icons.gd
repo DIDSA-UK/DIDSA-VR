@@ -100,6 +100,9 @@ const _ICONS := {
 	"eye": '<path d="M4 24C10 14 17 10 24 10S38 14 44 24C38 34 31 38 24 38S10 34 4 24Z"/><circle cx="24" cy="24" r="6"/>',
 	"eye_half": '<path d="M4 24C10 14 17 10 24 10S38 14 44 24C38 34 31 38 24 38S10 34 4 24Z"/><path d="M24 10V38"/><path d="M4 24C10 14 17 10 24 10V38C17 38 10 34 4 24Z" fill="white"/>',
 	"eye_off": '<path d="M4 24C10 14 17 10 24 10S38 14 44 24C38 34 31 38 24 38S10 34 4 24Z"/><path d="M8 40L40 8"/>',
+	"eye_shaded": '<path d="M24 6L42 15V33L24 42L6 33V15Z" fill="white"/>',
+	"eye_shaded_edges": '<path d="M24 6L42 15V33L24 42L6 33V15Z"/><path d="M6 15L24 24L42 15M24 24V42"/><path d="M6 15L24 6L42 15L24 24Z" fill="white"/>',
+	"eye_wireframe": '<path d="M24 6L42 15V33L24 42L6 33V15Z"/><path d="M6 15L24 24L42 15M24 24V42"/>',
 	"fit": '<path d="M7 17V7H17M31 7H41V17M41 31V41H31M17 41H7V31"/><rect x="17" y="17" width="14" height="14" rx="1"/>',
 	"enforce": '<path d="M10 25L20 35L38 13"/><circle cx="24" cy="24" r="20"/>',
 	# environment scenes

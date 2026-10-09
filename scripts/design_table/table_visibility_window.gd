@@ -2,7 +2,7 @@ extends "res://scripts/diegetic_panel.gd"
 ## The VISIBILITY drawer (docs/sketch-as-seed-plan.md section 3): a drawer on the right of the tool deck, opened by the eye button in the
 ## generic column. A grid of square tiles, one per category: an eye (all visible), half eye (some) or eye-off (none) over the name; a
 ## category with nothing in it is dimmed. Rows run in groups: what the model made, the planes and axes, what is drawn on it. Show all / Hide all
-## are the two large buttons down the far left and act on every category. The logic is visibility.gd (the rules) and table_build.gd (the hidden
+## are the two large buttons down the far left and act on every category. A partitioned column on the right holds the three Display modes. The logic is visibility.gd (the rules) and table_build.gd (the hidden
 ## ids; the session switches); this is only the view. Centre of gravity is a placeholder until the backend can report it.
 
 const Visibility := preload("res://scripts/design_table/visibility.gd")
@@ -20,10 +20,12 @@ const ROWS := [ ## [id, label, feature category or ""]
 	["centre_of_gravity", "CofG"],
 	[Visibility.DIMENSIONS, "Dims"],
 	[Visibility.CONSTRUCTION, "Constr."],
-	[Visibility.EDGE_LINES, "Edge lines"],
 ]
 
+const MODES := [["eye_shaded", "Shaded"], ["eye_shaded_edges", "Edges"], ["eye_wireframe", "Wire"]] ## view_modes.gd Mode order; the icon names are ui_icons.gd's
+
 var table ## design_table.gd
+var _mode_buttons: Array = []
 var _buttons := {} ## row id -> Button
 var _show_all: Button
 var _hide_all: Button
@@ -33,7 +35,7 @@ const GAP := 0.012 ## metres between the deck's right edge and the drawer
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	table = p_table
 	panel_title = "Visibility"
-	panel_size = Vector2(0.26, p_table.tools_size.y) # as tall as the deck it sits against
+	panel_size = Vector2(0.31, p_table.tools_size.y) # as tall as the deck it sits against
 	viewport_size = Vector2i((panel_size * p_table.pixels_per_metre).round()) # the deck's own density: the same text size
 	setup(left, right, camera)
 	set_title("Visibility")
@@ -46,6 +48,7 @@ func setup_for_table(p_table, left: XRController3D, right: XRController3D, camer
 		c.visible = false
 	table.build.changed.connect(refresh)
 	table.build.visibility.changed.connect(refresh)
+	table._main.view_modes.changed.connect(func(_mode: int) -> void: refresh())
 
 
 func _build_content() -> Control:
@@ -64,35 +67,57 @@ func _build_content() -> Control:
 	grid.add_theme_constant_override("v_separation", 8)
 	for r in ROWS:
 		var id: String = r[0]
-		var b := Button.new()
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		b.expand_icon = false
-		b.custom_minimum_size = Vector2(TILE, TILE)
-		b.size_flags_horizontal = Control.SIZE_FILL
-		b.size_flags_vertical = Control.SIZE_FILL
-		# The name is a label laid over the lower part of the tile, not the button's own text: wrapped text would make a tile as tall as
-		# its longest name and the grid uneven. The tile is always exactly TILE square.
-		var name_label := Label.new()
-		name_label.name = "Name"
-		name_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		name_label.offset_top = TILE * 0.52
-		name_label.offset_left = 4
-		name_label.offset_right = -4
-		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		name_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-		name_label.clip_text = true
-		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		name_label.add_theme_font_size_override("font_size", maxi(12, tokens.font_small - 2))
-		b.add_child(name_label)
+		var b := _tile()
 		b.pressed.connect(func() -> void:
 			UiFeedback.haptic(_right, "tick")
 			_row_pressed(id))
 		_buttons[id] = b
 		grid.add_child(b)
 	body.add_child(grid)
+	# A partitioned area on the right: how the part is drawn (View > Display), a setting of the app and not of the file.
+	body.add_child(VSeparator.new())
+	var modes := VBoxContainer.new()
+	modes.add_theme_constant_override("separation", 8)
+	for i in MODES.size():
+		var mode_index: int = i
+		var m := _tile()
+		m.toggle_mode = true
+		m.icon = UiIcons.texture(MODES[i][0], 32)
+		(m.get_node("Name") as Label).text = MODES[i][1]
+		m.pressed.connect(func() -> void:
+			UiFeedback.haptic(_right, "tick")
+			table._main.view_modes.set_mode(mode_index)
+			refresh())
+		_mode_buttons.append(m)
+		modes.add_child(m)
+	body.add_child(modes)
 	return body
+
+
+func _tile() -> Button:
+	var b := Button.new()
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+	b.expand_icon = false
+	b.custom_minimum_size = Vector2(TILE, TILE)
+	b.size_flags_horizontal = Control.SIZE_FILL
+	b.size_flags_vertical = Control.SIZE_FILL
+	# The name is a label laid over the lower part of the tile, not the button's own text: wrapped text would make a tile as tall as
+	# its longest name and the grid uneven. The tile is always exactly TILE square.
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	name_label.offset_top = TILE * 0.52
+	name_label.offset_left = 4
+	name_label.offset_right = -4
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	name_label.clip_text = true
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.add_theme_font_size_override("font_size", maxi(12, tokens.font_small - 2))
+	b.add_child(name_label)
+	return b
 
 
 func _plain(text: String, callback: Callable) -> Button:
@@ -147,6 +172,7 @@ func button_for(id: String) -> Button:
 
 
 func refresh() -> void:
+	_refresh_modes()
 	for r in ROWS:
 		var b: Button = _buttons.get(r[0])
 		if b == null:
@@ -156,6 +182,15 @@ func refresh() -> void:
 		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 32)
 		b.disabled = st["state"] in ["empty", "soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
 		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "soon", "none"] else Color.WHITE
+
+
+func _refresh_modes() -> void:
+	for i in _mode_buttons.size():
+		var m: Button = _mode_buttons[i]
+		m.set_pressed_no_signal(table._main.view_modes.mode == i)
+		if m.button_pressed:
+			m.add_theme_stylebox_override("pressed", tokens.selected_box(tokens.accent))
+			m.add_theme_stylebox_override("hover_pressed", tokens.selected_box(tokens.accent))
 
 
 func set_wanted(wanted: bool) -> void:

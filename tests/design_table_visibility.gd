@@ -72,11 +72,11 @@ func _initialize() -> void:
 	print("SMOKE ...on an all-visible category it hides all (off then on always ends with everything visible): ", Vis.category_state(rows, hidden_all, Vis.SKETCHES)["state"] == "none" and hidden_all.has("other_part") and Vis.category_state(rows, Vis.toggle_category(rows, hidden_all, Vis.SKETCHES), Vis.SKETCHES)["state"] == "all")
 	print("SMOKE rolled-back features are not counted (rolling back the loft takes its row out of Bodies, 5 of 5): ", Vis.category_state(rows, [], Vis.BODIES, ["lo_1"])["label"] == "5 of 5" and Vis.category_state(rows, ["fi_1"], Vis.BODIES, ["lo_1"])["label"] == "4 of 5")
 
-	var vis := Vis.new(true)
-	print("SMOKE session switches start off except edge lines, which follow the Display mode: ", not vis.is_on(Vis.REFERENCE_PLANES) and not vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on(Vis.DIMENSIONS) and not vis.is_on(Vis.CONSTRUCTION) and vis.is_on(Vis.EDGE_LINES) and not Vis.new(false).is_on(Vis.EDGE_LINES))
+	var vis := Vis.new()
+	print("SMOKE session switches all start off (edge lines are View > Display, not a switch): ", not vis.is_on(Vis.REFERENCE_PLANES) and not vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on(Vis.DIMENSIONS) and not vis.is_on(Vis.CONSTRUCTION))
 	vis.toggle(Vis.ORIGIN_AXES)
 	vis.set_on("nonsense", true)
-	print("SMOKE ...they toggle, unknown names are ignored, set_all and reset work: ", vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on("nonsense") and (func(): vis.set_all(false); return not vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on(Vis.EDGE_LINES)).call() and (func(): vis.reset(true); return vis.is_on(Vis.EDGE_LINES)).call())
+	print("SMOKE ...they toggle, unknown names are ignored, set_all and reset work: ", vis.is_on(Vis.ORIGIN_AXES) and not vis.is_on("nonsense") and (func(): vis.set_all(false); return not vis.is_on(Vis.ORIGIN_AXES)).call() and (func(): vis.set_all(true); vis.reset(); return not vis.is_on(Vis.CONSTRUCTION)).call())
 
 	# --- scene: the rule and the button over the Build tree
 	main = load("res://scenes/main.tscn").instantiate()
