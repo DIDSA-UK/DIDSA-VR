@@ -4,10 +4,10 @@ extends Control
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
 ##     small buttons that scrolls sideways when there are more than fit), then the tool tip
-##     (or what is selected) and the tool-specific buttons (Done). The active
+##     (or what is selected). The active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd), or in a row inside the frame when there is none.
-##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked. They are not
+##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked, Done (at the bottom). Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
 ## Glyphs carry colour (green Done, red Close, amber Undo...) so a button reads without its label.
@@ -69,7 +69,6 @@ var _tool_columns: HBoxContainer
 var _scroll_left: Button
 var _scroll_right: Button
 var _connector: Control
-var _tool_buttons_box: HBoxContainer ## the tool-specific buttons (Done)
 var _options_row: HBoxContainer
 var _status_label: Label
 var _snap_button: Button
@@ -187,28 +186,22 @@ func _build_shell() -> void:
 	status_panel.add_child(status_row)
 	bottom.add_child(status_panel)
 
-	_tool_buttons_box = HBoxContainer.new() ## tool-specific: only about the sketch that is open
-	_tool_buttons_box.add_theme_constant_override("separation", tokens.gap)
-	_tool_buttons_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	bottom.add_child(_tool_buttons_box)
-	_done_button = _utility("enforce", "Done", false)
-	_done_button.disabled = true
-	_done_button.visible = false
-	_done_button.pressed.connect(func() -> void:
-		feedback.emit("press")
-		done_pressed.emit())
-	_tool_buttons_box.add_child(_done_button)
 
 	# --- Right: the generic controls ---
 	var generic_divider := VSeparator.new()
 	main.add_child(generic_divider)
 	var generic := VBoxContainer.new()
 	generic.add_theme_constant_override("separation", tokens.gap)
-	generic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	generic.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(generic)
-	var top_row := HBoxContainer.new()
+	var top_row := HBoxContainer.new() ## Undo, Redo and Close in the dock's top right corner, level with the tabs
 	top_row.add_theme_constant_override("separation", tokens.gap)
+	top_row.alignment = BoxContainer.ALIGNMENT_END
+	top_row.custom_minimum_size = Vector2(0, 64)
 	generic.add_child(top_row)
+	var top_gap := Control.new()
+	top_gap.custom_minimum_size = Vector2(0, 12)
+	generic.add_child(top_gap)
 	_undo_button = _utility("undo", "", false)
 	_undo_button.disabled = true
 	_undo_button.pressed.connect(func() -> void:
@@ -274,6 +267,18 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		part_lock_toggled.emit(on))
 	lock_row.add_child(_lock_button)
+
+	var bottom_spacer := Control.new() ## pushes Done to the bottom of the dock
+	bottom_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	generic.add_child(bottom_spacer)
+	_done_button = _utility("enforce", "Done", false)
+	_done_button.custom_minimum_size.x = GENERIC_LABEL_BUTTON.x * 2.0 + tokens.gap
+	_done_button.disabled = true
+	_done_button.visible = false
+	_done_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		done_pressed.emit())
+	generic.add_child(_done_button)
 
 	_tint_glyphs()
 	_style_frame()
