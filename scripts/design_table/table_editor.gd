@@ -674,6 +674,25 @@ func reopen_sketch(feature_id: String) -> bool:
 	return true
 
 
+func new_sketch() -> void:
+	## The deck's New sketch: ends the sketch that is open (rebuilding the part if it changed), puts the active tool away
+	## and asks for the plane or flat face the next sketch goes on.
+	if table.table_copy == null:
+		table.set_status("Put a part on the table first: carry one over it and let go, or pick one in the tree.")
+		return
+	if state == "opening":
+		return
+	if session != null:
+		await finish_sketch()
+	if table.active_tool != "":
+		table.manager.deactivate()
+	if state != "pick_plane":
+		set_state("pick_plane")
+	if markers != null:
+		markers.set_markers_visible(true)
+	_say_pick_plane()
+
+
 func finish_sketch() -> void:
 	## The deck's Done: leaves the open sketch. If it was changed the part is rebuilt (everything built on the sketch follows) and its
 	## mates are flagged like any edit; an untouched sketch just closes.

@@ -6,6 +6,8 @@ extends Control
 ##     small buttons that scrolls sideways when there are more than fit), then Exit sketch (leaves the open sketch). The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
+##     New sketch (larger than a tool button) heads the Sketch and Constrain tabs; those tools are dimmed
+##     until a sketch is open.
 ##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Orbit lock. Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
@@ -25,6 +27,7 @@ signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
 signal part_lock_toggled(locked: bool) ## "Orbit lock On / Off" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
+signal new_sketch_pressed ## "New sketch": ends any open sketch and asks for a plane or flat face to start the next one on
 signal done_pressed ## "Exit sketch": leave the open sketch (the part is refreshed if it was changed)
 signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
 signal return_pressed ## "To arena": the real part goes back where it came from
@@ -40,6 +43,9 @@ const TOOL_BUTTON := Vector2(140, 52) ## a tool-list button: small enough that m
 const GENERIC_ICON_BUTTON := Vector2(70, 52)
 const GENERIC_LABEL_BUTTON := Vector2(150, 52)
 const VIOLET := Color(0.78, 0.55, 0.98)
+const NEW_SKETCH_BUTTON := Vector2(260, 68) ## bigger than a tool button: it is how a sketch starts
+const SKETCH_CATEGORIES := ["sketch", "constrain"] ## their tools only work inside a sketch, so they are dimmed until one is open
+const DIMMED := Color(1, 1, 1, 0.38)
 
 
 class Connector extends Control:
@@ -63,6 +69,10 @@ var selected_category_id := ""
 var _panel: PanelContainer
 var _cat_row: HBoxContainer
 var _tool_frame: PanelContainer
+var _new_sketch_row: HBoxContainer
+var _new_sketch_button: Button
+var _sketching := false
+var _part_present := false
 var _tool_scroll: ScrollContainer
 var _tool_columns: HBoxContainer
 var _scroll_left: Button
@@ -135,6 +145,21 @@ func _build_shell() -> void:
 	var frame_column := VBoxContainer.new()
 	frame_column.add_theme_constant_override("separation", tokens.gap)
 	_tool_frame.add_child(frame_column)
+
+	_new_sketch_row = HBoxContainer.new()
+	frame_column.add_child(_new_sketch_row)
+	_new_sketch_button = Button.new()
+	_new_sketch_button.text = "New sketch"
+	_new_sketch_button.icon = UiIcons.texture("cat_sketch", 34)
+	_new_sketch_button.clip_text = true
+	_new_sketch_button.custom_minimum_size = NEW_SKETCH_BUTTON
+	_new_sketch_button.theme_type_variation = &"ButtonAccent"
+	_new_sketch_button.add_theme_font_size_override("font_size", tokens.font_body)
+	_new_sketch_button.disabled = true
+	_new_sketch_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		new_sketch_pressed.emit())
+	_new_sketch_row.add_child(_new_sketch_button)
 
 	var tool_line := HBoxContainer.new()
 	tool_line.add_theme_constant_override("separation", 4)
@@ -410,6 +435,18 @@ func _rebuild_tools() -> void:
 	_tool_scroll.scroll_horizontal = 0
 	_style_frame()
 	_refresh_tool_visuals()
+	_refresh_sketch_state()
+
+
+func _refresh_sketch_state() -> void:
+	## Sketch and Constrain tools are dimmed until a sketch is open (they stay pressable: choosing one with no sketch
+	## open arms it and asks for a plane); New sketch is offered on those two tabs.
+	var in_sketch_tab: bool = SKETCH_CATEGORIES.has(selected_category_id)
+	_new_sketch_row.visible = in_sketch_tab
+	_new_sketch_button.disabled = not _part_present
+	for id in _tool_buttons:
+		(_tool_buttons[id] as Button).modulate = DIMMED if (in_sketch_tab and not _sketching) else Color.WHITE
+	activity.emit()
 
 
 func _on_tool_pressed(tool_id: String) -> void:
@@ -488,12 +525,22 @@ func set_undo_enabled(on: bool) -> void:
 		activity.emit()
 
 
+func new_sketch_button() -> Button:
+	return _new_sketch_button
+
+
+func tools_dimmed() -> bool:
+	return not _tool_buttons.is_empty() and (_tool_buttons.values()[0] as Button).modulate.a < 1.0
+
+
 func set_part_present(on: bool) -> void:
 	## Reset and To arena only mean something while a part is on the table.
 	if _reset_button.disabled == on:
 		_reset_button.disabled = not on
 		_return_button.disabled = not on
 		activity.emit()
+	_part_present = on
+	_refresh_sketch_state()
 	_reset_button.visible = on ## not greyed: with no part on the table there is nothing to reset or send back
 	_return_button.visible = on
 
@@ -505,6 +552,8 @@ func set_sketching(on: bool) -> void:
 		_fit_button.disabled = not on
 		_done_button.disabled = not on
 		activity.emit()
+	_sketching = on
+	_refresh_sketch_state()
 	_lock_button.visible = on ## the sketch's own buttons only exist while a sketch is open
 	_fit_button.visible = on
 	_done_button.visible = on
