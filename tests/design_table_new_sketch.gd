@@ -30,7 +30,7 @@ func _initialize() -> void:
 
 	print("SMOKE with a sketch open New sketch is greyed and Exit sketch is offered beside it (same row): ", nb.disabled and ui.done_button().is_visible_in_tree() and not ui.done_button().disabled and ui.done_button().get_parent() == nb.get_parent())
 	ui.select_category("feature")
-	print("SMOKE ...Exit sketch is still reachable from the Feature tab: ", ui.done_button().is_visible_in_tree())
+	print("SMOKE ...but Exit sketch is not shown on the Feature tab (it belongs to the Sketch tab): ", not ui.done_button().is_visible_in_tree())
 	ui.select_category("sketch")
 	ui.new_sketch_pressed.emit()
 	await rig.frames(2)

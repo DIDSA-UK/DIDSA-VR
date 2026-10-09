@@ -4,7 +4,8 @@ extends Control
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (three rows of
 ##     small buttons that scrolls sideways when there are more than fit). A category can set groups of
-##     tools apart: Sketch has Draw (cyan), Constrain (amber) and Edit (violet), each in its own panel. The tool tip and the active
+##     tools apart: Sketch has Draw (cyan), Constrain (amber) and Edit (violet), Feature has Create, Refine and
+##     Combine, each in its own panel. The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
 ##     New sketch (the way in, larger than a tool button) heads the Sketch and Constrain tabs with
@@ -485,7 +486,8 @@ func _refresh_sketch_state() -> void:
 	var in_sketch_tab: bool = SKETCH_CATEGORIES.has(selected_category_id)
 	_new_sketch_button.visible = in_sketch_tab
 	_new_sketch_button.disabled = not _part_present or _sketching ## an entry only: leave the open sketch (Exit sketch) before starting another
-	_new_sketch_row.visible = in_sketch_tab or _sketching ## Exit sketch stays reachable from every tab while a sketch is open
+	_done_button.visible = in_sketch_tab and _sketching ## Exit sketch belongs to the Sketch tab only
+	_new_sketch_row.visible = in_sketch_tab
 	for id in _tool_buttons:
 		(_tool_buttons[id] as Button).modulate = DIMMED if (in_sketch_tab and not _sketching) else Color.WHITE
 	activity.emit()
@@ -594,7 +596,6 @@ func set_sketching(on: bool) -> void:
 	_refresh_sketch_state()
 	_lock_button.visible = on ## the sketch's own buttons only exist while a sketch is open
 	_fit_button.visible = on
-	_done_button.visible = on
 
 
 func set_part_locked(on: bool) -> void:

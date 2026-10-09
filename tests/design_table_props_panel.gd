@@ -19,6 +19,7 @@ func _initialize() -> void:
 	table.manager.activate("extrude")
 	await rig.frames(3)
 	print("SMOKE choosing Extrude opens the panel: ", props.is_open())
+	print("SMOKE ...and a Selected list says the open sketch has a closed shape ready: ", props.selection_text().begins_with("SELECTED") and props.selection_text().contains("closed shape ready"), " ", props.selection_text())
 	print("SMOKE ...it lists every setting of the tool, as the deck's row did: ", props.option_ids() == ["boss", "cut", "flip", "new_body", "depth", "apply"], " ", props.option_ids())
 	print("SMOKE ...under the tool's name and its hint: ", props._title.text == "Extrude" and props._hint.text.contains("Boss or Cut"))
 	print("SMOKE ...the deck's own options row stays hidden and the deck finds the buttons in the panel: ", not table.ui._options_row.visible and table.ui.option_button("flip") == props.option_button("flip") and props.option_button("flip") != null)

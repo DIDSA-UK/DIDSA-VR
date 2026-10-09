@@ -1103,6 +1103,11 @@ func on_tool_changed(tool_id: String) -> void:
 func _update_options() -> void:
 	if table == null or table.ui == null:
 		return
+	_update_option_list()
+	table.props.set_selection(selection_summary())
+
+
+func _update_option_list() -> void:
 	var tool: String = table.active_tool
 	var list: Array = []
 	if not fixing.is_empty():
@@ -1694,6 +1699,30 @@ func _sync_text_settings() -> void:
 		session.text_font = str(options["text_font"])
 		session.text_size = float(options["text_size"])
 		session.text_rotation = float(options["text_rot"])
+
+
+func selection_summary() -> Array:
+	## What the active tool has picked so far, one line per kind, for the Properties panel's "Selected" list.
+	var lines: Array = []
+	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
+		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
+	if not edges.is_empty():
+		lines.append("Edges: %d" % edges.size())
+	if not faces.is_empty():
+		lines.append("Faces: %d" % faces.size())
+	if not bodies.is_empty():
+		lines.append("Bodies: %d" % bodies.size())
+	if not curve_picks.is_empty():
+		var names: Array = []
+		for c in curve_picks:
+			var info: Dictionary = {}
+			if sketch_picks != null and is_instance_valid(sketch_picks):
+				info = sketch_picks.sketches.get(str(c.get("sketch_feature_id", "")), {})
+			var label := str(info.get("name", "sketch"))
+			if not names.has(label):
+				names.append(label)
+		lines.append("Sketch lines: %d (%s)" % [curve_picks.size(), ", ".join(names)])
+	return lines
 
 
 func clear_picks() -> void:
