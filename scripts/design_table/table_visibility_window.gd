@@ -65,13 +65,27 @@ func _build_content() -> Control:
 	for r in ROWS:
 		var id: String = r[0]
 		var b := Button.new()
-		b.clip_text = true
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		b.expand_icon = false
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.custom_minimum_size = Vector2(TILE, TILE)
-		b.add_theme_font_size_override("font_size", maxi(12, tokens.font_small - 2))
+		b.size_flags_horizontal = Control.SIZE_FILL
+		b.size_flags_vertical = Control.SIZE_FILL
+		# The name is a label laid over the lower part of the tile, not the button's own text: wrapped text would make a tile as tall as
+		# its longest name and the grid uneven. The tile is always exactly TILE square.
+		var name_label := Label.new()
+		name_label.name = "Name"
+		name_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		name_label.offset_top = TILE * 0.52
+		name_label.offset_left = 4
+		name_label.offset_right = -4
+		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+		name_label.clip_text = true
+		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		name_label.add_theme_font_size_override("font_size", maxi(12, tokens.font_small - 2))
+		b.add_child(name_label)
 		b.pressed.connect(func() -> void:
 			UiFeedback.haptic(_right, "tick")
 			_row_pressed(id))
@@ -124,6 +138,10 @@ func row_state(id: String) -> Dictionary:
 	return {"state": "soon", "label": "coming soon"}
 
 
+func tile_name(id: String) -> String:
+	return (_buttons[id].get_node("Name") as Label).text if _buttons.has(id) else ""
+
+
 func button_for(id: String) -> Button:
 	return _buttons.get(id)
 
@@ -134,7 +152,7 @@ func refresh() -> void:
 		if b == null:
 			continue
 		var st := row_state(r[0])
-		b.text = r[1] if st["state"] != "soon" else "%s\n%s" % [r[1], st["label"]] # no counts on the tiles: the eye shows all / some / none
+		(b.get_node("Name") as Label).text = r[1] if st["state"] != "soon" else "%s\n%s" % [r[1], st["label"]] # no counts on the tiles: the eye shows all / some / none
 		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 32)
 		b.disabled = st["state"] in ["empty", "soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
 		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "soon", "none"] else Color.WHITE
