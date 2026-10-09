@@ -675,15 +675,16 @@ func reopen_sketch(feature_id: String) -> bool:
 
 
 func new_sketch() -> void:
-	## The deck's New sketch: ends the sketch that is open (rebuilding the part if it changed), puts the active tool away
-	## and asks for the plane or flat face the next sketch goes on.
+	## The deck's New sketch: an entry, never an exit. Puts the active tool away and asks for the plane or flat face the
+	## sketch goes on. With a sketch already open it does nothing but say so: leaving one is Exit sketch's job.
 	if table.table_copy == null:
 		table.set_status("Put a part on the table first: carry one over it and let go, or pick one in the tree.")
 		return
 	if state == "opening":
 		return
 	if session != null:
-		await finish_sketch()
+		table.set_status("A sketch is open. Press Exit sketch first, then New sketch.")
+		return
 	if table.active_tool != "":
 		table.manager.deactivate()
 	if state != "pick_plane":

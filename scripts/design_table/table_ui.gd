@@ -3,11 +3,11 @@ extends Control
 ## kinds of control, kept apart:
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
-##     small buttons that scrolls sideways when there are more than fit), then Exit sketch (leaves the open sketch). The tool tip and the active
+##     small buttons that scrolls sideways when there are more than fit). The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
-##     New sketch (larger than a tool button) heads the Sketch and Constrain tabs; those tools are dimmed
-##     until a sketch is open.
+##     New sketch (the way in, larger than a tool button) heads the Sketch and Constrain tabs with
+##     Exit sketch (the way out) beside it; those tools are dimmed until a sketch is open.
 ##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Orbit lock. Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
@@ -27,7 +27,7 @@ signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
 signal part_lock_toggled(locked: bool) ## "Orbit lock On / Off" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
-signal new_sketch_pressed ## "New sketch": ends any open sketch and asks for a plane or flat face to start the next one on
+signal new_sketch_pressed ## "New sketch": asks for a plane or flat face to start a sketch on (only offered when no sketch is open)
 signal done_pressed ## "Exit sketch": leave the open sketch (the part is refreshed if it was changed)
 signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
 signal return_pressed ## "To arena": the real part goes back where it came from
@@ -44,6 +44,7 @@ const GENERIC_ICON_BUTTON := Vector2(70, 52)
 const GENERIC_LABEL_BUTTON := Vector2(150, 52)
 const VIOLET := Color(0.78, 0.55, 0.98)
 const NEW_SKETCH_BUTTON := Vector2(260, 68) ## bigger than a tool button: it is how a sketch starts
+const EXIT_SKETCH_BUTTON := Vector2(240, 68)
 const SKETCH_CATEGORIES := ["sketch", "constrain"] ## their tools only work inside a sketch, so they are dimmed until one is open
 const DIMMED := Color(1, 1, 1, 0.38)
 
@@ -160,6 +161,18 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		new_sketch_pressed.emit())
 	_new_sketch_row.add_child(_new_sketch_button)
+	_done_button = Button.new() ## Exit sketch: the other half of the pair, so the way in and the way out sit together
+	_done_button.text = "Exit sketch"
+	_done_button.icon = UiIcons.texture("enforce", 34)
+	_done_button.clip_text = true
+	_done_button.custom_minimum_size = EXIT_SKETCH_BUTTON
+	_done_button.add_theme_font_size_override("font_size", tokens.font_body)
+	_done_button.disabled = true
+	_done_button.visible = false
+	_done_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		done_pressed.emit())
+	_new_sketch_row.add_child(_done_button)
 
 	var tool_line := HBoxContainer.new()
 	tool_line.add_theme_constant_override("separation", 4)
@@ -196,13 +209,6 @@ func _build_shell() -> void:
 	_active_chip.add_theme_color_override("font_color", tokens.accent)
 	_active_chip.add_theme_font_size_override("font_size", tokens.font_small + 3)
 	bottom.add_child(_active_chip)
-	_done_button = _utility("enforce", "Exit sketch", false) ## tool-specific: it leaves the sketch that is open
-	_done_button.disabled = true
-	_done_button.visible = false
-	_done_button.pressed.connect(func() -> void:
-		feedback.emit("press")
-		done_pressed.emit())
-	bottom.add_child(_done_button)
 
 
 	# --- Right: the generic controls ---
@@ -442,8 +448,9 @@ func _refresh_sketch_state() -> void:
 	## Sketch and Constrain tools are dimmed until a sketch is open (they stay pressable: choosing one with no sketch
 	## open arms it and asks for a plane); New sketch is offered on those two tabs.
 	var in_sketch_tab: bool = SKETCH_CATEGORIES.has(selected_category_id)
-	_new_sketch_row.visible = in_sketch_tab
-	_new_sketch_button.disabled = not _part_present
+	_new_sketch_button.visible = in_sketch_tab
+	_new_sketch_button.disabled = not _part_present or _sketching ## an entry only: leave the open sketch (Exit sketch) before starting another
+	_new_sketch_row.visible = in_sketch_tab or _sketching ## Exit sketch stays reachable from every tab while a sketch is open
 	for id in _tool_buttons:
 		(_tool_buttons[id] as Button).modulate = DIMMED if (in_sketch_tab and not _sketching) else Color.WHITE
 	activity.emit()
