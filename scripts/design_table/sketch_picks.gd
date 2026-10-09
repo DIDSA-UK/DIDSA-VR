@@ -16,7 +16,12 @@ const TUBE_RADIUS := 0.0010 ## world metres
 const BASE_COLOUR := Color(0.31, 0.77, 1.00, 0.85)
 
 var curves: Array = [] ## candidate entities (see above)
-var sketches: Dictionary = {} ## sketch feature id -> {sketch_id, name, plane, count, included}
+var sketches: Dictionary = {} ## sketch feature id -> {sketch_id, plane, count, included, closed (it holds a closed profile an extrude can use)}
+var tints: Dictionary = {} ## sketch feature id -> PackedVector3Array of triangles filling its closed loops (a cue for a sketch used as a seed, not a pick)
+var tint_on := false
+
+var _tint_node: MeshInstance3D = null
+var _tint_material: StandardMaterial3D
 var _node: MeshInstance3D = null
 var _material: StandardMaterial3D
 var _scale := 1.0
@@ -29,6 +34,11 @@ func _init() -> void:
 	_material.albedo_color = BASE_COLOUR
 	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_material.no_depth_test = false
+	_tint_material = StandardMaterial3D.new()
+	_tint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_tint_material.albedo_color = Color(0.31, 0.77, 1.00, 0.22)
+	_tint_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_tint_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Callable, skip_feature_id: String = "") -> int:
@@ -36,6 +46,7 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 	## placed (a flipped or turned sketch: left out, as reopening one is). Returns how many curves can be picked.
 	curves.clear()
 	sketches.clear()
+	tints.clear()
 	for row in rows:
 		if str(row.get("type", "")) != "sketch" or str(row.get("id", "")) == skip_feature_id or str(row.get("sketch_id", "")) == "":
 			continue
@@ -53,9 +64,178 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 			count += _add_circle(session, row, id, plane)
 		for id in session.arcs:
 			count += _add_arc(session, row, id, plane)
-		sketches[str(row["id"])] = {"sketch_id": str(row["sketch_id"]), "plane": plane, "count": count, "included": true}
+		sketches[str(row["id"])] = {"sketch_id": str(row["sketch_id"]), "plane": plane, "count": count, "included": true, "closed": session.profile_ok()}
+		tints[str(row["id"])] = _tint_triangles(session, plane)
 	_redraw()
 	return curves.size()
+
+
+func _tint_triangles(session, plane: Dictionary) -> PackedVector3Array:
+	## The closed loops of a sketch (circles, and chains of lines and arcs that end where they began) filled with triangles in the part's frame, HOLES
+	## LEFT OPEN: a loop inside another is a hole of it (inside two, a shape again). Construction and reference shapes are not part of a profile; a chain
+	## that does not close is left out.
+	var out := PackedVector3Array()
+	var normal: Vector3 = (plane["n"] as Vector3) * 0.02 # a hair off the plane so the fill does not fight a face the sketch lies on
+	for uvs in fill_polygons(_loops(session)):
+		var tri: PackedInt32Array = Geometry2D.triangulate_polygon(PackedVector2Array(uvs))
+		for i in tri:
+			out.append(SketchMath.from_sheet(uvs[i], plane) + normal)
+	return out
+
+
+static func fill_polygons(loops: Array) -> Array:
+	## Simple polygons (no holes in any of them) that together fill the loops with their holes left open. A loop's depth is how many other loops
+	## contain it: even depth is solid, odd depth a hole of the smallest loop around it. Each solid loop with holes is cut by a vertical line through
+	## every hole's middle (the hole straddles the cut, so each piece stays simple) and the hole is subtracted from the pieces.
+	var polys: Array = loops.map(func(l): return PackedVector2Array(l))
+	var area: Array = polys.map(func(p): return absf(_signed_area(p)))
+	var parent: Array = []
+	var depth: Array = []
+	for i in polys.size():
+		var best := -1
+		var d := 0
+		for j in polys.size():
+			if i != j and area[j] > area[i] and Geometry2D.is_point_in_polygon((polys[i] as PackedVector2Array)[0], polys[j]):
+				d += 1
+				if best < 0 or area[j] < area[best]:
+					best = j
+		parent.append(best)
+		depth.append(d)
+	var out: Array = []
+	for i in polys.size():
+		if int(depth[i]) % 2 != 0:
+			continue
+		var pieces: Array = [polys[i]]
+		for h in polys.size():
+			if int(depth[h]) % 2 == 1 and parent[h] == i:
+				pieces = _minus_hole(pieces, polys[h])
+		out.append_array(pieces)
+	return out
+
+
+static func _signed_area(p: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in p.size():
+		var q := p[(i + 1) % p.size()]
+		a += p[i].x * q.y - q.x * p[i].y
+	return a * 0.5
+
+
+static func _minus_hole(pieces: Array, hole: PackedVector2Array) -> Array:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for v in hole:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	var cx := (lo.x + hi.x) * 0.5
+	var out: Array = []
+	for piece in pieces:
+		if not Geometry2D.is_point_in_polygon(hole[0], piece):
+			out.append(piece) # this piece does not hold the hole
+			continue
+		var big := 1.0e6
+		for box in [PackedVector2Array([Vector2(-big, -big), Vector2(cx, -big), Vector2(cx, big), Vector2(-big, big)]), PackedVector2Array([Vector2(cx, -big), Vector2(big, -big), Vector2(big, big), Vector2(cx, big)])]:
+			for half in Geometry2D.intersect_polygons(piece, box):
+				for rest in Geometry2D.clip_polygons(half, hole):
+					if not Geometry2D.is_polygon_clockwise(rest):
+						out.append(rest)
+	return out
+
+
+func _loops(session) -> Array:
+	var loops: Array = []
+	for id in session.circles:
+		var c: Dictionary = session.circles[id]
+		if session.is_reference(id) or bool(c.get("construction", false)) or not session.points.has(c["c"]) or not session.points.has(c["p"]):
+			continue
+		var centre: Vector2 = session.points[c["c"]]
+		var radius := centre.distance_to(session.points[c["p"]])
+		var ring: Array = []
+		for i in CIRCLE_SEGMENTS:
+			var a := TAU * float(i) / float(CIRCLE_SEGMENTS)
+			ring.append(centre + Vector2(cos(a), sin(a)) * radius)
+		loops.append(ring)
+	var segs: Array = [] # [point a, point b, polyline from a to b]
+	for id in session.lines:
+		var l: Dictionary = session.lines[id]
+		if session.is_reference(id) or bool(l.get("construction", false)) or not session.points.has(l["a"]) or not session.points.has(l["b"]):
+			continue
+		segs.append([str(l["a"]), str(l["b"]), [session.points[l["a"]], session.points[l["b"]]]])
+	for id in session.arcs:
+		var a: Dictionary = session.arcs[id]
+		if session.is_reference(id) or bool(a.get("construction", false)) or not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
+			continue
+		segs.append([str(a["s"]), str(a["e"]), SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS)])
+	var at := {} # point id -> the segments that end there
+	for i in segs.size():
+		for end in [segs[i][0], segs[i][1]]:
+			if not at.has(end):
+				at[end] = []
+			(at[end] as Array).append(i)
+	var used := {}
+	for i in segs.size():
+		if used.has(i):
+			continue
+		used[i] = true
+		var start: String = segs[i][0]
+		var here: String = segs[i][1]
+		var poly: Array = (segs[i][2] as Array).duplicate()
+		var closed := false
+		while true:
+			if here == start:
+				closed = true
+				break
+			var next := -1
+			for j in at.get(here, []):
+				if not used.has(j):
+					next = j
+					break
+			if next < 0:
+				break
+			used[next] = true
+			var seg: Array = segs[next]
+			var line: Array = (seg[2] as Array).duplicate()
+			if seg[0] != here:
+				line.reverse()
+				here = seg[0]
+			else:
+				here = seg[1]
+			poly.append_array(line.slice(1))
+		if closed and poly.size() >= 4:
+			poly.pop_back() # the last point repeats the first
+			loops.append(poly)
+	return loops
+
+
+func set_tint(on: bool) -> void:
+	tint_on = on
+	_redraw_tint()
+
+
+func _redraw_tint() -> void:
+	if _tint_node != null and is_instance_valid(_tint_node):
+		remove_child(_tint_node) # out of the tree now, so the new node can take the name
+		_tint_node.queue_free()
+	_tint_node = null
+	if not tint_on:
+		return
+	var all := PackedVector3Array()
+	for id in tints:
+		if bool(sketches.get(id, {}).get("included", false)) and bool(sketches[id].get("closed", false)):
+			all.append_array(tints[id])
+	if all.is_empty():
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = all
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_tint_node = MeshInstance3D.new()
+	_tint_node.name = "SketchTint"
+	_tint_node.mesh = mesh
+	_tint_node.material_override = _tint_material
+	_tint_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_tint_node)
 
 
 func _add_line(session, row: Dictionary, id: String, plane: Dictionary) -> int:
@@ -63,7 +243,7 @@ func _add_line(session, row: Dictionary, id: String, plane: Dictionary) -> int:
 	if session.is_reference(id) or not session.points.has(l["a"]) or not session.points.has(l["b"]):
 		return 0
 	var pts := PackedVector3Array([SketchMath.from_sheet(session.points[l["a"]], plane), SketchMath.from_sheet(session.points[l["b"]], plane)])
-	_add(row, "line", id, pts)
+	_add(row, "line", id, pts, bool(l.get("construction", false)))
 	return 1
 
 
@@ -77,7 +257,7 @@ func _add_circle(session, row: Dictionary, id: String, plane: Dictionary) -> int
 	for i in CIRCLE_SEGMENTS + 1:
 		var a := TAU * float(i) / float(CIRCLE_SEGMENTS)
 		ring.append(centre + Vector2(cos(a), sin(a)) * radius)
-	_add(row, "circle", id, _pairs(ring, plane))
+	_add(row, "circle", id, _pairs(ring, plane), bool(c.get("construction", false)))
 	return 1
 
 
@@ -85,7 +265,7 @@ func _add_arc(session, row: Dictionary, id: String, plane: Dictionary) -> int:
 	var a: Dictionary = session.arcs[id]
 	if session.is_reference(id) or not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 		return 0
-	_add(row, "arc", id, _pairs(SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS), plane))
+	_add(row, "arc", id, _pairs(SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS), plane), bool(a.get("construction", false)))
 	return 1
 
 
@@ -97,9 +277,9 @@ func _pairs(uvs: Array, plane: Dictionary) -> PackedVector3Array:
 	return out
 
 
-func _add(row: Dictionary, type: String, id: String, pts: PackedVector3Array) -> void:
+func _add(row: Dictionary, type: String, id: String, pts: PackedVector3Array, construction := false) -> void:
 	curves.append({"kind": "curve", "sketch_feature_id": str(row["id"]), "sketch_id": str(row["sketch_id"]), "entity_type": type, "entity_id": id,
-		"points": pts, "key": "curve:%s:%s" % [row["sketch_id"], id]})
+		"points": pts, "key": "curve:%s:%s" % [row["sketch_id"], id], "construction": construction})
 
 
 func set_included(feature_id: String, included: bool) -> void:
@@ -108,7 +288,20 @@ func set_included(feature_id: String, included: bool) -> void:
 		_redraw()
 
 
+func apply_hidden(hidden_feature_ids: Array) -> void:
+	## At rest: draw the sketches the Visibility model shows (every one not in the hidden list). One redraw, only when something changed.
+	var changed := false
+	for id in sketches:
+		var want := not hidden_feature_ids.has(id)
+		if bool(sketches[id]["included"]) != want:
+			sketches[id]["included"] = want
+			changed = true
+	if changed:
+		_redraw()
+
+
 func candidates() -> Array:
+	## Every line, circle and arc of the sketches that are shown. A construction line is an ordinary line here: it is drawn and offered like the rest.
 	return curves.filter(func(c): return bool(sketches.get(str(c["sketch_feature_id"]), {}).get("included", false)))
 
 
@@ -143,7 +336,9 @@ func nearest(world_origin: Vector3, world_dir: Vector3, reach_world: float) -> D
 
 
 func _redraw() -> void:
+	_redraw_tint()
 	if _node != null and is_instance_valid(_node):
+		remove_child(_node) # out of the tree now, so the new node keeps the name
 		_node.queue_free()
 	_node = null
 	var all := PackedVector3Array()
@@ -165,6 +360,10 @@ func _redraw() -> void:
 func clear() -> void:
 	curves.clear()
 	sketches.clear()
+	tints.clear()
 	if _node != null and is_instance_valid(_node):
 		_node.queue_free()
 	_node = null
+	if _tint_node != null and is_instance_valid(_tint_node):
+		_tint_node.queue_free()
+	_tint_node = null

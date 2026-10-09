@@ -22,6 +22,11 @@ var _scale_m_per_mm := 0.003
 var _part_centre := Vector3.ZERO
 var _custom := {} ## key ("plane:<feature id>") -> basis: the planes the user made with Create Plane, offered like the three fixed ones
 const CUSTOM_COLOUR := Color(1.0, 0.82, 0.30)
+## Two reasons for a square to be drawn: the editor is PICKING a plane (every square shows), or the Visibility drawer has it on AT REST (the three
+## reference planes with one switch, each made plane with its own). Picking is set_markers_visible(); rest is set_rest_fixed / set_rest_custom.
+var picking := true
+var _rest_fixed := false
+var _rest_custom := {} ## key -> bool
 
 
 func setup(p_extent: float, part_centre: Vector3, scale_m_per_mm: float) -> void:
@@ -105,6 +110,7 @@ func clear_custom() -> void:
 			_materials.erase(key)
 			_centres.erase(key)
 	_custom.clear()
+	_rest_custom.clear()
 	if hovered.begins_with("plane:"):
 		hovered = ""
 	if chosen.begins_with("plane:"):
@@ -143,6 +149,7 @@ func add_plane(key: String, basis: Dictionary, label_text: String) -> void:
 	_quads[key] = node
 	_materials[key] = mat
 	_restyle()
+	_apply_visibility()
 
 
 func has_plane(key: String) -> bool:
@@ -161,7 +168,34 @@ func set_chosen(plane_name: String) -> void:
 
 
 func set_markers_visible(on: bool) -> void:
-	visible = on
+	## Plane picking is on (or off): while it is on every square shows.
+	picking = on
+	_apply_visibility()
+
+
+func set_rest_fixed(on: bool) -> void:
+	_rest_fixed = on
+	_apply_visibility()
+
+
+func set_rest_custom(key: String, on: bool) -> void:
+	_rest_custom[key] = on
+	_apply_visibility()
+
+
+func shows(plane_name: String) -> bool:
+	if picking:
+		return true
+	return bool(_rest_custom.get(plane_name, false)) if _custom.has(plane_name) else _rest_fixed
+
+
+func _apply_visibility() -> void:
+	var any := false
+	for name in _quads:
+		var shown := shows(name)
+		(_quads[name] as Node3D).visible = shown
+		any = any or shown
+	visible = any
 
 
 func _restyle() -> void:

@@ -56,6 +56,7 @@ const CadApi := preload("res://scripts/design_table/cad_api.gd")
 const TableEditor := preload("res://scripts/design_table/table_editor.gd")
 const TableTree := preload("res://scripts/design_table/table_tree_window.gd")
 const PropsWindow := preload("res://scripts/design_table/table_props_window.gd")
+const VisibilityWindow := preload("res://scripts/design_table/table_visibility_window.gd")
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const EnforceButton := preload("res://scripts/design_table/enforce_button.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
@@ -102,6 +103,7 @@ var snap_enabled := true
 var api ## cad_api.gd: the serial line to the backend
 var editor ## table_editor.gd: the editing session on the seated part
 var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
+var visibility_window ## table_visibility_window.gd: the Visibility drawer beside the props dock, opened by the eye button
 var props ## table_props_window.gd: the active tool's settings, docked at the slab's right (the deck's old options row)
 var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
 var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
@@ -205,6 +207,18 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	build.setup(self)
 	tree.attach_build(build)
 	build.changed.connect(editor.sync_plane_markers)
+	build.changed.connect(editor.sync_rest_sketches) # a coroutine: the finished sketches the Visibility model shows are drawn at rest
+	build.visibility.changed.connect(editor.sync_plane_markers)
+	build.visibility.changed.connect(editor._refresh_view) # the open sketch's dimensions and constraint glyphs follow their tiles
+	visibility_window = VisibilityWindow.new()
+	visibility_window.name = "Visibility"
+	_deck.add_child(visibility_window) # on the deck's right: it tips and moves with it
+	visibility_window.setup_for_table(self, left, right, camera)
+	ui.visibility_toggled.connect(func(on: bool) -> void:
+		if _open:
+			visibility_window.set_wanted(on)
+		else:
+			ui.set_eye(false))
 	resizer = TableResize.new()
 	resizer.setup(self)
 	manip = TableManip.new()
@@ -253,6 +267,7 @@ func close() -> void:
 	if tree.is_open():
 		tree.close()
 	props.set_wanted(false)
+	visibility_window.set_wanted(false)
 	_open = false
 	visible = false
 	surface.release_all()
@@ -432,6 +447,8 @@ func _apply_deck_width() -> void:
 	ui.size = Vector2(viewport_size)
 	(_deck_quad.mesh as QuadMesh).size = tools_size
 	surface.panel_size = tools_size
+	if visibility_window != null:
+		visibility_window.dock_to_deck()
 
 
 func apply_settings(settings) -> void:
@@ -470,6 +487,7 @@ func set_slab_size(new_size: Vector2) -> void:
 	var props_x := new_size.x * 0.5 + 0.20
 	props.position.x += props_x - props.dock_position.x
 	props.dock_position.x = props_x
+	visibility_window.dock_to_deck()
 	resizer.layout()
 	poke_render()
 

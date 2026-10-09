@@ -22,3 +22,5 @@ e2e_trim_offset
 e2e_modify
 e2e_curves
 e2e_ellipse_reference
+e2e_visibility
+e2e_visibility_auto

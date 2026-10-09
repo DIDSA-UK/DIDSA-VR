@@ -114,10 +114,10 @@ func _initialize() -> void:
 	# --- Hide: the table's copy only
 	b.select(extrude_id)
 	await b.toggle_hidden_selected()
-	print("SMOKE Hide leaves the table's copy empty (the backend left the body out) while the arena's part keeps its whole mesh: ", table.table_copy.layers == 0 and face_total(node.mesh) == full_faces and main.hidden_feature_ids() == [extrude_id])
+	print("SMOKE Hide leaves the table's copy empty (the backend left the body out) while the arena's part keeps its whole mesh: ", table.table_copy.layers == 0 and face_total(node.mesh) == full_faces and main.hidden_feature_ids() == [sketch_id, extrude_id]) # (the extrude's own sketch was auto-hidden when it was applied)
 	var saved_path: String = await main.save_native_snapshot("user://e2e_build_tree.didsa")
 	var saved = JSON.parse_string(FileAccess.get_file_as_string(saved_path)) if saved_path != "" else null
-	print("SMOKE the saved file carries the flat app's hidden_feature_ids with that id: ", saved is Dictionary and saved.get("hidden_feature_ids") == [extrude_id])
+	print("SMOKE the saved file carries the flat app's hidden_feature_ids with that id: ", saved is Dictionary and saved.get("hidden_feature_ids") == [sketch_id, extrude_id])
 	if saved_path != "":
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(saved_path))
 	await b.toggle_hidden_selected()

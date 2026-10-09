@@ -34,6 +34,8 @@ const SketchPicks := preload("res://scripts/design_table/sketch_picks.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
+const OriginAxes := preload("res://scripts/design_table/origin_axes.gd")
+const Visibility := preload("res://scripts/design_table/visibility.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
 const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const FeaturePreview := preload("res://scripts/design_table/feature_preview.gd")
@@ -48,8 +50,8 @@ const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
-const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## the states where the laser picks things on the part itself
-const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves"] ## where choosing a picking tool is allowed to switch the state
+const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## the states where the laser picks things on the part itself
+const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## where choosing a picking tool is allowed to switch the state
 const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
 const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot"] ## settings that may be negative or zero (a move along an axis)
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
@@ -70,6 +72,7 @@ var repick_point := "" ## a flagged reference point the user is choosing a repla
 var _repick_queue: Array = [] ## the flagged points still to do, in order
 var clip := SketchClip.new() ## clips the copy to the sketch window while a sketch is open (sketch_clip.gd)
 var markers: Node3D = null ## plane_markers.gd, a child of the table's copy
+var origin_axes: Node3D = null ## origin_axes.gd, a child of the copy: the part's origin and axes, shown when the Visibility drawer has them on
 var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Measure never see it)
 var part_id := "" ## the PART DEFINITION being edited (every instance of it changes), resolved from the seated node's occurrence
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
@@ -85,6 +88,15 @@ var faces: Array = [] ## picked face entities (Shell)
 var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
 var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
+var seed_sketches: Array = [] ## Loft: the finished sketches picked as sections, in pick order (feature ids)
+var activating_edit := false ## a Build row's Edit is opening the tool (a tool then keeps its own picking, not the seed picking)
+var _seed_tool := "" ## the tool the seed was picked for
+var _targets_return := "" ## the state Targets goes back to (pick_sketch, or pick_curves for a Sweep)
+var seed_sketch := "" ## the finished sketch picked as the seed of the active tool (Extrude with no sketch open): its feature id
+var rest_sketches: Node3D = null ## sketch_picks.gd, a second one: the finished sketches the Visibility model shows, drawn on the copy at rest
+var _rest_signature := ""
+var _rest_version := 0 ## bumped when a sketch may have changed (the part was rebuilt, a sketch was left): the lines are read again
+var _rest_token := 0
 var sketch_picks: Node3D = null ## sketch_picks.gd while curves are being picked: the lines and curves of the finished sketches, on the copy
 var preview := FeaturePreview.new() ## the translucent result before Apply
 var preview_enabled := true ## off: nothing is created or drawn until Apply
@@ -94,6 +106,7 @@ var _preview_again := false
 var editing: Dictionary = {} ## a feature opened from its Build row in its own tool: {id, type, original (the row)}; Apply PATCHes it, Undo puts the old values back
 var plane_base: Dictionary = {} ## what Create Plane offsets from: {fixed} | {face} | {plane_feature_id, plane}
 var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pick over the limit replaces the oldest
+var revolve_axis_sketch := "" ## the sketch (its own id) the picked axis line is in, "" = the profile's own sketch
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
@@ -120,6 +133,7 @@ func setup(p_table, p_api) -> void:
 	api = p_api
 	features = PartFeatures.new(Callable(self, "_call"))
 	table._right.button_pressed.connect(_on_right_pressed)
+	geometry_changed.connect(func() -> void: _rest_version += 1)
 
 
 func _call(method: int, path: String, body) -> Dictionary:
@@ -134,9 +148,16 @@ func set_state(new_state: String) -> void:
 		return
 	if state == "pick_curves" and sketch_picks != null and is_instance_valid(sketch_picks):
 		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part (a tool that switches between picking kinds keeps its picks)
+	var was_sketching := state == "sketch"
+	if state == "pick_sketch":
+		_end_sketch_pick(new_state)
 	state = new_state
 	state_changed.emit(state)
 	_update_options()
+	if was_sketching:
+		_rest_version += 1 # a sketch was just left: it may have changed
+	if table != null and table.build != null:
+		sync_rest_sketches.call_deferred()
 
 
 # --- Lifecycle ------------------------------------------------------------------------
@@ -152,6 +173,11 @@ func on_seated() -> void:
 	markers.name = "PlaneMarkers"
 	copy.add_child(markers)
 	markers.setup(extent, aabb.get_center(), table.fit_scale)
+	origin_axes = OriginAxes.new()
+	origin_axes.name = "OriginAxes"
+	copy.add_child(origin_axes)
+	origin_axes.setup(extent * 0.6, table.fit_scale)
+	sync_plane_markers()
 	highlight = FaceHighlight.new()
 	highlight.name = "EditHighlight"
 	table.add_child(highlight)
@@ -229,7 +255,7 @@ func on_cleared() -> void:
 
 func _reset() -> void:
 	cancel_preview()
-	editing = {}
+	_clear_editing()
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	clip.end()
@@ -239,12 +265,19 @@ func _reset() -> void:
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
 	markers = null
+	origin_axes = null
+	_rest_token += 1
+	_rest_signature = ""
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		rest_sketches.queue_free()
+	rest_sketches = null
 	if highlight != null and is_instance_valid(highlight):
 		highlight.queue_free()
 	highlight = null
 	chosen_face = {}
 	chosen_plane = ""
 	revolve_axis = ""
+	revolve_axis_sketch = ""
 	edges.clear()
 	faces.clear()
 	feature_stack.clear()
@@ -296,6 +329,8 @@ func _process(_delta: float) -> void:
 			_hover_bodies(origin, dir)
 		"pick_curves":
 			_hover_curves(origin, dir)
+		"pick_sketch":
+			_hover_sketch_pick(origin, dir)
 	if state != "pick_plane" and markers != null:
 		markers.set_hover("")
 
@@ -495,6 +530,8 @@ func _on_right_pressed(action: String) -> void:
 			_toggle_body()
 		"pick_curves":
 			_toggle_curve()
+		"pick_sketch":
+			_pick_sketch()
 
 
 func _pick_plane() -> void:
@@ -542,6 +579,292 @@ func sync_plane_markers() -> void:
 		markers.clear_custom()
 	for key in wanted:
 		markers.add_plane(key, wanted[key][0], str(wanted[key][1]))
+	# At rest (Visibility drawer): the reference planes follow their switch, each made plane its own hide state
+	if origin_axes != null and is_instance_valid(origin_axes):
+		origin_axes.visible = table.build.visibility.is_on(Visibility.ORIGIN_AXES)
+	markers.set_rest_fixed(table.build.visibility.is_on(Visibility.REFERENCE_PLANES))
+	for key in markers._custom.keys():
+		markers.set_rest_custom(key, not table.build.is_hidden(str(key).trim_prefix("plane:")))
+
+
+# --- A finished sketch as the seed (Extrude with no sketch open) ---------------------------------
+
+func start_sketch_pick() -> void:
+	## Extrude (and its kin) was chosen with no sketch open: the visible finished sketches are offered. Their closed shapes are tinted as a cue; the
+	## laser prefers a sketch LINE (circle, arc), exactly as plane picking does for the planes.
+	if not state in PICK_FROM_STATES or table.table_copy == null or api == null or session != null:
+		return
+	seed_sketch = ""
+	set_state("pick_sketch")
+	await sync_rest_sketches()
+	if state != "pick_sketch":
+		return
+	_show_sketch_pick()
+
+
+func _show_sketch_pick() -> void:
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		rest_sketches.set_tint(true)
+	if seed_sketch == "":
+		table.set_status(_sketch_pick_hint())
+	_update_options()
+
+
+func _sketch_pick_hint() -> String:
+	var any_sketch := false
+	for row in table.build.features:
+		if str(row.get("type", "")) == "sketch":
+			any_sketch = true
+	if not any_sketch:
+		return "Draw a closed shape on a plane first."
+	var visible_count := 0
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		for id in rest_sketches.sketches:
+			if bool(rest_sketches.sketches[id]["included"]):
+				visible_count += 1
+	if visible_count == 0:
+		return "No sketches are visible. Show them in Visibility (the Sketches tile)."
+	return "Aim at a line of a sketch and pull the trigger to use it (%d visible)." % visible_count
+
+
+func _end_sketch_pick(new_state := "") -> void:
+	if not (new_state in ["pick_curves", "pick_bodies"] and (seed_sketch != "" or not seed_sketches.is_empty())): # Sweep keeps its profile while the path is picked, and any seed tool while the targets are
+		seed_sketch = ""
+		seed_sketches.clear()
+		if session == null:
+			revolve_axis = ""
+			revolve_axis_sketch = ""
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		rest_sketches.set_tint(false)
+	if highlight != null and is_instance_valid(highlight) and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+
+
+func _hover_sketch_pick(origin: Vector3, dir: Vector3) -> void:
+	_hover_face = {}
+	if rest_sketches == null or not is_instance_valid(rest_sketches):
+		return
+	var hit: Dictionary = rest_sketches.nearest(origin, dir, CURVE_REACH) # only the sketches the Visibility model shows are candidates
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	hovering = _claim(float(hit["distance"]))
+	if not hovering:
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	_hover_face = hit
+	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
+
+
+func _pick_sketch() -> void:
+	## The trigger on a sketch line: that sketch is the seed (again: let it go). A sketch with no closed shape is refused with a reason.
+	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "curve" or rest_sketches == null or not is_instance_valid(rest_sketches):
+		return
+	var id := str(_hover_face["sketch_feature_id"])
+	var name: String = table.build.name_of_feature(id)
+	if table.active_tool == "loft":
+		_toggle_section(id, name)
+		return
+	if table.active_tool == "revolve" and seed_sketch != "":
+		_pick_axis() # Revolve: the first sketch is the profile; after that a pull on any visible sketch's line is the axis
+		return
+	if seed_sketch == id:
+		seed_sketch = ""
+		highlight.set_set(table.table_copy, [])
+		table.set_status(_sketch_pick_hint())
+	elif not bool(rest_sketches.sketches.get(id, {}).get("closed", false)):
+		table.set_status("%s has no closed shape to use." % name)
+		UiFeedback.haptic(table._right, "error")
+		return
+	else:
+		seed_sketch = id
+		_seed_tool = str(table.active_tool)
+		revolve_axis = ""
+		revolve_axis_sketch = ""
+		highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return str(c["sketch_feature_id"]) == id))
+		if table.active_tool == "revolve":
+			table.set_status("%s: closed shape ready. Now pull the trigger on a line of it to spin it about." % name)
+		elif table.active_tool == "sweep":
+			table.set_status("%s is the profile. Now aim at a line of an earlier sketch and pull the trigger for the path." % name)
+			set_pick_mode("curves") # the path is picked as lines of OTHER sketches, as before; the profile stays
+			_update_options()
+			return
+		else:
+			table.set_status("%s: closed shape ready. Set the values, then Apply." % name)
+	_update_options()
+	schedule_preview()
+
+
+func _toggle_section(id: String, name: String) -> void:
+	## Loft with no sketch open: each pull on a sketch adds it as the next section (in pick order), another pull on it takes it out.
+	if seed_sketches.has(id):
+		seed_sketches.erase(id)
+	elif not bool(rest_sketches.sketches.get(id, {}).get("closed", false)):
+		table.set_status("%s has no closed shape to use." % name)
+		UiFeedback.haptic(table._right, "error")
+		return
+	else:
+		seed_sketches.append(id)
+		_seed_tool = "loft"
+	highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return seed_sketches.has(str(c["sketch_feature_id"]))))
+	table.set_status("%d section(s) picked. Pull on another sketch to add it (two or more), then Apply." % seed_sketches.size() if not seed_sketches.is_empty() else _sketch_pick_hint())
+	_update_options()
+	schedule_preview()
+
+
+func _pick_axis() -> void:
+	## Revolve with a picked profile: the hovered line (of ANY visible sketch, the profile's or another) is the axis, the same line again lets it go.
+	## A circle or arc cannot be one. (The reference axes X, Y, Z are not offered: the backend takes a sketch line only.)
+	if str(_hover_face.get("entity_type", "")) != "line":
+		table.set_status("The axis has to be a straight line of a sketch.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	var line := str(_hover_face["entity_id"])
+	var line_sketch := str(_hover_face["sketch_id"])
+	if revolve_axis == line and seed_axis_sketch_id() == line_sketch:
+		revolve_axis = ""
+		revolve_axis_sketch = ""
+	else:
+		revolve_axis = line
+		revolve_axis_sketch = line_sketch
+	var lit: Array = rest_sketches.candidates().filter(func(c): return str(c["sketch_feature_id"]) == seed_sketch)
+	if revolve_axis != "":
+		lit.append(_hover_face.duplicate())
+	highlight.set_set(table.table_copy, lit)
+	table.set_status("Axis set. Set the angle, then Apply." if revolve_axis != "" else "Axis let go. Pull the trigger on a line of a sketch to spin it about.")
+	_update_options()
+	schedule_preview()
+
+
+func seed_axis_sketch_id() -> String:
+	## The own id of the sketch the axis line is in: the one it was picked from, else the profile's.
+	return revolve_axis_sketch if revolve_axis_sketch != "" else seed_sketch_internal_id()
+
+
+func clear_seed() -> void:
+	## Revolve's Clear: forget the profile and the axis and offer the sketches again.
+	seed_sketch = ""
+	revolve_axis = ""
+	revolve_axis_sketch = ""
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+	table.set_status(_sketch_pick_hint())
+	_update_options()
+	schedule_preview()
+
+
+func seed_sketch_internal_id() -> String:
+	## The sketch's own id (what an axis reference and the sketch routes name), as opposed to its feature id.
+	if session != null:
+		return session.sketch_id
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		return str(rest_sketches.sketches.get(seed_sketch, {}).get("sketch_id", ""))
+	return ""
+
+
+func seed_sketch_id() -> String:
+	## The sketch a seed tool works on: the open sketch, else the finished one picked in the viewport.
+	return session.feature_id if session != null else seed_sketch
+
+
+func seed_ready() -> bool:
+	## The seed is a sketch with a closed shape an extrude can use.
+	if session != null:
+		return session.profile_ok()
+	return seed_sketch != "" and rest_sketches != null and is_instance_valid(rest_sketches) and bool(rest_sketches.sketches.get(seed_sketch, {}).get("closed", false))
+
+
+func seed_tool_active() -> bool:
+	return str(table.active_tool) in ["extrude", "revolve", "sweep", "loft"]
+
+
+func targets_option() -> Dictionary:
+	## The Targets button of a tool working on a picked sketch: the bodies a boss fuses into (a cut cuts), picked with the laser.
+	var n := bodies.size()
+	return {"id": "targets", "text": "Targets: %s" % ("pick..." if state == "pick_bodies" and n == 0 else ("none" if n == 0 else "%d picked" % n)), "toggle": true, "pressed": state == "pick_bodies"}
+
+
+func toggle_target_picking() -> void:
+	## Targets pressed: the laser picks bodies (none, one or many; pull again to let one go); pressed again it goes back to what it was picking.
+	if state == "pick_bodies" and _targets_return != "":
+		var back := _targets_return
+		_targets_return = ""
+		set_state(back)
+		if back == "pick_curves":
+			await set_pick_mode("curves") # Sweep's path lines are read again
+		elif back == "pick_sketch":
+			_show_sketch_pick()
+			_relight_seed()
+		_update_options()
+		return
+	if not state in ["pick_sketch", "pick_curves"] or session != null:
+		return
+	_targets_return = state
+	body_limit = 0
+	set_state("pick_bodies")
+	_refresh_lit()
+	table.set_status("Aim at the bodies to fuse into (or cut) and pull the trigger; none is a new body. Press Targets again when done.")
+	_update_options()
+
+
+func _relight_seed() -> void:
+	if rest_sketches == null or not is_instance_valid(rest_sketches):
+		return
+	var ids: Array = seed_sketches.duplicate()
+	if seed_sketch != "":
+		ids.append(seed_sketch)
+	highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return ids.has(str(c["sketch_feature_id"]))))
+
+
+func sync_rest_sketches() -> void:
+	## The finished sketches the Visibility model shows are drawn on the table's copy at rest (lines, circles and arcs, as plane picking
+	## and curve picking draw them). They are read from the backend when the part's sketches change (a signature of the sketch rows plus a
+	## version bumped when the part is rebuilt or a sketch is left); hiding and showing one only redraws. Not drawn while a sketch is open
+	## (the sheet is the drawing) or while curves are being picked (sketch_picks draws them then).
+	if table == null or table.build == null or table.table_copy == null or part_id == "" or api == null or not api.is_configured():
+		return
+	var ids: Array = []
+	for row in table.build.features:
+		if str(row.get("type", "")) == "sketch" and str(row.get("sketch_id", "")) != "":
+			ids.append(str(row["id"]))
+	var signature := "%s|%d|%s" % [part_id, _rest_version, ",".join(ids)]
+	var copy: MeshInstance3D = table.table_copy
+	if signature != _rest_signature or rest_sketches == null or not is_instance_valid(rest_sketches) or rest_sketches.get_parent() != copy:
+		if ids.is_empty():
+			if rest_sketches != null and is_instance_valid(rest_sketches):
+				rest_sketches.queue_free()
+			rest_sketches = null
+			_rest_signature = signature
+			return
+		_rest_signature = signature
+		_rest_token += 1
+		var mine := _rest_token
+		var fresh: Node3D = SketchPicks.new()
+		fresh.name = "RestSketches"
+		fresh.visible = false
+		copy.add_child(fresh)
+		await fresh.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"))
+		if mine != _rest_token or table.table_copy != copy or not is_instance_valid(fresh):
+			if is_instance_valid(fresh):
+				fresh.queue_free()
+			return
+		if rest_sketches != null and is_instance_valid(rest_sketches):
+			rest_sketches.queue_free()
+		rest_sketches = fresh
+	rest_sketches.apply_hidden(table.build.hidden_ids())
+	rest_sketches.visible = not (state in ["sketch", "pick_curves"])
+	if state == "pick_sketch":
+		if seed_sketch != "" and not bool(rest_sketches.sketches.get(seed_sketch, {}).get("included", false)):
+			seed_sketch = "" # the picked sketch was hidden (or is gone): it is no longer a seed
+			highlight.set_set(table.table_copy, [])
+			schedule_preview()
+		var kept: Array = seed_sketches.filter(func(id): return bool(rest_sketches.sketches.get(id, {}).get("included", false)))
+		if kept.size() != seed_sketches.size():
+			seed_sketches = kept
+			highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return seed_sketches.has(str(c["sketch_feature_id"]))))
+			schedule_preview()
+		_show_sketch_pick()
 
 
 func mirror_across(spec: Dictionary) -> bool:
@@ -898,6 +1221,8 @@ func _on_session_changed() -> void:
 func _refresh_view() -> void:
 	if view == null or session == null:
 		return
+	view.show_dimensions = table.build.visibility.is_on(Visibility.DIMENSIONS) # the drawer's Dims / Constr. tiles: only this open sketch's own glyphs
+	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
 	view.rebuild(session, session.selection, _hover_entity)
 	view.show_ghosts(session.ghosts)
 
@@ -1072,6 +1397,11 @@ func dimension_typed(ghost_key: String, text: String) -> void:
 # --- Tools and the options row -------------------------------------------------------------
 
 func on_tool_changed(tool_id: String) -> void:
+	bodies.clear() # the bodies another tool picked are not this tool's targets
+	_targets_return = ""
+	if (seed_sketch != "" or not seed_sketches.is_empty()) and tool_id != _seed_tool:
+		seed_sketch = "" # the picked sketch was for another tool
+		seed_sketches.clear()
 	if state == "idle" and table.table_copy == null:
 		return
 	if session != null:
@@ -1080,7 +1410,7 @@ func on_tool_changed(tool_id: String) -> void:
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
 	if not editing.is_empty() and tool_id != str(editing["type"]):
-		editing = {}
+		_clear_editing()
 	if preview_feature_id != "" or preview.is_showing():
 		cancel_preview() # another tool: what the last one was showing goes (a feature it made for the preview is deleted first, in order)
 	if tools.has(tool_id):
@@ -1333,7 +1663,7 @@ func _load_sketch_picks() -> void:
 		sketch_picks.queue_free()
 	sketch_picks = SketchPicks.new()
 	table.table_copy.add_child(sketch_picks)
-	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else "")
+	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else seed_sketch)
 	if state == "pick_curves":
 		table.set_status("Aim at a line or curve of an earlier sketch and pull the trigger (%d to pick from)." % count if count > 0 else "There is no finished sketch with lines to pick from yet.")
 	_update_options()
@@ -1504,6 +1834,12 @@ func extrude_targets() -> Array:
 	var boss := bool(options["boss"])
 	if boss and bool(options["new_body"]):
 		return []
+	if session == null and (seed_sketch != "" or not seed_sketches.is_empty()):
+		# a sketch picked in the viewport: the targets are the bodies picked with Targets (none, one or many); none fuses nothing (a new body) and cuts everything
+		var picked: Array = bodies.map(func(b): return str(b["body_id"])).filter(func(id): return all.has(id))
+		if not picked.is_empty():
+			return picked
+		return [] if boss else all
 	if not chosen_face.is_empty():
 		return [str(chosen_face["body_id"])]
 	if boss:
@@ -1596,16 +1932,24 @@ func begin_tool_edit(feature_id: String) -> void:
 	if table.build.is_rolled_back_any():
 		table.set_status("The part is rolled back. Roll forward in the Build tree before editing.")
 		return
-	editing = {}
+	_clear_editing()
 	if table.active_tool != feature_tool.id:
 		table.manager.activate(feature_tool.id)
 	else:
 		feature_tool.on_activated(self)
 	editing = {"id": feature_id, "type": feature_tool.id, "original": row.duplicate(true)}
 	feature_tool.load_from_row(self, row)
+	table.build.edit_begun(feature_id)
 	_update_options()
 	schedule_preview()
 	table.set_status("Editing %s. Change what you want, then Apply." % table.build.names[table.build.index_of(feature_id)])
+
+
+func _clear_editing() -> void:
+	## No feature is open for editing any more: its seed sketches go back to how they were.
+	editing = {}
+	if table != null and table.build != null:
+		table.build.edit_ended()
 
 
 func _apply_edit(feature_tool, req: Dictionary) -> void:
@@ -1622,7 +1966,7 @@ func _apply_edit(feature_tool, req: Dictionary) -> void:
 		return
 	feature_stack.append({"kind": "edit", "id": edit["id"], "type": edit["type"], "payload": feature_tool.row_payload(edit["original"]), "redo_payload": body})
 	redo_stack.clear()
-	editing = {}
+	_clear_editing()
 	preview.clear()
 	var refreshed: bool = await refresh_geometry()
 	await table.build.reload()
@@ -1685,9 +2029,19 @@ func apply_feature() -> void:
 	var refreshed: bool = await refresh_geometry()
 	if feature_tool.reload_build_after():
 		await table.build.reload()
-	if feature_tool.finishes_sketch():
+	await table.build.note_applied(str(result["id"])) # the sketches it consumed hide (a failed Apply returned above: nothing changes)
+	if feature_tool.finishes_sketch() and session != null:
 		end_sketch()
+	var seeded := state == "pick_sketch" or seed_sketch != "" or not seed_sketches.is_empty()
+	if seeded:
+		seed_sketch = "" # the sketch(es) were the seed of this feature: ready for the next
+		seed_sketches.clear()
+		revolve_axis = ""
+		revolve_axis_sketch = ""
+		highlight.set_set(table.table_copy, [])
 	clear_picks()
+	if seeded and session == null and tool in ["extrude", "revolve", "sweep", "loft"]:
+		start_sketch_pick() # a coroutine, not waited for: back to offering the visible sketches for the next one
 	UiFeedback.haptic(table._right, "confirm")
 	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
@@ -1706,12 +2060,18 @@ func selection_summary() -> Array:
 	var lines: Array = []
 	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
 		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
+	if not seed_sketches.is_empty():
+		lines.append("Sections: %s" % ", ".join(seed_sketches.map(func(id): return table.build.name_of_feature(str(id)))))
+	if seed_sketch != "" and session == null:
+		lines.append("%s: closed shape ready" % table.build.name_of_feature(seed_sketch) if state == "pick_sketch" else "Profile: %s" % table.build.name_of_feature(seed_sketch))
+		if table.active_tool == "revolve":
+			lines.append("Axis: %s" % ("a sketch line, set" if revolve_axis != "" else "not picked yet"))
 	if not edges.is_empty():
 		lines.append("Edges: %d" % edges.size())
 	if not faces.is_empty():
 		lines.append("Faces: %d" % faces.size())
 	if not bodies.is_empty():
-		lines.append("Bodies: %d" % bodies.size())
+		lines.append(("Targets: %d" if seed_tool_active() and session == null else "Bodies: %d") % bodies.size())
 	if not curve_picks.is_empty():
 		var names: Array = []
 		for c in curve_picks:
@@ -1731,6 +2091,7 @@ func clear_picks() -> void:
 	faces.clear()
 	bodies.clear()
 	curve_picks.clear()
+	seed_sketches.clear()
 	if highlight != null and table.table_copy != null:
 		highlight.set_set(table.table_copy, [])
 
@@ -1803,7 +2164,7 @@ func glb_path(filtered: bool, quality := 0.5) -> String:
 	## The part's own assembly-mesh.glb; `filtered` adds the Build tree's Hide / Show and rollback sets (DIDSA-CAD, 2026-10-03).
 	var path := "/document/parts/%s/assembly-mesh.glb?quality=%s" % [part_id, str(quality)]
 	if filtered:
-		for id in table.build.hidden_ids():
+		for id in table.build.mesh_hidden_ids():
 			path += "&hidden_feature_ids=%s" % str(id).uri_encode()
 		for id in table.build.rollback_excluded():
 			path += "&rollback_excluded_feature_ids=%s" % str(id).uri_encode()
@@ -1811,7 +2172,7 @@ func glb_path(filtered: bool, quality := 0.5) -> String:
 
 
 func view_is_filtered() -> bool:
-	return not table.build.hidden_ids().is_empty() or not table.build.rollback_excluded().is_empty()
+	return not table.build.mesh_hidden_ids().is_empty() or not table.build.rollback_excluded().is_empty()
 
 
 func refresh_view() -> void:
@@ -1887,7 +2248,7 @@ func _rebuild_markers() -> void:
 	## The three plane squares, sized to the part as it is now (they were built for the placeholder box of a new part).
 	if markers == null or not is_instance_valid(markers):
 		return
-	var was_visible: bool = markers.visible
+	var was_picking: bool = markers.picking
 	var chosen_before: String = markers.chosen
 	markers.queue_free()
 	var copy: MeshInstance3D = table.table_copy
@@ -1896,7 +2257,13 @@ func _rebuild_markers() -> void:
 	markers.name = "PlaneMarkers"
 	copy.add_child(markers)
 	markers.setup(aabb.size.length() * 1.25, aabb.get_center(), table.fit_scale)
-	markers.set_markers_visible(was_visible)
+	if origin_axes != null and is_instance_valid(origin_axes):
+		origin_axes.queue_free()
+	origin_axes = OriginAxes.new()
+	origin_axes.name = "OriginAxes"
+	copy.add_child(origin_axes)
+	origin_axes.setup(aabb.size.length() * 0.75, table.fit_scale)
+	markers.set_markers_visible(was_picking)
 	if chosen_before != "":
 		markers.set_chosen(chosen_before)
 	sync_plane_markers()
@@ -1924,6 +2291,7 @@ func end_sketch() -> void:
 	_sync_deck()
 	set_state("pick_plane" if state != "pick_plane" else state)
 	revolve_axis = ""
+	revolve_axis_sketch = ""
 	if table.active_tool in ["extrude", "revolve"]:
 		table.manager.deactivate()
 	_say_pick_plane()
@@ -1968,6 +2336,8 @@ func undo() -> void:
 		var made: Dictionary = created_requests[str(entry)]
 		redo_stack.append({"kind": "create", "type": made["type"], "route": made["route"], "body": made["body"]})
 		created_requests.erase(str(entry))
+	if not entry is Dictionary:
+		await table.build.note_removed(str(entry)) # a sketch only that feature had hidden comes back
 	await refresh_geometry()
 	table.notify_edited(part_id, _edited_nodes)
 	sync_undo_redo()
@@ -1989,6 +2359,7 @@ func redo() -> void:
 		if result["ok"]:
 			feature_stack.append(str(result["id"]))
 			created_requests[str(result["id"])] = {"type": entry["type"], "route": entry["route"], "body": entry["body"]}
+			await table.build.note_applied(str(result["id"])) # made again: the sketches it consumes hide again
 	else:
 		var edit: Dictionary = entry["entry"]
 		result = await features.update_feature(part_id, str(edit["type"]), str(edit["id"]), edit["redo_payload"])

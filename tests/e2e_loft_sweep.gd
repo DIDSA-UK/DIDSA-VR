@@ -34,6 +34,15 @@ func pick_first_curve_of(ed, sketch_feature_id: String) -> void:
 			return
 
 
+func pick_sketch_line(ed, sketch_feature_id: String) -> void:
+	## A pull on a line of that sketch with the viewport sketch picking (Loft with no sketch open): the sketch becomes the next section.
+	for c in ed.rest_sketches.candidates():
+		if str(c["sketch_feature_id"]) == sketch_feature_id:
+			ed._hover_face = c
+			ed._pick_sketch()
+			return
+
+
 func fresh_part() -> void:
 	await main.new_assembly()
 	await table.new_part()
@@ -86,10 +95,11 @@ func _initialize() -> void:
 	await table.build.reload()
 	# Loft
 	table.manager.activate("loft")
-	var loaded: bool = await wait_for(func() -> bool: return ed.sketch_picks != null and is_instance_valid(ed.sketch_picks) and ed.sketch_picks.candidates().size() >= 8)
-	print("SMOKE both finished sketches are read from the real backend (at least the two squares' eight lines): ", loaded, " ", ed.sketch_picks.candidates().size() if ed.sketch_picks != null else 0)
-	pick_first_curve_of(ed, sketch_a)
-	pick_first_curve_of(ed, sketch_b)
+	var loaded: bool = await wait_for(func() -> bool: return ed.rest_sketches != null and is_instance_valid(ed.rest_sketches) and ed.rest_sketches.candidates().size() >= 8)
+	print("SMOKE both finished sketches are drawn, read from the real backend (at least the two squares' eight lines), and Loft offers them as sections: ", loaded and ed.state == "pick_sketch", " ", ed.rest_sketches.candidates().size() if ed.rest_sketches != null else 0)
+	pick_sketch_line(ed, sketch_a)
+	pick_sketch_line(ed, sketch_b)
+	print("SMOKE a pull on a line of each makes two sections, in pick order: ", ed.seed_sketches == [sketch_a, sketch_b])
 	ed.options["boss"] = true
 	ed.preview_enabled = true
 	ed.schedule_preview()

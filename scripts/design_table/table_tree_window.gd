@@ -31,6 +31,7 @@ var _build_dirty := false
 @export var dock_yaw_degrees: float = 24.0 ## turns the panel in towards the slab
 
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
+const Visibility := preload("res://scripts/design_table/visibility.gd")
 
 
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node) -> void:
@@ -178,6 +179,9 @@ func _redraw_build() -> void:
 	if build.features.is_empty():
 		_add_note("Nothing built yet. Pick a plane on the part and sketch.")
 	var hidden: Array = build.hidden_ids()
+	var groups := _group_strip(build)
+	if groups != null:
+		_build_rows.add_child(groups)
 	for i in build.features.size():
 		var f: Dictionary = build.features[i]
 		var id := str(f.get("id", ""))
@@ -207,6 +211,46 @@ func _redraw_build() -> void:
 			_build_rows.add_child(b)
 
 
+const GROUPS := [[Visibility.SKETCHES, "Sketches"], [Visibility.BODIES, "Bodies"], [Visibility.SURFACES, "Surfaces"], [Visibility.CURVES, "3D curves"], [Visibility.PLANES, "Planes"]]
+const EYE_LEFT := 60.0 ## px kept clear at the left of a row for its eye
+
+
+func _eye_icon(state: String) -> String:
+	return {"all": "eye", "some": "eye_half"}.get(state, "eye_off")
+
+
+func _group_strip(build) -> Control:
+	## The group headings: one eye per kind of feature the part has, acting on the whole kind exactly like the drawer's tile for it (all visible
+	## -> hide all, otherwise show all). The list below stays in build order: rollback and the history depend on it.
+	var strip := HFlowContainer.new()
+	strip.add_theme_constant_override("h_separation", 6)
+	strip.add_theme_constant_override("v_separation", 6)
+	var any := false
+	for g in GROUPS:
+		var st: Dictionary = build.category_state(g[0])
+		if st["total"] == 0:
+			continue
+		any = true
+		var b := Button.new()
+		b.text = " %s" % g[1]
+		b.icon = UiIcons.texture(_eye_icon(st["state"]), 24)
+		b.custom_minimum_size = Vector2(0, 48)
+		b.add_theme_font_size_override("font_size", tokens.font_small)
+		b.disabled = not build.view_filters_ok
+		if st["state"] == "none":
+			b.modulate = Color(1, 1, 1, 0.55)
+		var category: String = g[0]
+		b.pressed.connect(func() -> void: build.toggle_category(category))
+		strip.add_child(b)
+	return strip if any else null
+
+
+func _padded(box: StyleBox, left: float) -> StyleBox:
+	var padded: StyleBox = box.duplicate()
+	padded.content_margin_left = maxf(padded.content_margin_left, 0.0) + left
+	return padded
+
+
 func _add_note(text: String) -> void:
 	var l := Label.new()
 	l.text = text
@@ -223,14 +267,15 @@ func _feature_row(build, index: int, f: Dictionary, is_hidden: bool) -> Button:
 	b.toggle_mode = true
 	b.set_pressed_no_signal(id == build.selected_id)
 	b.theme_type_variation = &"ButtonRail"
-	b.icon = UiIcons.texture("visibility" if false else BuildTree.glyph(type), 28)
+	b.icon = UiIcons.texture(BuildTree.glyph(type), 28)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.clip_text = true
 	b.custom_minimum_size = Vector2(0, 60)
 	var line2: String = BuildTree.summary(build.features, index)
 	var state := ""
 	if is_hidden:
-		state = "  · hidden"
+		var seed_note: String = build.auto_note(id)
+		state = "  · %s" % (seed_note if seed_note != "" else "hidden")
 	if rolled:
 		state += "  · rolled back"
 	var reference_note := BuildTree.reference_note(f)
@@ -238,11 +283,28 @@ func _feature_row(build, index: int, f: Dictionary, is_hidden: bool) -> Button:
 		state += "  · %s" % reference_note
 		b.add_theme_color_override("font_color", tokens.warn)
 	b.text = "%s   %s%s" % [build.names[index], line2, state]
-	b.add_theme_stylebox_override("pressed", tokens.selected_box(tokens.accent))
-	b.add_theme_stylebox_override("hover_pressed", tokens.selected_box(tokens.accent))
+	# Room at the left for the eye, then the eye itself laid over the row: one tap hides or shows the feature without selecting it first.
+	for state_name in ["normal", "hover", "focus", "disabled"]:
+		b.add_theme_stylebox_override(state_name, _padded(b.get_theme_stylebox(state_name), EYE_LEFT))
+	b.add_theme_stylebox_override("pressed", _padded(tokens.selected_box(tokens.accent), EYE_LEFT))
+	b.add_theme_stylebox_override("hover_pressed", _padded(tokens.selected_box(tokens.accent), EYE_LEFT))
 	if is_hidden or rolled:
 		b.modulate = Color(1, 1, 1, 0.5)
 	b.pressed.connect(func() -> void: build.select(id))
+	var eye := Button.new()
+	eye.name = "Eye"
+	eye.flat = true
+	eye.icon = UiIcons.texture("eye_off" if is_hidden else "eye", 28)
+	eye.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	eye.expand_icon = false
+	eye.disabled = not build.view_filters_ok
+	eye.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	eye.offset_left = 4.0
+	eye.offset_right = EYE_LEFT - 4.0
+	eye.offset_top = 4.0
+	eye.offset_bottom = -4.0
+	eye.pressed.connect(func() -> void: build.toggle_hidden(id))
+	b.add_child(eye)
 	return b
 
 

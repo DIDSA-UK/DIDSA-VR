@@ -4,7 +4,7 @@ extends SceneTree
 ## when a part goes on the table; the Build tab lists the part's features in order with names / summaries; selecting a row lights up
 ## what it made on the table's copy; Edit changes an extrude's depth (a PATCH, taken back by Undo); Hide / Show and Roll back change
 ## only the table's COPY (a second glb fetch with the two query params; the arena node is never touched) and Roll back refuses new
-## features; Delete is two presses and cascades; hidden ids are the flat app's `hidden_feature_ids` extra.
+## features (the visibility load rule hides the extrude's consumed sketch, `sk_box`, which is not part of the picture); Delete is two presses and cascades; hidden ids are the flat app's `hidden_feature_ids` extra.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_build_tree.gd  (see tests/README.md)
 
 const Fake := preload("res://tests/helpers/fake_cad.gd")
@@ -214,7 +214,7 @@ func _initialize() -> void:
 	var calls_before: int = fake.calls.size()
 	await table.build.toggle_hidden_selected()
 	await table.build.toggle_rollback_selected()
-	print("SMOKE ...and pressing them anyway does nothing (no glb fetch, nothing hidden): ", fake.calls.size() == calls_before and table.build.hidden_ids().is_empty() and table.build.rollback_to == "")
+	print("SMOKE ...and pressing them anyway does nothing (no glb fetch, nothing hidden): ", fake.calls.size() == calls_before and table.build.hidden_ids() == ["sk_box"] and table.build.rollback_to == "")
 	fake.view_filters = true
 	table.build.view_filters_ok = true
 	table.build.changed.emit()
@@ -248,14 +248,14 @@ func _initialize() -> void:
 	find_button(table.tree._build_rows, "Hide").pressed.emit()
 	await settle(func() -> bool: return table.table_copy.layers == 0)
 	var fetch: Array = calls_to("hidden_feature_ids=body_box")
-	print("SMOKE Hide asks for a second picture with the hidden id: ", fetch.size() == 1 and main.hidden_feature_ids() == ["body_box"])
+	print("SMOKE Hide asks for a second picture with the hidden id: ", fetch.size() == 1 and main.hidden_feature_ids() == ["sk_box", "body_box"])
 	print("SMOKE ...the table's copy shows nothing (the filtered picture was empty) and cannot be picked, while the arena's real part keeps its mesh: ", table.table_copy.layers == 0 and not table.table_copy.get_children().any(func(c): return c is StaticBody3D) and box.mesh == arena_mesh_before and box.has_meta("face_ids"))
 	print("SMOKE ...the row says hidden and the strip offers Show: ", rows()[1].contains("hidden") and find_button(table.tree._build_rows, "Show") != null)
-	print("SMOKE ...and the id is saved in the file's hidden_feature_ids extra, as the flat app keeps it: ", main.native_extras_to_add({}).get("hidden_feature_ids") == ["body_box"])
+	print("SMOKE ...and the id is saved in the file's hidden_feature_ids extra, as the flat app keeps it: ", main.native_extras_to_add({}).get("hidden_feature_ids") == ["sk_box", "body_box"])
 	fake.calls.clear()
 	find_button(table.tree._build_rows, "Show").pressed.emit()
 	await settle(func() -> bool: return table.table_copy.layers == 1)
-	print("SMOKE Show puts the whole part back on the table with no second fetch: ", table.table_copy.layers == 1 and table.table_copy.mesh == arena_mesh_before and calls_to("hidden_feature_ids").is_empty() and main.hidden_feature_ids().is_empty() and not main.native_extras_to_add({}).has("hidden_feature_ids"))
+	print("SMOKE Show puts the whole part back on the table with no second fetch: ", table.table_copy.layers == 1 and table.table_copy.mesh == arena_mesh_before and calls_to("hidden_feature_ids").is_empty() and main.hidden_feature_ids() == ["sk_box"])
 
 	# --- Roll back / forward
 	row_button("Sketch 1").pressed.emit()

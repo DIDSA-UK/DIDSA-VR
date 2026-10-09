@@ -1,6 +1,6 @@
 extends "res://scripts/design_table/features/feature_tool.gd"
 ## Loft: a solid through two or more sections, each the closed profile of a finished sketch (its own plane: make planes with Plane first). The laser
-## picks a line of each sketch (Build row: Lines on / off narrows it down); the sections are those sketches in pick order. Boss or Cut, Ruled
+## picks a visible sketch for each section (any line of it), in pick order. A Build row's Edit keeps the older line picking (Lines on / off narrows it). Boss or Cut, Ruled
 ## (straight between sections). Preview is the coarse route: nothing is stored until Apply.
 
 
@@ -9,17 +9,22 @@ func _init() -> void:
 
 
 func options(ed) -> Array:
-	return [
+	var list := [
 		{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(ed.options["boss"])},
 		{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(ed.options["boss"])},
 		{"id": "ruled", "text": "Ruled", "toggle": true, "pressed": bool(ed.options["ruled"])},
 		{"id": "clear_curves", "text": "Clear"},
 		{"id": "apply", "text": "Apply (%d sections)" % sections(ed).size(), "disabled": not can_apply(ed)},
 	]
+	if ed.session == null and ed.editing.is_empty():
+		list.insert(list.size() - 1, ed.targets_option())
+	return list
 
 
 static func sections(ed) -> Array:
-	## The distinct sketches of the picked curves, in the order they were first picked.
+	## The sketches picked as sections, in pick order: the ones picked in the viewport, else the distinct sketches of the picked curves.
+	if not ed.seed_sketches.is_empty():
+		return ed.seed_sketches.duplicate()
 	var out: Array = []
 	for c in ed.curve_picks:
 		if not out.has(str(c["sketch_feature_id"])):
@@ -37,13 +42,18 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.options["ruled"] = not bool(ed.options["ruled"])
 		"clear_curves":
 			ed.clear_picks()
+		"targets":
+			ed.toggle_target_picking()
 		_:
 			return false
 	return true
 
 
 func on_activated(ed) -> void:
-	ed.start_curve_picks(0)
+	if ed.activating_edit or ed.session != null:
+		ed.start_curve_picks(0) # editing a loft (its sections are loaded as picks), or a sketch is open: the line picking as before
+		return
+	ed.start_sketch_pick()
 
 
 func can_apply(ed) -> bool:

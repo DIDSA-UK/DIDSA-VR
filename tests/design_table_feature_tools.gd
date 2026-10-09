@@ -34,6 +34,13 @@ class Ed extends RefCounted:
 	var typed: Array = []
 	var cleared := 0
 	var state_set := ""
+	func seed_sketch_id() -> String: return session.feature_id if session != null else ""
+	func seed_sketch_internal_id() -> String: return session.sketch_id if session != null else ""
+	var seed_sketch := ""
+	func targets_option() -> Dictionary: return {"id": "targets", "text": "Targets: none", "toggle": true, "pressed": false}
+	func seed_axis_sketch_id() -> String: return session.sketch_id if session != null else ""
+	func seed_ready() -> bool: return session != null and session.profile_ok()
+	func start_sketch_pick() -> void: state_set = "pick_sketch"
 	func extrude_distances() -> Array: return [0.0, 10.0]
 	func extrude_targets() -> Array: return []
 	func edge_refs() -> Array: return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))
@@ -61,7 +68,7 @@ func _initialize() -> void:
 
 	# Extrude
 	var ex = tools["extrude"]
-	print("SMOKE Extrude's options are Boss, Cut, Flip, New body, Depth, Apply (Apply off with no sketch): ", ex.options(ed).map(func(o): return o["id"]) == ["boss", "cut", "flip", "new_body", "depth", "apply"] and ex.options(ed)[-1]["disabled"])
+	print("SMOKE Extrude's options are Boss, Cut, Flip, New body, Depth, Targets (a picked sketch's bodies to fuse into, shown with no sketch open), Apply (Apply off with no sketch): ", ex.options(ed).map(func(o): return o["id"]) == ["boss", "cut", "flip", "new_body", "depth", "targets", "apply"] and ex.options(ed)[-1]["disabled"])
 	ed.options["boss"] = false
 	print("SMOKE ...Cut takes New body away: ", not ex.options(ed).any(func(o): return o["id"] == "new_body"))
 	print("SMOKE ...without a closed shape its request is refused with a reason: ", not ex.request(ed)["ok"] and str(ex.request(ed)["error"]) != "")

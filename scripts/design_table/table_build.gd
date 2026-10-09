@@ -17,6 +17,7 @@ signal changed ## the list, the selection or a state flag changed: the window re
 
 const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
+const Visibility := preload("res://scripts/design_table/visibility.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const ARM_MS := 4000 ## how long a Delete stays armed
 
@@ -30,6 +31,9 @@ var delete_armed_id := ""
 var loaded_part := ""
 var view_filters_ok := true ## false once the backend said it cannot hide or roll back (an older DIDSA-CAD): the buttons are off and the tree says why
 
+var auto_hidden := {} ## sketch feature id -> [the ids of the features that hid it]: sketches hidden BECAUSE a feature consumed them (session only, never saved)
+var _edit_shown: Array = [] ## the seed sketches of the feature being edited: shown while the edit is open
+var visibility := Visibility.new() ## the session-only switches (reference planes, origin and axes...): never saved
 var _table ## design_table.gd
 var _probed := false
 var _token := 0
@@ -127,6 +131,9 @@ func reload() -> void:
 		delete_armed_id = ""
 	changed.emit()
 	_warn_references()
+	if not _table._main.visibility_ruled_parts.has(pid):
+		_table._main.visibility_ruled_parts.append(pid)
+		apply_load_rule()
 	if first_time and _table.editor.view_is_filtered():
 		await _table.editor.refresh_view() # a part seated with features already hidden: the copy shows it that way
 
@@ -145,19 +152,92 @@ func row(feature_id: String) -> Dictionary:
 	return features[i] if i >= 0 else {}
 
 
+func name_of_feature(feature_id: String) -> String:
+	var i := index_of(feature_id)
+	return str(names[i]) if i >= 0 and i < names.size() else "Sketch"
+
+
 func part_name() -> String:
 	return str(_table.seated.name) if _table.seated != null else ""
 
 
 func hidden_ids() -> Array:
 	## The hidden features of THIS part (the saved list also holds other parts' ids; the backend would ignore them, but they must not
-	## count as "something is hidden here").
+	## count as "something is hidden here"). A sketch an applied feature hid shows again while every feature that consumed it is rolled
+	## back, and while one of them is open for editing.
 	var mine := features.map(func(f): return str(f.get("id", "")))
-	return _table._main.hidden_feature_ids().filter(func(id): return mine.has(str(id)))
+	return _table._main.hidden_feature_ids().filter(func(id): return mine.has(str(id)) and not _shown_for_now(str(id)))
+
+
+func _shown_for_now(sketch_id: String) -> bool:
+	if _edit_shown.has(sketch_id):
+		return true
+	if not auto_hidden.has(sketch_id):
+		return false
+	return (auto_hidden[sketch_id] as Array).all(func(cause): return is_rolled_back(str(cause)))
+
+
+func auto_note(sketch_id: String) -> String:
+	## "seed of Extrude 1" for a sketch hidden because a feature consumed it, else "".
+	if not auto_hidden.has(sketch_id) or _shown_for_now(sketch_id):
+		return ""
+	for cause in auto_hidden[sketch_id]:
+		var i := index_of(str(cause))
+		if i >= 0:
+			return "seed of %s" % names[i]
+	return ""
+
+
+func mesh_hidden_ids() -> Array:
+	## The hidden ids that change the PICTURE: bodies, surfaces and curves come back from the backend flagged hidden. A sketch or a created plane
+	## is not in the mesh, so hiding one (the load rule hides most sketches) must not cost a second glb fetch or mark the copy filtered.
+	var drawn := {}
+	for f in features:
+		if Visibility.category_of(f) in [Visibility.BODIES, Visibility.SURFACES, Visibility.CURVES]:
+			drawn[str(f.get("id", ""))] = true
+	return hidden_ids().filter(func(id): return drawn.has(str(id)))
 
 
 func is_hidden(feature_id: String) -> bool:
 	return hidden_ids().has(feature_id)
+
+
+func apply_load_rule() -> void:
+	## Once per part per loaded file: sketches nothing consumes are shown, created planes hidden, other hides in the file kept (visibility.gd).
+	var saved: Array = _table._main.hidden_feature_ids()
+	var ruled := Visibility.load_hidden(features, saved, rollback_excluded())
+	var causes := Visibility.seed_causes(features, rollback_excluded())
+	for f in features:
+		auto_hidden.erase(str(f.get("id", ""))) # this part's sketches are re-read from the rule
+	for sketch in causes:
+		if ruled.has(sketch):
+			auto_hidden[sketch] = causes[sketch]
+	if ruled.size() != saved.size() or ruled.any(func(id): return not saved.has(id)):
+		_table._main.set_hidden_feature_ids(ruled, false)
+
+
+func category_state(category: String) -> Dictionary:
+	return Visibility.category_state(features, hidden_ids(), category, rollback_excluded())
+
+
+func toggle_category(category: String) -> void:
+	## A category button (batch rule in visibility.gd): all visible -> hide all, otherwise show all.
+	if not view_filters_ok or category_state(category)["total"] == 0:
+		return
+	_table._main.set_hidden_feature_ids(Visibility.toggle_category(features, _table._main.hidden_feature_ids(), category, rollback_excluded()))
+	_forget_shown(_table._main.hidden_feature_ids())
+	await _table.editor.refresh_view()
+	changed.emit()
+
+
+func set_all_visible(show: bool) -> void:
+	## The drawer's Show all / Hide all: every feature category (hidden ids) and every session switch.
+	visibility.set_all(show)
+	if view_filters_ok and not features.is_empty():
+		_table._main.set_hidden_feature_ids(Visibility.set_all_features(features, _table._main.hidden_feature_ids(), not show, rollback_excluded()))
+		_forget_shown(_table._main.hidden_feature_ids())
+		await _table.editor.refresh_view()
+	changed.emit()
 
 
 func rollback_excluded() -> Array:
@@ -309,13 +389,77 @@ func edit_typed(feature_id: String, text: String) -> void:
 
 # --- Hide / Show, roll back -----------------------------------------------------------------
 
-func toggle_hidden_selected() -> void:
-	if selected_id == "" or not view_filters_ok:
+func note_applied(feature_id: String) -> void:
+	## A feature was applied: the sketches it consumes hide themselves (a sketch the user already hid by hand is left alone: it is never
+	## auto-shown later). Nothing is done for a feature that is not an extrude, revolve, loft or sweep.
+	await reload()
+	var seeds := Visibility.seeds_of_feature(features, feature_id)
+	if seeds.is_empty():
 		return
-	var now_hidden := not is_hidden(selected_id)
-	_table._main.set_feature_hidden(selected_id, now_hidden)
+	var stored: Array = _table._main.hidden_feature_ids()
+	var hid := false
+	for sketch in seeds:
+		if auto_hidden.has(sketch):
+			if not (auto_hidden[sketch] as Array).has(feature_id):
+				(auto_hidden[sketch] as Array).append(feature_id)
+		elif not stored.has(sketch):
+			stored.append(sketch)
+			auto_hidden[sketch] = [feature_id]
+			hid = true
+	if hid:
+		_table._main.set_hidden_feature_ids(stored)
+	changed.emit()
+
+
+func note_removed(feature_id: String) -> void:
+	## A feature is gone (Undo, or the Build tree's Delete): a sketch only it had hidden comes back; one a hand had hidden stays hidden.
+	var stored: Array = _table._main.hidden_feature_ids()
+	var shown := false
+	for sketch in auto_hidden.keys():
+		var causes: Array = auto_hidden[sketch]
+		causes.erase(feature_id)
+		if causes.is_empty():
+			auto_hidden.erase(sketch)
+			if stored.has(sketch):
+				stored.erase(sketch)
+				shown = true
+	if shown:
+		_table._main.set_hidden_feature_ids(stored)
+	changed.emit()
+
+
+func edit_begun(feature_id: String) -> void:
+	## A feature is opened for editing: its seed sketches show while the edit is open.
+	_edit_shown = Visibility.seeds_of_feature(features, feature_id)
+	changed.emit()
+
+
+func edit_ended() -> void:
+	if not _edit_shown.is_empty():
+		_edit_shown = []
+		changed.emit()
+
+
+func _forget_shown(stored: Array) -> void:
+	## The user showed a sketch by hand: it is no longer auto-hidden, so nothing re-hides it until the next feature is applied with it.
+	for sketch in auto_hidden.keys():
+		if not stored.has(sketch):
+			auto_hidden.erase(sketch)
+
+
+func toggle_hidden_selected() -> void:
+	await toggle_hidden(selected_id)
+
+
+func toggle_hidden(feature_id: String) -> void:
+	## Hide or show one feature (the strip's button, or the eye on its row, which needs no selecting first).
+	if feature_id == "" or not view_filters_ok or index_of(feature_id) < 0:
+		return
+	var now_hidden := not is_hidden(feature_id)
+	_table._main.set_feature_hidden(feature_id, now_hidden)
+	_forget_shown(_table._main.hidden_feature_ids())
 	await _table.editor.refresh_view()
-	_table.set_status("%s %s." % [names[index_of(selected_id)], "hidden on the table" if now_hidden else "shown again"])
+	_table.set_status("%s %s." % [names[index_of(feature_id)], "hidden on the table" if now_hidden else "shown again"])
 	changed.emit()
 
 
@@ -371,6 +515,7 @@ func delete_selected() -> void:
 	var gone: Array = result["deleted"]
 	for gone_id in gone:
 		_table._main.set_feature_hidden(str(gone_id), false)
+		await note_removed(str(gone_id))
 	if rollback_to != "" and gone.has(rollback_to):
 		rollback_to = ""
 	editor.forget_features(gone)

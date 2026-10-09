@@ -16,6 +16,8 @@ func options(ed) -> Array:
 	]
 	if bool(ed.options["boss"]):
 		list.insert(3, {"id": "new_body", "text": "New body", "toggle": true, "pressed": bool(ed.options["new_body"])})
+	if ed.session == null:
+		list.insert(list.size() - 1, ed.targets_option()) # a picked sketch: the bodies to fuse into are picked too
 	return list
 
 
@@ -29,6 +31,8 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.options["flip"] = not bool(ed.options["flip"])
 		"new_body":
 			ed.options["new_body"] = not bool(ed.options["new_body"])
+		"targets":
+			ed.toggle_target_picking()
 		"depth":
 			ed.type_option("depth", "Depth (mm)")
 		_:
@@ -37,19 +41,21 @@ func handle_option(ed, option_id: String) -> bool:
 
 
 func on_activated(ed) -> void:
+	## With a sketch open it is the seed, as ever. With none open the visible finished sketches are offered to the laser instead.
 	if ed.session == null:
-		ed.table.set_status("Draw a closed shape on a plane first.")
-	elif not ed.session.profile_ok():
+		ed.start_sketch_pick()
+		return
+	if not ed.session.profile_ok():
 		ed.table.set_status("The sketch needs a closed shape to extrude.")
-	ed.set_state("extrude" if ed.session != null else ed.state)
+	ed.set_state("extrude")
 
 
 func can_apply(ed) -> bool:
-	return ed.session != null and ed.session.profile_ok()
+	return ed.seed_ready()
 
 
 func finishes_sketch() -> bool:
-	return true
+	return true ## spends the OPEN sketch (the editor only ends one that is open; a picked finished sketch is left to the auto-hide)
 
 
 func preview_mode() -> String:
@@ -60,4 +66,4 @@ func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	if not can_apply(ed):
 		return PartFeatures._bad("The sketch needs a closed shape to extrude.")
 	var d: Array = ed.extrude_distances()
-	return PartFeatures.extrude_request(ed.session.feature_id, bool(ed.options["boss"]), d[0], d[1], ed.extrude_targets())
+	return PartFeatures.extrude_request(ed.seed_sketch_id(), bool(ed.options["boss"]), d[0], d[1], ed.extrude_targets())
