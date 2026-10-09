@@ -17,7 +17,7 @@ const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.PLANES, "Planes"],
 	[Visibility.REFERENCE_PLANES, "Ref. planes"],
 	[Visibility.ORIGIN_AXES, "Origin, axes"],
-	["centre_of_gravity", "Gravity"],
+	["centre_of_gravity", "CofG"],
 	[Visibility.DIMENSIONS, "Dims"],
 	[Visibility.CONSTRUCTION, "Constr."],
 	[Visibility.EDGE_LINES, "Edge lines"],
