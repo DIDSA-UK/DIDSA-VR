@@ -79,7 +79,8 @@ func handle(method: int, path: String, body) -> Dictionary:
 	if fail != "" and path.contains(fail) and (verb == "POST" or verb == "PATCH"):
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
-		return _ok(feature_rows.get(path.get_slice("/", 3), []))
+		var listed: Array = feature_rows.get(path.get_slice("/", 3), [])
+		return _ok(listed.duplicate(true) if track_rows else listed) # (the real backend answers with a fresh list: a tracking fake must not hand out the one it appends to)
 	if verb == "POST" and path.contains("/sketch/sketches/") and (path.ends_with("/split-trim") or path.ends_with("/trim") or path.ends_with("/offset")):
 		var kind := "circle" if path.contains("/circles/") else ("arc" if path.contains("/arcs/") else "line")
 		if path.ends_with("/offset"):

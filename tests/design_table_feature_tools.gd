@@ -34,6 +34,9 @@ class Ed extends RefCounted:
 	var typed: Array = []
 	var cleared := 0
 	var state_set := ""
+	func seed_sketch_id() -> String: return session.feature_id if session != null else ""
+	func seed_ready() -> bool: return session != null and session.profile_ok()
+	func start_sketch_pick() -> void: state_set = "pick_sketch"
 	func extrude_distances() -> Array: return [0.0, 10.0]
 	func extrude_targets() -> Array: return []
 	func edge_refs() -> Array: return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))

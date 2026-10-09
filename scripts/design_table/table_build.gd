@@ -152,6 +152,11 @@ func row(feature_id: String) -> Dictionary:
 	return features[i] if i >= 0 else {}
 
 
+func name_of_feature(feature_id: String) -> String:
+	var i := index_of(feature_id)
+	return str(names[i]) if i >= 0 and i < names.size() else "Sketch"
+
+
 func part_name() -> String:
 	return str(_table.seated.name) if _table.seated != null else ""
 

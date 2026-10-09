@@ -16,7 +16,11 @@ const TUBE_RADIUS := 0.0010 ## world metres
 const BASE_COLOUR := Color(0.31, 0.77, 1.00, 0.85)
 
 var curves: Array = [] ## candidate entities (see above)
-var sketches: Dictionary = {} ## sketch feature id -> {sketch_id, name, plane, count, included}
+var sketches: Dictionary = {} ## sketch feature id -> {sketch_id, plane, count, included, closed (it holds a closed profile an extrude can use)}
+var tints: Dictionary = {} ## sketch feature id -> PackedVector3Array of triangles filling its closed loops (a cue for a sketch used as a seed, not a pick)
+var tint_on := false
+var _tint_node: MeshInstance3D = null
+var _tint_material: StandardMaterial3D
 var _node: MeshInstance3D = null
 var _material: StandardMaterial3D
 var _scale := 1.0
@@ -29,6 +33,11 @@ func _init() -> void:
 	_material.albedo_color = BASE_COLOUR
 	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_material.no_depth_test = false
+	_tint_material = StandardMaterial3D.new()
+	_tint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_tint_material.albedo_color = Color(0.31, 0.77, 1.00, 0.22)
+	_tint_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_tint_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Callable, skip_feature_id: String = "") -> int:
@@ -36,6 +45,7 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 	## placed (a flipped or turned sketch: left out, as reopening one is). Returns how many curves can be picked.
 	curves.clear()
 	sketches.clear()
+	tints.clear()
 	for row in rows:
 		if str(row.get("type", "")) != "sketch" or str(row.get("id", "")) == skip_feature_id or str(row.get("sketch_id", "")) == "":
 			continue
@@ -53,9 +63,118 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 			count += _add_circle(session, row, id, plane)
 		for id in session.arcs:
 			count += _add_arc(session, row, id, plane)
-		sketches[str(row["id"])] = {"sketch_id": str(row["sketch_id"]), "plane": plane, "count": count, "included": true}
+		sketches[str(row["id"])] = {"sketch_id": str(row["sketch_id"]), "plane": plane, "count": count, "included": true, "closed": session.profile_ok()}
+		tints[str(row["id"])] = _tint_triangles(session, plane)
 	_redraw()
 	return curves.size()
+
+
+func _tint_triangles(session, plane: Dictionary) -> PackedVector3Array:
+	## The closed loops of a sketch (circles, and chains of lines and arcs that end where they began) filled with triangles in the part's frame.
+	## Construction and reference shapes are not part of a profile. Nested loops are each filled (it is a cue); a chain that does not close is left out.
+	var out := PackedVector3Array()
+	var normal: Vector3 = (plane["n"] as Vector3) * 0.02 # a hair off the plane so the fill does not fight a face the sketch lies on
+	for uvs in _loops(session):
+		var tri: PackedInt32Array = Geometry2D.triangulate_polygon(PackedVector2Array(uvs))
+		for i in tri:
+			out.append(SketchMath.from_sheet(uvs[i], plane) + normal)
+	return out
+
+
+func _loops(session) -> Array:
+	var loops: Array = []
+	for id in session.circles:
+		var c: Dictionary = session.circles[id]
+		if session.is_reference(id) or bool(c.get("construction", false)) or not session.points.has(c["c"]) or not session.points.has(c["p"]):
+			continue
+		var centre: Vector2 = session.points[c["c"]]
+		var radius := centre.distance_to(session.points[c["p"]])
+		var ring: Array = []
+		for i in CIRCLE_SEGMENTS:
+			var a := TAU * float(i) / float(CIRCLE_SEGMENTS)
+			ring.append(centre + Vector2(cos(a), sin(a)) * radius)
+		loops.append(ring)
+	var segs: Array = [] # [point a, point b, polyline from a to b]
+	for id in session.lines:
+		var l: Dictionary = session.lines[id]
+		if session.is_reference(id) or bool(l.get("construction", false)) or not session.points.has(l["a"]) or not session.points.has(l["b"]):
+			continue
+		segs.append([str(l["a"]), str(l["b"]), [session.points[l["a"]], session.points[l["b"]]]])
+	for id in session.arcs:
+		var a: Dictionary = session.arcs[id]
+		if session.is_reference(id) or bool(a.get("construction", false)) or not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
+			continue
+		segs.append([str(a["s"]), str(a["e"]), SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS)])
+	var at := {} # point id -> the segments that end there
+	for i in segs.size():
+		for end in [segs[i][0], segs[i][1]]:
+			if not at.has(end):
+				at[end] = []
+			(at[end] as Array).append(i)
+	var used := {}
+	for i in segs.size():
+		if used.has(i):
+			continue
+		used[i] = true
+		var start: String = segs[i][0]
+		var here: String = segs[i][1]
+		var poly: Array = (segs[i][2] as Array).duplicate()
+		var closed := false
+		while true:
+			if here == start:
+				closed = true
+				break
+			var next := -1
+			for j in at.get(here, []):
+				if not used.has(j):
+					next = j
+					break
+			if next < 0:
+				break
+			used[next] = true
+			var seg: Array = segs[next]
+			var line: Array = (seg[2] as Array).duplicate()
+			if seg[0] != here:
+				line.reverse()
+				here = seg[0]
+			else:
+				here = seg[1]
+			poly.append_array(line.slice(1))
+		if closed and poly.size() >= 4:
+			poly.pop_back() # the last point repeats the first
+			loops.append(poly)
+	return loops
+
+
+func set_tint(on: bool) -> void:
+	tint_on = on
+	_redraw_tint()
+
+
+func _redraw_tint() -> void:
+	if _tint_node != null and is_instance_valid(_tint_node):
+		remove_child(_tint_node) # out of the tree now, so the new node can take the name
+		_tint_node.queue_free()
+	_tint_node = null
+	if not tint_on:
+		return
+	var all := PackedVector3Array()
+	for id in tints:
+		if bool(sketches.get(id, {}).get("included", false)) and bool(sketches[id].get("closed", false)):
+			all.append_array(tints[id])
+	if all.is_empty():
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = all
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_tint_node = MeshInstance3D.new()
+	_tint_node.name = "SketchTint"
+	_tint_node.mesh = mesh
+	_tint_node.material_override = _tint_material
+	_tint_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_tint_node)
 
 
 func _add_line(session, row: Dictionary, id: String, plane: Dictionary) -> int:
@@ -155,6 +274,7 @@ func nearest(world_origin: Vector3, world_dir: Vector3, reach_world: float) -> D
 
 
 func _redraw() -> void:
+	_redraw_tint()
 	if _node != null and is_instance_valid(_node):
 		_node.queue_free()
 	_node = null
@@ -177,6 +297,10 @@ func _redraw() -> void:
 func clear() -> void:
 	curves.clear()
 	sketches.clear()
+	tints.clear()
 	if _node != null and is_instance_valid(_node):
 		_node.queue_free()
 	_node = null
+	if _tint_node != null and is_instance_valid(_tint_node):
+		_tint_node.queue_free()
+	_tint_node = null
