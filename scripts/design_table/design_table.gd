@@ -482,8 +482,8 @@ func set_slab_size(new_size: Vector2) -> void:
 	var props_x := new_size.x * 0.5 + 0.20
 	props.position.x += props_x - props.dock_position.x
 	props.dock_position.x = props_x
-	visibility_window.position.x += props_x + 0.34 - visibility_window.dock_position.x
-	visibility_window.dock_position.x = props_x + 0.34
+	visibility_window.position.x += props_x + 0.38 - visibility_window.dock_position.x
+	visibility_window.dock_position.x = props_x + 0.38
 	resizer.layout()
 	poke_render()
 

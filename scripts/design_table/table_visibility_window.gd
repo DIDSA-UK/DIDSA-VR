@@ -1,12 +1,15 @@
 extends "res://scripts/diegetic_panel.gd"
 ## The VISIBILITY drawer (docs/sketch-as-seed-plan.md section 3): a panel beside the Properties dock, opened by the eye button in the
-## generic column. One row per category: an eye (all visible), half eye (some) or eye-off (none), the name and, for the categories that are
-## features, how many are visible ("3 of 5"). Show all / Hide all act on every row. The logic is visibility.gd (the rules) and
+## generic column. A grid of square buttons, one per category: an eye (all visible), half eye (some) or eye-off (none) over the name and,
+## for the categories that are features, how many are visible ("3 of 5"). Show all / Hide all are the two large buttons down the far left and act on
+## every category. The logic is visibility.gd (the rules) and
 ## table_build.gd (the hidden ids; the session switches); this is only the view. A category with nothing in it is dimmed; Centre of gravity
 ## is a placeholder until the backend can report it.
 
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 
+const COLUMNS := 3
+const TILE := 140.0 ## px, a square button
 const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.SKETCHES, "Sketches"],
 	[Visibility.BODIES, "Bodies"],
@@ -15,26 +18,25 @@ const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.PLANES, "Created planes"],
 	[Visibility.REFERENCE_PLANES, "Reference planes"],
 	[Visibility.ORIGIN_AXES, "Origin and axes"],
-	["centre_of_gravity", "Centre of gravity (soon)"],
+	["centre_of_gravity", "Centre of gravity"],
 	[Visibility.DIMENSIONS, "Sketch dimensions"],
 	[Visibility.CONSTRUCTION, "Construction geometry"],
 	[Visibility.EDGE_LINES, "Edge lines"],
 ]
 
 var table ## design_table.gd
-var _rows := VBoxContainer.new()
 var _buttons := {} ## row id -> Button
 var _show_all: Button
 var _hide_all: Button
-@export var dock_position := Vector3(0.84, 0.20, 0.06) ## in the console's frame, beside the Properties dock
+@export var dock_position := Vector3(0.88, 0.20, 0.06) ## in the console's frame, beside the Properties dock
 @export var dock_yaw_degrees: float = -14.0
 
 
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	table = p_table
 	panel_title = "Visibility"
-	panel_size = Vector2(0.30, 0.54)
-	viewport_size = Vector2i(516, 930)
+	panel_size = Vector2(0.42, 0.44)
+	viewport_size = Vector2i(720, 750)
 	setup(left, right, camera)
 	set_title("Visibility")
 	_apply_panel_size(panel_size, true)
@@ -44,44 +46,43 @@ func setup_for_table(p_table, left: XRController3D, right: XRController3D, camer
 
 
 func _build_content() -> Control:
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	var top := HBoxContainer.new()
-	top.add_theme_constant_override("separation", 8)
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 12)
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 12)
 	_show_all = _plain("Show all", func() -> void: table.build.set_all_visible(true))
 	_hide_all = _plain("Hide all", func() -> void: table.build.set_all_visible(false))
-	top.add_child(_show_all)
-	top.add_child(_hide_all)
-	column.add_child(top)
-	_rows.add_theme_constant_override("separation", 8)
-	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_child(_show_all)
+	left.add_child(_hide_all)
+	body.add_child(left)
+	var grid := GridContainer.new()
+	grid.columns = COLUMNS
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
 	for r in ROWS:
 		var id: String = r[0]
 		var b := Button.new()
 		b.clip_text = true
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.custom_minimum_size = Vector2(0, 56)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		b.expand_icon = false
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.custom_minimum_size = Vector2(TILE, TILE)
 		b.add_theme_font_size_override("font_size", tokens.font_small)
 		b.pressed.connect(func() -> void:
 			UiFeedback.haptic(_right, "tick")
 			_row_pressed(id))
 		_buttons[id] = b
-		_rows.add_child(b)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.add_child(_rows)
-	column.add_child(scroll)
-	scroll_target = scroll
-	return column
+		grid.add_child(b)
+	body.add_child(grid)
+	return body
 
 
 func _plain(text: String, callback: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.custom_minimum_size = Vector2(0, 52)
+	b.custom_minimum_size = Vector2(TILE, TILE * 2 + 10) # twice a tile tall: the grid's rows beside it
+	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	b.add_theme_font_size_override("font_size", tokens.font_small)
 	b.pressed.connect(func() -> void:
 		UiFeedback.haptic(_right, "tick")
@@ -107,7 +108,7 @@ func row_state(id: String) -> Dictionary:
 		return {"state": st["state"], "label": st["label"] if st["total"] > 0 else ""}
 	if Visibility.SESSION_CATEGORIES.has(id):
 		return {"state": "all" if table.build.visibility.is_on(id) else "none", "label": ""}
-	return {"state": "soon", "label": ""}
+	return {"state": "soon", "label": "coming soon"}
 
 
 func button_for(id: String) -> Button:
@@ -120,8 +121,8 @@ func refresh() -> void:
 		if b == null:
 			continue
 		var st := row_state(r[0])
-		b.text = " %s%s" % [r[1], ("   " + st["label"]) if st["label"] != "" else ""]
-		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 28)
+		b.text = "%s\n%s" % [r[1], st["label"]]
+		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 44)
 		b.disabled = st["state"] in ["empty", "soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
 		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "soon", "none"] else Color.WHITE
 
