@@ -1,11 +1,10 @@
 extends SceneTree
 ## The design table's pure logic, no scene tree (scripts/design_table/): the tool-row
-## pager ("More" slot), the tool registration (real DIDSA-CAD names, one active tool),
+## the tool registration (real DIDSA-CAD names, one active tool),
 ## the sketch-plane maths (fixed planes, turning a part to lie on the table, ray to
 ## sheet), the seat / lift numbers and the pose maths (two-hand move / turn / scale, stick, nudge, engagement).
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_logic.gd  (see tests/README.md)
 
-const Pager := preload("res://scripts/design_table/tool_pager.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const DimLayout := preload("res://scripts/design_table/dimension_layout.gd")
@@ -51,21 +50,6 @@ func _near(a: Vector3, b: Vector3, eps := 0.0001) -> bool:
 
 
 func _initialize() -> void:
-	# --- pager
-	var six := ["a", "b", "c", "d", "e", "f"]
-	var eleven := ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
-	var p6 := Pager.slots(six, 0)
-	print("SMOKE six tools fit one page with no More: ", p6["tools"] == six and not p6["has_more"] and p6["pages"] == 1)
-	var p3 := Pager.slots(["a", "b", "c"], 0)
-	print("SMOKE fewer than six show as they are: ", p3["tools"].size() == 3 and not p3["has_more"])
-	var p7 := Pager.slots(["1", "2", "3", "4", "5", "6", "7"], 0)
-	print("SMOKE seven tools: five and a More slot, two pages: ", p7["tools"] == ["1", "2", "3", "4", "5"] and p7["has_more"] and p7["pages"] == 2)
-	var p11 := Pager.slots(eleven, 2)
-	print("SMOKE eleven tools, last page holds the last one: ", p11["tools"] == ["11"] and p11["pages"] == 3 and p11["page"] == 2)
-	print("SMOKE a page past the end is clamped: ", Pager.slots(eleven, 9)["page"] == 2 and Pager.slots(eleven, -3)["page"] == 0)
-	print("SMOKE More wraps round to the first page: ", Pager.next_page(0, 11) == 1 and Pager.next_page(2, 11) == 0 and Pager.next_page(0, 6) == 0)
-	print("SMOKE the row never has more than six slots: ", Pager.slots(eleven, 0)["tools"].size() + 1 <= Pager.SLOTS)
-
 	# --- tool registration
 	var reg = load("res://scripts/ui/tablet_registry.gd").new()
 	var mgr = load("res://scripts/ui/tool_manager.gd").new()
@@ -78,7 +62,7 @@ func _initialize() -> void:
 			ids.append(t.id)
 	print("SMOKE categories are Sketch, Constrain, Feature, Modify: ", reg.categories().map(func(c): return c.label) == ["Sketch", "Constrain", "Feature", "Modify"])
 	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text", "trim", "offset"])
-	print("SMOKE only Sketch and Feature are over the six-slot row (so they page: Select, Line, Rectangle, Circle, Arc, More): ", reg.categories().filter(func(c): return c.tools.size() > Pager.SLOTS).map(func(c): return c.id) == ["sketch", "feature"] and Pager.slots(reg.category("sketch").tools, 0)["tools"].map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc"])
+	print("SMOKE only Sketch and Feature have more than a dozen tools (the tool list scrolls past what fits): ", reg.categories().filter(func(c): return c.tools.size() > 12).map(func(c): return c.id) == ["sketch", "feature"])
 	print("SMOKE five category slots are enough: ", reg.categories().size() <= 5)
 	print("SMOKE every tool is a mode tool with a hint: ", reg.mode_tools().size() == ids.size() and ids.all(func(i): return reg.tool_def(i).hint != ""))
 	mgr.activate("line")

@@ -10,7 +10,7 @@ extends RefCounted
 ## it gets handler.tool_activated(id) / handler.tool_deactivated(id).
 ##
 ## Categories hold at most the tablet registry's limit, and the tool row pages
-## itself when a category has more than six tools (tool_pager.gd).
+## itself (two rows, scrolling sideways) when a category has more tools than fit.
 
 const TabletRegistry := preload("res://scripts/ui/tablet_registry.gd")
 

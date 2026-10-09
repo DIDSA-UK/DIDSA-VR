@@ -68,10 +68,23 @@ var backend_url := ""
 var api_key := ""
 var command_stack = null ## set via setup(); shared undo/redo history
 
-var mate_type := "coincident"
-var mate_value := 0.0
-var mate_flipped := false
-var mate_allow_rotation := true
+## What the mate being set up will be. Changing any of them re-runs the preview (a ghost of the part where the mate would put it).
+var mate_type := "coincident":
+	set(v):
+		mate_type = v
+		request_preview()
+var mate_value := 0.0:
+	set(v):
+		mate_value = v
+		request_preview()
+var mate_flipped := false:
+	set(v):
+		mate_flipped = v
+		request_preview()
+var mate_allow_rotation := true:
+	set(v):
+		mate_allow_rotation = v
+		request_preview()
 var relaxed := false
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
@@ -82,7 +95,11 @@ var _drag: Dictionary = {} ## part -> live-drag state, see constrain_drag()
 var _last_locked_notice_ms := -10000
 var _persist: Dictionary = {} ## occurrence_id -> {"pose": Dictionary|null, "running": bool} — see persist_pose()
 
+const GHOST_COLOUR := Color(0.31, 0.77, 1.0, 0.40)
+
 var _picks: Array[Dictionary] = []
+var _ghost: Node3D = null ## the preview: a see-through copy of the driven part, where the mate would put it
+var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
 var _busy := false
 var _current_owner_part_id := ""
@@ -110,7 +127,12 @@ func set_active(on: bool) -> void:
 func clear_picks() -> void:
 	_picks.clear()
 	_status = ""
+	request_preview() # two picks are gone, so the ghost goes with them
 	picks_changed.emit()
+
+
+func _exit_tree() -> void:
+	_clear_ghost()
 
 
 func status_text() -> String:
@@ -122,6 +144,8 @@ func status_text() -> String:
 		1:
 			return "Pick a face, edge or corner on the second part."
 		_:
+			if _ghost != null:
+				return "Preview shown in blue. If it faces the wrong way press Flip, then Create."
 			return "Ready — choose a mate type and Create."
 	return ""
 
@@ -176,6 +200,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"kind": kind,
 	})
 	_status = ""
+	request_preview()
 	picks_changed.emit()
 
 
@@ -194,6 +219,74 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 		if first["occurrence_id"] == occ_ref["occurrence_id"]:
 			return "Pick two different parts, not the same one twice."
 	return ""
+
+
+# --- Preview: a ghost of the part where the mate would put it --------------------------
+
+func preview_visible() -> bool:
+	return _ghost != null and is_instance_valid(_ghost)
+
+
+func request_preview() -> void:
+	## Re-runs the dry run for the mate as it is set up now (the backend's preview-mate-solve: same body as
+	## Create, nothing stored, nothing moved). With fewer than two picks, or no backend, the ghost is removed.
+	_preview_seq += 1
+	if not active or _picks.size() != 2 or backend_url == "" or not is_inside_tree():
+		_clear_ghost()
+		return
+	_run_preview(_preview_seq)
+
+
+func _run_preview(seq: int) -> void:
+	var owner_part_id: String = _picks[0]["owner_part_id"]
+	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve" % [owner_part_id, driven_id], build_create_payload())
+	if seq != _preview_seq or _picks.size() != 2:
+		return # a newer setting (or Clear) has replaced this one
+	var json = result.get("json")
+	var part := _find_loaded_part(owner_part_id, driven_id)
+	if not result["ok"] or not (json is Dictionary) or not bool(json.get("converged", false)) or not (json.get("transform") is Dictionary) or part == null:
+		_clear_ghost() # "no ghost to show yet": a value still to be typed, geometry this type can't use, or a grounded part
+		picks_changed.emit()
+		return
+	_show_ghost(part, json_to_pose(json["transform"]))
+	picks_changed.emit()
+
+
+func _show_ghost(part: Node3D, pose: Transform3D) -> void:
+	_clear_ghost()
+	if part.get_parent() == null:
+		return
+	var ghost := Node3D.new()
+	ghost.name = "MateGhost"
+	var material := StandardMaterial3D.new()
+	material.albedo_color = GHOST_COLOUR
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_add_ghost_meshes(part, Transform3D.IDENTITY, ghost, material)
+	part.get_parent().add_child(ghost)
+	ghost.transform = pose # same frame as the part itself (see _apply_solved_transform)
+	_ghost = ghost
+
+
+func _add_ghost_meshes(node: Node3D, xf: Transform3D, ghost: Node3D, material: Material) -> void:
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		var copy := MeshInstance3D.new()
+		copy.mesh = (node as MeshInstance3D).mesh
+		copy.material_override = material
+		copy.transform = xf
+		copy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ghost.add_child(copy)
+	for child in node.get_children():
+		if child is Node3D and not (child is CollisionObject3D):
+			_add_ghost_meshes(child, xf * (child as Node3D).transform, ghost, material)
+
+
+func _clear_ghost() -> void:
+	if _ghost != null and is_instance_valid(_ghost):
+		_ghost.queue_free()
+	_ghost = null
 
 
 func can_create() -> bool:
@@ -255,6 +348,31 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 		document_changed.emit()
 	await refresh_mates(owner_part_id)
 	return result["ok"]
+
+
+func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> Dictionary:
+	## Edits a mate after it was made: any of value / flipped / allow_rotation / suppressed (what the backend's
+	## PATCH accepts; the type and the two faces are never edited, make a new mate for those). Unless mates are
+	## relaxed, the driven part is solved again so the change shows at once (one undo entry, like Create's).
+	if fields.is_empty():
+		return {"ok": true, "error": ""}
+	_busy = true
+	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/mates/%s" % [owner_part_id, mate_id], fields)
+	_busy = false
+	if not result["ok"]:
+		return {"ok": false, "error": _friendly_error(result)}
+	document_changed.emit()
+	await refresh_mates(owner_part_id)
+	var refs: Array = []
+	for mate in mates:
+		if str(mate.get("id", "")) == mate_id:
+			refs = mate.get("references", [])
+	if not relaxed and refs.size() == 2:
+		var driven_id := _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
+		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_id)
+		if not solved["ok"]:
+			return {"ok": false, "error": "Mate changed, but couldn't be applied: %s" % solved["error"]}
+	return {"ok": true, "error": ""}
 
 
 func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionary:

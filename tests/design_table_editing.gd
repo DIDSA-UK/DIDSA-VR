@@ -135,7 +135,7 @@ func _initialize() -> void:
 	# --- the sheet: a snapped cursor, two pulls draw a rectangle
 	# --- a sketch opens ready to select, on a big sheet with a grid, and the origin is a snap point
 	print("SMOKE a sketch opens with the Select tool already on, shown pressed in the Sketch row: ", table.active_tool == "select" and ed.session.tool == "select" and table.ui.tool_button("select") != null and table.ui.tool_button("select").button_pressed)
-	print("SMOKE ...Select is the first slot of the Sketch row, and the other tools page behind More: ", table.ui.shown_tool_ids()[0] == "select" and table.ui.more_button() != null)
+	print("SMOKE ...Select is the first slot of the Sketch tool list, and the other tools follow it (no More button; the list scrolls if it overflows): ", table.ui.shown_tool_ids()[0] == "select" and table.ui.shown_tool_ids().size() == 14)
 	var world_size: Vector2 = ed.view.sheet_size * table.effective_scale()
 	print("SMOKE the sheet is a fixed window in the world, 0.8 x 0.4 m, whatever size the part is: ", world_size.is_equal_approx(table.sheet_window_m))
 	var step_world: float = ed.view.grid_step() * table.effective_scale()
