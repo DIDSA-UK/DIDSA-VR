@@ -44,6 +44,7 @@ var status_text: String = "" ## what _set_status() last said — console-only no
 
 var xr_interface: XRInterface
 var _resolved_part_id: String = ""
+var visibility_ruled_parts: Array = [] ## parts whose load-rule visibility (visibility.gd) is already applied since the file was loaded; session only, never saved
 var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 signal dirty_changed(dirty: bool)
@@ -1046,6 +1047,7 @@ func _import_external_file_impl(path: String, source_format: String) -> void:
 	if _parse_import_response(cleared_result, "start a fresh document for %s" % path.get_file(), req) == null:
 		return
 	_native_extras.clear()
+	visibility_ruled_parts.clear()
 	native_file_path = ""
 	req.request(backend_url + API_PREFIX + "/parts", headers, HTTPClient.METHOD_POST, JSON.stringify({"name": path.get_file().get_basename()}))
 	var create_result: Array = await req.request_completed
@@ -1278,6 +1280,7 @@ func _new_assembly_impl() -> bool:
 	var body: PackedByteArray = fetched["bytes"]
 	_resolved_part_id = root_id # before _show_model: it refreshes the mates state for the part it is showing
 	_native_extras.clear()
+	visibility_ruled_parts.clear()
 	native_file_path = "" # a save from here is named "assembly-vr-..." rather than after the file that was open before
 	if not _show_model(body, "", spawn_scale):
 		return false
@@ -1325,6 +1328,7 @@ const _SNAPSHOT_SCHEMA_VERSION := 1
 
 func _remember_native_extras(parsed: Dictionary) -> void:
 	_native_extras.clear()
+	visibility_ruled_parts.clear()
 	for key in parsed:
 		if key != "schema_version" and key != "document" and key != "sketches":
 			_native_extras[key] = parsed[key]
@@ -1522,6 +1526,16 @@ func set_feature_hidden(feature_id: String, hidden: bool) -> void:
 	else:
 		_native_extras["hidden_feature_ids"] = ids
 	mark_dirty() # the hidden set is written into a save
+
+
+func set_hidden_feature_ids(ids: Array, dirty := true) -> void:
+	## Replaces the whole hidden list (a category button's batch edit, or the load rule, which is not an edit of the file: dirty = false).
+	if ids.is_empty():
+		_native_extras.erase("hidden_feature_ids")
+	else:
+		_native_extras["hidden_feature_ids"] = ids.duplicate()
+	if dirty:
+		mark_dirty()
 
 
 func _blank_out(nodes: Array) -> int:

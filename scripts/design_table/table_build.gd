@@ -17,6 +17,7 @@ signal changed ## the list, the selection or a state flag changed: the window re
 
 const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const BuildTree := preload("res://scripts/design_table/build_tree.gd")
+const Visibility := preload("res://scripts/design_table/visibility.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const ARM_MS := 4000 ## how long a Delete stays armed
 
@@ -30,6 +31,7 @@ var delete_armed_id := ""
 var loaded_part := ""
 var view_filters_ok := true ## false once the backend said it cannot hide or roll back (an older DIDSA-CAD): the buttons are off and the tree says why
 
+var visibility := Visibility.new() ## the session-only switches (reference planes, origin and axes...): never saved
 var _table ## design_table.gd
 var _probed := false
 var _token := 0
@@ -127,6 +129,9 @@ func reload() -> void:
 		delete_armed_id = ""
 	changed.emit()
 	_warn_references()
+	if not _table._main.visibility_ruled_parts.has(pid):
+		_table._main.visibility_ruled_parts.append(pid)
+		apply_load_rule()
 	if first_time and _table.editor.view_is_filtered():
 		await _table.editor.refresh_view() # a part seated with features already hidden: the copy shows it that way
 
@@ -156,8 +161,39 @@ func hidden_ids() -> Array:
 	return _table._main.hidden_feature_ids().filter(func(id): return mine.has(str(id)))
 
 
+func mesh_hidden_ids() -> Array:
+	## The hidden ids that change the PICTURE: bodies, surfaces and curves come back from the backend flagged hidden. A sketch or a created plane
+	## is not in the mesh, so hiding one (the load rule hides most sketches) must not cost a second glb fetch or mark the copy filtered.
+	var drawn := {}
+	for f in features:
+		if Visibility.category_of(f) in [Visibility.BODIES, Visibility.SURFACES, Visibility.CURVES]:
+			drawn[str(f.get("id", ""))] = true
+	return hidden_ids().filter(func(id): return drawn.has(str(id)))
+
+
 func is_hidden(feature_id: String) -> bool:
 	return hidden_ids().has(feature_id)
+
+
+func apply_load_rule() -> void:
+	## Once per part per loaded file: sketches nothing consumes are shown, created planes hidden, other hides in the file kept (visibility.gd).
+	var saved: Array = _table._main.hidden_feature_ids()
+	var ruled := Visibility.load_hidden(features, saved, rollback_excluded())
+	if ruled.size() != saved.size() or ruled.any(func(id): return not saved.has(id)):
+		_table._main.set_hidden_feature_ids(ruled, false)
+
+
+func category_state(category: String) -> Dictionary:
+	return Visibility.category_state(features, hidden_ids(), category, rollback_excluded())
+
+
+func toggle_category(category: String) -> void:
+	## A category button (batch rule in visibility.gd): all visible -> hide all, otherwise show all.
+	if not view_filters_ok or category_state(category)["total"] == 0:
+		return
+	_table._main.set_hidden_feature_ids(Visibility.toggle_category(features, _table._main.hidden_feature_ids(), category, rollback_excluded()))
+	await _table.editor.refresh_view()
+	changed.emit()
 
 
 func rollback_excluded() -> Array:

@@ -1803,7 +1803,7 @@ func glb_path(filtered: bool, quality := 0.5) -> String:
 	## The part's own assembly-mesh.glb; `filtered` adds the Build tree's Hide / Show and rollback sets (DIDSA-CAD, 2026-10-03).
 	var path := "/document/parts/%s/assembly-mesh.glb?quality=%s" % [part_id, str(quality)]
 	if filtered:
-		for id in table.build.hidden_ids():
+		for id in table.build.mesh_hidden_ids():
 			path += "&hidden_feature_ids=%s" % str(id).uri_encode()
 		for id in table.build.rollback_excluded():
 			path += "&rollback_excluded_feature_ids=%s" % str(id).uri_encode()
@@ -1811,7 +1811,7 @@ func glb_path(filtered: bool, quality := 0.5) -> String:
 
 
 func view_is_filtered() -> bool:
-	return not table.build.hidden_ids().is_empty() or not table.build.rollback_excluded().is_empty()
+	return not table.build.mesh_hidden_ids().is_empty() or not table.build.rollback_excluded().is_empty()
 
 
 func refresh_view() -> void:
