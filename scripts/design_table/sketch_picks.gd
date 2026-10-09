@@ -9,6 +9,7 @@ const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchView := preload("res://scripts/design_table/sketch_view.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
+const DimensionLayout := preload("res://scripts/design_table/dimension_layout.gd")
 
 const ARC_SEGMENTS := 24
 const CIRCLE_SEGMENTS := 48
@@ -19,6 +20,11 @@ var curves: Array = [] ## candidate entities (see above)
 var sketches: Dictionary = {} ## sketch feature id -> {sketch_id, plane, count, included, closed (it holds a closed profile an extrude can use)}
 var tints: Dictionary = {} ## sketch feature id -> PackedVector3Array of triangles filling its closed loops (a cue for a sketch used as a seed, not a pick)
 var tint_on := false
+var show_construction := true ## false: construction lines are neither drawn nor offered (the Visibility drawer's "Constr." tile; picking instances keep them)
+var dims: Dictionary = {} ## sketch feature id -> {points (segment pairs, the part's frame), labels: [{text, pos}]}: the sketch's dimension glyphs
+var dims_on := false
+var _dim_node: MeshInstance3D = null
+var _dim_labels: Node3D = null
 var _tint_node: MeshInstance3D = null
 var _tint_material: StandardMaterial3D
 var _node: MeshInstance3D = null
@@ -46,6 +52,7 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 	curves.clear()
 	sketches.clear()
 	tints.clear()
+	dims.clear()
 	for row in rows:
 		if str(row.get("type", "")) != "sketch" or str(row.get("id", "")) == skip_feature_id or str(row.get("sketch_id", "")) == "":
 			continue
@@ -65,6 +72,7 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 			count += _add_arc(session, row, id, plane)
 		sketches[str(row["id"])] = {"sketch_id": str(row["sketch_id"]), "plane": plane, "count": count, "included": true, "closed": session.profile_ok()}
 		tints[str(row["id"])] = _tint_triangles(session, plane)
+		dims[str(row["id"])] = _dimension_glyphs(session, plane)
 	_redraw()
 	return curves.size()
 
@@ -146,6 +154,89 @@ func _loops(session) -> Array:
 	return loops
 
 
+func _dimension_glyphs(session, plane: Dictionary) -> Dictionary:
+	## The sketch's typed dimensions as lines and values in the part's frame: each laid out by dimension_layout.gd exactly as the sheet lays them out,
+	## at a size that suits the sketch (a fraction of how big it is, since this is drawn on a part of any size).
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	var obstacles: Array = []
+	for id in session.points:
+		lo = lo.min(session.points[id])
+		hi = hi.max(session.points[id])
+		obstacles.append(session.points[id])
+	var segs := PackedVector3Array()
+	var labels: Array = []
+	if lo.x == INF:
+		return {"points": segs, "labels": labels}
+	var size := maxf(hi.x - lo.x, hi.y - lo.y)
+	var unit := clampf(size * 0.12, 2.0, 25.0) # mm: a dimension line stands this far off the geometry
+	var params := {"offset": unit, "arrow": unit * 0.4, "gap": unit * 0.15, "over": unit * 0.2, "centroid": (lo + hi) * 0.5, "obstacles": obstacles, "obstacle_segments": [], "interiors": [], "text_h": unit * 0.7}
+	for item in session.dimension_items():
+		var text := str(item["text"])
+		params["text_w"] = unit * 0.7 * 0.6 * float(maxi(text.length(), 1))
+		var layout := DimensionLayout.layout(item["spec"], params)
+		for seg in layout["segments"]:
+			segs.append(SketchMath.from_sheet(seg[0], plane))
+			segs.append(SketchMath.from_sheet(seg[1], plane))
+		for arc in layout["arcs"]:
+			for i in (arc as Array).size() - 1:
+				segs.append(SketchMath.from_sheet(arc[i], plane))
+				segs.append(SketchMath.from_sheet(arc[i + 1], plane))
+		for ar in layout["arrows"]: # [tip, direction]: two short barbs back from the tip
+			var tip: Vector2 = ar[0]
+			var dir: Vector2 = (ar[1] as Vector2).normalized()
+			for side in [-1.0, 1.0]:
+				segs.append(SketchMath.from_sheet(tip, plane))
+				segs.append(SketchMath.from_sheet(tip - dir * unit * 0.4 + Vector2(-dir.y, dir.x) * side * unit * 0.14, plane))
+		labels.append({"text": text, "pos": SketchMath.from_sheet(layout["text_uv"], plane), "size": unit * 0.7})
+	return {"points": segs, "labels": labels}
+
+
+func _redraw_dimensions() -> void:
+	for n in [_dim_node, _dim_labels]:
+		if n != null and is_instance_valid(n):
+			remove_child(n)
+			n.queue_free()
+	_dim_node = null
+	_dim_labels = null
+	if not dims_on:
+		return
+	var all := PackedVector3Array()
+	var labels: Array = []
+	for id in dims:
+		if bool(sketches.get(id, {}).get("included", false)):
+			all.append_array(dims[id]["points"])
+			labels.append_array(dims[id]["labels"])
+	var parent := get_parent() as Node3D
+	var scale_x: float = maxf(parent.global_transform.basis.get_scale().x, 0.000001) if parent != null else 1.0
+	var mesh := FaceHighlight.tube_mesh(all, TUBE_RADIUS * 0.6 / scale_x)
+	if mesh != null:
+		_dim_node = MeshInstance3D.new()
+		_dim_node.name = "SketchDimensions"
+		_dim_node.mesh = mesh
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(1.0, 0.82, 0.30)
+		_dim_node.material_override = m
+		_dim_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_dim_node)
+	if not labels.is_empty():
+		_dim_labels = Node3D.new()
+		_dim_labels.name = "SketchDimensionValues"
+		add_child(_dim_labels)
+		for l in labels:
+			var t := Label3D.new()
+			t.text = str(l["text"])
+			t.font_size = 40
+			t.pixel_size = float(l["size"]) / 40.0 # the glyph height is the layout's text height, in the part's mm
+			t.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			t.no_depth_test = true
+			t.outline_size = 6
+			t.modulate = Color(1.0, 0.82, 0.30)
+			t.position = l["pos"]
+			_dim_labels.add_child(t)
+
+
 func set_tint(on: bool) -> void:
 	tint_on = on
 	_redraw_tint()
@@ -182,7 +273,7 @@ func _add_line(session, row: Dictionary, id: String, plane: Dictionary) -> int:
 	if session.is_reference(id) or not session.points.has(l["a"]) or not session.points.has(l["b"]):
 		return 0
 	var pts := PackedVector3Array([SketchMath.from_sheet(session.points[l["a"]], plane), SketchMath.from_sheet(session.points[l["b"]], plane)])
-	_add(row, "line", id, pts)
+	_add(row, "line", id, pts, bool(l.get("construction", false)))
 	return 1
 
 
@@ -196,7 +287,7 @@ func _add_circle(session, row: Dictionary, id: String, plane: Dictionary) -> int
 	for i in CIRCLE_SEGMENTS + 1:
 		var a := TAU * float(i) / float(CIRCLE_SEGMENTS)
 		ring.append(centre + Vector2(cos(a), sin(a)) * radius)
-	_add(row, "circle", id, _pairs(ring, plane))
+	_add(row, "circle", id, _pairs(ring, plane), bool(c.get("construction", false)))
 	return 1
 
 
@@ -204,7 +295,7 @@ func _add_arc(session, row: Dictionary, id: String, plane: Dictionary) -> int:
 	var a: Dictionary = session.arcs[id]
 	if session.is_reference(id) or not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
 		return 0
-	_add(row, "arc", id, _pairs(SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS), plane))
+	_add(row, "arc", id, _pairs(SketchView.arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], ARC_SEGMENTS), plane), bool(a.get("construction", false)))
 	return 1
 
 
@@ -216,9 +307,9 @@ func _pairs(uvs: Array, plane: Dictionary) -> PackedVector3Array:
 	return out
 
 
-func _add(row: Dictionary, type: String, id: String, pts: PackedVector3Array) -> void:
+func _add(row: Dictionary, type: String, id: String, pts: PackedVector3Array, construction := false) -> void:
 	curves.append({"kind": "curve", "sketch_feature_id": str(row["id"]), "sketch_id": str(row["sketch_id"]), "entity_type": type, "entity_id": id,
-		"points": pts, "key": "curve:%s:%s" % [row["sketch_id"], id]})
+		"points": pts, "key": "curve:%s:%s" % [row["sketch_id"], id], "construction": construction})
 
 
 func set_included(feature_id: String, included: bool) -> void:
@@ -240,7 +331,19 @@ func apply_hidden(hidden_feature_ids: Array) -> void:
 
 
 func candidates() -> Array:
-	return curves.filter(func(c): return bool(sketches.get(str(c["sketch_feature_id"]), {}).get("included", false)))
+	return curves.filter(func(c): return bool(sketches.get(str(c["sketch_feature_id"]), {}).get("included", false)) and (show_construction or not bool(c.get("construction", false))))
+
+
+func set_show_construction(on: bool) -> void:
+	if show_construction != on:
+		show_construction = on
+		_redraw()
+
+
+func set_dimensions(on: bool) -> void:
+	if dims_on != on:
+		dims_on = on
+		_redraw_dimensions()
 
 
 func entity_ref(entity: Dictionary) -> Dictionary:
@@ -275,7 +378,9 @@ func nearest(world_origin: Vector3, world_dir: Vector3, reach_world: float) -> D
 
 func _redraw() -> void:
 	_redraw_tint()
+	_redraw_dimensions()
 	if _node != null and is_instance_valid(_node):
+		remove_child(_node) # out of the tree now, so the new node keeps the name
 		_node.queue_free()
 	_node = null
 	var all := PackedVector3Array()
@@ -298,6 +403,8 @@ func clear() -> void:
 	curves.clear()
 	sketches.clear()
 	tints.clear()
+	dims.clear()
+	_redraw_dimensions()
 	if _node != null and is_instance_valid(_node):
 		_node.queue_free()
 	_node = null

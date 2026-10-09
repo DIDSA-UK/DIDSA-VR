@@ -34,6 +34,7 @@ const SketchPicks := preload("res://scripts/design_table/sketch_picks.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
+const OriginAxes := preload("res://scripts/design_table/origin_axes.gd")
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
 const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
@@ -71,6 +72,7 @@ var repick_point := "" ## a flagged reference point the user is choosing a repla
 var _repick_queue: Array = [] ## the flagged points still to do, in order
 var clip := SketchClip.new() ## clips the copy to the sketch window while a sketch is open (sketch_clip.gd)
 var markers: Node3D = null ## plane_markers.gd, a child of the table's copy
+var origin_axes: Node3D = null ## origin_axes.gd, a child of the copy: the part's origin and axes, shown when the Visibility drawer has them on
 var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Measure never see it)
 var part_id := "" ## the PART DEFINITION being edited (every instance of it changes), resolved from the seated node's occurrence
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
@@ -169,6 +171,11 @@ func on_seated() -> void:
 	markers.name = "PlaneMarkers"
 	copy.add_child(markers)
 	markers.setup(extent, aabb.get_center(), table.fit_scale)
+	origin_axes = OriginAxes.new()
+	origin_axes.name = "OriginAxes"
+	copy.add_child(origin_axes)
+	origin_axes.setup(extent * 0.6, table.fit_scale)
+	sync_plane_markers()
 	highlight = FaceHighlight.new()
 	highlight.name = "EditHighlight"
 	table.add_child(highlight)
@@ -256,6 +263,7 @@ func _reset() -> void:
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
 	markers = null
+	origin_axes = null
 	_rest_token += 1
 	_rest_signature = ""
 	if rest_sketches != null and is_instance_valid(rest_sketches):
@@ -569,6 +577,8 @@ func sync_plane_markers() -> void:
 	for key in wanted:
 		markers.add_plane(key, wanted[key][0], str(wanted[key][1]))
 	# At rest (Visibility drawer): the reference planes follow their switch, each made plane its own hide state
+	if origin_axes != null and is_instance_valid(origin_axes):
+		origin_axes.visible = table.build.visibility.is_on(Visibility.ORIGIN_AXES)
 	markers.set_rest_fixed(table.build.visibility.is_on(Visibility.REFERENCE_PLANES))
 	for key in markers._custom.keys():
 		markers.set_rest_custom(key, not table.build.is_hidden(str(key).trim_prefix("plane:")))
@@ -768,6 +778,9 @@ func sync_rest_sketches() -> void:
 			rest_sketches.queue_free()
 		rest_sketches = fresh
 	rest_sketches.apply_hidden(table.build.hidden_ids())
+	# the Visibility drawer's tiles: construction lines and dimension glyphs at rest (Revolve's axis is often a construction line: shown while it picks)
+	rest_sketches.set_show_construction(table.build.visibility.is_on(Visibility.CONSTRUCTION) or (state == "pick_sketch" and table.active_tool == "revolve"))
+	rest_sketches.set_dimensions(table.build.visibility.is_on(Visibility.DIMENSIONS))
 	rest_sketches.visible = not (state in ["sketch", "pick_curves"])
 	if state == "pick_sketch":
 		if seed_sketch != "" and not bool(rest_sketches.sketches.get(seed_sketch, {}).get("included", false)):
@@ -2161,6 +2174,12 @@ func _rebuild_markers() -> void:
 	markers.name = "PlaneMarkers"
 	copy.add_child(markers)
 	markers.setup(aabb.size.length() * 1.25, aabb.get_center(), table.fit_scale)
+	if origin_axes != null and is_instance_valid(origin_axes):
+		origin_axes.queue_free()
+	origin_axes = OriginAxes.new()
+	origin_axes.name = "OriginAxes"
+	copy.add_child(origin_axes)
+	origin_axes.setup(aabb.size.length() * 0.75, table.fit_scale)
 	markers.set_markers_visible(was_picking)
 	if chosen_before != "":
 		markers.set_chosen(chosen_before)
