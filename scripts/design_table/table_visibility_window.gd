@@ -8,7 +8,7 @@ extends "res://scripts/diegetic_panel.gd"
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 
 const COLUMNS := 4
-const TILE := 134.0 ## px, a square button: about two of the deck's buttons (52 px tall) high, at the deck's text size
+const TILE := 100.0 ## px, a square button: a little under twice the deck's buttons (52 px tall)
 const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.SKETCHES, "Sketches"],
 	[Visibility.BODIES, "Bodies"],
@@ -18,8 +18,8 @@ const ROWS := [ ## [id, label, feature category or ""]
 	[Visibility.REFERENCE_PLANES, "Ref. planes"],
 	[Visibility.ORIGIN_AXES, "Origin, axes"],
 	["centre_of_gravity", "Gravity"],
-	[Visibility.DIMENSIONS, "Dimensions"],
-	[Visibility.CONSTRUCTION, "Construction"],
+	[Visibility.DIMENSIONS, "Dims"],
+	[Visibility.CONSTRUCTION, "Constr."],
 	[Visibility.EDGE_LINES, "Edge lines"],
 ]
 
@@ -33,10 +33,10 @@ const GAP := 0.012 ## metres between the deck's right edge and the drawer
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
 	table = p_table
 	panel_title = "Visibility"
-	panel_size = Vector2(0.33, p_table.tools_size.y) # as tall as the deck it sits against
+	panel_size = Vector2(0.26, p_table.tools_size.y) # as tall as the deck it sits against
 	viewport_size = Vector2i((panel_size * p_table.pixels_per_metre).round()) # the deck's own density: the same text size
 	setup(left, right, camera)
-	_header.visible = false # no title and no X: the eye button on the deck opens and closes it
+	set_title("Visibility")
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
 	# Stationary: it is a child of the deck, flush against its right edge, so it has no grab handle and its corners do not resize it.
@@ -61,7 +61,7 @@ func _build_content() -> Control:
 	var grid := GridContainer.new()
 	grid.columns = COLUMNS
 	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 10)
+	grid.add_theme_constant_override("v_separation", 8)
 	for r in ROWS:
 		var id: String = r[0]
 		var b := Button.new()
@@ -71,7 +71,7 @@ func _build_content() -> Control:
 		b.expand_icon = false
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.custom_minimum_size = Vector2(TILE, TILE)
-		b.add_theme_font_size_override("font_size", tokens.font_small) # the deck buttons' text size
+		b.add_theme_font_size_override("font_size", maxi(12, tokens.font_small - 2))
 		b.pressed.connect(func() -> void:
 			UiFeedback.haptic(_right, "tick")
 			_row_pressed(id))
@@ -84,7 +84,7 @@ func _build_content() -> Control:
 func _plain(text: String, callback: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(150.0, (TILE * 3.0 + 20.0) * 0.5 - 6.0) # as wide as the deck's labelled buttons; the two share the grid's height # one per grid row, a little wider than a tile
+	b.custom_minimum_size = Vector2(120.0, (TILE * 3.0 + 20.0) * 0.5 - 6.0) # the two share the grid's height # one per grid row, a little wider than a tile
 	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	b.add_theme_font_size_override("font_size", tokens.font_small)
 	b.pressed.connect(func() -> void:
