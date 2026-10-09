@@ -46,7 +46,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | S3 | **A picked finished sketch has no "sketched-on face"**, so a Boss fuses only with a single-body part and a Cut cuts every body. | 6 | Could infer the face from the sketch plane. |
 | S4 | **Sketches on turned or flipped planes are not offered** (`_plane_for_row` returns nothing for them), the same limit as Loft and Sweep picking. | 6 | |
 | S5 | ~~Only Extrude takes a picked sketch~~ **Closed.** Revolve (profile, then a line of it as the axis), Sweep (profile, then the path lines of other sketches) and Loft (sections in pick order) all take picked sketches now. | 6 | |
-| S7 | **Revolve's axis can be any visible sketch's line (a construction line counts), but not yet a reference axis (X, Y, Z).** DIDSA-CAD's Revolve takes a sketch `Line` only (`axis_ref`, "Point/Circle invalid", no fixed axes), so the origin axes cannot be sent as they are. A profile with no line to spin about still cannot be revolved. | 6, 7 | **Open decision:** (a) a backend change so `axis_ref` can name a fixed axis, or (b) a VR workaround that makes a construction line on the axis in a new sketch on a reference plane (adds a sketch to the history). Not built. |
+| S7 | ~~Revolve's axis cannot be a reference axis~~ **Decided: left as it is.** The axis is any visible sketch's line (a construction line counts). To spin about X, Y or Z the user puts a line on that axis in a sketch (DIDSA-CAD's `axis_ref` takes a sketch line only). The origin axes stay a visual marker. | 6, 7 | Decided with John 2026-10-09. |
 | S8 | ~~The axis line is not lit separately~~ **Closed.** The picked axis line is lit with the profile. | 6 | |
 | S9 | **Sweep: the profile cannot be changed without choosing Sweep again** (the editor is in path picking). A "Back to profile" option is missing. | 6 | |
 | S10 | **Sweep's path is still picked line by line** (as before), not as a whole sketch. | 6 | Could take a sketch as the path in one pull. |
@@ -69,7 +69,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | G1 | **Dims and Constr. are two tiles, both on by default, and they govern the OPEN sketch only.** Dimensions and constraints never show on a finished sketch at rest. Hide all turns them off in the open sketch too. | Decided with John 2026-10-09. |
 | G2 | **The Dimension tool's own candidate values always show** (they are its interface), whatever the Dims tile says. | |
 | G3 | **Constraint glyphs are new**: the sheet drew none before. They are plain letters beside what they hold (H, V, //, \|_, =, co, (o), on, M, T, F), stacked when an entity has several. Coincident points get none (the shared point is the glyph), and only the constraint types the session already creates are covered. | `sketch_session.gd` `constraint_items`, `sketch_view.gd`. Letters were chosen so they never miss a glyph in the font. |
-| G4 | **Origin and axes are a marker only** (a ball, X, Y, Z axes and labels on the part's origin). Not pickable yet (S7). | |
+| G4 | **Origin and axes are a marker only** (a ball, X, Y, Z axes and labels on the part's origin), not pickable (S7). | |
 | G5 | **Axis colours are my choice** (X red, Y green, Z blue, from memory of the flat app). | Check against the flat app. |
 | G6 | **Construction lines are ordinary lines for visibility**: drawn and offered at rest like the rest; the earlier construction tile and filter were removed. | |
 
@@ -79,4 +79,3 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 |---|---|
 | **3D curves** | The backend's feature type name (the guess in `visibility.gd` `CURVE_TYPES`), that the Curves tile counts and hides them, and a real-backend test that makes one. |
 | **Centre of gravity** (all clients, backend mass properties) | Enable the CofG tile, a marker and readout, and test it against the real backend. |
-| **Reference axes for Revolve** | If the backend gains a fixed-axis `axis_ref`, make the origin axes pickable and send them (S7). |
