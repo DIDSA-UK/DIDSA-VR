@@ -58,16 +58,17 @@ func _initialize() -> void:
 	print("SMOKE categories: sketches, planes, surfaces, bodies (everything else): ", Vis.ids_of(rows, Vis.SKETCHES).size() == 7 and Vis.ids_of(rows, Vis.PLANES) == ["pl_1"] and Vis.ids_of(rows, Vis.SURFACES) == ["su_1"] and Vis.ids_of(rows, Vis.BODIES) == ["ex_a", "lo_1", "sw_1", "rv_1", "pa_1", "fi_1"] and Vis.ids_of(rows, Vis.CURVES).is_empty())
 
 	var loaded := Vis.load_hidden(rows, [])
-	print("SMOKE load rule: consumed sketches and created planes hidden, free sketches, bodies and surfaces shown: ", loaded == ["sk_a", "sk_b", "sk_c", "sk_d", "sk_e", "sk_f", "pl_1"])
+	print("SMOKE load rule: consumed sketches hidden; free sketches, created planes, bodies and surfaces shown: ", loaded == ["sk_a", "sk_b", "sk_c", "sk_d", "sk_e", "sk_f"])
 	var loaded2 := Vis.load_hidden(rows, ["su_1", "fi_1", "sk_g", "other_part", "sk_a"])
 	print("SMOKE ...a body, surface or other part's id the file hid stays hidden; a sketch the file hid follows the rule (a free one is shown again): ", loaded2.has("su_1") and loaded2.has("fi_1") and loaded2.has("other_part") and not loaded2.has("sk_g") and loaded2.has("sk_a") and loaded2.count("sk_a") == 1)
+	print("SMOKE ...a created plane the file hid stays hidden (a plane is not hidden by the rule, only kept as the file had it): ", Vis.load_hidden(rows, ["pl_1"]).has("pl_1") and not Vis.load_hidden(rows, []).has("pl_1"))
 	print("SMOKE ...rolled back, the load rule shows the freed sketches: ", not Vis.load_hidden(rows, [], ["lo_1"]).has("sk_b") and Vis.load_hidden(rows, [], ["lo_1"]).has("sk_a"))
 
 	var st := Vis.category_state(rows, loaded, Vis.SKETCHES)
 	print("SMOKE the sketches read '1 of 7' and 'some' after the load rule: ", st["label"] == "1 of 7" and st["state"] == "some" and st["visible"] == 1)
 	print("SMOKE a category with nothing in it is 'empty' (3D curves); all visible is 'all'; none is 'none': ", Vis.category_state(rows, loaded, Vis.CURVES)["state"] == "empty" and Vis.category_state(rows, [], Vis.SKETCHES)["state"] == "all" and Vis.category_state(rows, Vis.ids_of(rows, Vis.SKETCHES), Vis.SKETCHES)["state"] == "none")
 	var shown := Vis.toggle_category(rows, loaded, Vis.SKETCHES)
-	print("SMOKE the button on a mixed category shows ALL its items, leaving other categories and parts alone: ", Vis.category_state(rows, shown, Vis.SKETCHES)["state"] == "all" and shown.has("pl_1") and shown.size() == 1)
+	print("SMOKE the button on a mixed category shows ALL its items, leaving other categories and parts alone: ", Vis.category_state(rows, shown, Vis.SKETCHES)["state"] == "all" and not shown.has("pl_1"), " ", shown)
 	var hidden_all := Vis.toggle_category(rows, shown + ["other_part"], Vis.SKETCHES)
 	print("SMOKE ...on an all-visible category it hides all (off then on always ends with everything visible): ", Vis.category_state(rows, hidden_all, Vis.SKETCHES)["state"] == "none" and hidden_all.has("other_part") and Vis.category_state(rows, Vis.toggle_category(rows, hidden_all, Vis.SKETCHES), Vis.SKETCHES)["state"] == "all")
 	print("SMOKE rolled-back features are not counted (rolling back the loft takes its row out of Bodies, 5 of 5): ", Vis.category_state(rows, [], Vis.BODIES, ["lo_1"])["label"] == "5 of 5" and Vis.category_state(rows, ["fi_1"], Vis.BODIES, ["lo_1"])["label"] == "4 of 5")
@@ -114,11 +115,11 @@ func _initialize() -> void:
 	table.open()
 	table.seat(box)
 	var ready: bool = await settle(func() -> bool: return table.build.features.size() == rows.size())
-	var want: Array = ["su_1", "sk_a", "sk_b", "sk_c", "sk_d", "sk_e", "sk_f", "pl_1"]
+	var want: Array = ["su_1", "sk_a", "sk_b", "sk_c", "sk_d", "sk_e", "sk_f"]
 	var got: Array = main.hidden_feature_ids()
-	print("SMOKE seating a part applies the load rule to the file's hidden list (surface kept, free sketch shown, consumed sketches and planes hidden): ", ready and got.size() == want.size() and want.all(func(id): return got.has(id)))
+	print("SMOKE seating a part applies the load rule to the file's hidden list (surface kept, free sketch and created plane shown, consumed sketches hidden): ", ready and got.size() == want.size() and want.all(func(id): return got.has(id)))
 	print("SMOKE ...without marking the file unsaved: ", not main.document_dirty)
-	print("SMOKE ...and the Build tree counts say so: ", table.build.category_state(Vis.SKETCHES)["label"] == "1 of 7" and table.build.category_state(Vis.PLANES)["label"] == "0 of 1")
+	print("SMOKE ...and the Build tree counts say so: ", table.build.category_state(Vis.SKETCHES)["label"] == "1 of 7" and table.build.category_state(Vis.PLANES)["label"] == "1 of 1")
 
 	main.set_feature_hidden("sk_g", true) # the user hides the free sketch by hand
 	table.build.reload()

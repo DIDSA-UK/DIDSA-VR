@@ -71,14 +71,74 @@ func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Call
 
 
 func _tint_triangles(session, plane: Dictionary) -> PackedVector3Array:
-	## The closed loops of a sketch (circles, and chains of lines and arcs that end where they began) filled with triangles in the part's frame.
-	## Construction and reference shapes are not part of a profile. Nested loops are each filled (it is a cue); a chain that does not close is left out.
+	## The closed loops of a sketch (circles, and chains of lines and arcs that end where they began) filled with triangles in the part's frame, HOLES
+	## LEFT OPEN: a loop inside another is a hole of it (inside two, a shape again). Construction and reference shapes are not part of a profile; a chain
+	## that does not close is left out.
 	var out := PackedVector3Array()
 	var normal: Vector3 = (plane["n"] as Vector3) * 0.02 # a hair off the plane so the fill does not fight a face the sketch lies on
-	for uvs in _loops(session):
+	for uvs in fill_polygons(_loops(session)):
 		var tri: PackedInt32Array = Geometry2D.triangulate_polygon(PackedVector2Array(uvs))
 		for i in tri:
 			out.append(SketchMath.from_sheet(uvs[i], plane) + normal)
+	return out
+
+
+static func fill_polygons(loops: Array) -> Array:
+	## Simple polygons (no holes in any of them) that together fill the loops with their holes left open. A loop's depth is how many other loops
+	## contain it: even depth is solid, odd depth a hole of the smallest loop around it. Each solid loop with holes is cut by a vertical line through
+	## every hole's middle (the hole straddles the cut, so each piece stays simple) and the hole is subtracted from the pieces.
+	var polys: Array = loops.map(func(l): return PackedVector2Array(l))
+	var area: Array = polys.map(func(p): return absf(_signed_area(p)))
+	var parent: Array = []
+	var depth: Array = []
+	for i in polys.size():
+		var best := -1
+		var d := 0
+		for j in polys.size():
+			if i != j and area[j] > area[i] and Geometry2D.is_point_in_polygon((polys[i] as PackedVector2Array)[0], polys[j]):
+				d += 1
+				if best < 0 or area[j] < area[best]:
+					best = j
+		parent.append(best)
+		depth.append(d)
+	var out: Array = []
+	for i in polys.size():
+		if int(depth[i]) % 2 != 0:
+			continue
+		var pieces: Array = [polys[i]]
+		for h in polys.size():
+			if int(depth[h]) % 2 == 1 and parent[h] == i:
+				pieces = _minus_hole(pieces, polys[h])
+		out.append_array(pieces)
+	return out
+
+
+static func _signed_area(p: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in p.size():
+		var q := p[(i + 1) % p.size()]
+		a += p[i].x * q.y - q.x * p[i].y
+	return a * 0.5
+
+
+static func _minus_hole(pieces: Array, hole: PackedVector2Array) -> Array:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for v in hole:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	var cx := (lo.x + hi.x) * 0.5
+	var out: Array = []
+	for piece in pieces:
+		if not Geometry2D.is_point_in_polygon(hole[0], piece):
+			out.append(piece) # this piece does not hold the hole
+			continue
+		var big := 1.0e6
+		for box in [PackedVector2Array([Vector2(-big, -big), Vector2(cx, -big), Vector2(cx, big), Vector2(-big, big)]), PackedVector2Array([Vector2(cx, -big), Vector2(big, -big), Vector2(big, big), Vector2(cx, big)])]:
+			for half in Geometry2D.intersect_polygons(piece, box):
+				for rest in Geometry2D.clip_polygons(half, hole):
+					if not Geometry2D.is_polygon_clockwise(rest):
+						out.append(rest)
 	return out
 
 

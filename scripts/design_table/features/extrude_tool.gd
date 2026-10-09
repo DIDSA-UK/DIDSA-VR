@@ -16,6 +16,8 @@ func options(ed) -> Array:
 	]
 	if bool(ed.options["boss"]):
 		list.insert(3, {"id": "new_body", "text": "New body", "toggle": true, "pressed": bool(ed.options["new_body"])})
+	if ed.session == null:
+		list.insert(list.size() - 1, ed.targets_option()) # a picked sketch: the bodies to fuse into are picked too
 	return list
 
 
@@ -29,6 +31,8 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.options["flip"] = not bool(ed.options["flip"])
 		"new_body":
 			ed.options["new_body"] = not bool(ed.options["new_body"])
+		"targets":
+			ed.toggle_target_picking()
 		"depth":
 			ed.type_option("depth", "Depth (mm)")
 		_:

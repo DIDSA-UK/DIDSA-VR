@@ -91,6 +91,7 @@ var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
 var seed_sketches: Array = [] ## Loft: the finished sketches picked as sections, in pick order (feature ids)
 var activating_edit := false ## a Build row's Edit is opening the tool (a tool then keeps its own picking, not the seed picking)
 var _seed_tool := "" ## the tool the seed was picked for
+var _targets_return := "" ## the state Targets goes back to (pick_sketch, or pick_curves for a Sweep)
 var seed_sketch := "" ## the finished sketch picked as the seed of the active tool (Extrude with no sketch open): its feature id
 var rest_sketches: Node3D = null ## sketch_picks.gd, a second one: the finished sketches the Visibility model shows, drawn on the copy at rest
 var _rest_signature := ""
@@ -627,7 +628,7 @@ func _sketch_pick_hint() -> String:
 
 
 func _end_sketch_pick(new_state := "") -> void:
-	if not (new_state == "pick_curves" and seed_sketch != ""): # Sweep keeps its profile while the path is picked
+	if not (new_state in ["pick_curves", "pick_bodies"] and (seed_sketch != "" or not seed_sketches.is_empty())): # Sweep keeps its profile while the path is picked, and any seed tool while the targets are
 		seed_sketch = ""
 		seed_sketches.clear()
 		if session == null:
@@ -772,6 +773,48 @@ func seed_ready() -> bool:
 	if session != null:
 		return session.profile_ok()
 	return seed_sketch != "" and rest_sketches != null and is_instance_valid(rest_sketches) and bool(rest_sketches.sketches.get(seed_sketch, {}).get("closed", false))
+
+
+func seed_tool_active() -> bool:
+	return str(table.active_tool) in ["extrude", "revolve", "sweep", "loft"]
+
+
+func targets_option() -> Dictionary:
+	## The Targets button of a tool working on a picked sketch: the bodies a boss fuses into (a cut cuts), picked with the laser.
+	var n := bodies.size()
+	return {"id": "targets", "text": "Targets: %s" % ("pick..." if state == "pick_bodies" and n == 0 else ("none" if n == 0 else "%d picked" % n)), "toggle": true, "pressed": state == "pick_bodies"}
+
+
+func toggle_target_picking() -> void:
+	## Targets pressed: the laser picks bodies (none, one or many; pull again to let one go); pressed again it goes back to what it was picking.
+	if state == "pick_bodies" and _targets_return != "":
+		var back := _targets_return
+		_targets_return = ""
+		set_state(back)
+		if back == "pick_curves":
+			await set_pick_mode("curves") # Sweep's path lines are read again
+		elif back == "pick_sketch":
+			_show_sketch_pick()
+			_relight_seed()
+		_update_options()
+		return
+	if not state in ["pick_sketch", "pick_curves"] or session != null:
+		return
+	_targets_return = state
+	body_limit = 0
+	set_state("pick_bodies")
+	_refresh_lit()
+	table.set_status("Aim at the bodies to fuse into (or cut) and pull the trigger; none is a new body. Press Targets again when done.")
+	_update_options()
+
+
+func _relight_seed() -> void:
+	if rest_sketches == null or not is_instance_valid(rest_sketches):
+		return
+	var ids: Array = seed_sketches.duplicate()
+	if seed_sketch != "":
+		ids.append(seed_sketch)
+	highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return ids.has(str(c["sketch_feature_id"]))))
 
 
 func sync_rest_sketches() -> void:
@@ -1354,6 +1397,8 @@ func dimension_typed(ghost_key: String, text: String) -> void:
 # --- Tools and the options row -------------------------------------------------------------
 
 func on_tool_changed(tool_id: String) -> void:
+	bodies.clear() # the bodies another tool picked are not this tool's targets
+	_targets_return = ""
 	if (seed_sketch != "" or not seed_sketches.is_empty()) and tool_id != _seed_tool:
 		seed_sketch = "" # the picked sketch was for another tool
 		seed_sketches.clear()
@@ -1789,6 +1834,12 @@ func extrude_targets() -> Array:
 	var boss := bool(options["boss"])
 	if boss and bool(options["new_body"]):
 		return []
+	if session == null and (seed_sketch != "" or not seed_sketches.is_empty()):
+		# a sketch picked in the viewport: the targets are the bodies picked with Targets (none, one or many); none fuses nothing (a new body) and cuts everything
+		var picked: Array = bodies.map(func(b): return str(b["body_id"])).filter(func(id): return all.has(id))
+		if not picked.is_empty():
+			return picked
+		return [] if boss else all
 	if not chosen_face.is_empty():
 		return [str(chosen_face["body_id"])]
 	if boss:
@@ -2020,7 +2071,7 @@ func selection_summary() -> Array:
 	if not faces.is_empty():
 		lines.append("Faces: %d" % faces.size())
 	if not bodies.is_empty():
-		lines.append("Bodies: %d" % bodies.size())
+		lines.append(("Targets: %d" if seed_tool_active() and session == null else "Bodies: %d") % bodies.size())
 	if not curve_picks.is_empty():
 		var names: Array = []
 		for c in curve_picks:

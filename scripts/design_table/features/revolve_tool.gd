@@ -17,6 +17,8 @@ func options(ed) -> Array:
 	]
 	if ed.session == null and ed.seed_sketch != "":
 		list.insert(4, {"id": "clear_seed", "text": "Clear"}) # forget the picked profile and axis
+	if ed.session == null:
+		list.insert(list.size() - 1, ed.targets_option())
 	return list
 
 
@@ -30,6 +32,8 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.type_option("angle", "Angle (deg, up to 360)")
 		"clear_seed":
 			ed.clear_seed()
+		"targets":
+			ed.toggle_target_picking()
 		"axis":
 			ed.table.set_status("Pull the trigger on a line of the sketch to make it the axis.")
 			if ed.session == null and ed.seed_sketch == "":

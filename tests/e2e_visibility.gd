@@ -106,9 +106,9 @@ func _initialize() -> void:
 	var seeds := Vis.seed_sketch_ids(b.features)
 	print("SMOKE the real loft row names its two section sketches as seeds, the free sketch is not one: ", seeds.has(sketch_a) and seeds.has(sketch_b) and not seeds.has(sketch_c) and seeds.size() == 2, " ", seeds)
 	var hidden: Array = main.hidden_feature_ids()
-	print("SMOKE the load rule hides the consumed sketches and the created plane and keeps the free sketch and the body shown: ", hidden.has(sketch_a) and hidden.has(sketch_b) and hidden.has(plane_id) and not hidden.has(sketch_c) and hidden.size() == 3, " ", hidden)
+	print("SMOKE the load rule hides the consumed sketches and keeps the free sketch, the created plane and the body shown: ", hidden.has(sketch_a) and hidden.has(sketch_b) and not hidden.has(plane_id) and not hidden.has(sketch_c) and hidden.size() == 2, " ", hidden)
 	var st: Dictionary = b.category_state(Vis.SKETCHES)
-	print("SMOKE ...the Sketches category reads 1 of 3, Planes 0 of 1, Bodies all visible: ", st["label"] == "1 of 3" and b.category_state(Vis.PLANES)["label"] == "0 of 1" and b.category_state(Vis.BODIES)["state"] == "all", " ", st)
+	print("SMOKE ...the Sketches category reads 1 of 3, Planes 1 of 1, Bodies all visible: ", st["label"] == "1 of 3" and b.category_state(Vis.PLANES)["label"] == "1 of 1" and b.category_state(Vis.BODIES)["state"] == "all", " ", st)
 
 	var faces_before: int = table.table_copy.mesh.get_faces().size()
 	var fetched: Dictionary = await table.api.fetch_bytes("/document/parts/%s/assembly-mesh.glb?quality=0.5&hidden_feature_ids=%s&hidden_feature_ids=%s&hidden_feature_ids=%s" % [ed.part_id, sketch_a, sketch_b, plane_id])
@@ -116,7 +116,7 @@ func _initialize() -> void:
 	print("SMOKE the backend accepts sketch and plane ids in hidden_feature_ids and returns the same solid: ", fetched["ok"] and parsed["ok"] and parsed["mesh"].get_faces().size() == faces_before, " ", faces_before)
 
 	await b.toggle_category(Vis.SKETCHES)
-	print("SMOKE the Sketches button on the mixed state shows all three and leaves the plane hidden: ", b.category_state(Vis.SKETCHES)["state"] == "all" and main.hidden_feature_ids() == [plane_id])
+	print("SMOKE the Sketches button on the mixed state shows all three (nothing else was hidden): ", b.category_state(Vis.SKETCHES)["state"] == "all" and main.hidden_feature_ids().is_empty())
 	await b.toggle_category(Vis.BODIES)
 	var emptied: bool = await wait_for(func() -> bool: return table.table_copy.layers == 0)
 	print("SMOKE the Bodies button hides the loft: the table's copy is empty, and the arena's real part keeps its mesh: ", emptied and b.category_state(Vis.BODIES)["state"] == "none")

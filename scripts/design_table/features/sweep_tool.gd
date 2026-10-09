@@ -8,12 +8,15 @@ func _init() -> void:
 
 
 func options(ed) -> Array:
-	return [
+	var list := [
 		{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(ed.options["boss"])},
 		{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(ed.options["boss"])},
 		{"id": "clear_curves", "text": "Clear"},
 		{"id": "apply", "text": "Apply (%d path lines)" % ed.curve_picks.size(), "disabled": not can_apply(ed)},
 	]
+	if ed.session == null and ed.editing.is_empty():
+		list.insert(list.size() - 1, ed.targets_option())
+	return list
 
 
 func handle_option(ed, option_id: String) -> bool:
@@ -24,6 +27,8 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.options["boss"] = false
 		"clear_curves":
 			ed.clear_picks()
+		"targets":
+			ed.toggle_target_picking()
 		_:
 			return false
 	return true

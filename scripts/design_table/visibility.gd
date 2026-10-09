@@ -142,21 +142,18 @@ static func seeds_of_feature(features: Array, feature_id: String) -> Array:
 
 
 static func load_hidden(features: Array, saved_hidden: Array, excluded: Array = []) -> Array:
-	## The load rule: the hidden list a freshly loaded part starts from. Created planes are hidden; sketches follow the seed rule (consumed
-	## ones hidden, the rest shown, whatever the file said); every other id the file hid stays hidden, as do ids of other parts.
+	## The load rule: the hidden list a freshly loaded part starts from. Sketches follow the seed rule (consumed ones hidden, the rest shown, whatever the
+	## file said); every other id the file hid stays hidden (created planes included: they start visible unless the file hid them), as do ids of other parts.
 	var mine := {}
 	for f in features:
 		mine[str(f.get("id", ""))] = category_of(f)
 	var out: Array = []
 	for id in saved_hidden:
 		var s := str(id)
-		if not mine.has(s) or (mine[s] != SKETCHES and mine[s] != PLANES):
+		if not mine.has(s) or mine[s] != SKETCHES:
 			out.append(s)
 	for id in seed_sketch_ids(features, excluded):
 		if mine.get(id, "") == SKETCHES and not out.has(id):
-			out.append(id)
-	for id in ids_of(features, PLANES):
-		if not out.has(id):
 			out.append(id)
 	return out
 

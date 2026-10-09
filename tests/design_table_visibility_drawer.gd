@@ -35,7 +35,7 @@ func _initialize() -> void:
 	var sizes: Array = win._buttons.values().map(func(b): return b.size)
 	print("SMOKE every grid tile is the same square size, whatever its name (Origin, axes wraps): ", sizes.all(func(v): return v == sizes[0]) and is_equal_approx(sizes[0].x, sizes[0].y) and sizes[0].x > 0.0)
 	print("SMOKE Sketches reads 'some' after the load rule (the extrude consumed one) and the tiles carry no counts: ", win.tile_name(Vis.SKETCHES) == "Sketches" and win.row_state(Vis.SKETCHES)["label"] == "2 of 3" and not win.tile_name(Vis.BODIES).contains(" of "))
-	print("SMOKE Bodies is a full eye '1 of 1', Created planes is eye-off '0 of 1' (hidden by the load rule): ", win.row_state(Vis.BODIES) == {"state": "all", "label": "1 of 1"} and win.row_state(Vis.PLANES) == {"state": "none", "label": "0 of 1"})
+	print("SMOKE Bodies is a full eye '1 of 1', Created planes is a full eye '1 of 1' (created planes start visible): ", win.row_state(Vis.BODIES) == {"state": "all", "label": "1 of 1"} and win.row_state(Vis.PLANES) == {"state": "all", "label": "1 of 1"})
 	print("SMOKE categories with nothing in them (Surfaces, 3D curves) and Centre of gravity are dimmed and disabled: ", win.button_for(Vis.SURFACES).disabled and win.button_for(Vis.CURVES).disabled and win.button_for("centre_of_gravity").disabled and not sk.disabled)
 	sk.pressed.emit()
 	await rig.frames(3)

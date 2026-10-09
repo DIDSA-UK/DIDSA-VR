@@ -17,7 +17,7 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | # | Gap | Step | Notes |
 |---|---|---|---|
 | B1 | **Show all also switches on the session tiles** (Ref. planes, Origin, Dims, Constr.), so the reference planes and the origin axes appear when you press it; **Hide all** also hides the open sketch's dimensions and constraints. Matches the plan's "every category" wording. | 2 | Could limit Show all to feature categories. |
-| B2 | **Created planes start hidden** (load rule). After making a plane in the session it stays visible until the file is reloaded. | 1, 3 | The rule only runs on load. |
+| B2 | ~~Created planes started hidden~~ **Closed.** The load rule now keeps planes as the file had them (visible unless the file lists them); only seed sketches are hidden on load. | 1, 3 | |
 | B3 | **Other sketches are not drawn inside an open sketch** (the sheet is the drawing) nor while curves are picked (the picking lines replace them). | 3 | Could draw them faintly in the 3D view. |
 | B4 | **Rolled-back features:** category counts skip them, and a sketch hidden by a rolled-back feature shows again. Features that were hidden by hand stay hidden while rolled back. | 1, 5 | Matches the plan. |
 | B5 | **Auto-hide records are session only.** After a reload the load rule rebuilds them from the feature rows, so a sketch the user showed by hand is hidden again on the next file load. | 5 | By design (plan section 2). |
@@ -41,9 +41,9 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 
 | # | Gap | Step | Notes |
 |---|---|---|---|
-| S1 | **Tint fills each closed loop on its own**, so a hole is tinted too. It is only a cue. | 6 | Subtract holes if it confuses. |
+| S1 | ~~Tint filled holes~~ **Closed.** The tint subtracts holes (`SketchPicks.fill_polygons`). | 6 | |
 | S2 | **No "Select Other" cycle** for overlapping sketches (roadmap, plan section 9). The nearest line wins. | 6 | |
-| S3 | **A picked finished sketch has no "sketched-on face"**, so a Boss fuses only with a single-body part and a Cut cuts every body. | 6 | Could infer the face from the sketch plane. |
+| S3 | ~~No sketched-on face~~ **Replaced by picked targets.** With a sketch picked in the viewport, a Targets button picks the bodies (none, one or many): none is a new body for a Boss and every body for a Cut; New body still wins. **Gap:** the open-sketch flow keeps the automatic behaviour (sketched-on face, or the only body). | 6 | |
 | S4 | **Sketches on turned or flipped planes are not offered** (`_plane_for_row` returns nothing for them), the same limit as Loft and Sweep picking. | 6 | |
 | S5 | ~~Only Extrude takes a picked sketch~~ **Closed.** Revolve (profile, then a line of it as the axis), Sweep (profile, then the path lines of other sketches) and Loft (sections in pick order) all take picked sketches now. | 6 | |
 | S7 | ~~Revolve's axis cannot be a reference axis~~ **Decided: left as it is.** The axis is any visible sketch's line (a construction line counts). To spin about X, Y or Z the user puts a line on that axis in a sketch (DIDSA-CAD's `axis_ref` takes a sketch line only). The origin axes stay a visual marker. | 6, 7 | Decided with John 2026-10-09. |
