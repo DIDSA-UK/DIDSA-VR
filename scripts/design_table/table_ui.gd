@@ -4,10 +4,10 @@ extends Control
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
 ##     small buttons that scrolls sideways when there are more than fit), then the tool tip
-##     (or what is selected). The active
+##     (or what is selected) and Done (leaves the open sketch). The active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd), or in a row inside the frame when there is none.
-##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked, Done (at the bottom). Undo, Redo and Close are in the top right. They are not
+##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked. Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
 ## Glyphs carry colour (green Done, red Close, amber Undo...) so a button reads without its label.
@@ -185,6 +185,13 @@ func _build_shell() -> void:
 	status_row.add_child(_status_label)
 	status_panel.add_child(status_row)
 	bottom.add_child(status_panel)
+	_done_button = _utility("enforce", "Done", false) ## tool-specific: it leaves the sketch that is open
+	_done_button.disabled = true
+	_done_button.visible = false
+	_done_button.pressed.connect(func() -> void:
+		feedback.emit("press")
+		done_pressed.emit())
+	bottom.add_child(_done_button)
 
 
 	# --- Right: the generic controls ---
@@ -267,18 +274,6 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		part_lock_toggled.emit(on))
 	lock_row.add_child(_lock_button)
-
-	var bottom_spacer := Control.new() ## pushes Done to the bottom of the dock
-	bottom_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	generic.add_child(bottom_spacer)
-	_done_button = _utility("enforce", "Done", false)
-	_done_button.custom_minimum_size.x = GENERIC_LABEL_BUTTON.x * 2.0 + tokens.gap
-	_done_button.disabled = true
-	_done_button.visible = false
-	_done_button.pressed.connect(func() -> void:
-		feedback.emit("press")
-		done_pressed.emit())
-	generic.add_child(_done_button)
 
 	_tint_glyphs()
 	_style_frame()
