@@ -21,6 +21,9 @@ Everything else in this file is history and detail. This is the one list of what
 | 5 | **Re-attach of a sketch edge is still one corner at a time in VR** (the backend now has `reattach-edge` for both ends at once, VR does not call it yet). Non-sketch features are mended: Fix on a flagged fillet / chamfer / shell / mirror / pattern row re-picks the lost edge or face and PATCHes the feature (Phase 4, tests only, no headset). | VR (use `reattach-edge`) | R2 below |
 | 6 | Sub-assemblies: mates through them (G14), New part inside one (G16), carrying a mated part (G15, a workaround exists). | VR (+ backend nested solve) | the tables below |
 | 7 | Modelling depth (G8): Pattern, Sweep, Loft, booleans, direct edit; sketch tools Ellipse, Spline, Text, Trim, Offset (Point is already built); Build tree sections for Planes / Surfaces / Curves (G11). (A preview before Apply, redo for features, the docked Properties panel, body picks and picks from earlier sketches are built: Phase 5, tests only, no headset.) | VR | the tables below; scoped in `docs/scope-modelling-depth.md` |
+| 8 | **Visibility tool and sketch as seed** (planned 2026-10-09): a drawer to show or hide groups of things, sketches visible until a feature using them is applied, and Extrude / Revolve / Sweep / Loft taking a finished sketch picked in the viewport. | VR (+ small backend/client changes) | `docs/sketch-as-seed-plan.md` |
+| 9 | **Centre of gravity for every client** (placeholder in the Visibility drawer). | backend + all clients | `docs/sketch-as-seed-plan.md` section 9 |
+| 10 | DIDSA-CAD drops unknown top-level keys (`vr_stale_mates` today) when the flat app re-saves a file. No longer matters for visibility (it is not saved), still true for the stale-mate flags. | **backend / flat app** | `docs/sketch-as-seed-plan.md` section 9 |
 
 **Closed since the last version of this list (all in code and tests, none in a headset):** the references drift in the backend (DIDSA-CAD, Session A: a geometric signature, OCCT history, `has_lost_reference` and a "moved" state, a re-attach route) and the flat app's implicit referencing (Session A); the part clipped to the sketch window (N2e / "Sketch mode and the grips" item 6); circular edges as references (centre snap, rim pick, radius / diameter), an edge's midpoint and the nearest point along it as snaps, and driven dimensions between pinned things (R1); references for a part with something hidden or rolled back and for a reopened sketch that is not the last feature (R1); lost / moved references shown on the Build row, in the status line, on the sketch, with Fix / Keep (R2); Fix for flagged fillet / chamfer / shell / mirror / pattern features (R-D).
 
@@ -45,9 +48,9 @@ the sketch's coordinates (sketch mm = part mm), which is what dimensioning to ex
 sketch plane, anchored in the console when the sketch opens (`design_table.window_anchor`), 0.8 x 0.4 m of world whatever the zoom. Panning and
 zooming slide and scale the part under it, so it works as a viewport, and the drawing is clipped to it by `sketch_lines.gdshader`. While a sketch is open:
 
-1. With **Part: Locked** (the default) the grips slide the part **along the sketch plane** (whatever would move it off the plane is taken back out,
+1. With **Orbit lock** (the default) the grips slide the part **along the sketch plane** (whatever would move it off the plane is taken back out,
    `pin_sketch_plane`) and two hands zoom it about the point between them; nothing turns, the stick does not spin or tip it, Reset restores the tilt.
-   **Part: Free** gives the part its ordinary move / turn / scale back, anywhere.
+   **Orbit lock Off** gives the part its ordinary move / turn / scale back, anywhere.
 2. Letting go beyond the slab does **not** send the real part back to the arena (that would end the sketch); it is held back over the slab.
 3. A grip inside the window's rectangle takes the part, not only one near its bounding sphere.
 4. The zoom range is 1/50 to 200x (everyday handling: 0.4 to 3x, or the Settings limit); Fit slides and zooms the part so the sketch fills the window.
@@ -97,7 +100,7 @@ The design table shows it:
   status line while it is open;
 * with nothing picked, **Select's options row offers Fix** (and **Keep moved ones**): Fix walks the flagged points, lost first; point at the corner of the part
   (or the centre of the hole) the point should follow and pull the trigger and the point is re-attached (`reattach`: it keeps its id, so every line and
-  dimension on it stays); Keep confirms the moved ones (`confirm`). A corner-following point refuses a hole and the other way round. Then press Done to
+  dimension on it stays); Keep confirms the moved ones (`confirm`). A corner-following point refuses a hole and the other way round. Then press Exit sketch to
   rebuild the part from the sketch.
 
 `tests/e2e_references_lost.gd` moves a fillet to another edge against the real backend: to an edge away from the corner the reference follows (nothing flagged);

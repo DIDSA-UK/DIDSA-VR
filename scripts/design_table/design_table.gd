@@ -72,7 +72,7 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var slab_size := Vector2(0.60, 0.40) ## metres, x by z
 @export var slab_radius := 0.045 ## metres: the glass slab's rounded corners
 @export var slab_border := 0.006 ## metres: the rim round the glass
-@export var tools_size := Vector2(0.60, 0.15) ## the tool deck, metres
+@export var tools_size := Vector2(0.60, 0.18) ## the tool deck, metres
 @export var pixels_per_metre: float = 2667.0 ## the same physical text size as the wrist tablet
 @export var deck_lean_degrees: float = 30.0 ## how far the deck is tipped up from flat, towards you
 @export var deck_gap := 0.05 ## metres between the slab's front edge and the deck's top edge
@@ -217,6 +217,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 		part_locked = on
 		set_status("The part keeps its tilt: one hand slides it under the sketch window, two hands zoom it." if on else "The part is free: your hands move, turn and scale it anywhere, the stick spins it. Reset puts the tilt back."))
 	ui.fit_pressed.connect(fit_sketch)
+	ui.new_sketch_pressed.connect(func() -> void: editor.new_sketch())
 	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
 	ui.return_pressed.connect(return_to_arena)
 	ui.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
@@ -237,7 +238,7 @@ func open() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	poke_render()
 	tree.open()
-	props.set_wanted(props.has_options())
+	props.set_wanted(true)
 	set_status("Carry a part over the table and let go, or pick one in the tree, to edit it.")
 	UiFeedback.play("open", self)
 	opened.emit()
@@ -286,6 +287,8 @@ func set_status(text: String) -> void:
 	_status = text
 	if ui:
 		ui.set_status(text)
+	if props != null:
+		props.set_tip(text)
 	status_changed.emit(text)
 
 
@@ -415,7 +418,7 @@ func _build_deck() -> void:
 
 func deck_width_for(slab_width: float) -> float:
 	## The tool deck is as wide as the slab it sits in front of, never narrower than the original 0.6 m or wider than 1 m: a wider slab
-	## gives the buttons (Part: Locked, Fit, Done, Reset...) more room.
+	## gives the buttons (Orbit lock, Fit, Done, Reset...) more room.
 	return clampf(slab_width, DECK_MIN_WIDTH, DECK_MAX_WIDTH)
 
 
@@ -690,7 +693,7 @@ func editing_sketch() -> bool:
 
 
 func sketch_locked() -> bool:
-	## The part's turn is locked to the sketch tilt: a sketch is open and "Part: Locked" is on.
+	## The part's turn is locked to the sketch tilt: a sketch is open and "Orbit lock" is on.
 	return part_locked and editing_sketch()
 
 

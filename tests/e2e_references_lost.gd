@@ -134,7 +134,7 @@ func _initialize() -> void:
 	print("SMOKE the backend flags it: has_lost_reference, this point, the reason naming the fillet: ", bool(row.get("has_lost_reference", false)) and (row.get("lost_reference_point_ids", []) as Array) == [point_id] and str((row.get("reference_reasons", {}) as Dictionary).get(point_id, "")) == "consumed_by_%s" % str(fillet["id"]), " ", row.get("reference_reasons"))
 	await table.build.reload()
 	var build_row: Dictionary = table.build.row(sketch_feature_id)
-	print("SMOKE the sketch's Build row says so, and the status line names the sketch: ", BuildTree.reference_note(build_row) == "lost reference" and table.ui._status_label.text.contains("lost reference"), " ", BuildTree.reference_note(build_row), " | ", table.ui._status_label.text)
+	print("SMOKE the sketch's Build row says so, and the status line names the sketch: ", BuildTree.reference_note(build_row) == "lost reference" and table.ui.status_text().contains("lost reference"), " ", BuildTree.reference_note(build_row), " | ", table.ui.status_text())
 	var reopened: bool = await ed.reopen_sketch(sketch_feature_id)
 	s = ed.session
 	print("SMOKE reopening shows the point as lost, with a warning (it is flagged, not moved onto another corner), and Select offers Fix: ", reopened and s.reference_status(point_id) == "lost" and s.reference_warning().contains("1 lost") and ed._sketch_hint().begins_with("Reference to the part: 1 lost") and table.ui._options.map(func(o): return o["id"]) == ["refs_fix"])

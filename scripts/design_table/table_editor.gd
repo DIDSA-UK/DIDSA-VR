@@ -670,8 +670,28 @@ func reopen_sketch(feature_id: String) -> bool:
 	set_state("sketch")
 	_sync_deck()
 	table.manager.activate(SELECT_TOOL)
-	table.set_status("Sketch open. Select things to change them, draw more, then press Done.")
+	table.set_status("Sketch open. Select things to change them, draw more, then press Exit sketch.")
 	return true
+
+
+func new_sketch() -> void:
+	## The deck's New sketch: an entry, never an exit. Puts the active tool away and asks for the plane or flat face the
+	## sketch goes on. With a sketch already open it does nothing but say so: leaving one is Exit sketch's job.
+	if table.table_copy == null:
+		table.set_status("Put a part on the table first: carry one over it and let go, or pick one in the tree.")
+		return
+	if state == "opening":
+		return
+	if session != null:
+		table.set_status("A sketch is open. Press Exit sketch first, then New sketch.")
+		return
+	if table.active_tool != "":
+		table.manager.deactivate()
+	if state != "pick_plane":
+		set_state("pick_plane")
+	if markers != null:
+		markers.set_markers_visible(true)
+	_say_pick_plane()
 
 
 func finish_sketch() -> void:
@@ -691,7 +711,7 @@ func finish_sketch() -> void:
 		table.notify_edited(part_id, _edited_nodes)
 		table.set_status("Sketch updated; the part is rebuilt.")
 	else:
-		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Done again.")
+		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Exit sketch again.")
 
 
 func _light_chosen_plane() -> void:
@@ -1002,7 +1022,7 @@ func _do_repick() -> void:
 	_repick_queue = _repick_queue.filter(func(row) -> bool: return str(row["point_id"]) != done_point)
 	var still: Array = session.flagged_references().filter(func(row) -> bool: return _repick_queue.any(func(q) -> bool: return str(q["point_id"]) == str(row["point_id"])))
 	if still.is_empty():
-		_stop_repick("References fixed. Press Done to rebuild the part from the sketch.")
+		_stop_repick("References fixed. Press Exit sketch to rebuild the part from the sketch.")
 		return
 	_repick_queue = still
 	_set_repick(str(_repick_queue[0]["point_id"]))
@@ -1083,6 +1103,11 @@ func on_tool_changed(tool_id: String) -> void:
 func _update_options() -> void:
 	if table == null or table.ui == null:
 		return
+	_update_option_list()
+	table.props.set_selection(selection_summary())
+
+
+func _update_option_list() -> void:
 	var tool: String = table.active_tool
 	var list: Array = []
 	if not fixing.is_empty():
@@ -1674,6 +1699,30 @@ func _sync_text_settings() -> void:
 		session.text_font = str(options["text_font"])
 		session.text_size = float(options["text_size"])
 		session.text_rotation = float(options["text_rot"])
+
+
+func selection_summary() -> Array:
+	## What the active tool has picked so far, one line per kind, for the Properties panel's "Selected" list.
+	var lines: Array = []
+	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
+		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
+	if not edges.is_empty():
+		lines.append("Edges: %d" % edges.size())
+	if not faces.is_empty():
+		lines.append("Faces: %d" % faces.size())
+	if not bodies.is_empty():
+		lines.append("Bodies: %d" % bodies.size())
+	if not curve_picks.is_empty():
+		var names: Array = []
+		for c in curve_picks:
+			var info: Dictionary = {}
+			if sketch_picks != null and is_instance_valid(sketch_picks):
+				info = sketch_picks.sketches.get(str(c.get("sketch_feature_id", "")), {})
+			var label := str(info.get("name", "sketch"))
+			if not names.has(label):
+				names.append(label)
+		lines.append("Sketch lines: %d (%s)" % [curve_picks.size(), ", ".join(names)])
+	return lines
 
 
 func clear_picks() -> void:

@@ -121,7 +121,7 @@ func register(reg) -> void:
 	reg.add_tool("assembly", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
-		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value), then Create mate."})
+		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 	reg.add_tool("assembly", "colours", "Colours", "colours", _build_colours_page, {
 		"status": _colour_status,
 		"help": "Laser-select a part first, then tap a swatch. Apply to whole group colours every occurrence sharing its owner. Not undoable: pick another colour or Clear."})
@@ -559,16 +559,47 @@ func _mates_rows() -> Array:
 	if _mates_tool == null:
 		return rows
 	for mate in _mates_tool.mates:
-		var type_label: String = str(mate.get("type", "?")).capitalize()
+		var type_str := str(mate.get("type", "?"))
+		var type_label: String = type_str.capitalize()
 		var has_value: bool = mate.get("value") != null
 		var mate_id := str(mate.get("id", ""))
+		var flipped := bool(mate.get("flipped", false))
+		var free_spin := bool(mate.get("allow_rotation", true))
+		var notes := []
+		if flipped:
+			notes.append("flipped")
+		if type_str == "concentric":
+			notes.append("free to spin" if free_spin else "rotation locked")
+		var actions := [{"label": "Flip", "callback": _on_edit_mate.bind(mate_id, {"flipped": not flipped})}]
+		if type_str == "concentric":
+			actions.append({"label": "Lock rotation" if free_spin else "Free rotation", "callback": _on_edit_mate.bind(mate_id, {"allow_rotation": not free_spin})})
+		if type_str in ["distance", "angle"]:
+			actions.append({"label": "Value", "callback": _on_edit_mate_value.bind(mate_id, mate.get("value"))})
+		actions.append({"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)})
 		rows.append({
 			"id": mate_id,
 			"title": "%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else ""],
-			"subtitle": "", "state": "normal",
-			"actions": [{"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)}],
+			"subtitle": ", ".join(notes), "state": "normal",
+			"actions": actions,
 		})
 	return rows
+
+
+func _on_edit_mate(mate_id: String, fields: Dictionary) -> void:
+	## Flip / lock rotation / change the value of a mate that already exists (the backend's PATCH), and apply it.
+	if _mates_tool == null or _mates_last_owner_part_id == "" or mate_id == "":
+		return
+	var result: Dictionary = await _mates_tool.update_mate(_mates_last_owner_part_id, mate_id, fields)
+	if not result["ok"]:
+		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
+
+
+func _on_edit_mate_value(mate_id: String, current) -> void:
+	if _mates_tool == null or _main == null:
+		return
+	_main.open_keyboard_for(_trim_mate_value(current if current != null else 0.0), func(text: String) -> void:
+		_on_edit_mate(mate_id, {"value": text.to_float()})
+	)
 
 
 func _on_delete_mate_pressed(mate_id: String) -> void:

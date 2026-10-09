@@ -125,13 +125,10 @@ func _initialize() -> void:
 	print("SMOKE the table starts empty: ", table.seated == null and table.pivot == null)
 
 	# --- the deck: categories and tools, by real laser clicks
-	print("SMOKE three category buttons: ", ["Sketch", "Constrain", "Feature"].all(func(t): return find_button(func(b): return b.text == t) != null))
+	print("SMOKE three category buttons: ", ["Sketch", "Feature", "Modify"].all(func(t): return find_button(func(b): return b.text == t) != null))
 	var shown: Array = table.ui.shown_tool_ids()
-	print("SMOKE Sketch is shown first, with Select and the first four drawing tools: ", shown == ["select", "line", "rectangle", "circle", "arc"])
-	print("SMOKE ...and a More button, since seven do not fit the row of six: ", table.ui.more_button() != null)
-	await aim_and_click(find_button(func(b): return b.text == "Constrain"))
-	print("SMOKE clicking Constrain swaps the tool row: ", table.ui.shown_tool_ids() == ["dimension", "horizontal", "vertical", "parallel", "perpendicular", "coincident"])
-	print("SMOKE ...without switching any tool on: ", table.active_tool == "")
+	print("SMOKE Sketch is shown first, with every sketch tool (draw, constrain, edit), Select first: ", shown.size() == 20 and shown[0] == "select" and shown[1] == "line" and shown.has("dimension") and shown.has("trim"))
+	print("SMOKE constraints sit in the Sketch tab (no Constrain tab) and nothing is switched on yet: ", find_button(func(b): return b.text == "Constrain") == null and table.active_tool == "")
 	await aim_and_click(find_button(func(b): return b.text == "Dimension"))
 	print("SMOKE clicking a tool turns it on and shows its hint: ", table.active_tool == "dimension" and table.status().begins_with("Pick a line"))
 	print("SMOKE the pressed tool button shows as on: ", table.ui.tool_button("dimension").button_pressed)

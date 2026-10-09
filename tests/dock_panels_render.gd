@@ -80,7 +80,7 @@ func _initialize() -> void:
 			await _shoot("before_" + t, "feature", t, false)
 	else:
 		var n := 0
-		for cat in [["sketch", TableTools.SKETCH_TOOLS], ["constrain", TableTools.CONSTRAIN_TOOLS], ["feature", TableTools.FEATURE_TOOLS], ["modify", TableTools.MODIFY_TOOLS]]:
+		for cat in [["sketch", TableTools.SKETCH_TOOLS + TableTools.CONSTRAIN_TOOLS], ["feature", TableTools.FEATURE_TOOLS], ["modify", TableTools.MODIFY_TOOLS]]:
 			for t in cat[1]:
 				n += 1
 				await _shoot("%02d_%s_%s" % [n, cat[0], t[0]], str(cat[0]), str(t[0]), true)

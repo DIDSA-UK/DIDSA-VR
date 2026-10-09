@@ -21,7 +21,7 @@ func _initialize() -> void:
 	var fake = rig.fake
 	ed.preview_enabled = false
 	var cat = table.registry.category("modify")
-	print("SMOKE the Modify category is on the console with the five tools and its violet accent: ", cat != null and cat.tools.map(func(t): return t.id) == ["move_face", "delete_face", "move_body", "scale_body", "delete_body"] and cat.accent == TableTools.ACCENT_MODIFY)
+	print("SMOKE the Modify category is on the console with the five tools and the shared tab accent: ", cat != null and cat.tools.map(func(t): return t.id) == ["move_face", "delete_face", "move_body", "scale_body", "delete_body"] and cat.accent == TableTools.ACCENT_MODIFY)
 	table.ui.select_category("modify")
 	await rig.frames(2)
 	# Move Face

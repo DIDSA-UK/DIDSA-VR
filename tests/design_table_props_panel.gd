@@ -14,11 +14,12 @@ func _initialize() -> void:
 	var table = rig.table
 	var ed = rig.ed
 	var props = table.props
-	print("SMOKE the properties window exists, docked at the console's right and not open with no tool: ", props != null and props.dock_position.x > 0.0 and not props.is_open())
+	print("SMOKE the properties window exists, docked at the console's right, open with the console (it carries the tool tip): ", props != null and props.dock_position.x > 0.0 and props.is_open())
 	await rig.draw_rectangle()
 	table.manager.activate("extrude")
 	await rig.frames(3)
 	print("SMOKE choosing Extrude opens the panel: ", props.is_open())
+	print("SMOKE ...and a Selected list says the open sketch has a closed shape ready: ", props.selection_text().begins_with("SELECTED") and props.selection_text().contains("closed shape ready"), " ", props.selection_text())
 	print("SMOKE ...it lists every setting of the tool, as the deck's row did: ", props.option_ids() == ["boss", "cut", "flip", "new_body", "depth", "apply"], " ", props.option_ids())
 	print("SMOKE ...under the tool's name and its hint: ", props._title.text == "Extrude" and props._hint.text.contains("Boss or Cut"))
 	print("SMOKE ...the deck's own options row stays hidden and the deck finds the buttons in the panel: ", not table.ui._options_row.visible and table.ui.option_button("flip") == props.option_button("flip") and props.option_button("flip") != null)
@@ -39,7 +40,7 @@ func _initialize() -> void:
 	print("SMOKE ...and Extrude's four toggles are one group: ", _groups(props) == 1)
 	table.manager.deactivate()
 	await rig.frames(3)
-	print("SMOKE with no tool the panel goes away: ", not props.is_open())
+	print("SMOKE with no tool the panel stays (tip only) with no settings: ", props.is_open() and not props.has_options())
 	table.manager.activate("polygon")
 	await rig.frames(3)
 	print("SMOKE a sketch tool with settings opens it too (Polygon: Fewer, the count, More): ", props.is_open() and props.option_ids() == ["sides_down", "sides_label", "sides_up"])
