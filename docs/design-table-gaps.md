@@ -97,7 +97,7 @@ The design table shows it:
   status line while it is open;
 * with nothing picked, **Select's options row offers Fix** (and **Keep moved ones**): Fix walks the flagged points, lost first; point at the corner of the part
   (or the centre of the hole) the point should follow and pull the trigger and the point is re-attached (`reattach`: it keeps its id, so every line and
-  dimension on it stays); Keep confirms the moved ones (`confirm`). A corner-following point refuses a hole and the other way round. Then press Done to
+  dimension on it stays); Keep confirms the moved ones (`confirm`). A corner-following point refuses a hole and the other way round. Then press Exit sketch to
   rebuild the part from the sketch.
 
 `tests/e2e_references_lost.gd` moves a fillet to another edge against the real backend: to an edge away from the corner the reference follows (nothing flagged);

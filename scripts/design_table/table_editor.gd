@@ -670,7 +670,7 @@ func reopen_sketch(feature_id: String) -> bool:
 	set_state("sketch")
 	_sync_deck()
 	table.manager.activate(SELECT_TOOL)
-	table.set_status("Sketch open. Select things to change them, draw more, then press Done.")
+	table.set_status("Sketch open. Select things to change them, draw more, then press Exit sketch.")
 	return true
 
 
@@ -691,7 +691,7 @@ func finish_sketch() -> void:
 		table.notify_edited(part_id, _edited_nodes)
 		table.set_status("Sketch updated; the part is rebuilt.")
 	else:
-		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Done again.")
+		table.set_status("The sketch changed, but the part couldn't be rebuilt from it. Undo or fix the sketch, then press Exit sketch again.")
 
 
 func _light_chosen_plane() -> void:
@@ -1002,7 +1002,7 @@ func _do_repick() -> void:
 	_repick_queue = _repick_queue.filter(func(row) -> bool: return str(row["point_id"]) != done_point)
 	var still: Array = session.flagged_references().filter(func(row) -> bool: return _repick_queue.any(func(q) -> bool: return str(q["point_id"]) == str(row["point_id"])))
 	if still.is_empty():
-		_stop_repick("References fixed. Press Done to rebuild the part from the sketch.")
+		_stop_repick("References fixed. Press Exit sketch to rebuild the part from the sketch.")
 		return
 	_repick_queue = still
 	_set_repick(str(_repick_queue[0]["point_id"]))

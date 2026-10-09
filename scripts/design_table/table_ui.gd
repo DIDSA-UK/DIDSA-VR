@@ -4,13 +4,13 @@ extends Control
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
 ##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
 ##     small buttons that scrolls sideways when there are more than fit), then the tool tip
-##     (or what is selected) and Done (leaves the open sketch). The active
+##     (or what is selected) and Exit sketch (leaves the open sketch). The active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd), or in a row inside the frame when there is none.
 ##   * RIGHT, the generic controls: Undo, Redo, Close, Snap, Fit, Reset, To arena, Part: Locked. Undo, Redo and Close are in the top right. They are not
 ##     about one tool and are always where you left them; one that cannot mean anything right now
 ##     (no part on the table, no sketch open) is hidden rather than greyed.
-## Glyphs carry colour (green Done, red Close, amber Undo...) so a button reads without its label.
+## Glyphs carry colour (green Exit sketch, red Close, amber Undo...) so a button reads without its label.
 ##
 ## Pure 2D Controls, like tablet_ui.gd: no XR, no scene-tree dependency beyond itself,
 ## so it runs on a SubViewport quad (design_table.gd) and in a plain window (the UI
@@ -26,7 +26,7 @@ signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
 signal part_lock_toggled(locked: bool) ## "Part: Locked / Free" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
-signal done_pressed ## "Done": leave the open sketch (the part is refreshed if it was changed)
+signal done_pressed ## "Exit sketch": leave the open sketch (the part is refreshed if it was changed)
 signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
 signal return_pressed ## "To arena": the real part goes back where it came from
 signal close_requested
@@ -185,7 +185,7 @@ func _build_shell() -> void:
 	status_row.add_child(_status_label)
 	status_panel.add_child(status_row)
 	bottom.add_child(status_panel)
-	_done_button = _utility("enforce", "Done", false) ## tool-specific: it leaves the sketch that is open
+	_done_button = _utility("enforce", "Exit sketch", false) ## tool-specific: it leaves the sketch that is open
 	_done_button.disabled = true
 	_done_button.visible = false
 	_done_button.pressed.connect(func() -> void:
