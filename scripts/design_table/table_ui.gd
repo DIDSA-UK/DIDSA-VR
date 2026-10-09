@@ -259,8 +259,7 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		snap_toggled.emit(on))
 	view_row.add_child(_snap_button)
-	_eye_button = _utility("eye", "", true)
-	_eye_button.tooltip_text = "Visibility"
+	_eye_button = _utility("eye", "Visibility", true)
 	_eye_button.toggled.connect(func(on: bool) -> void:
 		feedback.emit("press")
 		visibility_toggled.emit(on))
