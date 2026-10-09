@@ -86,6 +86,9 @@ var faces: Array = [] ## picked face entities (Shell)
 var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
 var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
+var seed_sketches: Array = [] ## Loft: the finished sketches picked as sections, in pick order (feature ids)
+var activating_edit := false ## a Build row's Edit is opening the tool (a tool then keeps its own picking, not the seed picking)
+var _seed_tool := "" ## the tool the seed was picked for
 var seed_sketch := "" ## the finished sketch picked as the seed of the active tool (Extrude with no sketch open): its feature id
 var rest_sketches: Node3D = null ## sketch_picks.gd, a second one: the finished sketches the Visibility model shows, drawn on the copy at rest
 var _rest_signature := ""
@@ -143,7 +146,7 @@ func set_state(new_state: String) -> void:
 		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part (a tool that switches between picking kinds keeps its picks)
 	var was_sketching := state == "sketch"
 	if state == "pick_sketch":
-		_end_sketch_pick()
+		_end_sketch_pick(new_state)
 	state = new_state
 	state_changed.emit(state)
 	_update_options()
@@ -611,8 +614,12 @@ func _sketch_pick_hint() -> String:
 	return "Aim at a line of a sketch and pull the trigger to use it (%d visible)." % visible_count
 
 
-func _end_sketch_pick() -> void:
-	seed_sketch = ""
+func _end_sketch_pick(new_state := "") -> void:
+	if not (new_state == "pick_curves" and seed_sketch != ""): # Sweep keeps its profile while the path is picked
+		seed_sketch = ""
+		seed_sketches.clear()
+		if session == null:
+			revolve_axis = ""
 	if rest_sketches != null and is_instance_valid(rest_sketches):
 		rest_sketches.set_tint(false)
 	if highlight != null and is_instance_valid(highlight) and table.table_copy != null:
@@ -642,6 +649,12 @@ func _pick_sketch() -> void:
 		return
 	var id := str(_hover_face["sketch_feature_id"])
 	var name: String = table.build.name_of_feature(id)
+	if table.active_tool == "loft":
+		_toggle_section(id, name)
+		return
+	if table.active_tool == "revolve" and seed_sketch == id:
+		_pick_axis() # Revolve: the sketch is the profile, a second pull on one of ITS lines is the axis
+		return
 	if seed_sketch == id:
 		seed_sketch = ""
 		highlight.set_set(table.table_copy, [])
@@ -652,10 +665,59 @@ func _pick_sketch() -> void:
 		return
 	else:
 		seed_sketch = id
+		_seed_tool = str(table.active_tool)
+		revolve_axis = ""
 		highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return str(c["sketch_feature_id"]) == id))
-		table.set_status("%s: closed shape ready. Set the values, then Apply." % name)
+		if table.active_tool == "revolve":
+			table.set_status("%s: closed shape ready. Now pull the trigger on a line of it to spin it about." % name)
+		elif table.active_tool == "sweep":
+			table.set_status("%s is the profile. Now aim at a line of an earlier sketch and pull the trigger for the path." % name)
+			set_pick_mode("curves") # the path is picked as lines of OTHER sketches, as before; the profile stays
+			_update_options()
+			return
+		else:
+			table.set_status("%s: closed shape ready. Set the values, then Apply." % name)
 	_update_options()
 	schedule_preview()
+
+
+func _toggle_section(id: String, name: String) -> void:
+	## Loft with no sketch open: each pull on a sketch adds it as the next section (in pick order), another pull on it takes it out.
+	if seed_sketches.has(id):
+		seed_sketches.erase(id)
+	elif not bool(rest_sketches.sketches.get(id, {}).get("closed", false)):
+		table.set_status("%s has no closed shape to use." % name)
+		UiFeedback.haptic(table._right, "error")
+		return
+	else:
+		seed_sketches.append(id)
+		_seed_tool = "loft"
+	highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return seed_sketches.has(str(c["sketch_feature_id"]))))
+	table.set_status("%d section(s) picked. Pull on another sketch to add it (two or more), then Apply." % seed_sketches.size() if not seed_sketches.is_empty() else _sketch_pick_hint())
+	_update_options()
+	schedule_preview()
+
+
+func _pick_axis() -> void:
+	## Revolve with a picked sketch: the hovered line of that sketch is the axis (the same line again lets it go). A circle or arc cannot be one.
+	if str(_hover_face.get("entity_type", "")) != "line":
+		table.set_status("The axis has to be a straight line of the sketch.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	var line := str(_hover_face["entity_id"])
+	revolve_axis = "" if revolve_axis == line else line
+	table.set_status("Axis set. Set the angle, then Apply." if revolve_axis != "" else "Axis let go. Pull the trigger on a line of the sketch to spin it about.")
+	_update_options()
+	schedule_preview()
+
+
+func seed_sketch_internal_id() -> String:
+	## The sketch's own id (what an axis reference and the sketch routes name), as opposed to its feature id.
+	if session != null:
+		return session.sketch_id
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		return str(rest_sketches.sketches.get(seed_sketch, {}).get("sketch_id", ""))
+	return ""
 
 
 func seed_sketch_id() -> String:
@@ -711,6 +773,11 @@ func sync_rest_sketches() -> void:
 		if seed_sketch != "" and not bool(rest_sketches.sketches.get(seed_sketch, {}).get("included", false)):
 			seed_sketch = "" # the picked sketch was hidden (or is gone): it is no longer a seed
 			highlight.set_set(table.table_copy, [])
+			schedule_preview()
+		var kept: Array = seed_sketches.filter(func(id): return bool(rest_sketches.sketches.get(id, {}).get("included", false)))
+		if kept.size() != seed_sketches.size():
+			seed_sketches = kept
+			highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c): return seed_sketches.has(str(c["sketch_feature_id"]))))
 			schedule_preview()
 		_show_sketch_pick()
 
@@ -1243,6 +1310,9 @@ func dimension_typed(ghost_key: String, text: String) -> void:
 # --- Tools and the options row -------------------------------------------------------------
 
 func on_tool_changed(tool_id: String) -> void:
+	if (seed_sketch != "" or not seed_sketches.is_empty()) and tool_id != _seed_tool:
+		seed_sketch = "" # the picked sketch was for another tool
+		seed_sketches.clear()
 	if state == "idle" and table.table_copy == null:
 		return
 	if session != null:
@@ -1504,7 +1574,7 @@ func _load_sketch_picks() -> void:
 		sketch_picks.queue_free()
 	sketch_picks = SketchPicks.new()
 	table.table_copy.add_child(sketch_picks)
-	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else "")
+	var count: int = await sketch_picks.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"), session.feature_id if session != null else seed_sketch)
 	if state == "pick_curves":
 		table.set_status("Aim at a line or curve of an earlier sketch and pull the trigger (%d to pick from)." % count if count > 0 else "There is no finished sketch with lines to pick from yet.")
 	_update_options()
@@ -1867,11 +1937,15 @@ func apply_feature() -> void:
 	await table.build.note_applied(str(result["id"])) # the sketches it consumed hide (a failed Apply returned above: nothing changes)
 	if feature_tool.finishes_sketch() and session != null:
 		end_sketch()
-	if state == "pick_sketch":
-		seed_sketch = "" # the sketch was the seed of this feature: ready for the next
+	var seeded := state == "pick_sketch" or seed_sketch != "" or not seed_sketches.is_empty()
+	if seeded:
+		seed_sketch = "" # the sketch(es) were the seed of this feature: ready for the next
+		seed_sketches.clear()
+		revolve_axis = ""
 		highlight.set_set(table.table_copy, [])
-		_show_sketch_pick()
 	clear_picks()
+	if seeded and session == null and tool in ["extrude", "revolve", "sweep", "loft"]:
+		start_sketch_pick() # a coroutine, not waited for: back to offering the visible sketches for the next one
 	UiFeedback.haptic(table._right, "confirm")
 	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
 	table.notify_edited(part_id, _edited_nodes)
@@ -1890,8 +1964,12 @@ func selection_summary() -> Array:
 	var lines: Array = []
 	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
 		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
-	if state == "pick_sketch" and seed_sketch != "":
-		lines.append("%s: closed shape ready" % table.build.name_of_feature(seed_sketch))
+	if not seed_sketches.is_empty():
+		lines.append("Sections: %s" % ", ".join(seed_sketches.map(func(id): return table.build.name_of_feature(str(id)))))
+	if seed_sketch != "" and session == null:
+		lines.append("%s: closed shape ready" % table.build.name_of_feature(seed_sketch) if state == "pick_sketch" else "Profile: %s" % table.build.name_of_feature(seed_sketch))
+		if table.active_tool == "revolve":
+			lines.append("Axis: %s" % ("set" if revolve_axis != "" else "not picked yet"))
 	if not edges.is_empty():
 		lines.append("Edges: %d" % edges.size())
 	if not faces.is_empty():
@@ -1917,6 +1995,7 @@ func clear_picks() -> void:
 	faces.clear()
 	bodies.clear()
 	curve_picks.clear()
+	seed_sketches.clear()
 	if highlight != null and table.table_copy != null:
 		highlight.set_set(table.table_copy, [])
 

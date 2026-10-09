@@ -1,6 +1,6 @@
 extends "res://scripts/design_table/features/feature_tool.gd"
-## Sweep: the open sketch's closed profile along a path of lines and arcs picked from EARLIER sketches (the profile sketch stays open: draw it
-## first, then choose Sweep). Boss or Cut. The picks are the backend's sketch entity refs, in pick order, which is the order of the chain.
+## Sweep: a sketch's closed profile along a path of lines and arcs picked from EARLIER sketches. The profile is the open sketch, or (with none open) a
+## visible finished sketch picked in the viewport first. Boss or Cut. The picks are the backend's sketch entity refs, in pick order, which is the order of the chain.
 
 
 func _init() -> void:
@@ -30,8 +30,10 @@ func handle_option(ed, option_id: String) -> bool:
 
 
 func on_activated(ed) -> void:
-	if ed.session == null and ed.editing.is_empty():
-		ed.table.set_status("Draw the profile in a sketch first (a closed shape), then choose Sweep and pick the path lines of an earlier sketch.")
+	if ed.activating_edit:
+		return # a Build row's Edit loads its own picks
+	if ed.session == null:
+		ed.start_sketch_pick() # no sketch open: pick the profile sketch first, the path lines come next
 		return
 	if ed.session != null and not ed.session.profile_ok():
 		ed.table.set_status("The open sketch needs a closed shape to sweep.")
@@ -39,7 +41,7 @@ func on_activated(ed) -> void:
 
 
 func can_apply(ed) -> bool:
-	return not ed.curve_picks.is_empty() and (ed.session != null and ed.session.profile_ok() or not ed.editing.is_empty())
+	return not ed.curve_picks.is_empty() and (ed.seed_ready() or not ed.editing.is_empty())
 
 
 func preview_mode() -> String:
@@ -51,7 +53,9 @@ func finishes_sketch() -> bool:
 
 
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
-	var sketch_feature: String = ed.session.feature_id if ed.session != null else str(ed.editing.get("original", {}).get("sketch_feature_id", ""))
+	var sketch_feature: String = ed.seed_sketch_id()
+	if sketch_feature == "":
+		sketch_feature = str(ed.editing.get("original", {}).get("sketch_feature_id", ""))
 	return PartFeatures.sweep_request(sketch_feature, ed.curve_refs(), bool(ed.options["boss"]), ed.extrude_targets())
 
 

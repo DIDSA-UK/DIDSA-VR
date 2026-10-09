@@ -45,7 +45,13 @@ a decision, a limit or an unchecked assumption to review later. Newest last with
 | S2 | **No "Select Other" cycle** for overlapping sketches (roadmap, plan section 9). The nearest line wins. | 6 | |
 | S3 | **A picked finished sketch has no "sketched-on face"**, so a Boss fuses only with a single-body part and a Cut cuts every body. | 6 | Could infer the face from the sketch plane. |
 | S4 | **Sketches on turned or flipped planes are not offered** (`_plane_for_row` returns nothing for them), the same limit as Loft and Sweep picking. | 6 | |
-| S5 | **Only Extrude takes a picked sketch so far.** Revolve, Sweep and Loft still need the open sketch or line picking. | 6 | In progress. |
+| S5 | ~~Only Extrude takes a picked sketch~~ **Closed.** Revolve (profile, then a line of it as the axis), Sweep (profile, then the path lines of other sketches) and Loft (sections in pick order) all take picked sketches now. | 6 | |
+| S7 | **Revolve's axis can only be a line of the profile sketch.** The plan also allows a reference axis (X, Y, Z); that needs the origin and axes markers (step 7). | 6 | |
+| S8 | **The axis line is not lit separately**: the whole picked sketch is lit and the axis shows only as "Axis: set" in Selected. | 6 | Light it in a second colour. |
+| S9 | **Sweep: the profile cannot be changed without choosing Sweep again** (the editor is in path picking). A "Back to profile" option is missing. | 6 | |
+| S10 | **Sweep's path is still picked line by line** (as before), not as a whole sketch. | 6 | Could take a sketch as the path in one pull. |
+| S11 | **Loft and Sweep with a sketch open keep the old picking** (Loft ignores an open sketch; Sweep uses it as the profile), and **a Build row's Edit keeps line picking** for both. | 6 | By design: the open-sketch flow and Edit are unchanged. |
+| S12 | **Existing tests changed for Loft:** `design_table_loft_sweep.gd` expects `pick_sketch` on activation and `e2e_loft_sweep.gd` picks sections with sketch picks. The e2e change is unverified until CI runs it. | 6 | |
 | S6 | The hover highlight for a sketch line lights that one line; the **picked** sketch lights all its lines in the pick colour. | 6 | |
 
 ## Test and tooling notes
