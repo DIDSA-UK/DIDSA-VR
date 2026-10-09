@@ -15,7 +15,11 @@ extends RefCounted
 const TabletRegistry := preload("res://scripts/ui/tablet_registry.gd")
 
 const ACCENT_SKETCH := Color(0.31, 0.77, 1.00) ## cyan, the same as the wrist tablet's View; every tab uses it (test round 9 Oct: one colour for all, no green in Feature)
-const ACCENT_CONSTRAIN := ACCENT_SKETCH
+const ACCENT_CONSTRAIN := ACCENT_SKETCH ## (the Constrain tab is gone: constraints are sketch tools, set apart as a group below)
+const GROUP_DRAW := Color(0.31, 0.77, 1.00) ## cyan: lines, curves, shapes
+const GROUP_CONSTRAIN := Color(0.96, 0.69, 0.25) ## amber: constraints and dimensions
+const GROUP_EDIT := Color(0.78, 0.55, 0.98) ## violet: trim, offset (and later convert)
+const EDIT_IDS := ["trim", "offset"]
 const ACCENT_FEATURE := ACCENT_SKETCH
 const ACCENT_MODIFY := ACCENT_SKETCH
 const ACCENT_INSPECT := Color(0.95, 0.50, 0.65) ## rose
@@ -117,8 +121,20 @@ const HINTS := {
 
 
 static func register(reg, handler: Object) -> void:
-	_category(reg, handler, "sketch", "Sketch", "cat_sketch", ACCENT_SKETCH, SKETCH_TOOLS)
-	_category(reg, handler, "constrain", "Constrain", "cat_constrain", ACCENT_CONSTRAIN, CONSTRAIN_TOOLS)
+	## The Sketch tab holds all three kinds of sketch tool, each set apart as a group with its own colour:
+	## draw (Select and the line / curve / shape tools), constrain (constraints and Dimension) and edit (Trim, Offset).
+	_category(reg, handler, "sketch", "Sketch", "cat_sketch", ACCENT_SKETCH, [])
+	reg.add_group("sketch", "draw", "Draw", GROUP_DRAW)
+	reg.add_group("sketch", "constrain", "Constrain", GROUP_CONSTRAIN)
+	reg.add_group("sketch", "edit", "Edit", GROUP_EDIT)
+	for t in SKETCH_TOOLS:
+		if not EDIT_IDS.has(t[0]):
+			_tool(reg, handler, "sketch", t, "draw")
+	for t in CONSTRAIN_TOOLS:
+		_tool(reg, handler, "sketch", t, "constrain")
+	for t in SKETCH_TOOLS:
+		if EDIT_IDS.has(t[0]):
+			_tool(reg, handler, "sketch", t, "edit")
 	_category(reg, handler, "feature", "Feature", "cat_feature", ACCENT_FEATURE, FEATURE_TOOLS)
 	_category(reg, handler, "modify", "Modify", "cat_modify", ACCENT_MODIFY, MODIFY_TOOLS)
 
@@ -126,9 +142,14 @@ static func register(reg, handler: Object) -> void:
 static func _category(reg, handler: Object, id: String, label: String, icon: String, accent: Color, tools: Array) -> void:
 	reg.add_category(id, label, icon, accent)
 	for t in tools:
-		reg.add_tool(id, t[0], t[1], t[2], Callable(), {
-			"kind": "mode",
-			"on_activate": Callable(handler, "tool_activated").bind(t[0]),
-			"on_deactivate": Callable(handler, "tool_deactivated").bind(t[0]),
-			"hint": HINTS.get(t[0], ""),
-		})
+		_tool(reg, handler, id, t, "")
+
+
+static func _tool(reg, handler: Object, category_id: String, t: Array, group: String) -> void:
+	reg.add_tool(category_id, t[0], t[1], t[2], Callable(), {
+		"kind": "mode",
+		"on_activate": Callable(handler, "tool_activated").bind(t[0]),
+		"on_deactivate": Callable(handler, "tool_deactivated").bind(t[0]),
+		"hint": HINTS.get(t[0], ""),
+		"group": group,
+	})

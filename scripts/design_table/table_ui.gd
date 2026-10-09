@@ -2,8 +2,9 @@ extends Control
 ## The design table's tool deck, from John's concept sketch (test round 9 Oct 2026). Two
 ## kinds of control, kept apart:
 ##   * LEFT, the tool area: a row of category tabs; under the selected tab a framed panel in
-##     that category's colour, joined to the tab by a caret, holding the tool list (two rows of
-##     small buttons that scrolls sideways when there are more than fit). The tool tip and the active
+##     that category's colour, joined to the tab by a caret, holding the tool list (three rows of
+##     small buttons that scrolls sideways when there are more than fit). A category can set groups of
+##     tools apart: Sketch has Draw (cyan), Constrain (amber) and Edit (violet), each in its own panel. The tool tip and the active
 ##     tool's own settings (polygon sides, Boss or Cut, depth...) live in the Properties panel
 ##     (table_props_window.gd); a row inside the frame holds the settings when there is none.
 ##     New sketch (the way in, larger than a tool button) heads the Sketch and Constrain tabs with
@@ -45,7 +46,9 @@ const GENERIC_LABEL_BUTTON := Vector2(150, 52)
 const VIOLET := Color(0.78, 0.55, 0.98)
 const NEW_SKETCH_BUTTON := Vector2(260, 68) ## bigger than a tool button: it is how a sketch starts
 const EXIT_SKETCH_BUTTON := Vector2(240, 68)
-const SKETCH_CATEGORIES := ["sketch", "constrain"] ## their tools only work inside a sketch, so they are dimmed until one is open
+const TOOL_ROWS := 3 ## buttons per column in the tool list
+const TOOL_AREA_HEIGHT := 224.0 ## a group heading and three rows of tool buttons
+const SKETCH_CATEGORIES := ["sketch"] ## their tools only work inside a sketch, so they are dimmed until one is open
 const DIMMED := Color(1, 1, 1, 0.38)
 
 
@@ -94,6 +97,7 @@ var _active_chip: Label
 var _fx: ColorRect
 var _cat_group := ButtonGroup.new()
 var _cat_buttons := {}
+var _tool_accent := {} ## tool id -> its group's colour
 var _tool_buttons := {}
 var _options: Array = []
 var options_sink = null ## table_props_window.gd: when set, the active tool's settings go there and this deck's own options row stays hidden
@@ -183,7 +187,7 @@ func _build_shell() -> void:
 	_tool_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tool_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER ## the arrows scroll it; a bar would be one more thing to aim at
 	_tool_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_tool_scroll.custom_minimum_size = Vector2(0, TOOL_BUTTON.y * 2.0 + tokens.gap)
+	_tool_scroll.custom_minimum_size = Vector2(0, TOOL_AREA_HEIGHT)
 	tool_line.add_child(_tool_scroll)
 	_tool_columns = HBoxContainer.new()
 	_tool_columns.add_theme_constant_override("separation", tokens.gap)
@@ -316,7 +320,7 @@ func _utility(icon_name: String, text: String, toggle: bool) -> Button:
 func _scroll_arrow(glyph: String, direction: int) -> Button:
 	var b := Button.new()
 	b.text = glyph
-	b.custom_minimum_size = Vector2(40, TOOL_BUTTON.y * 2.0 + tokens.gap)
+	b.custom_minimum_size = Vector2(40, TOOL_AREA_HEIGHT)
 	b.add_theme_font_size_override("font_size", tokens.font_title)
 	b.visible = false
 	b.pressed.connect(func() -> void:
@@ -415,29 +419,60 @@ func _rebuild_tools() -> void:
 		_tool_columns.remove_child(child)
 		child.queue_free()
 	_tool_buttons.clear()
+	_tool_accent.clear()
 	var cat = registry.category(selected_category_id)
 	if cat == null:
 		return
-	var column: VBoxContainer = null
-	for i in cat.tools.size():
-		if i % 2 == 0: # two rows: tools go down a column, then on to the next
-			column = VBoxContainer.new()
-			column.add_theme_constant_override("separation", tokens.gap)
-			_tool_columns.add_child(column)
-		var t = cat.tools[i]
-		var b := Button.new()
-		b.text = t.label
-		b.icon = UiIcons.texture(t.icon, 26)
-		b.toggle_mode = true
-		b.clip_text = true
-		b.theme_type_variation = &"ButtonRail"
-		b.custom_minimum_size = TOOL_BUTTON
-		b.add_theme_font_size_override("font_size", tokens.font_small)
-		_style_selected(b, cat.accent, false)
-		_tint(b, cat.accent)
-		b.pressed.connect(_on_tool_pressed.bind(t.id))
-		column.add_child(b)
-		_tool_buttons[t.id] = b
+	var groups: Array = cat.groups.duplicate()
+	if groups.is_empty():
+		groups = [{"id": "", "label": "", "accent": cat.accent}]
+	for g in groups:
+		var members: Array = cat.tools.filter(func(t) -> bool: return t.group == g["id"])
+		if members.is_empty():
+			continue
+		var accent: Color = g["accent"]
+		var holder := VBoxContainer.new()
+		holder.add_theme_constant_override("separation", 4)
+		if str(g["label"]) != "": # a labelled group is set apart: its own tinted panel, outline and heading in its colour
+			var panel := PanelContainer.new()
+			panel.add_theme_stylebox_override("panel", tokens.box(Color(accent.r, accent.g, accent.b, 0.10), accent.darkened(0.35), tokens.radius_small, 8, 2))
+			_tool_columns.add_child(panel)
+			panel.add_child(holder)
+			var heading := Label.new()
+			heading.text = str(g["label"]).to_upper()
+			heading.theme_type_variation = &"LabelSmall"
+			heading.add_theme_color_override("font_color", accent)
+			holder.add_child(heading)
+		else:
+			_tool_columns.add_child(holder)
+		var longest := 0
+		for t in members:
+			longest = maxi(longest, str(t.label).length())
+		var button_width := maxf(120.0, 8.8 * float(longest) + 66.0) ## wide enough for the group's longest name ("Perpendicular"), no wider
+		var columns := HBoxContainer.new()
+		columns.add_theme_constant_override("separation", tokens.gap)
+		holder.add_child(columns)
+		var column: VBoxContainer = null
+		for i in members.size():
+			if i % TOOL_ROWS == 0: # tools go down a column, then on to the next
+				column = VBoxContainer.new()
+				column.add_theme_constant_override("separation", tokens.gap)
+				columns.add_child(column)
+			var t = members[i]
+			var b := Button.new()
+			b.text = t.label
+			b.icon = UiIcons.texture(t.icon, 26)
+			b.toggle_mode = true
+			b.clip_text = true
+			b.theme_type_variation = &"ButtonRail"
+			b.custom_minimum_size = Vector2(button_width, TOOL_BUTTON.y)
+			b.add_theme_font_size_override("font_size", tokens.font_small)
+			_style_selected(b, accent, false)
+			_tint(b, accent)
+			b.pressed.connect(_on_tool_pressed.bind(t.id))
+			column.add_child(b)
+			_tool_buttons[t.id] = b
+			_tool_accent[t.id] = accent
 	_tool_scroll.scroll_horizontal = 0
 	_style_frame()
 	_refresh_tool_visuals()
@@ -486,11 +521,7 @@ func apply_theme() -> void:
 	for cat in registry.categories():
 		if _cat_buttons.has(cat.id):
 			_style_selected(_cat_buttons[cat.id], cat.accent, true)
-	var current = registry.category(selected_category_id)
-	if current != null:
-		for id in _tool_buttons:
-			_style_selected(_tool_buttons[id], current.accent, false)
-			_tint(_tool_buttons[id], current.accent)
+	_rebuild_tools() # the group panels carry theme colours too; the pressed tool is the manager's, so nothing is lost
 	_active_chip.add_theme_color_override("font_color", tokens.accent)
 	_tint_glyphs()
 	_style_frame()

@@ -47,6 +47,7 @@ class ToolDef extends RefCounted:
 	var status_provider: Callable = Callable() ## () -> String, live text for the status line
 	var on_select: Callable = Callable() ## runs whenever the tool becomes the one being viewed (refresh data)
 	var list_empty: String = "Nothing here yet." ## side-panel text when list_provider returns no rows
+	var group: String = "" ## id of a CategoryDef group the design table's deck draws this tool under ("" = ungrouped)
 
 	func has_list() -> bool:
 		return list_provider.is_valid()
@@ -61,6 +62,7 @@ class CategoryDef extends RefCounted:
 	var icon: String
 	var accent: Color
 	var tools: Array[ToolDef] = []
+	var groups: Array[Dictionary] = [] ## [{id, label, accent}] in display order; optional, used by the design table's deck to set related tools apart
 
 
 var _categories: Array[CategoryDef] = []
@@ -82,6 +84,15 @@ func add_category(id: String, label: String, icon: String, accent: Color) -> Cat
 	_categories.append(def)
 	changed.emit()
 	return def
+
+
+func add_group(category_id: String, id: String, label: String, accent: Color) -> void:
+	var cat := category(category_id)
+	if cat == null:
+		push_error("tablet_registry: no category '%s' for group '%s'" % [category_id, id])
+		return
+	cat.groups.append({"id": id, "label": label, "accent": accent})
+	changed.emit()
 
 
 func add_tool(category_id: String, id: String, label: String, icon: String, build: Callable, options: Dictionary = {}) -> ToolDef:
@@ -107,6 +118,7 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	def.status_provider = options.get("status", Callable())
 	def.on_select = options.get("on_select", Callable())
 	def.list_empty = str(options.get("list_empty", "Nothing here yet."))
+	def.group = str(options.get("group", ""))
 	cat.tools.append(def)
 	_tools[id] = def
 	changed.emit()

@@ -1,7 +1,7 @@
 extends SceneTree
-## The deck's NEW SKETCH path (table_ui.gd, table_editor.gd new_sketch()): a button larger than a tool button heads the Sketch and
-## Constrain tabs; their tools are dimmed (still pressable) until a sketch is open; New sketch with a sketch open ends it and asks for a
-## plane or flat face; with no part on the table it is greyed. Fake backend, headless.
+## The deck's NEW SKETCH path (table_ui.gd, table_editor.gd new_sketch()): a button larger than a tool button heads the Sketch tab; the sketch
+## tools (draw, constrain and edit) are dimmed (still pressable) until a sketch is open; New sketch is greyed while a sketch is open and never
+## ends it (Exit sketch beside it does); with none open it asks for a plane or flat face; with no part on the table it is greyed. Fake backend, headless.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_new_sketch.gd  (see tests/README.md)
 
 const Rig := preload("res://tests/helpers/table_rig.gd")
@@ -19,8 +19,8 @@ func _initialize() -> void:
 	print("SMOKE ...and the sketch tools are dimmed until a sketch is open: ", ui.tools_dimmed() and ed.session == null)
 	ui.select_category("feature")
 	print("SMOKE the Feature tab has no New sketch button and its tools are not dimmed: ", not nb.is_visible_in_tree() and not ui.tools_dimmed())
-	ui.select_category("constrain")
-	print("SMOKE the Constrain tab is dimmed too, with New sketch: ", ui.tools_dimmed() and nb.is_visible_in_tree())
+	ui.select_category("sketch")
+	print("SMOKE the constraints are dimmed with the rest (they are sketch tools): ", ui.tool_button("dimension").modulate.a < 1.0 and ui.tool_button("trim").modulate.a < 1.0)
 	ui.select_category("sketch")
 
 	var top: Dictionary = rig.top_face()

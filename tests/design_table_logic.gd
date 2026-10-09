@@ -60,9 +60,10 @@ func _initialize() -> void:
 	for c in reg.categories():
 		for t in c.tools:
 			ids.append(t.id)
-	print("SMOKE categories are Sketch, Constrain, Feature, Modify: ", reg.categories().map(func(c): return c.label) == ["Sketch", "Constrain", "Feature", "Modify"])
-	print("SMOKE Sketch has Select first, then DIDSA-CAD's six drawing tools in the app's order: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text", "trim", "offset"])
-	print("SMOKE only Sketch and Feature have more than a dozen tools (the tool list scrolls past what fits): ", reg.categories().filter(func(c): return c.tools.size() > 12).map(func(c): return c.id) == ["sketch", "feature"])
+	print("SMOKE categories are Sketch, Feature, Modify (constraints are sketch tools now): ", reg.categories().map(func(c): return c.label) == ["Sketch", "Feature", "Modify"])
+	print("SMOKE Sketch has Select first, then DIDSA-CAD's drawing tools in the app's order, then the constraints, then Trim and Offset: ", reg.category("sketch").tools.map(func(t): return t.id) == ["select", "line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text", "dimension", "horizontal", "vertical", "parallel", "perpendicular", "coincident", "trim", "offset"])
+	print("SMOKE ...set apart as three groups (Draw, Constrain, Edit) with their own colours: ", reg.category("sketch").groups.map(func(g): return g["id"]) == ["draw", "constrain", "edit"] and reg.category("sketch").tools.filter(func(t): return t.group == "constrain").size() == 6 and reg.category("sketch").tools.filter(func(t): return t.group == "edit").map(func(t): return t.id) == ["trim", "offset"] and reg.category("sketch").groups[0]["accent"] != reg.category("sketch").groups[1]["accent"])
+	print("SMOKE only Sketch and Feature have more than a dozen tools: ", reg.categories().filter(func(c): return c.tools.size() > 12).map(func(c): return c.id) == ["sketch", "feature"])
 	print("SMOKE five category slots are enough: ", reg.categories().size() <= 5)
 	print("SMOKE every tool is a mode tool with a hint: ", reg.mode_tools().size() == ids.size() and ids.all(func(i): return reg.tool_def(i).hint != ""))
 	mgr.activate("line")
