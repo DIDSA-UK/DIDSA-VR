@@ -26,25 +26,43 @@ Hidden per item with the existing `hidden_feature_ids`. Cosmetic only, saved wit
 flat app already reads and writes it, so these transit between apps with no new work.
 
 **Things with no feature id (reference planes, origin and axes, centre of gravity, sketch dimension
-and constraint glyphs, construction geometry, edge lines).** These are on/off switches for the whole
-category, held in the client. VR keeps them in the file under a `vr_visibility` key (the way
-`vr_stale_mates` is kept).
+and constraint glyphs, construction geometry, edge lines).** On/off switches for the whole category,
+held in the client for the session. They are **not saved**: nothing visibility-related is written to the
+file beyond the existing `hidden_feature_ids`, so there is nothing new for the flat app to round-trip
+and no compatibility question. (A key the flat app doesn't know does not stop a file loading; it is
+simply dropped on a re-save, which is why we are not relying on one.)
 
 **Category buttons for features are batch edits, not a second layer.** Tapping "Sketches" when all are
 visible hides every sketch (adds them all to `hidden_feature_ids`); tapping it when any are hidden
 shows **all** of them, whatever their earlier individual settings (removes them all from
 `hidden_feature_ids`). So off then on always ends with every sketch visible. A mixed state shows as a
-half-filled eye and a count ("3 of 5"). Showing all also forgets any auto-hide records for those
-sketches.
+half-filled eye and a count ("3 of 5").
 
-**Do the VR-only switches survive a trip through the flat app?** Checked, and not yet. The flat app
-(`part_screen.dart`) writes only the keys it knows (`hidden_feature_ids`, `section_planes`) when it
-saves, so any `vr_*` key in a file is **dropped** when that file is opened and saved in the flat app.
-The same is true today of `vr_stale_mates`. Fix, on the DIDSA-CAD side: preserve unknown top-level
-keys on open and save (or at least the `vr_` prefix). It is small, but it is a prerequisite for the
-promise "the files still transit between apps"; it is listed on the roadmap.
-If we would rather every client honour these switches, the alternative is to agree a shared
-`hidden_categories` key. That is a decision for the CAD side.
+### The load rule
+
+Because visibility is not saved, **every load starts from a rule**:
+
+| Thing | On load |
+|---|---|
+| Sketch not used as a seed by any applied (and not rolled-back) feature | **shown** |
+| Sketch that is a seed of an applied feature | hidden |
+| Bodies | the current bodies only (consumed bodies do not exist, see section 5); shown |
+| Surfaces, 3D curves | shown (they are results, like bodies) |
+| Created planes | hidden |
+| Reference planes, origin and axes, dimension glyphs, construction geometry | hidden |
+| Edge lines | follow the existing View > Display mode |
+| Items the file lists in `hidden_feature_ids` (set in the flat app, or by VR in an earlier save) | **stay hidden**, except sketches, which follow the rule (see below) |
+
+Why those choices:
+- "Seed" is read from the feature rows the backend already returns: an Extrude or Revolve's sketch, a
+  Loft's section sketches, a Sweep's profile and path sketches. Pattern directions do not count.
+- **Rolling a feature back** makes its sketch unconsumed again, so it is shown while rolled back and
+  hidden again when the rollback is released.
+- Keeping `hidden_feature_ids` for bodies, surfaces, curves and planes respects a deliberate hide made in
+  either app, and it already travels. Sketches are the exception because the rule is the more useful
+  default after a load (it recreates the state "sketches I can still use are visible"), and an
+  explicit hide of a sketch is one tap to redo.
+- Auto-hide records (which feature hid which sketch, for Undo) are session-only for the same reason.
 
 Table scope only. The arena's View > Tools hide/show is untouched.
 
@@ -100,7 +118,7 @@ planes, mates (assembly level, not the table), measurements.
 1. A new sketch is **visible** and stays visible after Exit sketch.
 2. When a feature that uses it as its **seed** is **confirmed** (Apply succeeded), the sketch
    **auto-hides** (its id goes into `hidden_feature_ids`).
-3. The auto-hide is remembered separately (`vr_auto_hidden`: sketch id to the feature that caused it; a VR-only key, see section 2).
+3. The auto-hide is remembered separately (a session-only record of sketch id to the feature that caused it; not saved, see the load rule).
    Reasons: Undo of that feature brings the sketch back; a sketch the user hid by hand is never
    auto-shown; and the tree can say "seed of Extrude 1".
 4. The user can show it again at any time (drawer or tree). It is not re-hidden until the next feature
@@ -119,15 +137,24 @@ planes, mates (assembly level, not the table), measurements.
 - A hidden row is dimmed with an eye-off glyph; an auto-hidden sketch also shows "seed of Extrude 1".
 - Group headings (Sketches, Bodies...) get the same eye and act on the whole group, so they mirror
   the drawer's category buttons.
+- **Bodies list = the current bodies only.** Features apply in sequence and the list shows what they
+  produce now. A body consumed by a later feature (a Merge or Boolean input, say) is not listed, unless
+  that consuming feature is rolled back, when the bodies it consumed come back with the rollback. To
+  check when this is built: the backend already omits consumed bodies from its mesh response; a
+  scene test with the fake backend will pin that the tree follows it, including after rollback.
 
 ## 6. Sketch as seed (the feature work)
 
 Activating Extrude, Revolve, Sweep or Loft with **no sketch open** enters a pick-sketch state
 instead of showing "Draw a closed shape first":
 
-1. The **visible** sketches are drawn in the viewport, and their **closed profiles are shown as
-   translucent filled regions** so a sketch looks pickable, not just a set of lines. Hover lights one.
-2. Pull the trigger on a profile: that sketch is the seed. The Properties panel lists it under
+1. The **visible** sketches are drawn in the viewport. Their closed profiles are tinted as translucent
+   regions so a sketch reads as a usable shape, but that tint is **only a cue**.
+2. **Picking prefers a sketch line** (decided): aim at any line, circle or arc of the sketch and pull
+   the trigger, and that sketch is the seed. A filled region is picked only when no line is within
+   reach, so two overlapping sketches rarely compete (the lines differ even when the regions overlap).
+   A "Select Other"-style cycle, as in the flat app, is the later answer for any remaining ambiguity
+   (roadmap). The Properties panel lists it under
    Selected ("Sketch 2: closed shape ready") and the usual controls (Boss/Cut, depth, Apply) appear.
    The preview starts as soon as the seed and values are valid.
 3. If a sketch **is** open it is the default seed, as now, and nothing changes for that flow.
@@ -148,7 +175,7 @@ instead of showing "Draw a closed shape first":
 
 | Step | What | Tests |
 |---|---|---|
-| 1 | Visibility model: the VR-only category switches (`vr_visibility`, save/load), the batch show/hide rule in section 2 over the existing hidden set | pure logic + save round trip |
+| 1 | Visibility model: the VR-only category switches (session only), the load rule and the batch show/hide rule in section 2 over the existing hidden set | pure logic + load/save round trip |
 | 2 | Drawer and the eye button; categories on layers A and B that already exist (sketches, bodies, surfaces, created planes, reference planes) with counts | Rig scene test, render |
 | 3 | Sketches drawn at rest when visible (reuses `sketch_picks.gd`); reference/created planes always-on mode | scene test, render |
 | 4 | Tree eyes and group headings | tree test |
@@ -167,21 +194,20 @@ Each step ships on its own and leaves the table working.
 3. The drawer sits **beside the dock**.
 4. Category buttons show all when anything is hidden, regardless of earlier individual settings.
 5. Centre of gravity is a **placeholder** now and a roadmap item (a backend feature, for every client).
+6. Consumed bodies are not listed unless the feature that consumed them is rolled back.
+7. Picking a sketch prefers its **line** over the closed area; "Select Other" later.
+8. **Visibility is not saved.** A load rule sets it (section 2); the VR-only switches are session-only.
 
 **Still open**
 
-1. **Consumed bodies** (inputs to Merge or Boolean): they stop being drawn because the result replaces
-   them. Should the tree also list them, dimmed, as "consumed"?
-2. **Overlapping sketches** on the same plane: when the laser is over regions of two sketches, cycle
-   with repeat pulls, or pick the smallest region under the laser?
-3. **Flat-app round trip:** is the CAD team happy to preserve unknown `vr_` keys on save (section 2)?
-4. **Persistence** of the VR-only switches (reference planes, origin, dimensions...): saved per part
-   in the file (as planned), or per session only?
+None blocking. Check at step 1 whether the load rule's treatment of `hidden_feature_ids` for bodies,
+surfaces, curves and planes (kept hidden) is what you want, once you have seen a file load.
 
 ## 9. Roadmap items this creates
 
 - **Centre of gravity** (all clients): a backend mass-properties result (per body and whole part,
   volume centroid with density), then a marker and readout in VR and the flat app. VR shows a greyed
   placeholder in the Visibility drawer until then.
-- **DIDSA-CAD: preserve unknown top-level keys** (at least `vr_*`) when a native file is opened and
-  saved, so VR-only data is not lost in the flat app.
+- **"Select Other"** for sketch picking in VR, matching the flat app, for overlapping sketches.
+- Independent of this plan, and unchanged: DIDSA-CAD drops unknown top-level keys (such as
+  `vr_stale_mates`) when the flat app re-saves a file. It no longer matters for visibility.
