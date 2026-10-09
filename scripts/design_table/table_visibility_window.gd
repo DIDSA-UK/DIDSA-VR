@@ -1,10 +1,9 @@
 extends "res://scripts/diegetic_panel.gd"
 ## The VISIBILITY drawer (docs/sketch-as-seed-plan.md section 3): a drawer on the right of the tool deck, opened by the eye button in the
-## generic column. A grid of square buttons, one per category: an eye (all visible), half eye (some) or eye-off (none) over the name and,
-## for the categories that are features, how many are visible ("3 of 5"). Show all / Hide all are the two large buttons down the far left and act on
-## every category. The logic is visibility.gd (the rules) and
-## table_build.gd (the hidden ids; the session switches); this is only the view. A category with nothing in it is dimmed; Centre of gravity
-## is a placeholder until the backend can report it.
+## generic column. A grid of square tiles, one per category: an eye (all visible), half eye (some) or eye-off (none) over the name; a
+## category with nothing in it is dimmed. Rows run in groups: what the model made, the planes and axes, what is drawn on it. Show all / Hide all
+## are the two large buttons down the far left and act on every category. The logic is visibility.gd (the rules) and table_build.gd (the hidden
+## ids; the session switches); this is only the view. Centre of gravity is a placeholder until the backend can report it.
 
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 
@@ -135,7 +134,7 @@ func refresh() -> void:
 		if b == null:
 			continue
 		var st := row_state(r[0])
-		b.text = "%s\n%s" % [r[1], st["label"]]
+		b.text = r[1] if st["state"] != "soon" else "%s\n%s" % [r[1], st["label"]] # no counts on the tiles: the eye shows all / some / none
 		b.icon = UiIcons.texture({"all": "eye", "some": "eye_half"}.get(st["state"], "eye_off"), 32)
 		b.disabled = st["state"] in ["empty", "soon"] or (Visibility.FEATURE_CATEGORIES.has(r[0]) and not table.build.view_filters_ok)
 		b.modulate = Color(1, 1, 1, 0.5) if st["state"] in ["empty", "soon", "none"] else Color.WHITE

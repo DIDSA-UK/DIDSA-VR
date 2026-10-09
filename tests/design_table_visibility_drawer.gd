@@ -32,7 +32,7 @@ func _initialize() -> void:
 	await rig.frames(2)
 	print("SMOKE pressing the eye opens the drawer on the deck's right edge, level with its top, a child of the deck with no grab handle: ", win.is_open() and win.get_parent() == table._deck and is_equal_approx(win.position.x, table.tools_size.x * 0.5 + win.panel_size.x * 0.5 + win.GAP) and is_equal_approx(win.position.y + win.panel_size.y * 0.5, table.tools_size.y * 0.5) and win._handle == null and win.handle_in_reach(rig.r) == false)
 	var sk: Button = win.button_for(Vis.SKETCHES)
-	print("SMOKE Sketches shows '2 of 3' after the load rule (the extrude consumed one): ", sk.text.contains("Sketches") and sk.text.contains("2 of 3"), " ", sk.text)
+	print("SMOKE Sketches reads 'some' after the load rule (the extrude consumed one) and the tiles carry no counts: ", sk.text == "Sketches" and win.row_state(Vis.SKETCHES)["label"] == "2 of 3" and not win.button_for(Vis.BODIES).text.contains(" of "), " ", sk.text)
 	print("SMOKE Bodies is a full eye '1 of 1', Created planes is eye-off '0 of 1' (hidden by the load rule): ", win.row_state(Vis.BODIES) == {"state": "all", "label": "1 of 1"} and win.row_state(Vis.PLANES) == {"state": "none", "label": "0 of 1"})
 	print("SMOKE categories with nothing in them (Surfaces, 3D curves) and Centre of gravity are dimmed and disabled: ", win.button_for(Vis.SURFACES).disabled and win.button_for(Vis.CURVES).disabled and win.button_for("centre_of_gravity").disabled and not sk.disabled)
 	sk.pressed.emit()
