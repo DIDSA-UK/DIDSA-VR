@@ -34,6 +34,7 @@ const SketchPicks := preload("res://scripts/design_table/sketch_picks.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
+const Visibility := preload("res://scripts/design_table/visibility.gd")
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
 const FeatureTools := preload("res://scripts/design_table/features/feature_tools.gd")
 const FeaturePreview := preload("res://scripts/design_table/feature_preview.gd")
@@ -85,6 +86,10 @@ var faces: Array = [] ## picked face entities (Shell)
 var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pattern, Boolean, Merge...: the laser lights the whole body)
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
 var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
+var rest_sketches: Node3D = null ## sketch_picks.gd, a second one: the finished sketches the Visibility model shows, drawn on the copy at rest
+var _rest_signature := ""
+var _rest_version := 0 ## bumped when a sketch may have changed (the part was rebuilt, a sketch was left): the lines are read again
+var _rest_token := 0
 var sketch_picks: Node3D = null ## sketch_picks.gd while curves are being picked: the lines and curves of the finished sketches, on the copy
 var preview := FeaturePreview.new() ## the translucent result before Apply
 var preview_enabled := true ## off: nothing is created or drawn until Apply
@@ -120,6 +125,7 @@ func setup(p_table, p_api) -> void:
 	api = p_api
 	features = PartFeatures.new(Callable(self, "_call"))
 	table._right.button_pressed.connect(_on_right_pressed)
+	geometry_changed.connect(func() -> void: _rest_version += 1)
 
 
 func _call(method: int, path: String, body) -> Dictionary:
@@ -134,9 +140,14 @@ func set_state(new_state: String) -> void:
 		return
 	if state == "pick_curves" and sketch_picks != null and is_instance_valid(sketch_picks):
 		sketch_picks.clear() # leaving curve picking: the earlier sketches' lines go from the part (a tool that switches between picking kinds keeps its picks)
+	var was_sketching := state == "sketch"
 	state = new_state
 	state_changed.emit(state)
 	_update_options()
+	if was_sketching:
+		_rest_version += 1 # a sketch was just left: it may have changed
+	if table != null and table.build != null:
+		sync_rest_sketches.call_deferred()
 
 
 # --- Lifecycle ------------------------------------------------------------------------
@@ -239,6 +250,11 @@ func _reset() -> void:
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
 	markers = null
+	_rest_token += 1
+	_rest_signature = ""
+	if rest_sketches != null and is_instance_valid(rest_sketches):
+		rest_sketches.queue_free()
+	rest_sketches = null
 	if highlight != null and is_instance_valid(highlight):
 		highlight.queue_free()
 	highlight = null
@@ -542,6 +558,49 @@ func sync_plane_markers() -> void:
 		markers.clear_custom()
 	for key in wanted:
 		markers.add_plane(key, wanted[key][0], str(wanted[key][1]))
+	# At rest (Visibility drawer): the reference planes follow their switch, each made plane its own hide state
+	markers.set_rest_fixed(table.build.visibility.is_on(Visibility.REFERENCE_PLANES))
+	for key in markers._custom.keys():
+		markers.set_rest_custom(key, not table.build.is_hidden(str(key).trim_prefix("plane:")))
+
+
+func sync_rest_sketches() -> void:
+	## The finished sketches the Visibility model shows are drawn on the table's copy at rest (lines, circles and arcs, as plane picking
+	## and curve picking draw them). They are read from the backend when the part's sketches change (a signature of the sketch rows plus a
+	## version bumped when the part is rebuilt or a sketch is left); hiding and showing one only redraws. Not drawn while a sketch is open
+	## (the sheet is the drawing) or while curves are being picked (sketch_picks draws them then).
+	if table == null or table.build == null or table.table_copy == null or part_id == "" or api == null or not api.is_configured():
+		return
+	var ids: Array = []
+	for row in table.build.features:
+		if str(row.get("type", "")) == "sketch" and str(row.get("sketch_id", "")) != "":
+			ids.append(str(row["id"]))
+	var signature := "%s|%d|%s" % [part_id, _rest_version, ",".join(ids)]
+	var copy: MeshInstance3D = table.table_copy
+	if signature != _rest_signature or rest_sketches == null or not is_instance_valid(rest_sketches) or rest_sketches.get_parent() != copy:
+		if ids.is_empty():
+			if rest_sketches != null and is_instance_valid(rest_sketches):
+				rest_sketches.queue_free()
+			rest_sketches = null
+			_rest_signature = signature
+			return
+		_rest_signature = signature
+		_rest_token += 1
+		var mine := _rest_token
+		var fresh: Node3D = SketchPicks.new()
+		fresh.name = "RestSketches"
+		fresh.visible = false
+		copy.add_child(fresh)
+		await fresh.load_sketches(Callable(self, "_call"), part_id, table.build.features, Callable(self, "_plane_for_row"))
+		if mine != _rest_token or table.table_copy != copy or not is_instance_valid(fresh):
+			if is_instance_valid(fresh):
+				fresh.queue_free()
+			return
+		if rest_sketches != null and is_instance_valid(rest_sketches):
+			rest_sketches.queue_free()
+		rest_sketches = fresh
+	rest_sketches.apply_hidden(table.build.hidden_ids())
+	rest_sketches.visible = not (state in ["sketch", "pick_curves"])
 
 
 func mirror_across(spec: Dictionary) -> bool:
@@ -1887,7 +1946,7 @@ func _rebuild_markers() -> void:
 	## The three plane squares, sized to the part as it is now (they were built for the placeholder box of a new part).
 	if markers == null or not is_instance_valid(markers):
 		return
-	var was_visible: bool = markers.visible
+	var was_picking: bool = markers.picking
 	var chosen_before: String = markers.chosen
 	markers.queue_free()
 	var copy: MeshInstance3D = table.table_copy
@@ -1896,7 +1955,7 @@ func _rebuild_markers() -> void:
 	markers.name = "PlaneMarkers"
 	copy.add_child(markers)
 	markers.setup(aabb.size.length() * 1.25, aabb.get_center(), table.fit_scale)
-	markers.set_markers_visible(was_visible)
+	markers.set_markers_visible(was_picking)
 	if chosen_before != "":
 		markers.set_chosen(chosen_before)
 	sync_plane_markers()

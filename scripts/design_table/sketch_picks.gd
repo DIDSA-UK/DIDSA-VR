@@ -108,6 +108,18 @@ func set_included(feature_id: String, included: bool) -> void:
 		_redraw()
 
 
+func apply_hidden(hidden_feature_ids: Array) -> void:
+	## At rest: draw the sketches the Visibility model shows (every one not in the hidden list). One redraw, only when something changed.
+	var changed := false
+	for id in sketches:
+		var want := not hidden_feature_ids.has(id)
+		if bool(sketches[id]["included"]) != want:
+			sketches[id]["included"] = want
+			changed = true
+	if changed:
+		_redraw()
+
+
 func candidates() -> Array:
 	return curves.filter(func(c): return bool(sketches.get(str(c["sketch_feature_id"]), {}).get("included", false)))
 

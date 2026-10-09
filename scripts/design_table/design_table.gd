@@ -207,6 +207,8 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	build.setup(self)
 	tree.attach_build(build)
 	build.changed.connect(editor.sync_plane_markers)
+	build.changed.connect(editor.sync_rest_sketches) # a coroutine: the finished sketches the Visibility model shows are drawn at rest
+	build.visibility.changed.connect(editor.sync_plane_markers)
 	visibility_window = VisibilityWindow.new()
 	visibility_window.name = "Visibility"
 	_deck.add_child(visibility_window) # on the deck's right: it tips and moves with it
