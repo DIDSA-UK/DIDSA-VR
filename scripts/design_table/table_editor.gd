@@ -240,7 +240,7 @@ func on_cleared() -> void:
 
 func _reset() -> void:
 	cancel_preview()
-	editing = {}
+	_clear_editing()
 	if _orient_tween and _orient_tween.is_valid():
 		_orient_tween.kill()
 	clip.end()
@@ -1139,7 +1139,7 @@ func on_tool_changed(tool_id: String) -> void:
 			session.selection = [{"kind": "line", "id": revolve_axis}]
 		_refresh_view()
 	if not editing.is_empty() and tool_id != str(editing["type"]):
-		editing = {}
+		_clear_editing()
 	if preview_feature_id != "" or preview.is_showing():
 		cancel_preview() # another tool: what the last one was showing goes (a feature it made for the preview is deleted first, in order)
 	if tools.has(tool_id):
@@ -1655,16 +1655,24 @@ func begin_tool_edit(feature_id: String) -> void:
 	if table.build.is_rolled_back_any():
 		table.set_status("The part is rolled back. Roll forward in the Build tree before editing.")
 		return
-	editing = {}
+	_clear_editing()
 	if table.active_tool != feature_tool.id:
 		table.manager.activate(feature_tool.id)
 	else:
 		feature_tool.on_activated(self)
 	editing = {"id": feature_id, "type": feature_tool.id, "original": row.duplicate(true)}
 	feature_tool.load_from_row(self, row)
+	table.build.edit_begun(feature_id)
 	_update_options()
 	schedule_preview()
 	table.set_status("Editing %s. Change what you want, then Apply." % table.build.names[table.build.index_of(feature_id)])
+
+
+func _clear_editing() -> void:
+	## No feature is open for editing any more: its seed sketches go back to how they were.
+	editing = {}
+	if table != null and table.build != null:
+		table.build.edit_ended()
 
 
 func _apply_edit(feature_tool, req: Dictionary) -> void:
@@ -1681,7 +1689,7 @@ func _apply_edit(feature_tool, req: Dictionary) -> void:
 		return
 	feature_stack.append({"kind": "edit", "id": edit["id"], "type": edit["type"], "payload": feature_tool.row_payload(edit["original"]), "redo_payload": body})
 	redo_stack.clear()
-	editing = {}
+	_clear_editing()
 	preview.clear()
 	var refreshed: bool = await refresh_geometry()
 	await table.build.reload()
@@ -1744,6 +1752,7 @@ func apply_feature() -> void:
 	var refreshed: bool = await refresh_geometry()
 	if feature_tool.reload_build_after():
 		await table.build.reload()
+	await table.build.note_applied(str(result["id"])) # the sketches it consumed hide (a failed Apply returned above: nothing changes)
 	if feature_tool.finishes_sketch():
 		end_sketch()
 	clear_picks()
@@ -2027,6 +2036,8 @@ func undo() -> void:
 		var made: Dictionary = created_requests[str(entry)]
 		redo_stack.append({"kind": "create", "type": made["type"], "route": made["route"], "body": made["body"]})
 		created_requests.erase(str(entry))
+	if not entry is Dictionary:
+		await table.build.note_removed(str(entry)) # a sketch only that feature had hidden comes back
 	await refresh_geometry()
 	table.notify_edited(part_id, _edited_nodes)
 	sync_undo_redo()
@@ -2048,6 +2059,7 @@ func redo() -> void:
 		if result["ok"]:
 			feature_stack.append(str(result["id"]))
 			created_requests[str(result["id"])] = {"type": entry["type"], "route": entry["route"], "body": entry["body"]}
+			await table.build.note_applied(str(result["id"])) # made again: the sketches it consumes hide again
 	else:
 		var edit: Dictionary = entry["entry"]
 		result = await features.update_feature(part_id, str(edit["type"]), str(edit["id"]), edit["redo_payload"])

@@ -274,7 +274,8 @@ func _feature_row(build, index: int, f: Dictionary, is_hidden: bool) -> Button:
 	var line2: String = BuildTree.summary(build.features, index)
 	var state := ""
 	if is_hidden:
-		state = "  · hidden"
+		var seed_note: String = build.auto_note(id)
+		state = "  · %s" % (seed_note if seed_note != "" else "hidden")
 	if rolled:
 		state += "  · rolled back"
 	var reference_note := BuildTree.reference_note(f)

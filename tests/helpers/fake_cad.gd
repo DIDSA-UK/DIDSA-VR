@@ -21,6 +21,7 @@ var mesh_bytes := PackedByteArray()
 var mesh_ok := true
 var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
+var track_rows := false ## opt-in: a POST of a feature adds its row to feature_rows (the request body merged in) and a DELETE of it takes the row away, like the real backend
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
 var origin_id := ""
@@ -138,8 +139,19 @@ func handle(method: int, path: String, body) -> Dictionary:
 	if verb == "GET" and path.ends_with("/occurrences"):
 		return _ok(occurrences.get(path.get_slice("/", 3), []))
 	if verb == "POST" and path.ends_with("-features") and not path.ends_with("/create-plane-features"):
-		return _ok({"id": next_id("feat")})
+		var made := next_id("feat")
+		if track_rows:
+			var row: Dictionary = (body as Dictionary).duplicate(true) if body is Dictionary else {}
+			row["id"] = made
+			row["type"] = path.get_file().trim_suffix("-features").replace("-", "_")
+			var owner_rows: Array = feature_rows.get(path.get_slice("/", 3), [])
+			owner_rows.append(row)
+			feature_rows[path.get_slice("/", 3)] = owner_rows
+		return _ok({"id": made})
 	if verb == "DELETE" and path.contains("/features/"):
+		if track_rows:
+			var owner_id := path.get_slice("/", 3)
+			feature_rows[owner_id] = (feature_rows.get(owner_id, []) as Array).filter(func(r): return r["id"] != path.get_file())
 		return _ok(null)
 	if verb == "PATCH" and path.contains("/mates/"):
 		return _ok({})

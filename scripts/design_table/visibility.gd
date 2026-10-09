@@ -85,33 +85,58 @@ static func ids_of(features: Array, category: String, excluded: Array = []) -> A
 	return out
 
 
-static func seed_sketch_ids(features: Array, excluded: Array = []) -> Array:
-	## The sketches an applied (not rolled-back) feature consumes: an Extrude's or Revolve's sketch, a Loft's sections, a Sweep's profile
-	## and path sketches. (A Pattern's direction does not count: it is a reference, not a consumed profile.) A path ref names the sketch by
-	## its `sketch_id`, not its feature id, so that is mapped back through the sketch rows.
+static func _seeds_of_row(f: Dictionary, by_sketch_id: Dictionary) -> Array:
+	var found: Array = []
+	match str(f.get("type", "")):
+		"extrude", "revolve":
+			found.append(str(f.get("sketch_feature_id", "")))
+		"loft":
+			for sec in f.get("sections", []):
+				found.append(str((sec as Dictionary).get("sketch_feature_id", "")))
+		"sweep":
+			found.append(str(f.get("sketch_feature_id", "")))
+			for ref in f.get("path_refs", []):
+				found.append(str(by_sketch_id.get(str((ref as Dictionary).get("sketch_id", "")), "")))
+	return found.filter(func(id): return id != "")
+
+
+static func _sketch_index(features: Array) -> Dictionary:
+	## A path ref names its sketch by `sketch_id`, not its feature id: sketch_id -> feature id.
 	var by_sketch_id := {}
 	for f in features:
 		if str(f.get("type", "")) == "sketch":
 			by_sketch_id[str(f.get("sketch_id", ""))] = str(f.get("id", ""))
-	var out: Array = []
+	return by_sketch_id
+
+
+static func seed_causes(features: Array, excluded: Array = []) -> Dictionary:
+	## sketch feature id -> the ids of the applied (not rolled-back) features that consume it: an Extrude's or Revolve's sketch, a Loft's
+	## sections, a Sweep's profile and path sketches. (A Pattern's direction does not count: it is a reference, not a consumed profile.)
+	var by_sketch_id := _sketch_index(features)
+	var out := {}
 	for f in features:
-		if excluded.has(str(f.get("id", ""))):
+		var id := str(f.get("id", ""))
+		if excluded.has(id):
 			continue
-		var found: Array = []
-		match str(f.get("type", "")):
-			"extrude", "revolve":
-				found.append(str(f.get("sketch_feature_id", "")))
-			"loft":
-				for sec in f.get("sections", []):
-					found.append(str((sec as Dictionary).get("sketch_feature_id", "")))
-			"sweep":
-				found.append(str(f.get("sketch_feature_id", "")))
-				for ref in f.get("path_refs", []):
-					found.append(str(by_sketch_id.get(str((ref as Dictionary).get("sketch_id", "")), "")))
-		for id in found:
-			if id != "" and not out.has(id):
-				out.append(id)
+		for sketch in _seeds_of_row(f, by_sketch_id):
+			if not out.has(sketch):
+				out[sketch] = []
+			if not (out[sketch] as Array).has(id):
+				(out[sketch] as Array).append(id)
 	return out
+
+
+static func seed_sketch_ids(features: Array, excluded: Array = []) -> Array:
+	return seed_causes(features, excluded).keys()
+
+
+static func seeds_of_feature(features: Array, feature_id: String) -> Array:
+	## The sketches ONE feature consumes (empty for a feature that is not an extrude, revolve, loft or sweep).
+	var by_sketch_id := _sketch_index(features)
+	for f in features:
+		if str(f.get("id", "")) == feature_id:
+			return _seeds_of_row(f, by_sketch_id)
+	return []
 
 
 static func load_hidden(features: Array, saved_hidden: Array, excluded: Array = []) -> Array:
