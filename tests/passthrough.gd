@@ -80,7 +80,7 @@ func _initialize() -> void:
 	we = _make(xr)
 	we.set_scene("Passthrough")
 	print("SMOKE a runtime offering only opaque: passthrough is not claimed ON: ", not we.passthrough_active and not we.is_passthrough_supported())
-	print("SMOKE ...the status explains it: what IS offered, and what to check (streaming app setting / Vendors plugin): ", we.passthrough_status().contains("NOT available") and we.passthrough_status().contains("opaque") and we.passthrough_status().contains("Vendors plugin"))
+	print("SMOKE ...the status explains it: what IS offered, and what to check (Passthrough over Link, or the export option on the headset): ", we.passthrough_status().contains("NOT available") and we.passthrough_status().contains("opaque") and we.passthrough_status().contains("Passthrough over Link"))
 	we.queue_free()
 
 	# --- session not ready at startup: retried when the headset gains focus

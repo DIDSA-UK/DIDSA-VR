@@ -84,7 +84,7 @@ const MODIFY_TOOLS := [
 ]
 
 const HINTS := {
-	"select": "Pick points, lines and curves. Pick again to let go. Options for what you picked appear below.",
+	"select": "Aim at a point, line or curve and pull the trigger to pick it (again to let go; pick several for more options). What you can do with it appears below: Length, Radius, Horizontal, Fix, Construction, Delete...",
 	"line": "Point at the sheet and pull the trigger to place the start, then the end. Each end starts the next line.",
 	"rectangle": "Pick two opposite corners.",
 	"circle": "Pick the centre, then a point on the circle.",

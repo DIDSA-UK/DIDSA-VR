@@ -118,4 +118,37 @@ func _initialize() -> void:
 	s.set_tool("dimension")
 	await s.select({"kind": "ellipse", "id": "E1"})
 	print("SMOKE Dimension on an ellipse offers Major radius 20 and Minor radius 10 (patching its two size constraints): ", s.ghosts.map(func(g): return g["key"]) == ["major_radius", "minor_radius"] and absf(float(s.ghost("major_radius")["value"]) - 20.0) < 0.001 and s.ghost("minor_radius")["apply"]["patch_id"] == "KN")
+	# --- Delete cascades like the flat app: constraints first, then what is built on a deleted point
+	s.points = {"a": Vector2(0, 0), "b": Vector2(10, 0), "c": Vector2(10, 10)}
+	s.lines = {"L1": {"a": "a", "b": "b", "construction": false}, "L2": {"a": "b", "b": "c", "construction": false}}
+	s.circles.clear()
+	s.arcs.clear()
+	s.ellipses.clear()
+	s.ellipse_arcs.clear()
+	s.splines.clear()
+	s.texts.clear()
+	s.shapes.clear()
+	s.constraints = {"H1": {"id": "H1", "type": "horizontal", "line_id": "L1"}, "D1": {"id": "D1", "type": "distance", "point_a_id": "b", "point_b_id": "c"}, "X": {"id": "X", "type": "vertical", "line_id": "L2"}}
+	s.selection = [{"kind": "line", "id": "L1"}]
+	var plan: Dictionary = s.delete_cascade()
+	print("SMOKE deleting a line takes the constraints that name it (its Horizontal), not the others: ", plan["constraints"] == ["H1"] and plan["entities"]["line"] == ["L1"] and plan["points"].is_empty(), " ", plan)
+	s.selection = [{"kind": "point", "id": "b"}]
+	plan = s.delete_cascade()
+	print("SMOKE deleting a point takes both lines on it and every constraint on the point or those lines, and says so: ", plan["entities"]["line"].size() == 2 and plan["constraints"].size() == 3 and String(plan["extra"]).contains("2 line") and String(plan["extra"]).contains("3 constraint"), " ", plan)
+	s.shapes = {"R": {"kind": "rectangle", "point_ids": ["a", "b", "c", "d"], "own_point_ids": ["a", "b", "c", "d"]}}
+	s.selection = [{"kind": "line", "id": "L1"}]
+	plan = s.delete_cascade()
+	print("SMOKE cutting one line out of a rectangle collapses it to plain lines instead of deleting the whole: ", plan["collapse"] == [{"kind": "rectangle", "id": "R"}] and plan["remove_shapes"].is_empty(), " ", plan)
+	s.points["d"] = Vector2(0, 10)
+	s.lines["L3"] = {"a": "c", "b": "d", "construction": false}
+	s.lines["L4"] = {"a": "d", "b": "a", "construction": false}
+	s.selection = [{"kind": "line", "id": "L1"}, {"kind": "line", "id": "L2"}, {"kind": "line", "id": "L3"}, {"kind": "line", "id": "L4"}]
+	plan = s.delete_cascade()
+	print("SMOKE taking all four sides deletes the rectangle whole: ", plan["remove_shapes"] == [{"kind": "rectangle", "id": "R"}] and plan["collapse"].is_empty(), " ", plan)
+	s.shapes.clear()
+	s.selection = [{"kind": "line", "id": "L1"}]
+	rig.fake.calls.clear()
+	await s.delete_selection()
+	var order: Array = rig.fake.calls.filter(func(c): return String(c[0]).begins_with("DELETE")).map(func(c): return String(c[0]).get_slice("/", 4))
+	print("SMOKE Delete sends the constraint's delete before the line's: ", order.size() >= 2 and order[0] == "constraints" and order[1] == "lines", " ", order)
 	quit()

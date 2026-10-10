@@ -26,6 +26,7 @@ const CURVE_TYPES := ["curve", "curve_3d", "spline_3d"] ## the backend's 3D curv
 signal changed ## a switch moved: the drawer redraws
 
 var _on := {} ## session category -> bool
+var _touched := {} ## session category -> true once the user has moved its switch (the load default is "off", which is not the same as "hidden")
 
 
 func _init() -> void:
@@ -36,6 +37,7 @@ func reset() -> void:
 	## The load rule for the session switches: everything off, except the sketch glyphs (dimensions and constraints), which are on: they only ever
 	## show in the sketch that is open.
 	_on = {}
+	_touched = {}
 	for c in SESSION_CATEGORIES:
 		_on[c] = SKETCH_GLYPHS.has(c)
 	changed.emit()
@@ -48,7 +50,13 @@ func is_on(category: String) -> bool:
 func set_on(category: String, on: bool) -> void:
 	if _on.has(category) and _on[category] != on:
 		_on[category] = on
+		_touched[category] = true
 		changed.emit()
+
+
+func is_hidden_by_user(category: String) -> bool:
+	## True if the user switched this category off (as opposed to it simply never having been switched on).
+	return bool(_touched.get(category, false)) and not is_on(category)
 
 
 func toggle(category: String) -> bool:
@@ -59,6 +67,7 @@ func toggle(category: String) -> bool:
 func set_all(on: bool) -> void:
 	for c in SESSION_CATEGORIES:
 		_on[c] = on
+		_touched[c] = true
 	changed.emit()
 
 

@@ -27,6 +27,17 @@ func _initialize() -> void:
 	pm.set_markers_visible(true)
 	pm.set_markers_visible(false)
 	print("SMOKE picking turning off again returns to the rest state: ", pm.shows("plane:p1") and not pm.shows("YZ"))
+	pm.set_markers_visible(true)
+	pm.set_fixed_hidden(true)
+	pm.set_rest_custom("plane:p1", false)
+	print("SMOKE hiding on purpose wins over plane picking: the reference planes and a hidden made plane are not drawn, nor can be pointed at: ", not pm.shows("XY") and not pm.shows("plane:p1") and not pm.visible and pm.intersect(Vector3(0, 0, 50), Vector3(0, 0, -1)).is_empty())
+	pm.set_fixed_hidden(false)
+	print("SMOKE ...and switching them back on shows them again while picking: ", pm.shows("XY") and not pm.shows("plane:p1") and not pm.intersect(Vector3(0, 0, 50), Vector3(0, 0, -1)).is_empty())
+	var vis := Vis.new()
+	print("SMOKE a switch never touched is off but not 'hidden by the user' (so a new part still shows its planes to sketch on): ", not vis.is_on(Vis.REFERENCE_PLANES) and not vis.is_hidden_by_user(Vis.REFERENCE_PLANES))
+	vis.set_on(Vis.REFERENCE_PLANES, true)
+	vis.set_on(Vis.REFERENCE_PLANES, false)
+	print("SMOKE ...turned on and off again it is hidden by the user: ", vis.is_hidden_by_user(Vis.REFERENCE_PLANES))
 	pm.free()
 
 	# --- scene

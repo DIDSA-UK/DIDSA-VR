@@ -18,12 +18,14 @@ const GRID_SHADER := preload("res://shaders/sketch_grid.gdshader")
 const LINE_SHADER := preload("res://shaders/sketch_lines.gdshader")
 const DimensionLayout := preload("res://scripts/design_table/dimension_layout.gd")
 
-const LINE_WIDTH := 0.0035 ## world metres: the rubber band, the cursor ring and the sheet's marks
-const OBJECT_WIDTH := 0.0042 ## the visible outline of the sketch: the heaviest line, as on a drawing
-const CONSTRUCTION_WIDTH := 0.0020 ## construction geometry: thin, in a chain (long dash, short dash) pattern
-const DIM_WIDTH := 0.0016 ## dimension lines, extension lines, leaders: thinner still
-const UNDERLAY_WIDTH := 0.0075 ## the dark edge under an object line, so it reads on a white part and on the dark slab alike
+const LINE_WIDTH := 0.00245 ## world metres: the rubber band, the cursor ring and the sheet's marks
+const OBJECT_WIDTH := 0.00294 ## the visible outline of the sketch: the heaviest line, as on a drawing
+const CONSTRUCTION_WIDTH := 0.0014 ## construction geometry: thin, in a chain (long dash, short dash) pattern
+const DIM_WIDTH := 0.00112 ## dimension lines, extension lines, leaders: thinner still
+const UNDERLAY_WIDTH := 0.00525 ## the dark edge under an object line, so it reads on a white part and on the dark slab alike
 const UNDERLAY := Color(0.02, 0.05, 0.10, 0.85)
+const PREVIEW_EDGE := Color(0.02, 0.05, 0.10, 0.95) ## the dark edge under the rubber band
+const PREVIEW_EDGE_EXTRA := 0.0025 ## ...this much wider than the band, so it shows on either side
 const THIN_UNDERLAY := Color(0.02, 0.05, 0.10, 0.55)
 const CHAIN := [0.013, 0.004, 0.0035, 0.004] ## world metres: dash, gap, dot, gap
 const ARROW_LENGTH := 0.011
@@ -32,7 +34,7 @@ const DIM_GAP := 0.004 ## the small gap between the geometry and an extension li
 const DIM_OVERSHOOT := 0.006
 const REF_COLOUR := Color(0.62, 0.78, 0.98, 0.95) ## the part's own edges and corners, seen through the sketch: reference geometry, quieter than the sketch
 const REF_FAR_COLOUR := Color(0.62, 0.78, 0.98, 0.50) ## ...those that lie off the sketch plane, projected onto it
-const REF_WIDTH := 0.0018
+const REF_WIDTH := 0.00126
 const REF_USED_COLOUR := Color(0.55, 0.85, 1.0, 1.0) ## a part corner / edge / hole the sketch actually uses (a dimension or constraint goes to it): the part's own geometry, lit a little
 const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
@@ -249,7 +251,7 @@ func _rebuild_references() -> void:
 		var colour: Color = REF_COLOUR if float(e["depth"]) < 0.05 else REF_FAR_COLOUR
 		var segs: PackedVector2Array = e["segs"]
 		for i in range(0, segs.size() - 1, 2):
-			_ribbon(verts, colors, segs[i], segs[i + 1], REF_WIDTH + 0.0016, THIN_UNDERLAY, 0.3) # dark under the light, so it reads on a white part too
+			_ribbon(verts, colors, segs[i], segs[i + 1], REF_WIDTH + 0.00112, THIN_UNDERLAY, 0.3) # dark under the light, so it reads on a white part too
 			_ribbon(verts, colors, segs[i], segs[i + 1], REF_WIDTH, colour, 0.4)
 	for v in _refs.vertices_in(lo, hi):
 		_marker(verts, colors, v["uv"], REF_POINT + 0.0018, UNDERLAY, 0.45)
@@ -439,10 +441,10 @@ func _stroke(verts: PackedVector3Array, colors: PackedColorArray, pts: Array, cl
 
 func _draw_dimension(verts: PackedVector3Array, colors: PackedColorArray, layout: Dictionary, colour: Color) -> void:
 	for seg in layout["segments"]:
-		_ribbon(verts, colors, seg[0], seg[1], DIM_WIDTH + 0.0014, THIN_UNDERLAY, 0.9)
+		_ribbon(verts, colors, seg[0], seg[1], DIM_WIDTH + 0.00098, THIN_UNDERLAY, 0.9)
 		_ribbon(verts, colors, seg[0], seg[1], DIM_WIDTH, colour, 1.1)
 	for arc in layout["arcs"]:
-		_polyline(verts, colors, arc, DIM_WIDTH + 0.0014, THIN_UNDERLAY, false, 0.9)
+		_polyline(verts, colors, arc, DIM_WIDTH + 0.00098, THIN_UNDERLAY, false, 0.9)
 		_polyline(verts, colors, arc, DIM_WIDTH, colour, false, 1.1)
 	for ar in layout["arrows"]:
 		_arrow(verts, colors, ar[0], ar[1], colour, 1.2)
@@ -512,7 +514,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				continue
 			if session.is_reference(id):
 				# the sketch's plumbing to the part's own edge: no line of its own is drawn, the part's edge is lit instead
-				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.0008, REF_USED_COLOUR, 0.6)
+				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.00056, REF_USED_COLOUR, 0.6)
 				continue
 			var key: String = "line:" + id
 			var lit: bool = selected.has(key) or key == hovered
@@ -638,64 +640,71 @@ func set_cursor(uv: Variant, kind: String = "free") -> void:
 
 
 func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 6) -> void:
-	## The shape the next tap would finish, as a faint rubber band. `taps` are the sheet positions placed so far.
+	## The shape the next tap would finish, as a rubber band. `taps` are the sheet positions placed so far. Drawn twice, a dark edge wider than
+	## the line and the line itself on top, so it reads on a white or pale part as well as on the dark slab (the plain accent line vanished on a body).
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	if cursor_uv != null and not taps.is_empty():
-		var colour: Color = _tokens.accent
-		colour.a = 0.85
-		var c: Vector2 = cursor_uv
-		var first: Vector2 = taps[0]
-		match tool_id:
-			"line":
-				_ribbon(verts, colors, first, c, LINE_WIDTH, colour, 1.2)
-			"rectangle":
-				_polyline(verts, colors, [first, Vector2(c.x, first.y), c, Vector2(first.x, c.y)], LINE_WIDTH, colour, true, 1.2)
-			"circle":
-				_polyline(verts, colors, circle_points(first, first.distance_to(c), CIRCLE_SEGMENTS), LINE_WIDTH, colour, true, 1.2)
-				_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
-			"arc":
-				if taps.size() == 1:
-					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
-				else:
-					var start: Vector2 = taps[1]
-					var r := first.distance_to(start)
-					var dir := c - first
-					var end := first + (dir.normalized() * r if dir.length() > 0.0001 else Vector2(r, 0))
-					_polyline(verts, colors, arc_points(first, start, end, 32), LINE_WIDTH, colour, false, 1.2)
-					_ribbon(verts, colors, first, start, LINE_WIDTH * 0.5, colour, 1.2)
-			"slot":
-				if taps.size() == 1:
-					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
-				else:
-					var second: Vector2 = taps[1]
-					var width: float = c.distance_to(Geometry2D.get_closest_point_to_segment(c, first, second))
-					_polyline(verts, colors, slot_outline(first, second, width, 16), LINE_WIDTH, colour, true, 1.2)
-					_ribbon(verts, colors, first, second, LINE_WIDTH * 0.5, colour, 1.2)
-			"ellipse", "ellipse_arc":
-				if taps.size() == 1:
-					_ribbon(verts, colors, first, c, LINE_WIDTH * 0.6, colour, 1.2)
-				else:
-					var major: Vector2 = taps[1]
-					var a_len := first.distance_to(major)
-					var u := (major - first) / maxf(a_len, 0.0001)
-					var b_len := clampf(absf((c - first).cross(u)), a_len * 0.02, a_len) if taps.size() == 2 else clampf(absf(((taps[2] as Vector2) - first).cross(u)), a_len * 0.02, a_len)
-					var minor_pt := first + Vector2(-u.y, u.x) * b_len
-					_polyline(verts, colors, session_ellipse_points(first, major, minor_pt), LINE_WIDTH, colour, true, 1.2)
-					_ribbon(verts, colors, first, major, LINE_WIDTH * 0.5, colour, 1.2)
-			"spline":
-				var through: Array = taps.duplicate()
-				through.append(c)
-				_polyline(verts, colors, through, LINE_WIDTH, colour, false, 1.2)
-			"polygon":
-				var r2 := first.distance_to(c)
-				var a0 := (c - first).angle()
-				var corners: Array = []
-				for i in maxi(sides, 3):
-					var a := a0 + TAU * float(i) / float(maxi(sides, 3))
-					corners.append(first + Vector2(cos(a), sin(a)) * r2)
-				_polyline(verts, colors, corners, LINE_WIDTH, colour, true, 1.2)
+		_preview_pass(verts, colors, tool_id, taps, cursor_uv, sides, PREVIEW_EDGE, PREVIEW_EDGE_EXTRA, 1.1)
+		var colour: Color = _tokens.accent.lightened(0.25)
+		colour.a = 1.0
+		_preview_pass(verts, colors, tool_id, taps, cursor_uv, sides, colour, 0.0, 1.2)
 	_set_surface(_preview, verts, colors)
+
+
+func _preview_pass(verts: PackedVector3Array, colors: PackedColorArray, tool_id: String, taps: Array, cursor_uv: Vector2, sides: int, colour: Color, extra: float, lift: float) -> void:
+	var w := LINE_WIDTH + extra
+	var c: Vector2 = cursor_uv
+	var first: Vector2 = taps[0]
+	match tool_id:
+		"line":
+			_ribbon(verts, colors, first, c, w, colour, lift)
+		"rectangle":
+			_polyline(verts, colors, [first, Vector2(c.x, first.y), c, Vector2(first.x, c.y)], w, colour, true, lift)
+		"circle":
+			_polyline(verts, colors, circle_points(first, first.distance_to(c), CIRCLE_SEGMENTS), w, colour, true, lift)
+			_ribbon(verts, colors, first, c, w * 0.6, colour, lift)
+		"arc":
+			if taps.size() == 1:
+				_ribbon(verts, colors, first, c, w * 0.6, colour, lift)
+			else:
+				var start: Vector2 = taps[1]
+				var r := first.distance_to(start)
+				var dir := c - first
+				var end := first + (dir.normalized() * r if dir.length() > 0.0001 else Vector2(r, 0))
+				_polyline(verts, colors, arc_points(first, start, end, 32), w, colour, false, lift)
+				_ribbon(verts, colors, first, start, w * 0.5, colour, lift)
+		"slot":
+			if taps.size() == 1:
+				_ribbon(verts, colors, first, c, w * 0.6, colour, lift)
+			else:
+				var second: Vector2 = taps[1]
+				var width: float = c.distance_to(Geometry2D.get_closest_point_to_segment(c, first, second))
+				_polyline(verts, colors, slot_outline(first, second, width, 16), w, colour, true, lift)
+				_ribbon(verts, colors, first, second, w * 0.5, colour, lift)
+		"ellipse", "ellipse_arc":
+			if taps.size() == 1:
+				_ribbon(verts, colors, first, c, w * 0.6, colour, lift)
+			else:
+				var major: Vector2 = taps[1]
+				var a_len := first.distance_to(major)
+				var u := (major - first) / maxf(a_len, 0.0001)
+				var b_len := clampf(absf((c - first).cross(u)), a_len * 0.02, a_len) if taps.size() == 2 else clampf(absf(((taps[2] as Vector2) - first).cross(u)), a_len * 0.02, a_len)
+				var minor_pt := first + Vector2(-u.y, u.x) * b_len
+				_polyline(verts, colors, session_ellipse_points(first, major, minor_pt), w, colour, true, lift)
+				_ribbon(verts, colors, first, major, w * 0.5, colour, lift)
+		"spline":
+			var through: Array = taps.duplicate()
+			through.append(c)
+			_polyline(verts, colors, through, w, colour, false, lift)
+		"polygon":
+			var r2 := first.distance_to(c)
+			var a0 := (c - first).angle()
+			var corners: Array = []
+			for i in maxi(sides, 3):
+				var a := a0 + TAU * float(i) / float(maxi(sides, 3))
+				corners.append(first + Vector2(cos(a), sin(a)) * r2)
+			_polyline(verts, colors, corners, w, colour, true, lift)
 
 
 static func session_ellipse_points(centre: Vector2, major: Vector2, minor: Vector2) -> Array:
