@@ -1447,6 +1447,20 @@ Flip `Main > Wrist tablet > use_new_tablet` (default off) to build it instead of
   Tests: `tests/ui_themes.gd`, theme/effects switching in `tests/tablet_v2.gd`, per-theme x effects renders in
   `tests/ui_lab_render.gd` (shows the shader draws in every theme). Not verified: how the glow looks on a
   Quest lens / at arm's length, and the Quest-standalone cost of the overlay (one extra fragment pass per render).
+- **Headset test round (Passthrough, sketch delete, line weight, preview contrast).**
+  *Passthrough*: the report "headset's passthrough layer is available but failed to start" means the runtime offered neither
+  alpha-blend nor additive and `start_passthrough()` returned false. It is now retried 3 times (0.6 s, 1.6 s, 3.5 s: the layer can
+  fail while the session settles) and, if it still fails, the status line says what to change for where it runs: on the headset
+  itself the Android export preset needs **Xr Features > Passthrough = Optional/Required** (otherwise the manifest lacks the
+  passthrough feature and the layer cannot be created); over a PC link, **Passthrough over Link** (Meta Quest Link / Horizon app,
+  Settings > Beta) or the streaming app's own setting. **Not verified on a headset** (this sandbox has none): the export option is the
+  most likely cause, not a confirmed one. *Sketch delete*: Select already offers Delete / Length / Radius / Diameter / Horizontal... in
+  the Properties panel, but nothing said so: the Select hint and the open-sketch hint now say it, and Properties' Selected list names what
+  is picked ("Sketch: 1 line"). Delete now **cascades like the flat app** (`sketch_session.gd delete_cascade`): the constraints that name
+  a deleted entity or point (a line's Horizontal...) go first (the backend left them dangling and refused to prune their points), the
+  lines / curves built on a deleted point go with it, a rectangle / polygon / slot cut about is **collapsed** to plain lines and one taken
+  whole is deleted whole; the status line says what came along. No confirm dialog yet (the flat app has one). *Look*: sketch line widths
+  are 70% of before; the drawing preview has a dark edge under it and a brighter fill so it reads on a pale part.
 - **Passthrough fix (real-headset report: choosing the Passthrough environment did nothing).** Root cause found by
   reading Godot's own AR/passthrough docs against `environment_manager.gd`: it only ever called the **legacy**
   `OpenXRInterface.start_passthrough()` (kept "for backwards compatibility") and **never set the environment blend

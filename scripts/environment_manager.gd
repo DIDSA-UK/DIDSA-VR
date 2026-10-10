@@ -157,12 +157,51 @@ func _enable_passthrough() -> void:
 			passthrough_active = true
 			passthrough_report = "Passthrough ON (the headset's own passthrough layer). The runtime offers blend modes: %s." % offered
 		else:
-			legacy_note = " The headset's passthrough layer is available but failed to start."
+			legacy_note = " The headset's passthrough layer is available but failed to start (it is tried again in a moment)."
+			_schedule_retry()
 	if not passthrough_active:
 		_set_transparent(true)
-		passthrough_report = "Passthrough is NOT available from this runtime. It offers blend modes: %s, and no passthrough layer.%s Check your streaming app's passthrough setting (Quest Link / Virtual Desktop); a standalone Quest build also needs the OpenXR Vendors plugin." % [offered, legacy_note]
+		passthrough_report = "Passthrough is NOT available from this runtime. It offers blend modes: %s%s.%s %s" % [offered, "" if legacy_note != "" else ", and no passthrough layer", legacy_note, _fix_advice()]
 		push_warning("DIDSA VR: " + passthrough_report)
 	print("DIDSA VR: ", passthrough_report)
+
+
+func _fix_advice() -> String:
+	## What to change when the runtime would not give the camera feed: it depends on whether this is the Quest app itself or a PC link.
+	if OS.get_name() == "Android":
+		return "On the headset itself the app must ask for it: in the Android export preset set Xr Features > Passthrough to Optional (or Required) and re-export (the OpenXR Vendors plugin's Meta options do the same), and leave the headset's own Passthrough setting on."
+	return "Over a PC link, turn on Passthrough over Link in the Meta Quest Link / Horizon app (Settings > Beta), or the passthrough setting of your streaming app (Virtual Desktop), then choose Passthrough again."
+
+
+const _RETRY_DELAYS: Array[float] = [0.6, 1.6, 3.5] ## seconds: the layer can fail on the first try while the session is still settling
+
+var _retries_left := 0
+
+
+func _schedule_retry() -> void:
+	## A passthrough layer that "failed to start" often works a moment later (the OpenXR session was not yet visible / focused). Try again a few times.
+	if not is_inside_tree() or _retries_left > 0:
+		return
+	_retries_left = _RETRY_DELAYS.size()
+	_retry_next(0)
+
+
+func _retry_next(attempt: int) -> void:
+	if attempt >= _RETRY_DELAYS.size() or not is_inside_tree():
+		_retries_left = 0
+		return
+	await get_tree().create_timer(_RETRY_DELAYS[attempt]).timeout
+	if not is_inside_tree() or current_scene != "Passthrough" or passthrough_active or not _xr_ready():
+		_retries_left = 0
+		return
+	if _xr_interface.has_method("start_passthrough") and _xr_interface.start_passthrough():
+		passthrough_active = true
+		_retries_left = 0
+		passthrough_report = "Passthrough ON (the headset's own passthrough layer, on try %d)." % (attempt + 2)
+		print("DIDSA VR: ", passthrough_report)
+		scene_changed.emit(current_scene) # so the tablet's status line refreshes
+		return
+	_retry_next(attempt + 1)
 
 
 func _set_transparent(on: bool) -> void:
@@ -172,6 +211,7 @@ func _set_transparent(on: bool) -> void:
 
 
 func _disable_passthrough() -> void:
+	_retries_left = 0
 	var was_active := passthrough_active
 	passthrough_active = false
 	passthrough_report = ""

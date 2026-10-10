@@ -1229,7 +1229,7 @@ func _refresh_view() -> void:
 
 func _sketch_hint() -> String:
 	var def = table.registry.tool_def(table.active_tool) if table.active_tool != "" else null
-	var hint := "Sketch open. Pick a tool to draw or constrain."
+	var hint := "Sketch open. Pick a tool to draw or constrain. To change or delete something, choose Select and pick it: its options appear in Properties."
 	if def != null and def.hint != "":
 		hint = def.hint
 	var warning: String = session.reference_warning() if session != null else ""
@@ -2058,6 +2058,15 @@ func _sync_text_settings() -> void:
 func selection_summary() -> Array:
 	## What the active tool has picked so far, one line per kind, for the Properties panel's "Selected" list.
 	var lines: Array = []
+	if session != null and not session.selection.is_empty() and table.active_tool == SELECT_TOOL:
+		var counts := {}
+		for e in session.selection:
+			var kind := str(e.get("kind", "")).replace("_", " ")
+			counts[kind] = int(counts.get(kind, 0)) + 1
+		var named: Array = []
+		for kind in counts:
+			named.append("%d %s%s" % [counts[kind], kind, "" if counts[kind] == 1 else "s"])
+		lines.append("Sketch: %s (options below)" % ", ".join(named))
 	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
 		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
 	if not seed_sketches.is_empty():

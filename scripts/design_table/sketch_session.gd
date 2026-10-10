@@ -250,11 +250,21 @@ func _ingest_entities(json: Dictionary) -> void:
 			"text":
 				texts[id] = {"anchor": str(e["anchor_point_id"]), "content": str(e.get("content", "")), "font": str(e.get("font", "")), "size": float(e.get("size", 10.0)), "rot": float(e.get("rotation_degrees", 0.0)), "construction": bool(e.get("construction", false))}
 			"rectangle":
-				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", [])}
+				shapes[id] = {"kind": "rectangle", "point_ids": e.get("corner_point_ids", []), "own_point_ids": _strings(e.get("corner_point_ids", [])) + _strings([e.get("center_point_id", "")])}
 			"polygon":
-				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", [])}
+				shapes[id] = {"kind": "polygon", "point_ids": e.get("vertex_point_ids", []), "radial_line_ids": e.get("radial_line_ids", []), "own_point_ids": _strings(e.get("vertex_point_ids", [])) + _strings([e.get("center_point_id", "")])}
 			"slot":
-				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))]}
+				shapes[id] = {"kind": "slot", "point_ids": [str(e.get("center1_point_id", "")), str(e.get("center2_point_id", ""))],
+					"own_point_ids": _strings([e.get("center1_point_id", ""), e.get("center2_point_id", ""), e.get("a_point_id", ""), e.get("b_point_id", ""), e.get("c_point_id", ""), e.get("d_point_id", "")])}
+
+
+static func _strings(values: Array) -> Array:
+	## The non-empty entries of a list of ids, as Strings.
+	var out: Array = []
+	for v in values:
+		if v != null and str(v) != "":
+			out.append(str(v))
+	return out
 
 
 func outline_of(kind: String, id: String) -> Array:
@@ -1382,38 +1392,194 @@ func _fix_bodies() -> Array:
 	return selection.map(func(e): return {"type": "fixed", "entity_id": str(e["id"])})
 
 
+const ENTITY_ROUTES := {"line": "lines", "circle": "circles", "arc": "arcs", "ellipse": "ellipses", "ellipse_arc": "ellipse-arcs", "spline": "splines", "text": "texts"}
+const SHAPE_ROUTES := {"rectangle": "rectangles", "polygon": "polygons", "slot": "slots"}
+
+
+func _entity_dict(kind: String) -> Dictionary:
+	match kind:
+		"line":
+			return lines
+		"circle":
+			return circles
+		"arc":
+			return arcs
+		"ellipse":
+			return ellipses
+		"ellipse_arc":
+			return ellipse_arcs
+		"spline":
+			return splines
+		"text":
+			return texts
+	return {}
+
+
+func _entity_point_ids(kind: String, entity: Dictionary) -> Array:
+	## The points an entity is made of.
+	match kind:
+		"line":
+			return [entity.get("a", ""), entity.get("b", "")]
+		"circle":
+			return [entity.get("c", ""), entity.get("p", "")]
+		"arc":
+			return [entity.get("c", ""), entity.get("s", ""), entity.get("e", "")]
+		"ellipse":
+			return [entity.get("c", ""), entity.get("ma", ""), entity.get("mi", "")]
+		"ellipse_arc":
+			return [entity.get("c", ""), entity.get("ma", ""), entity.get("mi", ""), entity.get("s", ""), entity.get("e", "")]
+		"spline":
+			return (entity.get("through", []) as Array) + (entity.get("control", []) as Array)
+		"text":
+			return [entity.get("anchor", "")]
+	return []
+
+
+func delete_cascade(picked: Array = selection) -> Dictionary:
+	## Everything deleting `picked` has to take with it, the way the flat app works it out (sketch_controller.dart computeDeleteCascade): a
+	## deleted POINT takes every line, circle, arc, ellipse, spline and text built on it; every constraint that names a deleted point or
+	## entity goes too (the backend refuses to leave one dangling, and refuses to delete a point a constraint still holds); a rectangle, polygon
+	## or slot that loses only some of its pieces is COLLAPSED (it stays as plain lines and constraints) and one that loses all of them is deleted
+	## whole. Returns {entities: {kind: [ids]}, points: [ids], constraints: [ids], collapse: [{kind, id}], remove_shapes: [{kind, id}], extra: String}
+	## where `extra` says what came with the selection ("" when nothing did).
+	var doomed := {} # id -> true: every point and entity going
+	var picked_ids := {}
+	var points_out := {}
+	var entities := {}
+	for kind in ENTITY_ROUTES:
+		entities[kind] = {}
+	for e in picked:
+		var kind := str(e.get("kind", ""))
+		var id := str(e.get("id", ""))
+		picked_ids[id] = true
+		if kind == "point":
+			if not is_origin(id) and points.has(id):
+				points_out[id] = true
+				doomed[id] = true
+		elif entities.has(kind) and _entity_dict(kind).has(id):
+			entities[kind][id] = true
+			doomed[id] = true
+	for kind in entities:
+		var source := _entity_dict(kind)
+		for id in source:
+			if entities[kind].has(id) or reference_ids.has(id):
+				continue
+			for pid in _entity_point_ids(kind, source[id]):
+				if points_out.has(str(pid)):
+					entities[kind][id] = true
+					doomed[id] = true
+					break
+	var touched := points_out.duplicate() # every point that is going or loses something that held it
+	for kind in entities:
+		for id in entities[kind]:
+			for pid in _entity_point_ids(kind, _entity_dict(kind)[id]):
+				touched[str(pid)] = true
+	var collapse: Array = []
+	var remove_shapes: Array = []
+	for sid in shapes:
+		var own: Array = shapes[sid].get("own_point_ids", shapes[sid].get("point_ids", []))
+		var hit := 0
+		for pid in own:
+			if touched.has(str(pid)):
+				hit += 1
+		if hit == 0:
+			continue
+		var entry := {"kind": str(shapes[sid]["kind"]), "id": str(sid)}
+		if hit == own.size():
+			remove_shapes.append(entry)
+		else:
+			collapse.append(entry)
+	var own_radius := {} # a circle's / arc's / ellipse's own size constraint: the backend removes it with the entity
+	for kind in ["circle", "arc"]:
+		for id in entities[kind]:
+			own_radius[str(_entity_dict(kind)[id].get("k", ""))] = true
+	for id in entities["ellipse"]:
+		own_radius[str(ellipses[id].get("km", ""))] = true
+		own_radius[str(ellipses[id].get("kn", ""))] = true
+	var dropped: Array = []
+	for cid in constraints:
+		if own_radius.has(cid):
+			continue
+		var c: Dictionary = constraints[cid]
+		var named := false
+		for key in c:
+			if key == "id" or key == "type":
+				continue
+			var value = c[key]
+			if value is String and doomed.has(value):
+				named = true
+			elif value is Array:
+				for v in value:
+					if v is String and doomed.has(v):
+						named = true
+		if named:
+			dropped.append(str(cid))
+	var out_entities := {}
+	var extra_lines := 0
+	var extra_curves := 0
+	for kind in entities:
+		out_entities[kind] = entities[kind].keys().filter(func(id): return not reference_ids.has(id))
+		for id in out_entities[kind]:
+			if not picked_ids.has(id):
+				if kind == "line":
+					extra_lines += 1
+				else:
+					extra_curves += 1
+	var bits: Array = []
+	if extra_lines > 0:
+		bits.append("%d line%s" % [extra_lines, "" if extra_lines == 1 else "s"])
+	if extra_curves > 0:
+		bits.append("%d curve%s" % [extra_curves, "" if extra_curves == 1 else "s"])
+	if not dropped.is_empty():
+		bits.append("%d constraint%s" % [dropped.size(), "" if dropped.size() == 1 else "s"])
+	return {"entities": out_entities, "points": points_out.keys(), "constraints": dropped, "collapse": collapse, "remove_shapes": remove_shapes,
+		"extra": ("Also removed " + ", ".join(bits) + " that depended on it.") if not bits.is_empty() else ""}
+
+
 func delete_selection() -> Dictionary:
-	## Deletes the selected lines, circles, arcs and points (never the origin). The backend prunes the points nothing uses any more.
-	## There is no undo for it, as in the flat app's Delete: take care with the picks.
+	## Deletes the selected points, lines, circles, arcs, ellipses, splines and texts (never the origin) AND whatever depends on them, as the
+	## flat app does (delete_cascade): the constraints that hold them (a line's Horizontal, a circle's Concentric...), the lines and curves built on a
+	## deleted point, and a rectangle / polygon / slot that is cut about (collapsed to plain lines) or entirely taken (deleted whole). Order matters to
+	## the backend: shapes, then constraints, then entities, then points. The backend prunes the points nothing uses any more. Takes one step back
+	## with Undo only if nothing was deleted (there is no restore for a delete, as in the flat app's Delete): take care with the picks.
 	if busy:
 		return {"ok": false, "message": ""}
-	var paths: Array = []
-	for e in selection:
-		var id := str(e["id"])
-		match str(e["kind"]):
-			"line":
-				paths.append(SKETCH + sketch_id + "/lines/" + id)
-			"circle":
-				paths.append(SKETCH + sketch_id + "/circles/" + id)
-			"arc":
-				paths.append(SKETCH + sketch_id + "/arcs/" + id)
-			"ellipse":
-				paths.append(SKETCH + sketch_id + "/ellipses/" + id)
-			"ellipse_arc":
-				paths.append(SKETCH + sketch_id + "/ellipse-arcs/" + id)
-			"spline":
-				paths.append(SKETCH + sketch_id + "/splines/" + id)
-			"text":
-				paths.append(SKETCH + sketch_id + "/texts/" + id)
-	for e in selection: # points last: deleting a line may already have taken one
-		if str(e["kind"]) == "point" and not is_origin(str(e["id"])):
-			paths.append(SKETCH + sketch_id + "/points/" + str(e["id"]))
-	if paths.is_empty():
-		return {"ok": false, "message": "The origin can't be deleted."}
+	var plan := delete_cascade()
+	var nothing: bool = plan["points"].is_empty() and plan["constraints"].is_empty() and plan["collapse"].is_empty() and plan["remove_shapes"].is_empty()
+	for kind in plan["entities"]:
+		nothing = nothing and (plan["entities"][kind] as Array).is_empty()
+	if nothing:
+		return {"ok": false, "message": "The origin can't be deleted." if not selection.is_empty() else ""}
 	busy = true
 	var failed := ""
-	for path in paths:
-		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, path, null)
+	var shape_ops: Array = []
+	for entry in plan["collapse"]:
+		shape_ops.append(SKETCH + sketch_id + "/" + SHAPE_ROUTES[entry["kind"]] + "/" + str(entry["id"]) + "/collapse")
+	for path in shape_ops:
+		var r: Dictionary = await api.call(HTTPClient.METHOD_POST, path, {})
+		if not r["ok"]:
+			failed = str(r["error"])
+	for entry in plan["remove_shapes"]:
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/" + SHAPE_ROUTES[entry["kind"]] + "/" + str(entry["id"]), null)
+		if not r["ok"]:
+			failed = str(r["error"])
+	if not shape_ops.is_empty() or not (plan["remove_shapes"] as Array).is_empty():
+		await refresh(true) # a deleted shape took its own pieces and constraints with it: plan the rest against what is really left
+		plan = delete_cascade()
+	for cid in plan["constraints"]:
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(cid), null)
+		if not r["ok"] and int(r.get("code", 0)) != 404:
+			failed = str(r["error"])
+	for kind in ENTITY_ROUTES:
+		for id in plan["entities"][kind]:
+			var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/" + ENTITY_ROUTES[kind] + "/" + str(id), null)
+			if not r["ok"]:
+				failed = str(r["error"])
+	var gone := await _refresh_points_only()
+	for pid in plan["points"]: # points last: deleting a line may already have taken one
+		if gone.has(pid) or not points.has(pid):
+			continue
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/points/" + str(pid), null)
 		if not r["ok"]:
 			failed = str(r["error"])
 	selection.clear()
@@ -1424,7 +1590,20 @@ func delete_selection() -> Dictionary:
 		var message := "Couldn't delete everything: %s" % failed
 		status.emit(message)
 		return {"ok": false, "message": message}
+	if str(plan["extra"]) != "":
+		status.emit(str(plan["extra"]))
 	return {"ok": refreshed, "message": ""}
+
+
+func _refresh_points_only() -> Dictionary:
+	## The points the backend has already removed by now (it prunes the ones nothing needs): {id: true}. Reads the sketch afresh.
+	var before := points.duplicate()
+	await refresh(false)
+	var gone := {}
+	for pid in before:
+		if not points.has(pid):
+			gone[pid] = true
+	return gone
 
 
 func toggle_construction() -> Dictionary:
