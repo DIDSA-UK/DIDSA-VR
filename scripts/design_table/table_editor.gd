@@ -583,6 +583,7 @@ func sync_plane_markers() -> void:
 	if origin_axes != null and is_instance_valid(origin_axes):
 		origin_axes.visible = table.build.visibility.is_on(Visibility.ORIGIN_AXES)
 	markers.set_rest_fixed(table.build.visibility.is_on(Visibility.REFERENCE_PLANES))
+	markers.set_fixed_hidden(table.build.visibility.is_hidden_by_user(Visibility.REFERENCE_PLANES))
 	for key in markers._custom.keys():
 		markers.set_rest_custom(key, not table.build.is_hidden(str(key).trim_prefix("plane:")))
 

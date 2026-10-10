@@ -27,6 +27,7 @@ const CUSTOM_COLOUR := Color(1.0, 0.82, 0.30)
 var picking := true
 var _rest_fixed := false
 var _rest_custom := {} ## key -> bool
+var _fixed_hidden := false ## the user switched the reference planes off: not even plane picking draws them (until they are switched on again)
 
 
 func setup(p_extent: float, part_centre: Vector3, scale_m_per_mm: float) -> void:
@@ -73,6 +74,8 @@ func intersect(origin_local: Vector3, dir_local: Vector3) -> Dictionary:
 	var best_t := INF
 	var half := extent * 0.5
 	for name in _plane_names():
+		if not shows(name):
+			continue # a square the user hid cannot be pointed at either
 		var b: Dictionary = _basis_of(name)
 		var denom: float = dir_local.dot(b["n"])
 		if absf(denom) < 0.000001:
@@ -178,6 +181,11 @@ func set_rest_fixed(on: bool) -> void:
 	_apply_visibility()
 
 
+func set_fixed_hidden(hidden: bool) -> void:
+	_fixed_hidden = hidden
+	_apply_visibility()
+
+
 func set_rest_custom(key: String, on: bool) -> void:
 	_rest_custom[key] = on
 	_apply_visibility()
@@ -185,7 +193,8 @@ func set_rest_custom(key: String, on: bool) -> void:
 
 func shows(plane_name: String) -> bool:
 	if picking:
-		return true
+		# Picking shows every square, unless the user hid it on purpose (the reference planes' switch, a made plane's eye).
+		return bool(_rest_custom.get(plane_name, true)) if _custom.has(plane_name) else not _fixed_hidden
 	return bool(_rest_custom.get(plane_name, false)) if _custom.has(plane_name) else _rest_fixed
 
 
