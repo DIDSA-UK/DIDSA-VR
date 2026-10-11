@@ -107,4 +107,13 @@ func _initialize() -> void:
 	print("SMOKE desktop preview (no XR): no crash, honest message: ", not we.passthrough_active and we.passthrough_status().contains("No headset") and not we.is_passthrough_supported())
 	we.set_scene("Light")
 	print("SMOKE ...and the other scenes still apply: ", we.environment.background_color == Color(0.82, 0.85, 0.89))
+	# --- remembered Passthrough at startup waits for the headset's focus (it dropped a Virtual Desktop connection)
+	xr = FakeXR.new()
+	xr.modes = [OP, AL]
+	we = _make(xr)
+	we.apply_saved_scene("Passthrough")
+	print("SMOKE a remembered Passthrough does not touch the runtime before the headset has focus: ", xr.environment_blend_mode == OP and not xr.legacy_on and not we.passthrough_active and we.current_scene == "Passthrough")
+	xr.session_focussed.emit()
+	print("SMOKE ...and turns on when it gains focus: ", we.passthrough_active and xr.environment_blend_mode == AL)
+	we.queue_free()
 	quit()
