@@ -58,6 +58,7 @@ func _initialize() -> void:
 
 	# --- the slider on the tablet's View > Navigate page
 	tab.open_tablet()
+	tab.ui.select_tool("navigate") # the tablet opens on Home; View > Navigate is two taps away
 	for i in 4:
 		await process_frame
 	var slider: HSlider = tab.pages._speed_slider

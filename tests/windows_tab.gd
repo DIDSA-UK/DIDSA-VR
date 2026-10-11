@@ -99,17 +99,13 @@ func _initialize() -> void:
 	tablet.open_tablet()
 	await process_frame
 	await create_timer(0.5).timeout # open_settle_seconds (0.4s): an immediate press is ignored - see tests/section_tab.gd's own identical wait for why
-	var windows_tab: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Windows")
-	print("SMOKE the Windows tab exists on the wrist tablet: ", windows_tab != null)
-	await aim_and_click_tablet(windows_tab)
-	print("SMOKE Windows tab selected: ", tablet.ui.selected_tool_id == "windows")
-
-	var tree_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Assembly Tree")
+	var tree_button: Button = tablet.ui.home_tile("tree")
+	print("SMOKE each window has its own tile on the home screen (tree, calculator, images, browser): ", tree_button != null and tablet.ui.home_tile("calculator") != null and tablet.ui.home_tile("images") != null and tablet.ui.home_tile("browser") != null)
 	await aim_and_click_tablet(tree_button)
-	print("SMOKE Assembly Tree window opens from its Windows-tab button: ", tree_window.is_open())
+	print("SMOKE Assembly Tree window opens from its tile and the tablet stays on Home: ", tree_window.is_open() and tablet.ui.selected_category_id == "")
 	print("SMOKE with no backend configured, its status says so rather than hanging: ", tree_window._status_label.text.begins_with("No assembly"))
 
-	var calc_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Calculator")
+	var calc_button: Button = tablet.ui.home_tile("calculator")
 	await aim_and_click_tablet(calc_button)
 	print("SMOKE Calculator window ALSO opens, while the tree window stays open too: ", calc.is_open() and tree_window.is_open())
 
@@ -122,12 +118,12 @@ func _initialize() -> void:
 	await aim_and_click(calc, calc._viewport, find_button(calc._viewport, func(b: Button) -> bool: return b.text == "="))
 	print("SMOKE the calculator computes 2+2 through a real laser/click sequence: ", calc._display.text == "4")
 
-	var image_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Image Viewer")
+	var image_button: Button = tablet.ui.home_tile("images")
 	await aim_and_click_tablet(image_button)
 	print("SMOKE all three windows can be open at once: ", calc.is_open() and tree_window.is_open() and image_window.is_open())
 	print("SMOKE image viewer's file list populates on open (empty models/ is fine - it's git-ignored and empty by default): ", image_window._list_box.get_child_count() > 0)
 
-	var browser_button: Button = find_button(tablet._viewport, func(b: Button) -> bool: return b.text == "Browser")
+	var browser_button: Button = tablet.ui.home_tile("browser")
 	await aim_and_click_tablet(browser_button)
 	print("SMOKE Browser window ALSO opens, alongside the other three: ", browser_window.is_open() and calc.is_open() and tree_window.is_open() and image_window.is_open())
 	print("SMOKE with no relay configured, its status says so rather than hanging: ", browser_window._status_label.text.begins_with("No browser relay"))

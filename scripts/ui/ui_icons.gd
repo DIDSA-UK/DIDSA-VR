@@ -24,6 +24,15 @@ const _ICONS := {
 	"assembly": '<rect x="6" y="15" width="22" height="22" rx="2"/><rect x="20" y="9" width="22" height="22" rx="2"/>',
 	"windows": '<rect x="5" y="9" width="38" height="30" rx="3"/><path d="M5 19H43"/>',
 	"files": '<path d="M5 13a2 2 0 0 1 2-2H18L23 17H41a2 2 0 0 1 2 2V37a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z"/>',
+	# home screen tiles (new)
+	"design": '<path d="M9 39L11 29L31 9L39 17L19 37Z"/><path d="M27 13L35 21"/><path d="M9 39L19 37"/>',
+	"tree": '<rect x="17" y="6" width="14" height="10" rx="2"/><rect x="5" y="32" width="14" height="10" rx="2"/><rect x="29" y="32" width="14" height="10" rx="2"/><path d="M24 16V24M12 32V24H36V32"/>',
+	"calculator": '<rect x="10" y="5" width="28" height="38" rx="4"/><rect x="15" y="10" width="18" height="8" rx="1"/><path d="M16 26H18M24 26H26M32 26H34M16 33H18M24 33H26M32 33H34M16 39H18M24 39H26"/>',
+	"image": '<rect x="5" y="9" width="38" height="30" rx="3"/><circle cx="16" cy="20" r="4"/><path d="M5 34L17 25L26 32L33 27L43 35"/>',
+	"browser": '<circle cx="24" cy="24" r="18"/><path d="M6 24H42"/><path d="M24 6C16 14 16 34 24 42M24 6C32 14 32 34 24 42"/>',
+	"movement": '<path d="M24 6V42M6 24H42"/><path d="M19 11L24 6L29 11M19 37L24 42L29 37M11 19L6 24L11 29M37 19L42 24L37 29"/>',
+	"comfort": '<path d="M6 19H14L26 9V39L14 29H6Z"/><path d="M32 17A10 10 0 0 1 32 31M37 12A17 17 0 0 1 37 36"/>',
+	"back": '<path d="M30 9L15 24L30 39"/>',
 	# utility cluster
 	"undo": '<path d="M17 11L8 20L17 29"/><path d="M8 20H28a10 10 0 0 1 0 20H20"/>',
 	"redo": '<path d="M31 11L40 20L31 29"/><path d="M40 20H20a10 10 0 0 0 0 20H28"/>',

@@ -190,13 +190,11 @@ func _initialize() -> void:
 	await settle(func() -> bool: return table.seated != seated_before and table.seated != null)
 	print("SMOKE ...and pressing it starts another new part: ", table.seated != seated_before and calls_to("/occurrences").any(func(c): return c[0].begins_with("POST")))
 	var tablet = l.get_node("WristTablet")
-	var table_page: Control = tablet.registry.tool_def("table").build.call()
-	var new_part_button: Button = find_button(table_page, "New part")
-	print("SMOKE the tablet's Table page has a New part button: ", new_part_button != null)
+	print("SMOKE the tablet has no Table page: Design is one tile and New part lives on the table's own tree: ", tablet.registry.tool_def("table") == null and tablet.registry.category("design").is_action())
 	var before_press: Node = table.seated
-	new_part_button.pressed.emit()
+	table.new_part() # what the tree's + calls
 	await settle(func() -> bool: return table.seated != before_press and table.seated != null)
-	print("SMOKE ...that does the same: ", table.seated != before_press)
+	print("SMOKE ...and new_part() starts a part the same way: ", table.seated != before_press)
 
 	fake.mesh_bytes = empty_glb() # (the fake's view of a new, empty assembly again)
 	var files_page: Control = tablet.registry.tool_def("models").build.call()

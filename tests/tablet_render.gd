@@ -2,7 +2,7 @@ extends SceneTree
 ## NEEDS A REAL RENDER, not --headless (Xvfb + llvmpipe, same recipe as
 ## tests/section_render.gd):
 ##   TABLET_RENDER_DIR=/tmp/lab xvfb-run -a "$GODOT" --path . --script res://tests/tablet_render.gd
-## Opens the redesigned tablet in the real scene, goes to Assembly > Mates, and renders it
+## Opens the redesigned tablet in the real scene, goes to Assemble > Mates, and renders it
 ## from where a user's eyes would be, saving PNGs ($TABLET_RENDER_DIR) so the 3D result
 ## — quad, tilt, the angled side list, the hand badge — can be eyeballed. Checks the
 ## panel is actually drawn (not blank) and the side panel appears when Mates is shown.
@@ -32,7 +32,7 @@ func _initialize() -> void:
 	for i in 3:
 		await process_frame
 	tab.open_tablet()
-	tab.ui.select_category("assembly")
+	tab.ui.select_category("assemble")
 	tab.ui.select_tool("mates", true)
 	await create_timer(0.8).timeout # let the open / unfold / fade-in animations finish
 	var dir := OS.get_environment("TABLET_RENDER_DIR")
@@ -45,8 +45,8 @@ func _initialize() -> void:
 			if img.get_pixel(x, y).get_luminance() > 0.05:
 				lit += 1
 	var side_ok: bool = tab._side_open and tab.badge.visible # captured now: opening Settings below closes the side panel
-	# Second shot: the Settings page scrolled to Comfort (Reduce motion, Sound, Volume, Haptics).
-	tab.ui.set_settings_open(true)
+	# Second shot: Settings > Comfort (Reduce motion, Sound, Volume, Haptics).
+	tab.ui.select_tool("set_comfort")
 	await create_timer(0.5).timeout
 	var sound_btn: Button = null
 	for b in tab.ui.find_children("*", "Button", true, false):

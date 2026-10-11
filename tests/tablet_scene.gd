@@ -52,6 +52,12 @@ func find_side_open(file_name: String) -> Button:
 		stack.append_array(n.get_children())
 	return rows[0] if not rows.is_empty() else null
 
+func go_home_laser() -> void:
+	for i in 3:
+		if tab.ui.selected_category_id == "":
+			return
+		await aim_and_click(tab.ui._back_button)
+
 func aim_at_watch() -> void:
 	r.position = Vector3(l.position.x + tab.target_position.x, 1.5, l.position.z + tab.target_position.z)
 	r.rotation_degrees = Vector3(-90, 0, 0)
@@ -111,7 +117,7 @@ func _initialize() -> void:
 	print("SMOKE listed: ", main.list_model_files())
 
 	# Files tab via the tablet
-	await aim_and_click(find_button(func(b): return b.text == "Files"))
+	await aim_and_click(tab.ui.home_tile("files"))
 	var fb := find_side_open("smoke_test.glb")
 	print("SMOKE files tab shows the file (a row with an Open button in the side panel): ", fb != null)
 	await aim_and_click(fb, true)
@@ -122,8 +128,9 @@ func _initialize() -> void:
 	print("SMOKE reloaded: parts=", main._part_count, " children=", main.assembly_root.get_child_count())
 
 	# Fit and Home on View > Scale
-	await aim_and_click(find_button(func(b): return b.text == "View"))
-	await aim_and_click(find_button(func(b): return b.text == "Scale"))
+	await go_home_laser()
+	await aim_and_click(tab.ui.home_tile("view"))
+	await aim_and_click(tab.ui.hub_tile("scale"))
 	await aim_and_click(find_button(func(b): return b.text == "Fit to view"))
 	var box: AABB = th._model_bounds()
 	print("SMOKE after Fit: centre=", box.get_center(), " diag/2=", box.size.length() * 0.5, " ", th.scale_text())
@@ -144,7 +151,8 @@ func _initialize() -> void:
 	# View > Navigate (View is already the active category from the Scale
 	# click above; its own sub-tab row stays reachable regardless of which
 	# of its pages is currently showing)
-	await aim_and_click(find_button(func(b): return b.text == "Navigate"))
+	await aim_and_click(tab.ui._back_button) # up to the View hub
+	await aim_and_click(tab.ui.hub_tile("navigate"))
 	await aim_and_click(find_button(func(b): return b.text.begins_with("User movement")))
 	print("SMOKE  after user-movement click: locomotion=", origin.enabled)
 	await aim_and_click(find_button(func(b): return b.text.begins_with("Model movement")))
@@ -170,9 +178,12 @@ func _initialize() -> void:
 	# Resolution/MSAA, formerly the Perf tab) both live here now
 	print("SMOKE steadiness default: ", th.STEADINESS_NAMES[th.steadiness])
 	await aim_and_click(tab.ui._settings_button)
+	await aim_and_click(tab.ui.hub_tile("set_movement"))
 	await aim_and_click(find_button(func(b): return b.text == "Strong"))
 	print("SMOKE steadiness after clicking Strong: ", th.STEADINESS_NAMES[th.steadiness], " cutoff=", th._left_filter.min_cutoff)
 	await create_timer(0.7).timeout
+	await aim_and_click(tab.ui._back_button) # up to the Settings hub, then its Display page
+	await aim_and_click(tab.ui.hub_tile("set_display"))
 	var light: DirectionalLight3D = main.get_node("DirectionalLight3D")
 	print("SMOKE shadows before: ", light.shadow_enabled)
 	await aim_and_click(find_button(func(b): return b.text.begins_with("Shadows")))
@@ -188,8 +199,9 @@ func _initialize() -> void:
 	# before it could be read — a held error is only worth anything if it
 	# actually survives at least one of those ticks. Nothing is laser-selected
 	# here, so "Clear" hits _apply_colour()'s own no-selection branch.
-	await aim_and_click(find_button(func(b): return b.text == "Assembly"))
-	await aim_and_click(find_button(func(b): return b.text == "Colours"))
+	await go_home_laser()
+	await aim_and_click(tab.ui.home_tile("view"))
+	await aim_and_click(tab.ui.hub_tile("colours"))
 	await aim_and_click(find_button(func(b): return b.text == "Clear colour"))
 	var message_text: String = tab.ui.status_text()
 	print("SMOKE clearing with nothing selected shows the no-selection message: ", message_text.find("laser-select a part first") != -1)
@@ -228,8 +240,8 @@ func _initialize() -> void:
 	# > Colours, from the block above) — View's own sub-tab row (holding the
 	# "Scale" button below) is only reachable once View is the visible
 	# top-level page again.
-	await aim_and_click(find_button(func(b): return b.text == "View"))
-	var scale_tab := find_button(func(b): return b.text == "Scale")
+	await aim_and_click(tab.ui._back_button) # reopened on View > Colours: up to the View hub, whose Scale tile is the aim
+	var scale_tab: Button = tab.ui.hub_tile("scale")
 	aim_at(scale_tab.global_position + scale_tab.size * 0.5, Vector2(tab.viewport_size), tab.panel_size.x, tab._quad)
 	for i in 3:
 		await process_frame

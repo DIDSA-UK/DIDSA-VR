@@ -217,3 +217,22 @@ rendering spike · concept-only tools · third-party icon/audio pipeline.
   the old ones keep guarding the old tablet until it's removed.
 * The keyboard and windows are touched in Phase 3, so their existing tests
   (`popup_keyboard`, `full_keyboard`, `windows_*`, `features_round`) must stay green.
+
+
+## Home screen and tiles (2026-10-11) — BUILT in the UI Lab and the real tablet; headset look not yet seen
+
+John's direction: the tablet opens on a tile **home screen** like a phone, with a smooth flow from idea to the world. Decided in conversation:
+
+| Topic | Decision |
+|---|---|
+| Home | Ten tiles, 5 x 2, no badges on tiles: Design, Assemble, View, Inspect, Files / Tree, Calculator, Images, Browser, Settings. |
+| Windows | Each floating window is its own tile (they feel like separate apps); the old Windows category is gone. Tapping a tile opens the window; Images and Browser open another each press, as before. |
+| Design | One tile, no menu. Table closed: Summon table. Table open: Bring it to me. New part and Edit are on the table itself (the tree's +, each part's Table button, or carry a part over it). `new_part()` opens the table if it is closed. Dismissing the table is the X on its deck. The table's two options (returned-part turn, zoom limit) moved to Settings > Design table. |
+| Level-2 screens | Three kinds, chosen per category in the registry: plain (tool view with a chip strip across the top when it has more than one tool: Inspect), **hub** (a screen of tiles first: View, Settings), **action** (no screen: Design and the window tiles). Flip a category between them with `"hub": true` or an `"action"`. |
+| Navigation | Back climbs one level (tool > hub > Home). The gear in the utility cluster jumps to Settings and, pressed again, goes Home. |
+| Mode tools | Going Home never turns the active mode tool off. The top bar shows a chip (for example "Measure on") that jumps to it. Extra chips: Unsaved (jumps to Files), Table open (brings the table to you). |
+| Where things moved | Colours -> View (a look, not an assembly step); Mates is Assemble's only tool; Measure + Sections -> Inspect; Display (quality) -> Settings > Display, "Display" (shaded / edges / wire) stays in View; the old Settings page is split into six sub-pages. |
+
+Registry additions (`tablet_registry.gd`): `add_category(..., {subtitle, hub, action, caption})` and `ToolDef.caption`; the grid is 5 columns, up to 10 tiles. The design table's deck still uses the same registry with the old four-argument call.
+
+Not done on purpose: a Recent row, pinned/favourite tiles, tile badges, Dismiss on the Design tile.

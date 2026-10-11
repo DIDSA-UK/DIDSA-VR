@@ -103,6 +103,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 		"section_tool": section_tool, "measure_tool": measure_tool, "assembly_tree_window": assembly_tree_window,
 		"calculator_window": calculator_window, "image_viewer_window": image_viewer_window, "browser_window": browser_window, "design_table": design_table,
 		"dragging": func() -> bool: return surface != null and surface.dragging_slider(),
+		"navigate": func(category_id: String) -> void: ui.select_category(category_id),
 	}, tokens, manager)
 	pages.register(registry)
 
@@ -221,7 +222,7 @@ func _build_main_panel(command_stack) -> void:
 	add_child(_viewport)
 	ui = TabletUI.new()
 	ui.size = Vector2(viewport_size)
-	ui.setup(tokens, registry, manager, {"command_stack": command_stack, "settings_builder": pages.settings_page})
+	ui.setup(tokens, registry, manager, {"command_stack": command_stack, "chips": pages.chips})
 	_viewport.add_child(ui)
 	var cursor := LaserSurface.make_cursor()
 	ui.add_child(cursor)

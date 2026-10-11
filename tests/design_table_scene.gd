@@ -108,17 +108,13 @@ func _initialize() -> void:
 	print("SMOKE it is closed and hidden by default: ", not table.is_open() and not table.visible)
 	print("SMOKE it is in the groups controller.gd asks about: ", table.is_in_group("design_tables") and table.is_in_group("diegetic_panels"))
 	var tablet = l.get_node("WristTablet")
-	var def = tablet.registry.tool_def("table")
-	print("SMOKE the tablet has a Table tool in the Assembly category: ", def != null and def.category_id == "assembly" and not def.is_mode())
-	var page: Control = def.build.call()
-	var summon: Button = null
-	for n in page.find_children("*", "Button", true, false):
-		if (n as Button).text == "Summon table":
-			summon = n
-	print("SMOKE the Table page offers Summon table: ", summon != null)
-	summon.pressed.emit()
+	var design = tablet.registry.category("design")
+	print("SMOKE the tablet has a Design tile that acts straight from Home (no page, no menu): ", design != null and design.is_action() and design.tools.is_empty() and tablet.registry.tool_def("table") == null)
+	print("SMOKE ...whose caption offers Summon table while the table is put away: ", design.caption.call() == "Summon table" and tablet.ui.tile_caption("design") == "Summon table")
+	design.action.call()
 	await process_frame
 	print("SMOKE pressing it opens the table: ", table.is_open() and table.visible)
+	print("SMOKE ...and the caption becomes Bring it to me: ", design.caption.call() == "Bring it to me")
 	var ahead: Vector3 = table.global_position - cam.global_position
 	print("SMOKE it opens in front of you, below eye level: ", ahead.z < -0.5 and absf(ahead.x) < 0.1 and ahead.y < -0.3 and ahead.y > -0.6)
 	print("SMOKE ...facing you (its +Z towards the camera) and leaning back a little: ", table.global_transform.basis.z.z > 0.85 and table.global_transform.basis.y.y < 0.97 and table.global_transform.basis.y.y > 0.85)

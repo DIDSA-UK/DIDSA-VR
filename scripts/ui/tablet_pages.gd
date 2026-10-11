@@ -1,6 +1,6 @@
 extends RefCounted
 ## Every page the redesigned tablet shows, and the registration that puts them in
-## the category grid / tool rail (scripts/ui/tablet_registry.gd). Ported from
+## the home-screen tiles / hubs / tool strip (scripts/ui/tablet_registry.gd). Ported from
 ## wrist_tablet.gd's page builders with the same behaviour and the same calls into
 ## main.gd and the tools, restyled through the UI theme (type variations, no
 ## hand-set sizes/colours) and trimmed where the new shell now does the job:
@@ -15,6 +15,7 @@ extends RefCounted
 ##   colour_tool, section_tool, measure_tool, assembly_tree_window,
 ##   calculator_window, image_viewer_window, browser_window,
 ##   dragging: Callable() -> bool  (true while the laser is dragging a slider)
+##   navigate: Callable(category_id)  (opens a category on the tablet: a status chip's tap)
 
 signal toast(text: String, kind: String)
 
@@ -29,10 +30,13 @@ const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "White", "hex": "#f5f5f5"}, {"name": "Black", "hex": "#222222"},
 ]
 const SCENE_ICONS := {"Light": "scene_light", "Dark": "scene_dark", "Mid": "scene_mid", "Passthrough": "scene_passthrough"}
-const ACCENT_VIEW := Color(0.35, 0.78, 0.95)
-const ACCENT_ASSEMBLY := Color(0.95, 0.72, 0.35)
-const ACCENT_WINDOWS := Color(0.72, 0.60, 0.95)
-const ACCENT_FILES := Color(0.50, 0.85, 0.60)
+const ACCENT_DESIGN := Color(1.00, 0.71, 0.33)
+const ACCENT_ASSEMBLY := Color(0.37, 0.76, 1.00)
+const ACCENT_VIEW := Color(0.48, 0.88, 0.69)
+const ACCENT_INSPECT := Color(0.77, 0.55, 1.00)
+const ACCENT_FILES := Color(1.00, 0.82, 0.40)
+const ACCENT_WINDOWS := Color(0.43, 0.66, 1.00)
+const ACCENT_SETTINGS := Color(0.62, 0.70, 0.80)
 
 var tokens: Resource
 var manager
@@ -53,8 +57,8 @@ var _calculator_window: Node
 var _image_viewer_window: Node
 var _browser_window: Node
 var _design_table: Node
-var _table_button: Button
 var _dragging: Callable = Callable()
+var _navigate: Callable = Callable() ## (category_id) -> void: opens a category on the tablet (a status chip's tap)
 
 var _scale_label: Label
 var _lock_button: Button
@@ -98,53 +102,81 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 	_browser_window = ctx.get("browser_window")
 	_design_table = ctx.get("design_table")
 	_dragging = ctx.get("dragging", Callable())
+	_navigate = ctx.get("navigate", func(_category_id: String) -> void: pass)
 
 
 func register(reg) -> void:
-	reg.add_category("view", "View", "view", ACCENT_VIEW)
-	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
-		"help": "Switch model movement, user movement and part manipulation on or off. Travel speed sets how fast the left stick walks you."})
-	reg.add_tool("view", "scale", "Scale", "scale", _build_scale_page, {
-		"help": "Jump to a preset scale about the model's centre. Fit to view brings the whole model in front of you; Home returns it to where it loaded. For an exact value, click the right thumbstick."})
-	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
-		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
-	reg.add_tool("view", "display", "Display", "visibility", _build_display_page, {
-		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
-	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
-		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
-		"hint": "Point at a part and pull the right trigger to hide it.",
-		"help": "Switch the tool on, then point the right laser at a part and pull the trigger to hide it. Undo brings it back."})
-	reg.add_tool("view", "environment", "Environment", "environment", _build_environment_page, {
-		"help": "How the room around the model looks: a rendered backdrop, or step into mixed reality (Passthrough)."})
+	## One category = one tile on the home screen, in the order the tiles appear (5 x 2):
+	## Design | Assemble | View | Inspect | Files   /   Tree | Calculator | Images | Browser | Settings.
+	## Design and the four window tiles are "action" tiles (they act straight from Home);
+	## View and Settings are hubs (a screen of tiles first); the rest open a tool view.
+	reg.add_category("design", "Design", "design", ACCENT_DESIGN, {
+		"subtitle": "sketch · extrude", "action": _on_design_tile, "caption": _design_caption})
 
-	reg.add_category("assembly", "Assembly", "assembly", ACCENT_ASSEMBLY)
-	reg.add_tool("assembly", "mates", "Mates", "mates", _build_mates_page, {
+	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
+	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
-	reg.add_tool("assembly", "colours", "Colours", "colours", _build_colours_page, {
-		"status": _colour_status,
+
+	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
+	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
+		"caption": "hands · speed",
+		"help": "Switch model movement, user movement and part manipulation on or off. Travel speed sets how fast the left stick walks you."})
+	reg.add_tool("view", "scale", "Scale", "scale", _build_scale_page, {
+		"caption": "presets · fit · home",
+		"help": "Jump to a preset scale about the model's centre. Fit to view brings the whole model in front of you; Home returns it to where it loaded. For an exact value, click the right thumbstick."})
+	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
+		"caption": "hide · show · isolate",
+		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
+	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
+		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
+		"caption": "point and hide",
+		"hint": "Point at a part and pull the right trigger to hide it.",
+		"help": "Switch the tool on, then point the right laser at a part and pull the trigger to hide it. Undo brings it back."})
+	reg.add_tool("view", "display", "Display", "eye_shaded", _build_display_page, {
+		"caption": "shaded · edges · wire",
+		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
+	reg.add_tool("view", "colours", "Colours", "colours", _build_colours_page, {
+		"caption": "paint parts", "status": _colour_status,
 		"help": "Laser-select a part first, then tap a swatch. Apply to whole group colours every occurrence sharing its owner. Not undoable: pick another colour or Clear."})
-	reg.add_tool("assembly", "sections", "Sections", "sections", _build_sections_page, {
-		"kind": "mode", "on_activate": _set_sections.bind(true), "on_deactivate": _set_sections.bind(false), "status": _sections_status,
-		"help": "Switch the tool on to place a clip plane in front of you. Grip the plane to move or tilt it, like grabbing a part. Flip swaps the side that stays."})
-	reg.add_tool("assembly", "measure", "Measure", "measure", _build_measure_page, {
+	reg.add_tool("view", "environment", "Environment", "environment", _build_environment_page, {
+		"caption": "scene · passthrough",
+		"help": "How the room around the model looks: a rendered backdrop, or step into mixed reality (Passthrough)."})
+
+	reg.add_category("inspect", "Inspect", "measure", ACCENT_INSPECT, {"subtitle": "measure · sections"})
+	reg.add_tool("inspect", "measure", "Measure", "measure", _build_measure_page, {
 		"kind": "mode", "on_activate": _set_measure.bind(true), "on_deactivate": _set_measure.bind(false),
 		"status": _measure_status, "list": _measure_rows, "list_empty": "No measurements yet.",
 		"help": "Switch the tool on, then pick a vertex, edge or face. A second pick compares the two; a third starts again. Results show beside the tablet."})
+	reg.add_tool("inspect", "sections", "Sections", "sections", _build_sections_page, {
+		"kind": "mode", "on_activate": _set_sections.bind(true), "on_deactivate": _set_sections.bind(false), "status": _sections_status,
+		"help": "Switch the tool on to place a clip plane in front of you. Grip the plane to move or tilt it, like grabbing a part. Flip swaps the side that stays."})
 
-	reg.add_tool("assembly", "table", "Table", "table", _build_table_page, {
-		"status": _table_status,
-		"help": "Summon the design table in front of you. New part starts an empty one to sketch on; or carry a part over it with grip and let go to edit it. Grip the part on the table to move it, both hands to turn and scale it; carry it off the slab and let go to send it back to the arena. Mated parts: Relax all mates first, or they stay steered by their mates."})
-
-	reg.add_category("windows", "Windows", "windows", ACCENT_WINDOWS)
-	reg.add_tool("windows", "windows", "Windows", "windows", _build_windows_page, {
-		"help": "Open floating windows. Each opens in front of you with its own close button, grab handle and resize corners."})
-
-	reg.add_category("files", "Files", "files", ACCENT_FILES)
+	reg.add_category("files", "Files", "files", ACCENT_FILES, {"subtitle": "open · save · new"})
 	reg.add_tool("files", "models", "Models", "models", _build_files_page, {
 		"on_select": _rescan_files, "status": _files_status, "list": _files_rows, "list_empty": "No model files found.",
 		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
+
+	# Each floating window is its own tile: tap to open it (Image Viewer and Browser: tap again for another).
+	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("tree")})
+	reg.add_category("calculator", "Calculator", "calculator", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("calculator")})
+	reg.add_category("images", "Images", "image", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("image")})
+	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("browser")})
+
+	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"subtitle": "set & forget", "hub": true})
+	reg.add_tool("settings", "set_movement", "Movement", "movement", _build_settings_movement, {
+		"caption": "steadiness", "help": "How much a held part or the model is steadied against hand shake."})
+	reg.add_tool("settings", "set_display", "Display", "eye_shaded", _build_settings_display, {
+		"caption": "shadows · resolution · MSAA", "help": "Image quality against speed. Lower the resolution or MSAA if the headset struggles."})
+	reg.add_tool("settings", "set_appearance", "Appearance", "colours", _build_settings_appearance, {
+		"caption": "theme · effects", "help": "The tablet's look. Shader effects can be switched off if they cost too much."})
+	reg.add_tool("settings", "set_comfort", "Comfort", "comfort", _build_settings_comfort, {
+		"caption": "motion · sound · haptics", "help": "Reduce motion, sound and its volume, and how strongly the controllers buzz."})
+	reg.add_tool("settings", "set_folder", "Project folder", "files", _build_settings_folder, {
+		"caption": "where models live", "help": "An extra folder the Files tool scans for models."})
+	reg.add_tool("settings", "set_table", "Design table", "table", _build_settings_table, {
+		"caption": "turn · zoom limits", "help": "How the design table treats a part sent back to the arena, and how far you can zoom a part on it."})
 
 
 func refresh() -> void:
@@ -160,8 +192,6 @@ func refresh() -> void:
 		var labels: Array = _mates_tool.picked_labels()
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
-	if _table_button and _design_table:
-		_table_button.text = "Dismiss table" if _design_table.is_open() else "Summon table"
 	if _new_assembly_button and _new_assembly_armed_until_ms > 0 and Time.get_ticks_msec() > _new_assembly_armed_until_ms:
 		_disarm_new_assembly()
 	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
@@ -774,61 +804,47 @@ static func _fmt_vec_unit(v: Array, unit: String) -> String:
 	return "%s %s" % [", ".join(parts), unit]
 
 
-# --- Table -----------------------------------------------------------------------------
+# --- Design and window tiles ---------------------------------------------------------------
 
-func _build_table_page() -> Control:
-	var page := _page()
+func _on_design_tile() -> void:
+	## One tile, no menu: the table is closed -> summon it; it is open -> bring it to you. New part, Edit and
+	## the rest live on the table itself (its tree's + and each part's Table button, or carry a part over it).
 	if _design_table == null:
-		page.add_child(_hint("The design table isn't available here."))
-		return page
-	_table_button = _button("Dismiss table" if _design_table.is_open() else "Summon table", _toggle_table, &"ButtonAccent")
-	page.add_child(_table_button)
-	page.add_child(_button("Bring it to me", func() -> void:
-		if _design_table.is_open():
-			_design_table.recall()))
-	page.add_child(_button("New part", func() -> void: _design_table.new_part(), &"ButtonAccent"))
-	page.add_child(_hint("New part starts an empty part on the table: pick a reference plane, sketch, extrude. Or carry a part over the table with grip and let go to edit it. Grip the part to move it, both hands to turn and scale it (or one hand with the left stick pressed to turn it with your wrist). If a part is mated, Relax all mates first."))
-	var settings = _main.app_settings() if _main != null else null
-	if settings != null:
-		page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
-			_design_table.keep_turn_on_return = i == 1
-			settings.set_table_keep_turn(i == 1)))
-		var limits := [2.0, 3.0, 5.0, 8.0]
-		var current := limits.find(settings.table_max_scale)
-		page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
-			_design_table.max_scale_setting = limits[i]
-			settings.set_table_max_scale(limits[i])))
-	return page
+		return
+	if _design_table.is_open():
+		_design_table.recall()
+	else:
+		_design_table.open()
 
 
-func _toggle_table() -> void:
-	if _design_table:
-		_design_table.toggle()
-		refresh()
-
-
-func _table_status() -> String:
+func _design_caption() -> String:
 	if _design_table == null:
-		return ""
-	return str(_design_table.status()) if _design_table.is_open() else "The table is put away. Summon it to edit a part."
+		return "sketch · extrude"
+	return "Bring it to me" if _design_table.is_open() else "Summon table"
 
 
-# --- Windows ---------------------------------------------------------------------------
+func _open_window(which: String) -> void:
+	match which:
+		"tree":
+			if _assembly_tree_window:
+				_assembly_tree_window.toggle()
+		"calculator":
+			if _calculator_window:
+				_calculator_window.toggle()
+		"image", "browser":
+			# Several can be open at once: the first press opens one, every further press another.
+			if _main != null:
+				_main.open_window(which)
 
-func _build_windows_page() -> Control:
-	var page := _page()
-	if _assembly_tree_window:
-		page.add_child(_button("Assembly Tree", _assembly_tree_window.toggle))
-	if _calculator_window:
-		page.add_child(_button("Calculator", _calculator_window.toggle))
-	# Image Viewer and Browser: several can be open at once — the button opens one
-	# (the first press) and another with every further press.
-	if _image_viewer_window:
-		page.add_child(_button("Image Viewer", func() -> void: _main.open_window("image")))
-	if _browser_window:
-		page.add_child(_button("Browser", func() -> void: _main.open_window("browser")))
-	page.add_child(_hint("Each window opens in front of you and has its own close button and grab handle. Image Viewer and Browser: press again for another window."))
-	return page
+
+func chips() -> Array:
+	## The status chips along the tablet's top bar, besides the active mode tool (which tablet_ui adds itself).
+	var out: Array = []
+	if _main != null and _main.document_dirty:
+		out.append({"text": "Unsaved", "kind": "warn", "tap": _navigate.bind("files")})
+	if _design_table != null and _design_table.is_open():
+		out.append({"text": "Table open", "kind": "ok", "tap": _design_table.recall})
+	return out
 
 
 # --- Files -------------------------------------------------------------------------------
@@ -924,11 +940,11 @@ func _files_rows() -> Array:
 	return rows
 
 
-# --- Settings (utility cluster) -----------------------------------------------------------
+# --- Settings (the Settings hub's pages) -----------------------------------------------------
 
-func settings_page() -> Control:
+func _build_settings_movement() -> Control:
 	var page := _page(14)
-	page.add_child(_hint("Set-and-forget: steadiness, display quality and where the Files tool looks for models."))
+	page.add_child(_hint("How much hand shake is filtered out of a held part and of moving the whole model."))
 	page.add_child(_choice_row("Steadiness (hold-still shake)", _two_hand.STEADINESS_NAMES, _two_hand.steadiness, func(i: int) -> void:
 		_two_hand.set_steadiness(i) # whole-model moves
 		_left.set_steadiness(i) # a single held part (grip), each hand
@@ -936,7 +952,11 @@ func settings_page() -> Control:
 		if _section_tool:
 			_section_tool.set_steadiness(i) # the section-plane gizmo, grabbed the same way
 	))
-	page.add_child(_hint("Display"))
+	return page
+
+
+func _build_settings_display() -> Control:
+	var page := _page(14)
 	_info_label = _hint("")
 	_info_label.add_theme_color_override("font_color", Color(0.6, 0.95, 1.0))
 	# A FIXED height: the readout gains and loses lines (parts loaded, load summary, wrapping) and
@@ -947,10 +967,18 @@ func settings_page() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
-	page.add_child(_hint("Appearance"))
+	return page
+
+
+func _build_settings_appearance() -> Control:
+	var page := _page(14)
 	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
 	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
-	page.add_child(_hint("Comfort"))
+	return page
+
+
+func _build_settings_comfort() -> Control:
+	var page := _page(14)
 	page.add_child(_mode_toggle("Reduce motion", func(on: bool) -> void: _main.set_reduce_motion(on), _main.reduce_motion()))
 	page.add_child(_mode_toggle("Sound", func(on: bool) -> void: _main.set_sound_enabled(on), _main.sound_enabled()))
 	page.add_child(_build_volume_row())
@@ -958,7 +986,12 @@ func settings_page() -> Control:
 		_main.set_haptics_level(i)
 		UiFeedback.haptic(_right, "confirm") # a sample of the new level
 	))
-	page.add_child(_hint("Project folder"))
+	return page
+
+
+func _build_settings_folder() -> Control:
+	var page := _page(14)
+	page.add_child(_hint("Where the Files tool looks for models, besides res://models and user://models."))
 	_project_folder_label = Label.new()
 	_project_folder_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	page.add_child(_project_folder_label)
@@ -970,6 +1003,23 @@ func settings_page() -> Control:
 		_main.set_project_folder("")
 		_refresh_project_folder_label()
 	))
+	return page
+
+
+func _build_settings_table() -> Control:
+	var page := _page(14)
+	if _design_table == null or _main == null or _main.app_settings() == null:
+		page.add_child(_hint("The design table isn't available here."))
+		return page
+	var settings = _main.app_settings()
+	page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
+		_design_table.keep_turn_on_return = i == 1
+		settings.set_table_keep_turn(i == 1)))
+	var limits := [2.0, 3.0, 5.0, 8.0]
+	var current := limits.find(settings.table_max_scale)
+	page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
+		_design_table.max_scale_setting = limits[i]
+		settings.set_table_max_scale(limits[i])))
 	return page
 
 
