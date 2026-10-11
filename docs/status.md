@@ -2718,3 +2718,10 @@ Backend (DIDSA-CAD `ccr-b3b16f97-0i1850`) and VR and flat app, one pass.
   "Ref. planes" off (or a made plane's eye) changed nothing until a sketch was opened. Now a square the user hid ON PURPOSE (switch moved off, Hide all, a made plane's eye) is
   not drawn while picking either, and cannot be pointed at; a switch never touched still shows the squares in picking (the load default is "off", and a new part needs them to
   sketch on). `visibility.gd is_hidden_by_user`, `plane_markers.gd set_fixed_hidden`. Not seen in a headset.
+
+### 2026-10-11 — Wrist tablet: home screen of tiles
+
+* The tablet now opens on a **home screen** of ten tiles (5 x 2); see "Home screen and tiles" in `docs/wrist-tablet-redesign-plan.md` for the decisions. `tablet_ui.gd` has three screens (home / hub / tool view), a Back button, live status chips and a chip strip in place of the left rail; `tablet_registry.gd` categories gained `subtitle`, `hub`, `action` and `caption`; `tablet_pages.gd` registers the new layout, drops the Windows and Table pages (windows are tiles, Design is an action) and splits the Settings page into six sub-pages.
+* New icons: design, tree, calculator, image, browser, movement, comfort, back (`ui_icons.gd`).
+* Tests ported to the new navigation (`tablet`, `tablet_scene`, `tools_tab`, `section_tab`, `windows_tab`, `tablet_registry`, `tablet_render`, `ui_lab_render`); `tablet_ui.gd` has small accessors for tests (`home_tile`, `hub_tile`, `strip_button`, `tile_caption`, `chip_texts`). UI Lab: `lab/ui_lab.tscn` mirrors the real tile layout with stub pages and a "Go Home" button.
+* Not seen in a headset: tile size and text legibility at arm's length, and the top bar's width with three chips.

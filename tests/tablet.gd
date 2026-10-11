@@ -1,6 +1,6 @@
 extends SceneTree
 ## Full-scene test for the wrist tablet (scripts/ui/wrist_tablet.gd): main.tscn with NO backend, a simulated right laser. Covers opening
-## by shooting the wrist icon, the category grid and tool rail, the one-active-tool rule and
+## by shooting the wrist icon, the home tiles, hubs and tool strip, the one-active-tool rule and
 ## its hand badge (also with the tablet closed), the header switch, status line, the
 ## contextual side panel (mates list / model files / undo history) reached by a real laser
 ## aimed at the angled panel, Undo/Redo and the Undo long-press, Scale / Navigate / Settings
@@ -73,6 +73,26 @@ func aim_side_and_click(b: Button) -> void:
 		await process_frame
 	await click_now()
 
+func go_home_by_laser() -> void:
+	# Back is one step up: from a tool inside a hub it lands on the hub, then Home.
+	for i in 3:
+		if tab.ui.selected_category_id == "":
+			return
+		await aim_and_click(tab.ui._back_button)
+
+func open_category(category_id: String) -> void:
+	await go_home_by_laser()
+	await aim_and_click(tab.ui.home_tile(category_id))
+
+func open_tool(category_id: String, tool_id: String) -> void:
+	# Home tile -> (hub tile | strip chip), the way a person gets there.
+	await open_category(category_id)
+	var cat = tab.registry.category(category_id)
+	if cat.hub:
+		await aim_and_click(tab.ui.hub_tile(tool_id))
+	elif tab.ui.selected_tool_id != tool_id:
+		await aim_and_click(tab.ui.strip_button(tool_id))
+
 func _initialize() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
@@ -120,34 +140,37 @@ func _initialize() -> void:
 	print("SMOKE an immediate second pull is ignored (settle window): ", modes_before == [th.enabled, origin.enabled, l.parts_enabled] and not tab.surface.pressed)
 	await create_timer(0.5).timeout
 
-	# --- layout: 4 categories, one row; View selected with its first tool
+	# --- layout: the home screen, ten tiles in 5 x 2
 	var ui = tab.ui
-	print("SMOKE four categories sit in ONE row (no empty slots drawn): ", ui._cat_grid.get_child_count() == 4 and ui._cat_grid.columns == 4 and tab.registry.category_rows() == 1)
-	print("SMOKE View > Navigate is showing first: ", ui.selected_category_id == "view" and ui.selected_tool_id == "navigate")
+	print("SMOKE ten home tiles sit in a 5 x 2 grid: ", ui._home_grid.get_child_count() == 10 and ui._home_grid.columns == 5 and tab.registry.category_rows() == 2)
+	print("SMOKE the tablet opens on the home screen, no tool selected: ", ui.selected_category_id == "" and ui._home_view.visible and not ui._tool_view.visible and not ui._back_button.visible)
+	print("SMOKE the tiles are the categories, in order, with no windows page: ", tab.registry.categories().map(func(c): return c.id) == ["design", "assemble", "view", "inspect", "files", "tree", "calculator", "images", "browser", "settings"])
 	print("SMOKE the tablet is 0.40 x 0.26 m at the same text density as before: ", tab.panel_size == Vector2(0.40, 0.26) and absf(tab.viewport_size.x / tab.panel_size.x - 2667.0) < 2.0)
 	print("SMOKE no side panel for a tool with no list: ", not tab._side_open and not tab._side_pivot.visible)
 
 	# --- laser claims the tablet
-	await aim_and_click(find_button(func(b): return b.text == "Scale"))
+	await open_tool("view", "scale")
+	print("SMOKE View is a hub: its tiles show first, Scale opens from its tile: ", ui.selected_category_id == "view" and not ui.hub_open and ui._back_button.visible)
 	print("SMOKE aiming at a tablet button claims the laser (ui_hover) and shortens it: ", r.get_meta("ui_hover") == true and float(r.get_meta("ui_hit_distance")) > 0.3 and float(r.get_meta("ui_hit_distance")) < 0.7)
-	print("SMOKE the Scale rail button selected Scale: ", ui.selected_tool_id == "scale")
+	print("SMOKE the Scale tile selected Scale: ", ui.selected_tool_id == "scale")
 	await aim_and_click(find_button(func(b): return b.text == "2:1"))
 	print("SMOKE 2:1 -> ", th.scale_text(), " | ", th.scale_text().contains("2"))
 	await aim_and_click(find_button(func(b): return b.text == "Home"))
 	print("SMOKE Home on a tablet with nothing loaded does nothing bad and the tablet stays open: ", tab._open and ui.selected_tool_id == "scale")
 
 	# --- Navigate toggles
-	await aim_and_click(find_button(func(b): return b.text == "Navigate"))
+	await open_tool("view", "navigate")
 	await aim_and_click(find_button(func(b): return b.text.begins_with("User movement")))
 	print("SMOKE Navigate > User movement toggles locomotion off: ", origin.enabled == false)
 	await aim_and_click(find_button(func(b): return b.text.begins_with("User movement")))
 	print("SMOKE ...and back on: ", origin.enabled == true)
 
 	# --- one active tool at a time
-	await aim_and_click(find_button(func(b): return b.text == "Assembly"))
-	print("SMOKE switching category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assembly" and tab.manager.active_id == "" and not r.mates_tool_active)
-	await aim_and_click(find_button(func(b): return b.text == "Mates"))
-	print("SMOKE tapping Mates on the rail turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
+	await open_category("assemble")
+	print("SMOKE opening a category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assemble" and ui.selected_tool_id == "mates" and tab.manager.active_id == "" and not r.mates_tool_active)
+	print("SMOKE a category with one tool shows no chip strip: ", not ui._strip_scroll.visible)
+	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
+	print("SMOKE the header switch turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)
 	print("SMOKE the right hand shows the badge for Mates: ", tab.badge.visible and tab.badge.shown_tool_id() == "mates" and tab.badge._label.text == "Mates")
 	print("SMOKE the Mates list opens the side panel (angled, beside the tablet): ", tab._side_open and tab._side_pivot.visible and tab.side_ui._title.text == "Mates")
@@ -162,13 +185,16 @@ func _initialize() -> void:
 	var toward_user: float = rad_to_deg(asin(clampf(side_x.dot(tq.basis.z.normalized()), -1.0, 1.0)))
 	print("SMOKE ...the outward turn measured against the tablet face is ~5 degrees: ", absf(toward_user - 5.0) < 0.5, " (", toward_user, ")")
 	print("SMOKE the status bar shows the Mates tool's own status: ", ui.status_text().contains("Pick a face"))
-	await aim_and_click(find_button(func(b): return b.text == "Measure"))
-	print("SMOKE tapping Measure turns Measure ON and Mates OFF: ", tab.manager.active_id == "measure" and r.measure_tool_active and not r.mates_tool_active and not main._mates_tool.active and main._measure_tool.active)
+	await open_tool("inspect", "measure")
+	print("SMOKE Inspect has a two-chip strip (Measure, Sections): ", ui._strip_scroll.visible and ui._strip_buttons.size() == 2)
+	print("SMOKE going Home and into another category leaves Mates on, and the top bar says so: ", tab.manager.active_id == "mates" and ui.chip_texts().any(func(t): return t.contains("Mates on")))
+	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
+	print("SMOKE switching Measure on turns Measure ON and Mates OFF: ", tab.manager.active_id == "measure" and r.measure_tool_active and not r.mates_tool_active and not main._mates_tool.active and main._measure_tool.active)
 	print("SMOKE ...only one mode tool is ever on: ", [r.mates_tool_active, r.measure_tool_active, r.hide_tool_active, main._section_tool.active].count(true) == 1)
-	await aim_and_click(find_button(func(b): return b.text == "Colours"))
+	await open_tool("view", "colours")
 	print("SMOKE viewing a page tool (Colours) leaves Measure on: ", tab.manager.active_id == "measure" and ui.selected_tool_id == "colours")
 	print("SMOKE ...and Colours' status line reports the selection: ", ui.status_text().contains("Selected"))
-	await aim_and_click(find_button(func(b): return b.text == "Sections"))
+	await open_tool("inspect", "sections")
 	print("SMOKE Sections is a mode tool too: it replaces Measure: ", tab.manager.active_id == "sections" and main._section_tool.active and not r.measure_tool_active)
 
 	# --- close with a tool active: the tool and its badge survive
@@ -186,17 +212,16 @@ func _initialize() -> void:
 		await process_frame
 	await click_now()
 	await create_timer(0.5).timeout
-	print("SMOKE shooting the icon reopens it, still on Assembly > Sections: ", tab._open and ui.selected_tool_id == "sections")
-	await aim_and_click(find_button(func(b): return b.text == "Sections"))
-	print("SMOKE tapping the selected, active tool turns it OFF: ", tab.manager.active_id == "" and not main._section_tool.active and not tab.badge.visible)
-	await aim_and_click(find_button(func(b): return b.text == "View"))
-	await aim_and_click(find_button(func(b): return b.text == "Shoot hide"))
-	print("SMOKE View > Shoot hide is a mode tool in the View category: ", tab.manager.active_id == "shoot_hide" and l.hide_tool_active and r.hide_tool_active)
-	await aim_and_click(find_button(func(b): return b.text == "Assembly"))
-	await aim_and_click(find_button(func(b): return b.text == "Mates"))
+	print("SMOKE shooting the icon reopens it, still on Inspect > Sections: ", tab._open and ui.selected_tool_id == "sections")
+	await aim_and_click(ui.strip_button("sections"))
+	print("SMOKE tapping the selected, active chip turns it OFF: ", tab.manager.active_id == "" and not main._section_tool.active and not tab.badge.visible)
+	await open_tool("view", "shoot_hide")
+	print("SMOKE View > Shoot hide is a mode tool in the View category (its hub tile turns it on): ", tab.manager.active_id == "shoot_hide" and l.hide_tool_active and r.hide_tool_active)
+	await open_category("assemble")
+	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE Mates replaces Shoot hide across categories: ", tab.manager.active_id == "mates" and not r.hide_tool_active and r.mates_tool_active)
-	await aim_and_click(find_button(func(b): return b.text == "Mates"))
-	print("SMOKE ...and tapping it again switches everything off: ", tab.manager.active_id == "" and not r.mates_tool_active and not tab.badge.visible)
+	await aim_and_click(find_button(func(b): return b.text == "Tool: ON"))
+	print("SMOKE ...and the switch again turns everything off: ", tab.manager.active_id == "" and not r.mates_tool_active and not tab.badge.visible)
 
 	# --- help card
 	await aim_and_click(find_button(func(b): return b.icon != null and b.custom_minimum_size == Vector2(52, 52)))
@@ -209,7 +234,7 @@ func _initialize() -> void:
 	gd.append_from_scene(scene, gs)
 	DirAccess.make_dir_recursive_absolute("user://models")
 	gd.write_to_filesystem(gs, "user://models/v2_test.glb")
-	await aim_and_click(find_button(func(b): return b.text == "Files"))
+	await open_category("files")
 	for i in 3:
 		await process_frame
 	print("SMOKE Files shows the model list in the side panel: ", tab._side_open and tab.side_ui._title.text == "Models" and tab.side_ui.row_count() >= 1)
@@ -236,18 +261,21 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE a long press on Undo opens History and does NOT also undo: ", ui.history_open and tab._side_open and main.command_stack.redo_labels().size() == stack_before)
 	print("SMOKE History lists what Redo would bring back: ", tab.side_ui._title.text == "History" and tab.side_ui.row_count() == 1)
-	await aim_and_click(find_button(func(b): return b.text == "View"))
-	print("SMOKE picking a category closes History: ", not ui.history_open)
+	await aim_and_click(ui._back_button)
+	print("SMOKE going Home closes History: ", not ui.history_open and ui.selected_category_id == "")
 
 	# --- Settings
 	await aim_and_click(ui._settings_button)
-	print("SMOKE Settings opens in the pane, rail hidden, no side panel: ", ui.settings_open and not ui._rail_scroll.visible and not tab._side_open)
+	print("SMOKE the gear opens the Settings hub, no side panel: ", ui.selected_category_id == "settings" and ui.hub_open and not tab._side_open and ui._settings_button.button_pressed)
+	await aim_and_click(ui.hub_tile("set_movement"))
 	await click_text(func(b): return b.text == "Strong")
 	print("SMOKE Settings > Steadiness Strong applies (whole-model and both hands): ", th.steadiness == 3)
+	await open_tool("settings", "set_display")
 	await click_text(func(b): return b.text == "65%")
 	print("SMOKE Settings > Resolution 65% applies: ", is_equal_approx(main.get_viewport().scaling_3d_scale, 0.65))
 	var Fb = load("res://scripts/ui/ui_feedback.gd")
 	var sound_was: bool = main.sound_enabled()
+	await open_tool("settings", "set_comfort")
 	print("SMOKE Settings > Comfort has a Sound toggle (default ON): ", find_button(func(b): return b.text == "Sound: ON") != null)
 	ui.pages_scroll.ensure_control_visible(find_button(func(b): return b.text.begins_with("Sound:"))) # the Comfort section sits below the fold: scroll to it, as the right thumbstick would
 	await process_frame
@@ -267,6 +295,7 @@ func _initialize() -> void:
 	main.set_sound_enabled(sound_was)
 
 	# --- Settings > Appearance: themes and shader effects, re-themed live and in place
+	await open_tool("settings", "set_appearance")
 	var Themes = load("res://scripts/ui/ui_themes.gd")
 	var navy_bg: Color = Themes.preset("Navy").bg_panel
 	var dark_bg: Color = Themes.preset("Dark").bg_panel
@@ -281,7 +310,7 @@ func _initialize() -> void:
 	print("SMOKE picking Dark applies it everywhere (shared theme, saved choice): ", Themes.current == "Dark" and main.ui_theme() == "Dark" and Themes.live().bg_panel == dark_bg)
 	print("SMOKE the open tablet re-themed itself in place (its panel is now the Dark colour): ", (tab.ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
 	print("SMOKE ...and the side panel too: ", (tab.side_ui.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
-	print("SMOKE ...without rebuilding anything: same tool, still on Settings, same scroll position: ", tab.ui.selected_tool_id == tool_before and tab.ui.settings_open and absf(tab.ui.pages_scroll.scroll_vertical - pane_before) < 2.0)
+	print("SMOKE ...without rebuilding anything: same tool, still on Settings, same scroll position: ", tab.ui.selected_tool_id == tool_before and tab.ui.selected_category_id == "settings" and absf(tab.ui.pages_scroll.scroll_vertical - pane_before) < 2.0)
 	print("SMOKE a floating window and the keyboard that were closed pick up the theme too: ", (calc._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg and (kb_node._ui_root.theme.get_stylebox("panel", "PanelContainer") as StyleBoxFlat).bg_color == dark_bg)
 	print("SMOKE the window's resize brackets and handle follow the theme's accent: ", calc._corner_hot == Themes.live().accent)
 	print("SMOKE the wrist watch and the hand rings take the theme too (accent ring, panel-coloured face): ", tab._watch_ring.albedo_color.is_equal_approx(Themes.live().accent.darkened(0.1)) and r._ring_material.albedo_color.is_equal_approx(Color(Themes.live().accent.r, Themes.live().accent.g, Themes.live().accent.b, r._ring_material.albedo_color.a)) and l._ring_face_material.albedo_color.r == Themes.live().bg_panel.r)
@@ -307,13 +336,13 @@ func _initialize() -> void:
 	main.set_ui_theme("Navy")
 	main.set_fx_enabled(true) # leave the saved settings as we found them
 	await aim_and_click(ui._settings_button)
-	print("SMOKE the Settings button again returns to the tools: ", not ui.settings_open and ui._rail_scroll.visible)
+	print("SMOKE the gear again returns Home: ", ui.selected_category_id == "" and ui._home_view.visible and not ui._settings_button.button_pressed)
 
 	# --- idle render gating: only re-render every frame while something is happening
 	r.position = Vector3(2.0, 1.5, 2.0)
 	await create_timer(1.5).timeout
 	print("SMOKE an idle open tablet is not re-rendered every frame: ", tab._viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS)
-	await aim_only(find_button(func(b): return b.text == "View"))
+	await aim_only(ui.home_tile("view"))
 	print("SMOKE aiming the laser at it renders every frame again: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
 	r.position = Vector3(2.0, 1.5, 2.0)
 	await create_timer(1.5).timeout
@@ -323,6 +352,7 @@ func _initialize() -> void:
 	var cues := []
 	ui.feedback.connect(func(e: String) -> void: cues.append(e))
 	ui.toast("Couldn't do the thing", "error")
+	ui.tick(0.016) # the status line takes a toast on the next tick (on Home there is no tool text for it to replace)
 	print("SMOKE an error toast shows in the status bar, pulses it, and asks for an error haptic: ", ui.status_text() != "" and ui._status_panel.self_modulate != Color.WHITE and cues == ["error"])
 	ui.tick(0.016)
 	print("SMOKE ...the status bar says what went wrong: ", ui.status_text().contains("Couldn't do the thing"))

@@ -77,11 +77,11 @@ func _initialize() -> void:
 	reloaded.load_from_disk()
 	print("SMOKE the zoom limit and the send-back choice persist (clamped to 1.5-8x): ", is_equal_approx(reloaded.table_max_scale, 3.0) and reloaded.table_keep_turn == settings.table_keep_turn)
 
-	# --- the page on the tablet
+	# --- the page on the tablet (Settings > Design table)
 	var tablet = l.get_node("WristTablet")
-	var page: Control = tablet.registry.tool_def("table").build.call()
+	var page: Control = tablet.registry.tool_def("set_table").build.call()
 	var choices: Array = page.find_children("*", "Button", true, false).map(func(b): return (b as Button).text)
-	print("SMOKE the tablet's Table page offers the send-back choice and the zoom limit: ", choices.has("Original turn") and choices.has("As turned") and choices.has("2x") and choices.has("8x"))
+	print("SMOKE the tablet's Settings > Design table page offers the send-back choice and the zoom limit: ", choices.has("Original turn") and choices.has("As turned") and choices.has("2x") and choices.has("8x"))
 	for b in page.find_children("*", "Button", true, false):
 		if (b as Button).text == "As turned":
 			(b as Button).pressed.emit()

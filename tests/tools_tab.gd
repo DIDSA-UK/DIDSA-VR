@@ -82,8 +82,8 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE loaded parts: ", main._part_count)
 
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "View"))
-	var visibility_tab := find_button(func(b: Button) -> bool: return b.text == "Visibility")
+	await aim_and_click(tab.ui.home_tile("view"))
+	var visibility_tab: Button = tab.ui.hub_tile("visibility") # View is a hub: its tiles come first
 	await aim_and_click(visibility_tab)
 	print("SMOKE View > Visibility opens: ", tab.ui.selected_tool_id == "visibility")
 
@@ -124,8 +124,9 @@ func _initialize() -> void:
 
 	# shoot-to-hide: toggle the tool on, aim at a part, pull the trigger
 	stack.clear()
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Shoot hide"))
-	print("SMOKE shoot-to-hide toggled on both hands (selecting it on the rail turns it on): ", l.hide_tool_active and r.hide_tool_active and tab.manager.active_id == "shoot_hide")
+	await aim_and_click(tab.ui._back_button) # up to the View hub, then its Shoot hide tile
+	await aim_and_click(tab.ui.hub_tile("shoot_hide"))
+	print("SMOKE shoot-to-hide toggled on both hands (its hub tile turns it on): ", l.hide_tool_active and r.hide_tool_active and tab.manager.active_id == "shoot_hide")
 	r.position = parts[2].global_position + Vector3(0, 0, 2)
 	r.look_at(parts[2].global_position, Vector3.UP)
 	await physics_frame; await physics_frame

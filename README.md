@@ -175,10 +175,14 @@ live-synced.
    With no `secrets.cfg` the app now starts anyway, ready for a local file.
    **The wrist tablet** (`scripts/ui/wrist_tablet.gd`, plan in
    `docs/wrist-tablet-redesign-plan.md`). Same wrist icon, same "shoot it to open, never
-   opens by itself", right-hand laser only. A 0.40 x 0.26 m panel laid out like the sketch:
-   a **category grid** top-left (View, Assembly, Windows, Files; up to 8 in 4 x 2, a second
-   row appears from the 5th), **Undo / Redo / Settings / Close** top-right, a **tool rail**
-   down the left, the tool's controls in the middle under a header (name, **Tool: ON/off**
+   opens by itself", right-hand laser only. A 0.40 x 0.26 m panel with a phone-style **home
+   screen** of ten tiles (5 x 2): **Design** (summons the design table, or brings it to you if it is open),
+   **Assemble** (Mates), **View** (a screen of tiles: Navigate, Scale, Visibility, Shoot hide, Display,
+   Colours, Environment), **Inspect** (Measure, Sections, as a chip strip), **Files**, one tile each for the
+   **Tree**, **Calculator**, **Images** and **Browser** windows, and **Settings** (a screen of sub-tiles:
+   Movement, Display, Appearance, Comfort, Project folder, Design table). **Back** climbs one level; the top bar always
+   carries status chips (what tool is on, Unsaved, Table open) and **Undo / Redo / Settings / Close**.
+   A tool's controls sit under a header (name, **Tool: ON/off**
    switch for tools that change what the laser does, **?** help card) and a one-line
    **status bar** at the bottom. A **side panel** angled beside it lists what the tool has
    a list of: existing mates (Delete asks "Sure?" first), measurement results, model files

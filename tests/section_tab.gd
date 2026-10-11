@@ -82,12 +82,12 @@ func _initialize() -> void:
 	print("SMOKE loaded parts: ", main._part_count)
 	var parts: Array = main.get_tree().get_nodes_in_group("grabbable_parts")
 
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Assembly"))
+	await aim_and_click(tab.ui.home_tile("inspect"))
 	print("SMOKE section tool starts off: ", main._section_tool.active == false)
 
 	# selecting Sections on the rail turns the tool on: spawns a gizmo, no parts wrapped yet until the next process frame's reconcile()
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Sections"))
-	print("SMOKE Assembly > Sections opens: ", tab.ui.selected_tool_id == "sections")
+	await aim_and_click(tab.ui.strip_button("sections"))
+	print("SMOKE Inspect > Sections opens: ", tab.ui.selected_tool_id == "sections")
 	print("SMOKE section tool active after toggling on: ", main._section_tool.active == true)
 	print("SMOKE toggling on spawns a gizmo: ", main._section_tool.gizmo() != null)
 	for i in 3:
@@ -136,7 +136,7 @@ func _initialize() -> void:
 	print("SMOKE flip toggles: ", main._section_tool.flipped == true)
 
 	# tapping the active Sections tool again turns it off: restores every part's real material and drops the gizmo
-	await aim_and_click(find_button(func(b: Button) -> bool: return b.text == "Sections"))
+	await aim_and_click(tab.ui.strip_button("sections"))
 	print("SMOKE section tool off: gizmo dropped: ", main._section_tool.gizmo() == null)
 	print("SMOKE every part's material_override is restored (none were ever colour_tool-overridden): ", parts.all(func(p: MeshInstance3D) -> bool: return p.material_override == null))
 

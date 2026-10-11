@@ -4,7 +4,7 @@ extends SceneTree
 ##   UI_LAB_DIR=/tmp/lab xvfb-run -a "$GODOT" --path . --script res://tests/ui_lab_render.gd
 ## Loads the UI Lab (res://lab/ui_lab.tscn: the real tablet shell + side panel over
 ## stub tools), renders it, saves PNGs to $UI_LAB_DIR (default: none) for eyeballing
-## — the default view, then 8 categories with History open — and checks the look's
+## — the default view, the View hub, Inspect's chip strip and History — and checks the look's
 ## own claims: selected controls are drawn differently from resting ones, a disabled
 ## one is darker, the panel is the theme's panel colour.
 ## Like look_render.gd the sandbox renders through GL compatibility, not the
@@ -41,27 +41,53 @@ func _initialize() -> void:
 	var img := await _shot("ui_lab.png")
 	var tokens: Resource = lab.tokens
 	var tablet = lab.tablet
-	var view_btn: Button = _find(tablet, func(n): return n is Button and n.text == "View")
-	var files_btn: Button = _find(tablet, func(n): return n is Button and n.text == "Files")
+	var design_tile: Button = tablet.home_tile("design")
+	var view_tile: Button = tablet.home_tile("view")
 	var undo_dis: Button = _find(tablet, func(n): return n is Button and n.disabled)
 	print("SMOKE the lab built the real shell from the theme resource: ", tokens != null and lab.theme != null and tablet != null)
-	print("SMOKE the first category (View) is selected: ", view_btn.button_pressed and not files_btn.button_pressed)
-	var p_on := img.get_pixelv(Vector2i(view_btn.get_global_rect().position) + Vector2i(6, 6))
-	var p_off := img.get_pixelv(Vector2i(files_btn.get_global_rect().position) + Vector2i(6, 6))
-	print("SMOKE ...and drawn differently from a resting one: ", not p_on.is_equal_approx(p_off))
-	print("SMOKE the redo button starts disabled and darker than an enabled button: ", undo_dis != null and _luma(img.get_pixelv(Vector2i(undo_dis.get_global_rect().position) + Vector2i(6, 6))) < _luma(p_off) + 0.001)
+	print("SMOKE the lab opens on the home screen: ", tablet.selected_category_id == "" and tablet._home_view.visible and not tablet._back_button.visible)
+	print("SMOKE ten tiles in a 5 x 2 grid: ", tablet._home_grid.get_child_count() == 10 and tablet._home_grid.columns == 5)
+	var p_tile := img.get_pixelv(Vector2i(view_tile.get_global_rect().position) + Vector2i(40, 40))
+	var p_panel := img.get_pixelv(Vector2i(30, 30))
+	print("SMOKE ...tiles are drawn (a tile's inside differs from the panel's): ", not p_tile.is_equal_approx(p_panel))
+	print("SMOKE the redo button starts disabled: ", undo_dis != null)
 	var panel_px := img.get_pixelv(Vector2i(30, 30))
 	print("SMOKE the tablet panel is the theme's panel colour: ", absf(panel_px.r - tokens.bg_panel.r) < 0.03 and absf(panel_px.b - tokens.bg_panel.b) < 0.03)
-	print("SMOKE no side panel while the viewed tool has no list: ", not lab.side.visible)
-
-	# Assembly > Mates (mode tool with a list) via the real rail button path.
-	var assembly: Button = _find(tablet, func(n): return n is Button and n.text == "Assembly")
-	assembly.pressed.emit()
+	print("SMOKE no side panel on the home screen: ", not lab.side.visible)
+	print("SMOKE the Design tile says what it will do (Summon table), then Bring it to me once the table is open: ", tablet.tile_caption("design") == "Summon table")
+	design_tile.pressed.emit()
 	await process_frame
+	print("SMOKE ...tapping it acts straight from Home and the caption follows: ", lab._table_open and tablet.selected_category_id == "" and tablet.tile_caption("design") == "Bring it to me")
+
+	# View is a hub: its tiles come first.
+	view_tile.pressed.emit()
+	await process_frame
+	await _shot("ui_lab_view_hub.png")
+	print("SMOKE View opens a screen of tiles, one per tool: ", tablet.hub_open and tablet._hub_view.visible and tablet._hub_grid.get_child_count() == 7)
+	tablet.hub_tile("scale").pressed.emit()
+	await process_frame
+	print("SMOKE a hub tile opens its tool, Back returns to the hub, Back again to Home: ", tablet.selected_tool_id == "scale" and not tablet.hub_open)
+	tablet.go_back()
+	print("SMOKE ...(hub)", tablet.hub_open)
+	tablet.go_back()
+	print("SMOKE ...(home)", tablet.selected_category_id == "")
+
+	# Assemble > Mates (mode tool with a list) via the real tile / header path.
+	tablet.home_tile("assemble").pressed.emit()
+	await process_frame
+	print("SMOKE a category with one tool shows no chip strip: ", not tablet._strip_scroll.visible)
 	tablet.select_tool("mates", true)
 	await process_frame
 	await process_frame
 	print("SMOKE selecting a mode tool turns it on and shows the side list: ", lab.manager.active_id == "mates" and lab.side.visible and lab.side.row_count() == 2)
+	tablet.go_home()
+	await process_frame
+	print("SMOKE going Home leaves the tool on and the top bar says so: ", lab.manager.active_id == "mates" and tablet.chip_texts().any(func(t): return t.contains("Mates on")) and not lab.side.visible)
+	tablet.home_tile("inspect").pressed.emit()
+	await process_frame
+	print("SMOKE Inspect (two tools) shows a chip strip: ", tablet._strip_scroll.visible and tablet._strip_buttons.size() == 2)
+	await _shot("ui_lab_inspect_strip.png")
+	tablet.go_home()
 
 	# Themes x effects: render each, check the shader and the themes are really visible.
 	var Themes = load("res://scripts/ui/ui_themes.gd")
@@ -87,13 +113,9 @@ func _initialize() -> void:
 	print("SMOKE the glass shader actually draws: the panel edge is brighter with effects on, in every theme: ", glow_seen, " ", edge_on, edge_off)
 	print("SMOKE ...and Navy's glow is stronger than Simple's (each theme sets its own strength): ", _luma(edge_on["Navy"]) - _luma(edge_off["Navy"]) > _luma(edge_on["Simple"]) - _luma(edge_off["Simple"]))
 
-	# Eight categories + History open.
-	for i in 4:
-		lab._add_category()
-	await process_frame
+	# History open on the home screen.
 	tablet.history_open = true
 	tablet.selection_changed.emit()
-	await _shot("ui_lab_8_categories_history.png")
-	print("SMOKE eight categories give a two-row grid: ", tablet._cat_grid.get_child_count() == 8 and tablet._cat_grid.columns == 4)
+	await _shot("ui_lab_history.png")
 	print("SMOKE History shows the undo stack in the side panel: ", lab.side.visible and lab.side.row_count() == 3)
 	quit()

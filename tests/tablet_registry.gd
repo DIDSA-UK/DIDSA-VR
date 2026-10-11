@@ -1,6 +1,6 @@
 extends SceneTree
 ## The redesigned tablet's data registry (scripts/ui/tablet_registry.gd): no scene
-## tree needed. Covers registration, lookups, the 8-category cap, duplicate
+## tree needed. Covers registration, lookups, the 10-category cap, duplicate
 ## rejection, mode-tool discovery and how many grid rows the layout needs.
 ## Run: "$GODOT" --headless --path . --script res://tests/tablet_registry.gd  (see tests/README.md)
 
@@ -36,10 +36,23 @@ func _initialize() -> void:
 	print("SMOKE a duplicate tool id is refused (even in another category): ", reg.add_tool("view", "mates", "Dup", "x", builder) == null)
 	print("SMOKE a tool for an unknown category is refused: ", reg.add_tool("ghost", "t", "T", "x", builder) == null)
 
-	print("SMOKE four categories still need one row: ", _fill(reg, 4) and reg.category_rows() == 1)
-	print("SMOKE a fifth category makes a second row: ", _fill(reg, 5) and reg.category_rows() == 2)
-	print("SMOKE eight categories fit two rows: ", _fill(reg, 8) and reg.category_rows() == 2 and reg.categories().size() == 8)
-	print("SMOKE a ninth category is refused: ", reg.add_category("c9", "Nine", "x", Color.WHITE) == null and reg.categories().size() == 8)
+	print("SMOKE five categories still need one row: ", _fill(reg, 5) and reg.category_rows() == 1)
+	print("SMOKE a sixth category makes a second row: ", _fill(reg, 6) and reg.category_rows() == 2)
+	print("SMOKE ten categories fit two rows: ", _fill(reg, 10) and reg.category_rows() == 2 and reg.categories().size() == 10)
+	print("SMOKE an eleventh category is refused: ", reg.add_category("c11", "Eleven", "x", Color.WHITE) == null and reg.categories().size() == 10)
+
+	# Home-tile options: a plain category, a hub, and an action tile with a live caption.
+	var reg2 = Registry.new()
+	var plain = reg2.add_category("p", "Plain", "x", Color.WHITE)
+	var hub = reg2.add_category("h", "Hub", "x", Color.WHITE, {"hub": true, "subtitle": "a · b"})
+	var live := ["one"]
+	var act = reg2.add_category("a", "Act", "x", Color.WHITE, {"action": func() -> void: live[0] = "two", "caption": func() -> String: return live[0]})
+	print("SMOKE a category defaults to a plain, non-hub, non-action tile with no subtitle: ", not plain.hub and not plain.is_action() and plain.subtitle == "" and not plain.caption.is_valid())
+	print("SMOKE hub and subtitle options are kept: ", hub.hub and hub.subtitle == "a · b" and not hub.is_action())
+	act.action.call()
+	print("SMOKE an action category keeps its action and live caption: ", act.is_action() and act.caption.call() == "two")
+	var cap = reg2.add_tool("h", "t", "T", "x", builder, {"caption": "small line"})
+	print("SMOKE a tool keeps its hub-tile caption: ", cap.caption == "small line")
 	quit()
 
 

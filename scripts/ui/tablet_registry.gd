@@ -12,6 +12,14 @@ extends RefCounted
 ##
 ## Pure data, no scene tree, so it is unit-tested on its own (tests/tablet_registry.gd).
 ##
+## A category is a TILE on the tablet's home screen. Three flavours, set by add_category's options:
+##   plain   opens its tools as a strip of chips across the top of the tool view (Inspect, Files);
+##   hub     opens a second screen of tiles, one per tool, first (View, Settings) -- "hub": true;
+##   action  does its thing straight from the home screen and has no tools of its own (the
+##           window tiles, Design): "action": Callable. Its tile may show live text through
+##           "caption": Callable() -> String.
+## Options: subtitle (the small line under the tile's name), hub, action, caption.
+##
 ## ToolDef.kind:
 ##   "page"  an ordinary page of controls (Scale, Colours, Files...).
 ##   "mode"  a tool that changes what the laser does in the world (Mates, Measure,
@@ -28,8 +36,8 @@ extends RefCounted
 
 signal changed
 
-const MAX_CATEGORIES := 8 ## the grid is 4 columns x 2 rows
-const GRID_COLUMNS := 4
+const MAX_CATEGORIES := 10 ## the home screen's tile grid is 5 columns x 2 rows
+const GRID_COLUMNS := 5
 
 
 class ToolDef extends RefCounted:
@@ -42,6 +50,7 @@ class ToolDef extends RefCounted:
 	var list_provider: Callable = Callable()
 	var on_activate: Callable = Callable()
 	var on_deactivate: Callable = Callable()
+	var caption: String = "" ## the small line under the tool's tile when its category is a hub
 	var help: String = "" ## text of the tool header's "?" card
 	var hint: String = "" ## one-line instruction for the status line when no status_provider text is available
 	var status_provider: Callable = Callable() ## () -> String, live text for the status line
@@ -61,26 +70,37 @@ class CategoryDef extends RefCounted:
 	var label: String
 	var icon: String
 	var accent: Color
+	var subtitle: String = "" ## the small line under the home tile's name
+	var hub := false ## opens a screen of tiles (one per tool) before any tool's page
+	var action: Callable = Callable() ## valid = a tile that acts straight from the home screen
+	var caption: Callable = Callable() ## () -> String, live replacement for the subtitle
 	var tools: Array[ToolDef] = []
 	var groups: Array[Dictionary] = [] ## [{id, label, accent}] in display order; optional, used by the design table's deck to set related tools apart
+
+	func is_action() -> bool:
+		return action.is_valid()
 
 
 var _categories: Array[CategoryDef] = []
 var _tools := {} ## tool id -> ToolDef (ids are unique across the whole registry)
 
 
-func add_category(id: String, label: String, icon: String, accent: Color) -> CategoryDef:
+func add_category(id: String, label: String, icon: String, accent: Color, options: Dictionary = {}) -> CategoryDef:
 	if category(id) != null:
 		push_error("tablet_registry: duplicate category id '%s'" % id)
 		return null
 	if _categories.size() >= MAX_CATEGORIES:
-		push_error("tablet_registry: the category grid holds %d; '%s' not added" % [MAX_CATEGORIES, id])
+		push_error("tablet_registry: the home grid holds %d; '%s' not added" % [MAX_CATEGORIES, id])
 		return null
 	var def := CategoryDef.new()
 	def.id = id
 	def.label = label
 	def.icon = icon
 	def.accent = accent
+	def.subtitle = str(options.get("subtitle", ""))
+	def.hub = bool(options.get("hub", false))
+	def.action = options.get("action", Callable())
+	def.caption = options.get("caption", Callable())
 	_categories.append(def)
 	changed.emit()
 	return def
@@ -113,6 +133,7 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	def.list_provider = options.get("list", Callable())
 	def.on_activate = options.get("on_activate", Callable())
 	def.on_deactivate = options.get("on_deactivate", Callable())
+	def.caption = str(options.get("caption", ""))
 	def.help = str(options.get("help", ""))
 	def.hint = str(options.get("hint", ""))
 	def.status_provider = options.get("status", Callable())
@@ -155,6 +176,6 @@ func mode_tools() -> Array[ToolDef]:
 
 
 func category_rows() -> int:
-	## Rows of the category grid actually needed: one while there are four or
-	## fewer categories (no empty slots drawn), two from the fifth on.
+	## Rows of the home tile grid actually needed: one while there are five or
+	## fewer categories (no empty slots drawn), two from the sixth on.
 	return maxi(1, ceili(float(_categories.size()) / float(GRID_COLUMNS)))

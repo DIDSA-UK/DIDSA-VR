@@ -1,27 +1,35 @@
 extends Control
-## The redesigned tablet's 2D shell, from John's sketch: a category grid (top left,
-## 4 columns x up to 2 rows), a utility cluster (undo, redo, settings, close) after
-## a divider (top right), a tool rail down the left, the active tool's controls
-## in the middle with a tool header (name, on/off switch for mode tools, "?" help),
-## and a one-line status bar along the bottom.
+## The redesigned tablet's 2D shell: a phone-style HOME screen of tiles, and the
+## tool screens behind them. Pure 2D Controls: no XR, no scene-tree dependency
+## beyond itself, so it runs in a plain window (the UI Lab) and on a SubViewport
+## quad (wrist_tablet.gd) alike. It never names a specific tool: everything comes
+## from the registry (tablet_registry.gd), and the one-active-tool rule from the
+## tool manager (tool_manager.gd).
 ##
-## Pure 2D Controls: no XR, no scene-tree dependency beyond itself, so it runs in a
-## plain window (the UI Lab) and on a SubViewport quad (wrist_tablet.gd) alike.
-## It never names a specific tool: everything comes from the registry
-## (tablet_registry.gd), and the one-active-tool rule from the tool manager
-## (tool_manager.gd).
+## Screens (selected_category_id / hub_open say which one is showing):
+##   Home        every registry category as a tile (5 x 2). A tile either does its thing
+##               straight away (an "action" category: the window tiles, Design) or opens...
+##   Hub         a screen of tiles, one per tool, for a category registered with hub: true
+##               (View, Settings). Tap a tile to open that tool's page; Back returns here.
+##   Tool view   a chip strip across the top (only for a plain category with more than one
+##               tool, e.g. Inspect), the tool header (name, on/off switch for mode tools,
+##               "?" help) and the tool's controls.
+## A top bar on every screen but Home carries Back and the category's name; on every
+## screen it carries the status chips (what is switched on / unsaved) and the utility
+## cluster (undo, redo, settings, close).
 ##
 ## Selecting:
-##  * a category shows its last-viewed (else first) tool WITHOUT switching any
-##    mode tool on — browsing must never change what the laser does;
-##  * a rail button on a "page" tool just shows it;
-##  * a rail button on a "mode" tool shows it AND turns it on (turning any other
-##    mode tool off); pressing the selected, active one again turns it off.
+##  * opening a category shows its last-viewed (else first) tool WITHOUT switching any
+##    mode tool on -- browsing must never change what the laser does;
+##  * a strip chip or hub tile on a "page" tool just shows it;
+##  * a strip chip or hub tile on a "mode" tool shows it AND turns it on (turning any other
+##    mode tool off); pressing the selected, active chip again turns it off;
+##  * going Home never touches the active mode tool; a chip says it is still on.
 ##
 ## The host polls list_source() for the side panel and calls tick(delta) each frame.
 
 signal close_requested
-signal selection_changed ## category/tool/settings/history changed: re-read list_source()
+signal selection_changed ## screen/tool/history changed: re-read list_source()
 signal feedback(event: String) ## "error" / "confirm": the host turns it into a haptic pulse and/or a sound
 signal activity ## anything on screen changed that the host's render gate should know about (a toast, a page switch)
 
@@ -30,16 +38,17 @@ const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 const LONG_PRESS_MS := 600
 const TOAST_SECONDS := 3.0
+const SETTINGS_CATEGORY := "settings" ## the utility cluster's gear opens this category
 
 var tokens: Resource
 var registry
 var manager
 var command_stack = null ## duck-typed: can_undo/can_redo/undo/redo/history_labels/redo_labels
-var settings_builder: Callable = Callable()
+var chips_provider: Callable = Callable() ## () -> Array of {text, kind: "info"|"ok"|"warn"|"accent", tap: Callable}, shown beside the active mode tool's own chip
 
-var selected_category_id := ""
+var selected_category_id := "" ## "" = the home screen
 var selected_tool_id := ""
-var settings_open := false
+var hub_open := false ## the selected category's tile screen is showing instead of a tool
 var history_open := false
 var help_open := false
 
@@ -47,16 +56,22 @@ var pages_scroll: ScrollContainer ## the host hands this to its LaserSurface as 
 var sliders: Array = [] ## every HSlider in every page, for LaserSurface.add_slider()
 
 var _panel: PanelContainer
-var _cat_grid: GridContainer
-var _cat_group := ButtonGroup.new()
-var _cat_buttons := {}
-var _rail_scroll: ScrollContainer
-var _rail_box: VBoxContainer
-var _rail_group := ButtonGroup.new()
-var _rail_buttons := {}
+var _back_button: Button
+var _cat_title: Label
+var _chips_box: HBoxContainer
+var _chip_signature := ""
+var _home_view: Control
+var _home_grid: GridContainer
+var _hub_view: Control
+var _hub_grid: GridContainer
+var _tool_view: Control
+var _tiles: Array = [] ## [{button, icon, name, caption, accent, category_id}] for the home and hub tiles on screen
+var _strip_scroll: ScrollContainer
+var _strip_box: HBoxContainer
+var _strip_group := ButtonGroup.new()
+var _strip_buttons := {}
 var _holder: VBoxContainer
 var _pages := {}
-var _settings_page: Control
 var _title: Label
 var _chip: Label
 var _help_button: Button
@@ -65,7 +80,6 @@ var _help_card: PanelContainer
 var _help_label: Label
 var _status_label: Label
 var _status_panel: PanelContainer
-var _divider: ColorRect
 var _fx: ColorRect ## the glass overlay (fx_overlay.gd)
 var _seen_revision := -1 ## ui_themes.gd's revision this UI was last themed at
 var _undo_button: Button
@@ -84,12 +98,15 @@ func setup(p_tokens: Resource, p_registry, p_manager, options: Dictionary = {}) 
 	registry = p_registry
 	manager = p_manager
 	command_stack = options.get("command_stack")
-	settings_builder = options.get("settings_builder", Callable())
+	chips_provider = options.get("chips", Callable())
 	theme = tokens.build_theme()
 	_seen_revision = UiThemes.revision
 	_build_shell()
 	rebuild()
-	manager.active_changed.connect(func(_id: String) -> void: _refresh_rail_visuals())
+	manager.active_changed.connect(func(_id: String) -> void:
+		_refresh_strip_visuals()
+		_refresh_chips()
+	)
 	registry.changed.connect(rebuild, CONNECT_DEFERRED)
 
 
@@ -103,20 +120,24 @@ func _build_shell() -> void:
 	column.add_theme_constant_override("separation", tokens.gap + 4)
 	_panel.add_child(column)
 
-	# Top bar: category grid | divider | utility cluster
+	# Top bar: Back + category name (not on Home) | status chips | utility cluster
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", tokens.gap)
 	column.add_child(top)
-	_cat_grid = GridContainer.new()
-	_cat_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_cat_grid.add_theme_constant_override("h_separation", tokens.gap)
-	_cat_grid.add_theme_constant_override("v_separation", tokens.gap)
-	top.add_child(_cat_grid)
-	var divider := ColorRect.new()
-	divider.custom_minimum_size = Vector2(2, 0)
-	divider.color = tokens.border
-	top.add_child(divider)
-	_divider = divider
+	_back_button = Button.new()
+	_back_button.text = "Back"
+	_back_button.icon = UiIcons.texture("back", 28)
+	_back_button.custom_minimum_size = Vector2(0, 64)
+	_back_button.pressed.connect(go_back)
+	top.add_child(_back_button)
+	_cat_title = Label.new()
+	_cat_title.theme_type_variation = &"LabelTitle"
+	_cat_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(_cat_title)
+	_chips_box = HBoxContainer.new()
+	_chips_box.add_theme_constant_override("separation", tokens.gap)
+	_chips_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(_chips_box)
 	var utility := HBoxContainer.new()
 	utility.add_theme_constant_override("separation", tokens.gap)
 	top.add_child(utility)
@@ -134,34 +155,75 @@ func _build_shell() -> void:
 	)
 	utility.add_child(_redo_button)
 	_settings_button = _utility_button("settings", true)
-	_settings_button.pressed.connect(func() -> void: set_settings_open(not settings_open))
+	_settings_button.pressed.connect(func() -> void:
+		if selected_category_id == SETTINGS_CATEGORY:
+			go_home()
+		else:
+			select_category(SETTINGS_CATEGORY)
+	)
 	utility.add_child(_settings_button)
 	var close := _utility_button("close", false)
 	close.theme_type_variation = &"ButtonDanger"
 	close.pressed.connect(func() -> void: close_requested.emit())
 	utility.add_child(close)
 
-	# Body: rail | pane
-	var body := HBoxContainer.new()
+	# Body: one of three screens
+	var body := Control.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", tokens.gap + 4)
 	column.add_child(body)
-	_rail_scroll = ScrollContainer.new()
-	_rail_scroll.custom_minimum_size = Vector2(226, 0)
-	_rail_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	body.add_child(_rail_scroll)
-	_rail_box = VBoxContainer.new()
-	_rail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rail_box.add_theme_constant_override("separation", tokens.gap)
-	_rail_scroll.add_child(_rail_box)
+	_home_view = _full_rect_box(body)
+	_home_grid = _tile_grid()
+	_home_view.add_child(_home_grid)
+	_hub_view = _full_rect_box(body)
+	_hub_grid = _tile_grid()
+	_hub_view.add_child(_hub_grid)
+	_tool_view = _full_rect_box(body)
+	_build_tool_view(_tool_view)
 
-	var pane := VBoxContainer.new()
-	pane.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pane.add_theme_constant_override("separation", tokens.gap)
-	body.add_child(pane)
+	# Status bar
+	var status := PanelContainer.new()
+	status.theme_type_variation = &"PanelRaised"
+	_status_panel = status
+	_status_label = Label.new()
+	_status_label.theme_type_variation = &"LabelDim"
+	_status_label.clip_text = true
+	status.add_child(_status_label)
+	column.add_child(status)
+
+	_fx = FxOverlay.new() # last child of the root, so the glass sits over everything but the laser cursor the host adds after
+	add_child(_fx)
+	_fx.setup(tokens)
+
+
+func _full_rect_box(parent: Control) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.add_theme_constant_override("separation", tokens.gap)
+	parent.add_child(box)
+	return box
+
+
+func _tile_grid() -> GridContainer:
+	var grid := GridContainer.new()
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", tokens.gap + 4)
+	grid.add_theme_constant_override("v_separation", tokens.gap + 4)
+	return grid
+
+
+func _build_tool_view(view: VBoxContainer) -> void:
+	_strip_scroll = ScrollContainer.new()
+	_strip_scroll.custom_minimum_size = Vector2(0, 76)
+	_strip_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	view.add_child(_strip_scroll)
+	_strip_box = HBoxContainer.new()
+	_strip_box.add_theme_constant_override("separation", tokens.gap)
+	_strip_scroll.add_child(_strip_box)
+
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", tokens.gap)
-	pane.add_child(header)
+	view.add_child(header)
 	_title = Label.new()
 	_title.theme_type_variation = &"LabelTitle"
 	header.add_child(_title) # no clip_text: a clipping Label's minimum width is 0 and a header HBox then squeezes the title away
@@ -188,30 +250,16 @@ func _build_shell() -> void:
 	_help_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help_label.theme_type_variation = &"LabelDim"
 	_help_card.add_child(_help_label)
-	pane.add_child(_help_card)
+	view.add_child(_help_card)
 
 	pages_scroll = ScrollContainer.new()
 	pages_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	pages_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pages_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	pane.add_child(pages_scroll)
+	view.add_child(pages_scroll)
 	_holder = VBoxContainer.new()
 	_holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pages_scroll.add_child(_holder)
-
-	# Status bar
-	var status := PanelContainer.new()
-	status.theme_type_variation = &"PanelRaised"
-	_status_panel = status
-	_status_label = Label.new()
-	_status_label.theme_type_variation = &"LabelDim"
-	_status_label.clip_text = true
-	status.add_child(_status_label)
-	column.add_child(status)
-
-	_fx = FxOverlay.new() # last child of the root, so the glass sits over everything but the laser cursor the host adds after
-	add_child(_fx)
-	_fx.setup(tokens)
 
 
 func _utility_button(icon_name: String, toggle: bool) -> Button:
@@ -223,34 +271,103 @@ func _utility_button(icon_name: String, toggle: bool) -> Button:
 	return b
 
 
+# --- Tiles -----------------------------------------------------------------
+
+func _make_tile(label: String, caption: String, icon_name: String, accent: Color, on_press: Callable, category_id: String = "", tool_id: String = "") -> Button:
+	## A big launcher tile: an icon over a name over one small line. The Button draws the
+	## frame and the press; its children are only a layout (they ignore the mouse).
+	var b := Button.new()
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size = Vector2(0, 120)
+	b.clip_contents = true
+	b.pressed.connect(on_press)
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 4)
+	b.add_child(box)
+	var icon := TextureRect.new()
+	icon.texture = UiIcons.texture(icon_name, 64)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.modulate = accent
+	box.add_child(icon)
+	var name_label := Label.new()
+	name_label.text = label
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(name_label)
+	var caption_label := Label.new()
+	caption_label.text = caption
+	caption_label.theme_type_variation = &"LabelSmall"
+	caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(caption_label)
+	_style_tile(b, accent)
+	_tiles.append({"button": b, "icon": icon, "caption": caption_label, "accent": accent, "category_id": category_id, "tool_id": tool_id})
+	return b
+
+
+func _style_tile(b: Button, accent: Color) -> void:
+	## A tile's frame in its category's accent colour (per-button overrides on top of the theme, so
+	## they are re-applied when the theme changes).
+	b.add_theme_stylebox_override("normal", tokens.box(tokens.bg_raised, accent.darkened(0.3), tokens.radius_panel, 8))
+	b.add_theme_stylebox_override("hover", tokens.glow(tokens.box(tokens.surface_hover, accent, tokens.radius_panel, 8), accent, 0.6))
+	var on: StyleBoxFlat = tokens.selected_box(accent)
+	on.set_corner_radius_all(tokens.radius_panel)
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+
+
+func _on_home_tile(cat_id: String) -> void:
+	var cat = registry.category(cat_id)
+	if cat == null:
+		return
+	if cat.is_action():
+		cat.action.call()
+		_refresh_tile_captions()
+		activity.emit()
+		return
+	select_category(cat_id)
+
+
+func _refresh_tile_captions() -> void:
+	var changed := false
+	for entry in _tiles:
+		var cat_id: String = entry["category_id"]
+		if cat_id == "":
+			continue
+		var cat = registry.category(cat_id)
+		if cat == null or not cat.caption.is_valid():
+			continue
+		var label: Label = entry["caption"]
+		var text := str(cat.caption.call())
+		if label.text != text:
+			label.text = text
+			changed = true
+	if changed:
+		activity.emit()
+
+
 # --- Building from the registry ---------------------------------------------
 
 func rebuild() -> void:
-	for child in _cat_grid.get_children():
-		_cat_grid.remove_child(child); child.queue_free()
+	for child in _home_grid.get_children():
+		_home_grid.remove_child(child); child.queue_free()
+	for child in _hub_grid.get_children():
+		_hub_grid.remove_child(child); child.queue_free()
 	for child in _holder.get_children():
 		_holder.remove_child(child); child.queue_free()
-	_cat_buttons.clear()
+	_tiles.clear()
 	_pages.clear()
-	_settings_page = null
-	_cat_group = ButtonGroup.new()
 
 	var cats = registry.categories()
-	_cat_grid.columns = clampi(cats.size(), 1, registry.GRID_COLUMNS)
+	_home_grid.columns = clampi(cats.size(), 1, registry.GRID_COLUMNS)
 	for cat in cats:
-		var b := Button.new()
-		b.text = cat.label
-		b.icon = UiIcons.texture(cat.icon, 30)
-		b.toggle_mode = true
-		b.button_group = _cat_group
-		b.custom_minimum_size = Vector2(0, 64)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.clip_text = true
-		b.add_theme_font_size_override("font_size", tokens.font_small + 2)
-		_style_selected(b, cat.accent, true)
-		b.pressed.connect(select_category.bind(cat.id))
-		_cat_grid.add_child(b)
-		_cat_buttons[cat.id] = b
+		_home_grid.add_child(_make_tile(cat.label, cat.subtitle, cat.icon, cat.accent, _on_home_tile.bind(cat.id), cat.id))
 		for t in cat.tools:
 			var page: Control = t.build.call() if t.build.is_valid() else Control.new()
 			page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -258,26 +375,39 @@ func rebuild() -> void:
 			page.visible = false
 			_holder.add_child(page)
 			_pages[t.id] = page
-	if settings_builder.is_valid():
-		_settings_page = settings_builder.call()
-		_settings_page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_settings_page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-		_settings_page.visible = false
-		_holder.add_child(_settings_page)
 	sliders = _holder.find_children("*", "HSlider", true, false)
+	_refresh_tile_captions()
 
-	var keep: String = selected_category_id if registry.category(selected_category_id) != null else (cats[0].id if not cats.is_empty() else "")
-	selected_category_id = ""
-	selected_tool_id = ""
-	if keep != "":
-		select_category(keep)
+	# Come back to where we were if that screen still exists, otherwise Home.
+	var cat = registry.category(selected_category_id)
+	if cat == null or registry.tool_def(selected_tool_id) == null and not hub_open:
+		selected_category_id = ""
+		selected_tool_id = ""
+		hub_open = false
+	elif hub_open:
+		_rebuild_hub(cat)
+	_rebuild_strip()
+	_apply_view()
 
 
-func _rebuild_rail() -> void:
-	for child in _rail_box.get_children():
-		_rail_box.remove_child(child); child.queue_free()
-	_rail_buttons.clear()
-	_rail_group = ButtonGroup.new()
+func _rebuild_hub(cat) -> void:
+	for child in _hub_grid.get_children():
+		_hub_grid.remove_child(child); child.queue_free()
+	_tiles = _tiles.filter(func(e) -> bool: return e["category_id"] != "") # the previous hub's tiles go; home tiles carry a category id
+	_hub_grid.columns = clampi(ceili(cat.tools.size() / 2.0), 3, 5)
+	for t in cat.tools:
+		_hub_grid.add_child(_make_tile(t.label, t.caption, t.icon, cat.accent, _on_hub_tile.bind(t.id), "", t.id))
+
+
+func _on_hub_tile(tool_id: String) -> void:
+	select_tool(tool_id, true)
+
+
+func _rebuild_strip() -> void:
+	for child in _strip_box.get_children():
+		_strip_box.remove_child(child); child.queue_free()
+	_strip_buttons.clear()
+	_strip_group = ButtonGroup.new()
 	var cat = registry.category(selected_category_id)
 	if cat == null:
 		return
@@ -286,22 +416,19 @@ func _rebuild_rail() -> void:
 		b.text = t.label
 		b.icon = UiIcons.texture(t.icon, 28)
 		b.toggle_mode = true
-		b.button_group = _rail_group
-		b.clip_text = true
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.button_group = _strip_group
 		b.custom_minimum_size = Vector2(0, 64)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.theme_type_variation = &"ButtonRail"
 		b.add_theme_font_size_override("font_size", tokens.font_small + 2)
 		_style_selected(b, cat.accent, false)
-		b.pressed.connect(_on_rail_pressed.bind(t.id))
-		_rail_box.add_child(b)
-		_rail_buttons[t.id] = b
-	_refresh_rail_visuals()
+		b.pressed.connect(_on_strip_pressed.bind(t.id))
+		_strip_box.add_child(b)
+		_strip_buttons[t.id] = b
+	_refresh_strip_visuals()
 
 
 func _style_selected(b: Button, accent: Color, both_icon_states: bool) -> void:
-	## A category / rail button's "selected" look in its category's accent colour (a per-button
+	## A strip chip's "selected" look in its category's accent colour (a per-button
 	## override on top of the theme, so it has to be re-applied when the theme changes).
 	var on_style: StyleBoxFlat = tokens.selected_box(accent)
 	b.add_theme_stylebox_override("pressed", on_style)
@@ -313,20 +440,20 @@ func _style_selected(b: Button, accent: Color, both_icon_states: bool) -> void:
 
 func apply_theme() -> void:
 	## Re-themes in place after ui_themes.gd changed the shared theme or the effects switch: new
-	## Theme, the per-button accent overrides, the divider, the glass overlay. Nothing is rebuilt, so
+	## Theme, the per-button accent overrides, the glass overlay. Nothing is rebuilt, so
 	## the selected tool, scroll position and every toggle stay exactly as they were.
 	_seen_revision = UiThemes.revision
 	theme = tokens.build_theme()
-	_divider.color = tokens.border
-	for cat in registry.categories():
-		if _cat_buttons.has(cat.id):
-			_style_selected(_cat_buttons[cat.id], cat.accent, true)
+	for entry in _tiles:
+		_style_tile(entry["button"], entry["accent"])
 	var current = registry.category(selected_category_id)
 	if current != null:
-		for id in _rail_buttons:
-			_style_selected(_rail_buttons[id], current.accent, false)
+		for id in _strip_buttons:
+			_style_selected(_strip_buttons[id], current.accent, false)
+	_chip_signature = "" # chips are styled from the theme too
+	_refresh_chips()
 	_fx.refresh(tokens)
-	_refresh_rail_visuals()
+	_refresh_strip_visuals()
 	activity.emit()
 
 
@@ -335,28 +462,118 @@ func _process(_delta: float) -> void:
 		apply_theme()
 
 
-func _refresh_rail_visuals() -> void:
-	for id in _rail_buttons:
-		var b: Button = _rail_buttons[id]
+func _refresh_strip_visuals() -> void:
+	for id in _strip_buttons:
+		var b: Button = _strip_buttons[id]
 		var def = registry.tool_def(id)
 		var live: bool = def != null and def.is_mode() and manager.is_active(id)
 		b.theme_type_variation = &"ButtonRailLive" if (live and id != selected_tool_id) else &"ButtonRail"
-		b.set_pressed_no_signal(id == selected_tool_id and not settings_open)
+		b.set_pressed_no_signal(id == selected_tool_id)
 	_refresh_header()
+
+
+# --- Accessors (tests and the host find a control without knowing the layout) ------------
+
+func home_tile(category_id: String) -> Button:
+	for entry in _tiles:
+		if entry["category_id"] == category_id:
+			return entry["button"]
+	return null
+
+
+func tile_caption(category_id: String) -> String:
+	for entry in _tiles:
+		if entry["category_id"] == category_id:
+			return (entry["caption"] as Label).text
+	return ""
+
+
+func hub_tile(tool_id: String) -> Button:
+	for entry in _tiles:
+		if entry["tool_id"] == tool_id and is_instance_valid(entry["button"]) and not entry["button"].is_queued_for_deletion():
+			return entry["button"]
+	return null
+
+
+func strip_button(tool_id: String) -> Button:
+	return _strip_buttons.get(tool_id)
+
+
+func chip_texts() -> Array:
+	var out: Array = []
+	for child in _chips_box.get_children():
+		if not child.is_queued_for_deletion():
+			out.append((child as Button).text)
+	return out
+
+
+# --- Status chips ---------------------------------------------------------------
+
+func _refresh_chips() -> void:
+	var items: Array = []
+	if manager.active_id != "":
+		var def = registry.tool_def(manager.active_id)
+		if def != null:
+			items.append({"text": "%s on" % def.label, "kind": "accent", "tap": select_tool.bind(def.id, false)})
+	if chips_provider.is_valid():
+		items.append_array(chips_provider.call())
+	var signature := ""
+	for item in items:
+		signature += "%s|%s;" % [item["text"], item.get("kind", "info")]
+	if signature == _chip_signature:
+		return
+	_chip_signature = signature
+	for child in _chips_box.get_children():
+		_chips_box.remove_child(child); child.queue_free()
+	for item in items:
+		var colour := _chip_colour(str(item.get("kind", "info")))
+		var b := Button.new()
+		b.text = "●  %s" % item["text"]
+		b.custom_minimum_size = Vector2(0, 44)
+		b.add_theme_font_size_override("font_size", tokens.font_small)
+		b.add_theme_stylebox_override("normal", tokens.box(tokens.bg_raised, tokens.border, 22, 14, 1))
+		b.add_theme_stylebox_override("hover", tokens.box(tokens.surface_hover, colour, 22, 14, 1))
+		b.add_theme_stylebox_override("pressed", tokens.box(tokens.surface_hover, colour, 22, 14, 1))
+		for state in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+			b.add_theme_color_override(state, colour)
+		var tap: Callable = item.get("tap", Callable())
+		if tap.is_valid():
+			b.pressed.connect(tap)
+		_chips_box.add_child(b)
+	activity.emit()
+
+
+func _chip_colour(kind: String) -> Color:
+	match kind:
+		"ok":
+			return tokens.ok
+		"warn":
+			return tokens.warn
+		"accent":
+			return tokens.accent
+	return tokens.text_dim
 
 
 # --- Selection --------------------------------------------------------------
 
 func select_category(category_id: String) -> void:
+	## Opens a category: its hub screen if it has one, otherwise its last-viewed (else first) tool.
+	## An "action" category has no screen; use the home tile (or its action) for those.
 	var cat = registry.category(category_id)
-	if cat == null:
+	if cat == null or cat.is_action():
 		return
-	settings_open = false
 	history_open = false
+	help_open = false
 	selected_category_id = category_id
-	for id in _cat_buttons:
-		(_cat_buttons[id] as Button).set_pressed_no_signal(id == category_id)
-	_rebuild_rail()
+	_rebuild_strip()
+	if cat.hub:
+		hub_open = true
+		selected_tool_id = ""
+		_rebuild_hub(cat)
+		_apply_view()
+		_fade_in(_hub_view)
+		return
+	hub_open = false
 	var pick: String = _last_tool.get(category_id, "")
 	if registry.tool_def(pick) == null and not cat.tools.is_empty():
 		pick = cat.tools[0].id
@@ -370,23 +587,47 @@ func select_tool(tool_id: String, activate_mode: bool = false) -> void:
 		return
 	if def.category_id != selected_category_id:
 		selected_category_id = def.category_id
-		for id in _cat_buttons:
-			(_cat_buttons[id] as Button).set_pressed_no_signal(id == selected_category_id)
-		_rebuild_rail()
-	settings_open = false
+		_rebuild_strip()
+	hub_open = false
 	history_open = false
 	_show_tool(tool_id)
 	if activate_mode and def.is_mode():
 		manager.activate(tool_id)
 
 
-func _on_rail_pressed(tool_id: String) -> void:
+func go_home() -> void:
+	## Back to the tile screen. Never touches the active mode tool.
+	selected_category_id = ""
+	selected_tool_id = ""
+	hub_open = false
+	history_open = false
+	help_open = false
+	_apply_view()
+	_fade_in(_home_view)
+
+
+func go_back() -> void:
+	## One step up: from a hub category's tool to its hub, otherwise to Home.
+	var cat = registry.category(selected_category_id)
+	if cat != null and cat.hub and not hub_open:
+		selected_tool_id = ""
+		hub_open = true
+		history_open = false
+		help_open = false
+		_rebuild_hub(cat)
+		_apply_view()
+		_fade_in(_hub_view)
+		return
+	go_home()
+
+
+func _on_strip_pressed(tool_id: String) -> void:
 	var def = registry.tool_def(tool_id)
 	if def == null:
 		return
-	if def.is_mode() and tool_id == selected_tool_id and not settings_open:
+	if def.is_mode() and tool_id == selected_tool_id:
 		manager.toggle(tool_id)
-		_refresh_rail_visuals()
+		_refresh_strip_visuals()
 		return
 	select_tool(tool_id, true)
 
@@ -396,34 +637,31 @@ func _show_tool(tool_id: String) -> void:
 	if tool_id != "":
 		_last_tool[selected_category_id] = tool_id
 	help_open = false
-	for id in _pages:
-		(_pages[id] as Control).visible = (id == tool_id)
-	if _settings_page:
-		_settings_page.visible = false
 	pages_scroll.scroll_vertical = 0
-	_fade_in(_pages.get(tool_id))
 	var def = registry.tool_def(tool_id)
 	if def != null and def.on_select.is_valid():
-		def.on_select.call()
-	_refresh_rail_visuals()
-	selection_changed.emit()
+		def.on_select.call() # refresh the tool's data first: _apply_view announces the selection and the side list reads it
+	_apply_view()
+	_fade_in(_pages.get(tool_id))
 
 
-func set_settings_open(on: bool) -> void:
-	if on and _settings_page == null:
-		return
-	settings_open = on
-	history_open = false
-	help_open = false
+func _apply_view() -> void:
+	## Shows exactly one of the three screens and sets the top bar to match.
+	var cat = registry.category(selected_category_id)
+	var home: bool = cat == null
+	_home_view.visible = home
+	_hub_view.visible = not home and hub_open
+	_tool_view.visible = not home and not hub_open
+	_back_button.visible = not home
+	_cat_title.visible = not home
+	if cat != null:
+		_cat_title.text = cat.label
+		_cat_title.add_theme_color_override("font_color", cat.accent)
 	for id in _pages:
-		(_pages[id] as Control).visible = (not on and id == selected_tool_id)
-	if _settings_page:
-		_settings_page.visible = on
-	_settings_button.set_pressed_no_signal(on)
-	pages_scroll.scroll_vertical = 0
-	_fade_in(_settings_page if on else _pages.get(selected_tool_id))
-	_rail_scroll.visible = not on
-	_refresh_rail_visuals()
+		(_pages[id] as Control).visible = _tool_view.visible and id == selected_tool_id
+	_strip_scroll.visible = _tool_view.visible and cat != null and not cat.hub and cat.tools.size() > 1
+	_settings_button.set_pressed_no_signal(selected_category_id == SETTINGS_CATEGORY)
+	_refresh_strip_visuals()
 	selection_changed.emit()
 
 
@@ -433,17 +671,8 @@ func set_help_open(on: bool) -> void:
 
 
 func _refresh_header() -> void:
-	_rail_scroll.visible = not settings_open
-	_settings_button.set_pressed_no_signal(settings_open)
 	var def = registry.tool_def(selected_tool_id)
 	var cat = registry.category(selected_category_id)
-	if settings_open:
-		_title.text = "Settings"
-		_chip.text = ""
-		_switch_button.visible = false
-		_help_button.visible = false
-		_help_card.visible = false
-		return
 	_title.text = def.label if def else ""
 	_chip.text = ("  " + cat.label.to_upper()) if cat else ""
 	_help_button.visible = def != null
@@ -464,10 +693,8 @@ func list_source() -> Dictionary:
 	## What the side panel should show right now: {title, provider, empty} or {} for none.
 	if history_open:
 		return {"title": "History", "provider": _history_rows, "empty": "Nothing to undo yet."}
-	if settings_open:
-		return {}
 	var def = registry.tool_def(selected_tool_id)
-	if def != null and def.has_list():
+	if def != null and def.has_list() and _tool_view.visible:
 		return {"title": def.label, "provider": def.list_provider, "empty": def.list_empty}
 	return {}
 
@@ -517,6 +744,8 @@ func _fade_in(page: Control) -> void:
 
 func tick(_delta: float) -> void:
 	var now := Time.get_ticks_msec()
+	_refresh_chips()
+	_refresh_tile_captions()
 	if command_stack:
 		_undo_button.disabled = not command_stack.can_undo()
 		_redo_button.disabled = not command_stack.can_redo()
@@ -529,12 +758,11 @@ func tick(_delta: float) -> void:
 	if now < _toast_until_ms:
 		text = _toast_text
 		kind = _toast_kind
-	elif settings_open:
-		text = "Settings"
 	elif history_open:
-		text = "History — pick a category or tool to close it"
+		text = "History — pick a tile or tool to close it"
 	else:
-		var def = registry.tool_def(selected_tool_id)
+		# On Home and hub screens the status line speaks for the tool that is switched on, if any.
+		var def = registry.tool_def(selected_tool_id if selected_tool_id != "" else manager.active_id)
 		if def != null:
 			text = str(def.status_provider.call()) if def.status_provider.is_valid() else def.hint
 	_status_label.text = "●  %s" % text if text != "" else ""
