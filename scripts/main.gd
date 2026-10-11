@@ -138,7 +138,7 @@ func _ready() -> void:
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
-	_world_environment.set_scene(_settings.last_scene)
+	_world_environment.apply_saved_scene(_settings.last_scene)
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
 		return

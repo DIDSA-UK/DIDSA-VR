@@ -30,6 +30,7 @@ var _viewport: Viewport
 var _grid_material: ShaderMaterial ## the floor's infinite_grid.gdshader material; its line colour follows the scene
 var current_scene: String = "Mid"
 var passthrough_active := false ## the camera feed is being shown (by any method)
+var _focussed := false ## the OpenXR session has had focus at least once
 var passthrough_report := "" ## what Passthrough did and why — see passthrough_status()
 
 ## Light/Dark/Mid deliberately share ONE lighting rig (the Mid look: models
@@ -81,7 +82,20 @@ func set_scene(scene_name: String) -> void:
 	scene_changed.emit(current_scene)
 
 
+func apply_saved_scene(scene_name: String) -> void:
+	## The scene remembered from the last run, applied at startup. Passthrough waits for the headset to have focus (session_focussed): asking an
+	## OpenXR runtime for the passthrough layer while the session is still starting is a way to drop a Virtual Desktop / Link connection.
+	if scene_name == "Passthrough" and _xr_ready() and not _focussed:
+		current_scene = scene_name
+		_apply_preset(_PRESETS["Mid"])
+		passthrough_report = "Passthrough will start once the headset has focus. If it does not, pick another scene and then Passthrough again."
+		scene_changed.emit(current_scene)
+		return
+	set_scene(scene_name)
+
+
 func _on_session_focussed() -> void:
+	_focussed = true
 	if current_scene == "Passthrough" and not passthrough_active:
 		_enable_passthrough()
 		scene_changed.emit(current_scene) # so the tablet's status line refreshes
@@ -157,8 +171,7 @@ func _enable_passthrough() -> void:
 			passthrough_active = true
 			passthrough_report = "Passthrough ON (the headset's own passthrough layer). The runtime offers blend modes: %s." % offered
 		else:
-			legacy_note = " The headset's passthrough layer is available but failed to start (it is tried again in a moment)."
-			_schedule_retry()
+			legacy_note = " The headset's passthrough layer is available but failed to start."
 	if not passthrough_active:
 		_set_transparent(true)
 		passthrough_report = "Passthrough is NOT available from this runtime. It offers blend modes: %s%s.%s %s" % [offered, "" if legacy_note != "" else ", and no passthrough layer", legacy_note, _fix_advice()]
@@ -173,37 +186,6 @@ func _fix_advice() -> String:
 	return "Over a PC link, turn on Passthrough over Link in the Meta Quest Link / Horizon app (Settings > Beta), or the passthrough setting of your streaming app (Virtual Desktop), then choose Passthrough again."
 
 
-const _RETRY_DELAYS: Array[float] = [0.6, 1.6, 3.5] ## seconds: the layer can fail on the first try while the session is still settling
-
-var _retries_left := 0
-
-
-func _schedule_retry() -> void:
-	## A passthrough layer that "failed to start" often works a moment later (the OpenXR session was not yet visible / focused). Try again a few times.
-	if not is_inside_tree() or _retries_left > 0:
-		return
-	_retries_left = _RETRY_DELAYS.size()
-	_retry_next(0)
-
-
-func _retry_next(attempt: int) -> void:
-	if attempt >= _RETRY_DELAYS.size() or not is_inside_tree():
-		_retries_left = 0
-		return
-	await get_tree().create_timer(_RETRY_DELAYS[attempt]).timeout
-	if not is_inside_tree() or current_scene != "Passthrough" or passthrough_active or not _xr_ready():
-		_retries_left = 0
-		return
-	if _xr_interface.has_method("start_passthrough") and _xr_interface.start_passthrough():
-		passthrough_active = true
-		_retries_left = 0
-		passthrough_report = "Passthrough ON (the headset's own passthrough layer, on try %d)." % (attempt + 2)
-		print("DIDSA VR: ", passthrough_report)
-		scene_changed.emit(current_scene) # so the tablet's status line refreshes
-		return
-	_retry_next(attempt + 1)
-
-
 func _set_transparent(on: bool) -> void:
 	if _viewport:
 		_viewport.transparent_bg = on
@@ -211,7 +193,6 @@ func _set_transparent(on: bool) -> void:
 
 
 func _disable_passthrough() -> void:
-	_retries_left = 0
 	var was_active := passthrough_active
 	passthrough_active = false
 	passthrough_report = ""
