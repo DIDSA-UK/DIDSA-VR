@@ -66,6 +66,9 @@ const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/fa
 var face_highlight: Node ## face-level hover / pick highlight for Mates and Measure — see face_highlight.gd
 var _two_hand: Node
 var _tablet: Node
+var _tool_wheel: Node3D ## tool_wheel.gd: right trigger + grip
+var _wheel_flows: Node3D ## wheel_flows.gd: what the wheel offers and the prompt
+var _measure_dimensions: Node3D ## measure_dimensions.gd: Measure results drawn in the world
 var _keyboard: Node
 var _mates_tool: Node
 var _measure_tool: Node
@@ -114,6 +117,7 @@ func _ready() -> void:
 	_add_browser_window()
 	_add_design_table()
 	_add_wrist_tablet()
+	_add_tool_wheel()
 	_add_popup_keyboard()
 	design_table.apply_settings(_settings) # the table's remembered size, zoom limit and what happens to a part sent back
 	command_stack.changed.connect(mark_dirty) # only entries that change the document (a part's pose) fire it, not hide / navigate
@@ -125,6 +129,8 @@ func _ready() -> void:
 	$XROrigin3D/RightController.mates_tool = _mates_tool
 	$XROrigin3D/LeftController.measure_tool = _measure_tool
 	$XROrigin3D/RightController.measure_tool = _measure_tool
+	$XROrigin3D/LeftController.colour_tool = _colour_tool
+	$XROrigin3D/RightController.colour_tool = _colour_tool
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
 	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
@@ -331,6 +337,47 @@ func _add_wrist_tablet() -> void:
 	tablet.name = "WristTablet"
 	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window, design_table)
 	_tablet = tablet
+
+
+func _add_tool_wheel() -> void:
+	## The tool wheel (right trigger + grip), the prompt that leads you through a tool, and Measure's in-world dimensions.
+	var tokens: Resource = _tablet.tokens
+	_wheel_flows = preload("res://scripts/ui/wheel_flows.gd").new()
+	_wheel_flows.name = "WheelFlows"
+	add_child(_wheel_flows)
+	_wheel_flows.setup({
+		"main": self, "tablet": _tablet, "mates_tool": _mates_tool, "measure_tool": _measure_tool,
+		"hand": $XROrigin3D/RightController, "design_table": design_table, "camera": $XROrigin3D/XRCamera3D,
+		"swatches": preload("res://scripts/ui/tablet_pages.gd").COLOUR_SWATCHES,
+	}, tokens)
+	_tool_wheel = preload("res://scripts/ui/tool_wheel.gd").new()
+	_tool_wheel.name = "ToolWheel"
+	add_child(_tool_wheel)
+	_tool_wheel.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, tokens, _wheel_flows.entries)
+	_tool_wheel.set_size(_settings.wheel_size)
+	_tool_wheel.set_enabled(_settings.wheel_enabled)
+	_measure_dimensions = preload("res://scripts/measure_dimensions.gd").new()
+	_measure_dimensions.name = "MeasureDimensions"
+	add_child(_measure_dimensions)
+	_measure_dimensions.setup(_measure_tool, $XROrigin3D/XRCamera3D)
+
+
+func wheel_enabled() -> bool:
+	return _settings.wheel_enabled
+
+
+func set_wheel_enabled(on: bool) -> void:
+	_settings.set_wheel_enabled(on)
+	_tool_wheel.set_enabled(on)
+
+
+func wheel_size() -> int:
+	return _settings.wheel_size
+
+
+func set_wheel_size(index: int) -> void:
+	_settings.set_wheel_size(index)
+	_tool_wheel.set_size(index)
 
 
 func _add_popup_keyboard() -> void:

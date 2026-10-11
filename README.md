@@ -427,6 +427,18 @@ live-synced.
     isn't built: [`docs/design-table.md`](docs/design-table.md); the gap list and what became of
     each: [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 
+18. **Tool wheel.** Squeeze the **right trigger and grip together** (press them within a
+    quarter of a second of each other; either alone still grabs or selects as before). A ring
+    of wedges opens at your hand. **Move your hand** towards a wedge (it is steered by hand
+    movement, not aim) and **let go to choose**; let go at the centre to cancel. Constraint,
+    Measure, Summon table, Colour gun, Shoot hide, Section, Visibility (a sub-wheel: Show all,
+    Invert, Isolate part, Categories) and Undo are on the first ring. A wedge with a sub-wheel
+    opens it once your hand travels well out towards it. While a tool is on the ring follows
+    it: Mates offers Create, Flip, Clear picks and the mate Type; Measure offers Clear and the
+    tablet; the Colour gun offers its palette. A small prompt in front of you says what the
+    trigger does next. Measure draws its dimensions on the model itself and opens the tablet
+    for volume, area and mass. The wheel can be switched off or resized in Settings -> Comfort.
+
 ## 1. Drop in a real assembly
 
 Export or copy a saved assembly file — a `.DIDSAprt`/`.didsa` file whose

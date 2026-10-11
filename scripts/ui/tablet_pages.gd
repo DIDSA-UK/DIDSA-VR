@@ -71,6 +71,7 @@ var _mates_relax_button: Button
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
 var _colour_group_toggle: Button
+var _gun_hex_label: Label
 var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
@@ -140,6 +141,11 @@ func register(reg) -> void:
 	reg.add_tool("view", "colours", "Colours", "colours", _build_colours_page, {
 		"caption": "paint parts", "status": _colour_status,
 		"help": "Laser-select a part first, then tap a swatch. Apply to whole group colours every occurrence sharing its owner. Not undoable: pick another colour or Clear."})
+	reg.add_tool("view", "colour_gun", "Colour gun", "colour_gun", _build_colour_gun_page, {
+		"kind": "mode", "on_activate": _set_colour_gun.bind(true), "on_deactivate": _set_colour_gun.bind(false),
+		"caption": "shoot to paint",
+		"hint": "Point at a part and pull the right trigger to paint it.",
+		"help": "Switch the tool on, pick a colour, then point the right laser at a part and pull the trigger to paint it. Undo puts the old colour back. The tool wheel (right trigger + grip) has the palette too."})
 	reg.add_tool("view", "environment", "Environment", "environment", _build_environment_page, {
 		"caption": "scene · passthrough",
 		"help": "How the room around the model looks: a rendered backdrop, or step into mixed reality (Passthrough)."})
@@ -210,6 +216,38 @@ func set_info(text: String) -> void:
 func _set_shoot_hide(on: bool) -> void:
 	_left.hide_tool_active = on
 	_right.hide_tool_active = on
+
+
+func _set_colour_gun(on: bool) -> void:
+	_left.colour_gun_active = on
+	_right.colour_gun_active = on
+
+
+func set_gun_colour(hex: String) -> void:
+	## The colour the colour gun fires (the tool wheel's palette and this tool's own page both set it).
+	_left.colour_gun_hex = hex
+	_right.colour_gun_hex = hex
+	if _gun_hex_label:
+		_gun_hex_label.text = "Firing: %s" % hex
+
+
+func gun_colour() -> String:
+	return _right.colour_gun_hex
+
+
+func _build_colour_gun_page() -> Control:
+	var page := _page()
+	_gun_hex_label = _hint("Firing: %s" % _right.colour_gun_hex)
+	page.add_child(_gun_hex_label)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	for swatch in COLOUR_SWATCHES:
+		var b := Button.new()
+		b.text = swatch["name"]
+		b.pressed.connect(set_gun_colour.bind(swatch["hex"]))
+		grid.add_child(b)
+	page.add_child(grid)
+	return page
 
 
 func _set_mates(on: bool) -> void:
@@ -986,6 +1024,8 @@ func _build_settings_comfort() -> Control:
 		_main.set_haptics_level(i)
 		UiFeedback.haptic(_right, "confirm") # a sample of the new level
 	))
+	page.add_child(_mode_toggle("Tool wheel (right trigger + grip)", func(on: bool) -> void: _main.set_wheel_enabled(on), _main.wheel_enabled()))
+	page.add_child(_choice_row("Wheel size", ["Small", "Normal", "Large"], _main.wheel_size(), func(i: int) -> void: _main.set_wheel_size(i)))
 	return page
 
 

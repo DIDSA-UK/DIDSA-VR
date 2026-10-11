@@ -95,6 +95,18 @@ func picked_entities() -> Array:
 	return out
 
 
+func picked_points() -> Array:
+	## World positions of where each pick landed (in pick order), for the in-world dimension (measure_dimensions.gd).
+	## A pick whose part has left the tree, or that came without a hit point, is skipped.
+	var out := []
+	for p in _picks:
+		var part = p.get("part")
+		var local: Vector3 = p.get("hit_local", Vector3.INF)
+		if part != null and is_instance_valid(part) and part.is_inside_tree() and local.is_finite():
+			out.append((part as Node3D).to_global(local))
+	return out
+
+
 func picked_labels() -> Array:
 	var out := []
 	for p in _picks:
@@ -102,7 +114,7 @@ func picked_labels() -> Array:
 	return out
 
 
-func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
+func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}, hit_point: Vector3 = Vector3.INF) -> void:
 	## Called by controller.gd's trigger handler while the tool is active.
 	## Always sets status and emits picks_changed, even on rejection, so the
 	## wrist tablet can show *why* a pick didn't count (mirrors mates_tool.
@@ -141,6 +153,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"part": part, # for face_highlight.gd: the picked face/edge/vertex stays lit
 		"face_index": face_index,
 		"entity": entity if kind != "face" else {},
+		"hit_local": part.to_local(hit_point) if hit_point.is_finite() and part.is_inside_tree() else Vector3.INF, # where the laser landed, in the part's own space: measure_dimensions.gd hangs the in-world dimension off it and it follows the part
 	})
 	_owner_part_id = occ_ref["owner_part_id"]
 	_status = ""
