@@ -18,7 +18,7 @@ var _eye: Camera3D
 var _wheel
 var _flows
 var _dir := ""
-var _anchor := Vector3(0.22, 1.42, -0.75)
+var _anchor := Vector3(0.22, 1.55, -0.75)
 var _saved := 0
 
 
@@ -63,12 +63,12 @@ func _initialize() -> void:
 	await _open()
 	await _move(Vector2(0.0, 0.12)) # Create, greyed with one pick
 	await _shot("05_constraint_ring_create_greyed")
-	await _move(Vector2(0.0, -0.12) * 0.0 + Vector2(sin(PI), cos(PI)) * 0.2) # towards Type, opens its ring
+	await _move(Vector2(0.0, -0.12) * 0.0 + Vector2(sin(PI), cos(PI)) * 0.24) # towards Type, opens its ring
 	_anchor = _r.global_position
 	await _move(Vector2(sin(TAU / 5.0), cos(TAU / 5.0)) * 0.12) # Concentric
 	await _shot("06_type_subwheel_concentric_hovered")
 	_release()
-	_anchor = Vector3(0.22, 1.42, -0.75)
+	_anchor = Vector3(0.22, 1.55, -0.75)
 	_r.global_position = _anchor
 	print("SMOKE releasing on Concentric set the type: ", mates.mate_type == "concentric")
 
@@ -95,7 +95,7 @@ func _parts() -> Array:
 
 
 func _open() -> void:
-	_anchor = Vector3(0.22, 1.42, -0.75)
+	_anchor = Vector3(0.22, 1.55, -0.75)
 	_r.global_position = _anchor
 	_r.wheel_chord_started.emit()
 	await process_frame

@@ -137,6 +137,18 @@ func entries() -> Array:
 	return root_entries()
 
 
+func ring_title() -> String:
+	## The ring's name above it while nothing is pointed at.
+	match _manager.active_id:
+		"mates":
+			return "Constraint"
+		"measure":
+			return "Measure"
+		"colour_gun":
+			return "Colour gun"
+	return "Tools"
+
+
 func root_entries() -> Array:
 	var has_selection: bool = _main.current_selected_part() != null
 	return [

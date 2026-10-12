@@ -7,10 +7,11 @@ extends RefCounted
 ## the wedges run clockwise, like a clock face.
 
 const DEAD_ZONE := 0.045 ## metres: inside this the hand is "at the centre" = nothing chosen (release here to cancel)
-const DRILL_DISTANCE := 0.16 ## metres: a sub-wheel wedge opens its ring once the hand is this far out
-const OUTER_RADIUS := 0.17 ## metres: drawn radius of the ring
-const INNER_RADIUS := 0.065 ## metres: drawn inner radius (a little bigger than the dead zone, so the centre reads as a hole)
-const GAP := 0.012 ## metres: visual gap between neighbouring wedges
+const DRILL_DISTANCE := 0.20 ## metres: a sub-wheel wedge opens its ring once the hand is this far out
+const OUTER_RADIUS := 0.22 ## metres: drawn radius of the ring
+const INNER_RADIUS := 0.075 ## metres: drawn inner radius (a little bigger than the dead zone, so the centre reads as a hole)
+const GAP := 0.014 ## metres: visual gap between neighbouring wedges
+const CORNER := 0.009 ## metres: how round a wedge's corners are (the tablet's tiles are rounded the same way)
 
 
 static func wedge_for(offset: Vector2, count: int, dead_zone: float = DEAD_ZONE) -> int:
@@ -32,7 +33,7 @@ static func centre_direction(index: int, count: int) -> Vector2:
 	return Vector2(sin(a), cos(a))
 
 
-static func wedge_outline(index: int, count: int, inner: float = INNER_RADIUS, outer: float = OUTER_RADIUS, gap: float = GAP, steps: int = 10) -> PackedVector2Array:
+static func wedge_outline(index: int, count: int, inner: float = INNER_RADIUS, outer: float = OUTER_RADIUS, gap: float = GAP, steps: int = 14, corner: float = CORNER) -> PackedVector2Array:
 	## A closed polygon for the wedge (counter-clockwise), with `gap` metres trimmed off each side so the wedges don't touch.
 	var pts := PackedVector2Array()
 	if count <= 0:
@@ -48,6 +49,31 @@ static func wedge_outline(index: int, count: int, inner: float = INNER_RADIUS, o
 	for i in steps + 1:
 		var a := centre - inner_half + (inner_half * 2.0) * float(i) / float(steps)
 		pts.append(Vector2(sin(a), cos(a)) * inner)
+	return rounded(pts, corner)
+
+
+static func rounded(poly: PackedVector2Array, radius: float) -> PackedVector2Array:
+	## Rounds a convex polygon's corners: shrink it by `radius`, then grow it back with round joins.
+	if radius <= 0.0 or poly.size() < 3:
+		return poly
+	var shrunk := Geometry2D.offset_polygon(poly, -radius, Geometry2D.JOIN_ROUND)
+	if shrunk.is_empty():
+		return poly
+	var grown := Geometry2D.offset_polygon(shrunk[0], radius, Geometry2D.JOIN_ROUND)
+	return grown[0] if not grown.is_empty() else poly
+
+
+static func grown(poly: PackedVector2Array, delta: float) -> PackedVector2Array:
+	## The polygon pushed out (or in, negative) by `delta` metres, round joins: a border or glow layer behind a wedge.
+	var out := Geometry2D.offset_polygon(poly, delta, Geometry2D.JOIN_ROUND)
+	return out[0] if not out.is_empty() else poly
+
+
+static func circle(radius: float, steps: int = 40) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in steps:
+		var a := TAU * float(i) / float(steps)
+		pts.append(Vector2(sin(a), cos(a)) * radius)
 	return pts
 
 

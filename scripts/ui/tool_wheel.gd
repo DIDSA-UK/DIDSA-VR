@@ -26,9 +26,14 @@ signal opened()
 signal closed()
 signal chosen(entry_id: String)
 
-const ICON_PX := 64
-const ICON_PIXEL_SIZE := 0.0007 ## metres per icon pixel: a 4.5 cm icon
+const ICON_PX := 96
+const ICON_PIXEL_SIZE := 0.0005 ## metres per icon pixel: a 4.8 cm icon
 const HOVER_LIFT := 0.012 ## metres: the hovered wedge lifts towards you
+const BORDER := 0.0035 ## metres: a wedge's accent border, like the tablet tiles' outline
+const GLOW := 0.014 ## metres: how far the hovered wedge's glow reaches
+const LABEL_FONT_SIZE := 28
+const LABEL_PIXEL_SIZE := 0.0006
+const LABEL_WRAP_PX := 200 ## a wedge's name wraps to two lines rather than spilling over its neighbours
 const SIZE_NAMES: Array[String] = ["Small", "Normal", "Large"]
 const SIZE_SCALES: Array[float] = [0.8, 1.0, 1.3]
 const TRIGGER_ACTION := "trigger_click"
@@ -49,8 +54,13 @@ var _title := ""
 var _hover := -1
 var _anchor := Vector3.ZERO
 var _right := Vector3.RIGHT
-var _wedges: Array[MeshInstance3D] = []
+var title_provider: Callable = Callable() ## () -> String: the ring's name above it when nothing is hovered ("Constraint" while Mates is on)
+var _wedges: Array[MeshInstance3D] = [] ## each wedge's fill; its border and glow are siblings (_borders, _glows)
+var _borders: Array[MeshInstance3D] = []
+var _glows: Array[MeshInstance3D] = []
+var _labels: Array[Label3D] = []
 var _icons: Array[Sprite3D] = []
+var _hole: MeshInstance3D
 var _centre_title: Label3D
 var _centre_hint: Label3D
 var _cursor: MeshInstance3D
@@ -66,11 +76,13 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 	_ring.name = "Ring"
 	add_child(_ring)
 	# The name and hint sit ABOVE the ring: the hand (its tracking ring and controller) is at the ring's centre and would cover them.
-	_centre_title = _make_label(64, 0.0006)
-	_centre_title.position = Vector3(0, Math.OUTER_RADIUS + 0.035, 0.004)
+	_centre_title = _make_label(52, 0.0006)
+	_centre_title.position = Vector3(0, Math.OUTER_RADIUS + 0.075, 0.004)
 	_centre_hint = _make_label(36, 0.0006)
-	_centre_hint.position = Vector3(0, Math.OUTER_RADIUS + 0.078, 0.004)
+	_centre_hint.position = Vector3(0, Math.OUTER_RADIUS + 0.034, 0.004)
 	_centre_hint.modulate = tokens.text_dim
+	_hole = MeshInstance3D.new()
+	_ring.add_child(_hole)
 	_cursor = MeshInstance3D.new()
 	var dot := SphereMesh.new()
 	dot.radius = 0.007
@@ -237,21 +249,28 @@ func _drill(index: int) -> void:
 
 
 # --- Drawing -----------------------------------------------------------------------------------
+# Styled like the wrist tablet's tiles (didsa_ui_theme.gd tokens): a rounded raised tile with a thin accent border, an accent
+# outline icon and the name always underneath in the theme font. The hovered tile gets a brighter border, a glow and an accent
+# tint; the tool that is on is filled with accent_deep; a greyed one drops to the border / disabled colours.
+
+func _clear_nodes() -> void:
+	for group in [_wedges, _borders, _glows, _labels, _icons]:
+		for n in group:
+			n.queue_free()
+		group.clear()
+
 
 func _rebuild() -> void:
-	for n in _wedges:
-		n.queue_free()
-	for n in _icons:
-		n.queue_free()
-	_wedges.clear()
-	_icons.clear()
+	_clear_nodes()
 	var count := _entries.size()
 	for i in count:
-		var wedge := MeshInstance3D.new()
-		wedge.mesh = _wedge_mesh(i, count)
-		wedge.material_override = _material(tokens.bg_panel, 0.86)
-		_ring.add_child(wedge)
-		_wedges.append(wedge)
+		var outline := Math.wedge_outline(i, count)
+		var glow := _node_for(Math.grown(outline, GLOW), 8)
+		var border := _node_for(Math.grown(outline, BORDER), 9)
+		var fill := _node_for(outline, 10)
+		_glows.append(glow)
+		_borders.append(border)
+		_wedges.append(fill)
 		var icon := Sprite3D.new()
 		icon.texture = UiIcons.texture(str(_entries[i].get("icon", "")), ICON_PX)
 		icon.pixel_size = ICON_PIXEL_SIZE
@@ -260,11 +279,26 @@ func _rebuild() -> void:
 		icon.no_depth_test = true
 		icon.render_priority = 12
 		icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		var dir := Math.centre_direction(i, count)
-		var radius := (Math.INNER_RADIUS + Math.OUTER_RADIUS) * 0.5
-		icon.position = Vector3(dir.x * radius, dir.y * radius, 0.003)
 		_ring.add_child(icon)
 		_icons.append(icon)
+		var label := _make_label(LABEL_FONT_SIZE, LABEL_PIXEL_SIZE, false)
+		label.text = str(_entries[i].get("label", ""))
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.width = LABEL_WRAP_PX
+		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+		_ring.add_child(label)
+		_labels.append(label)
+		var dir := Math.centre_direction(i, count)
+		var mid := (Math.INNER_RADIUS + Math.OUTER_RADIUS) * 0.5
+		var centre := dir * mid
+		icon.position = Vector3(centre.x, centre.y + 0.018, 0.003)
+		label.position = Vector3(centre.x, centre.y - 0.012, 0.004)
+	# the centre: where the hand rests, and "release here to cancel"
+	var hole_outline := Math.circle(Math.INNER_RADIUS - Math.GAP)
+	_hole.mesh = _poly_mesh(hole_outline)
+	var hole_mat := _material(tokens.bg_panel, 0.8)
+	hole_mat.render_priority = 8
+	_hole.material_override = hole_mat
 	_cursor.position = Vector3(0, 0, 0.006)
 	_paint()
 
@@ -275,35 +309,54 @@ func _paint() -> void:
 		var accent: Color = entry.get("accent", tokens.accent)
 		var enabled := bool(entry.get("enabled", true))
 		var on := bool(entry.get("active", false))
-		var hovered := i == _hover
-		var fill: Color = tokens.bg_panel
+		var lit := i == _hover and enabled
+		var fill: Color = tokens.surface
+		var border_colour: Color = accent if enabled else tokens.border
+		var border_alpha := 0.6
 		if on:
 			fill = tokens.accent_deep
-		if hovered and enabled:
-			fill = accent.darkened(0.35)
-		var mat := _wedges[i].material_override as StandardMaterial3D
-		mat.albedo_color = Color(fill.r, fill.g, fill.b, 0.93 if hovered else 0.84)
-		_wedges[i].position.z = HOVER_LIFT if hovered and enabled else 0.0
-		_icons[i].modulate = Color.WHITE if (hovered and enabled) else (accent if enabled else tokens.text_disabled)
-		_icons[i].position.z = 0.003 + (HOVER_LIFT if hovered and enabled else 0.0)
-		_icons[i].scale = Vector3.ONE * (1.25 if hovered and enabled else 1.0)
+			border_alpha = 0.95
+		if lit:
+			fill = tokens.surface_hover.lerp(accent, 0.28)
+			border_alpha = 1.0
+		elif i == _hover:
+			border_colour = tokens.warn # pointed at but greyed: the border says "not now" and the hint says why
+			border_alpha = 0.8
+		_set_colour(_wedges[i], Color(fill.r, fill.g, fill.b, 0.97))
+		_set_colour(_borders[i], Color(border_colour.r, border_colour.g, border_colour.b, border_alpha))
+		_set_colour(_glows[i], Color(accent.r, accent.g, accent.b, 0.30))
+		_glows[i].visible = lit
+		var lift := HOVER_LIFT if lit else 0.0
+		_wedges[i].position.z = lift
+		_borders[i].position.z = lift
+		_glows[i].position.z = lift
+		_icons[i].modulate = accent if enabled else tokens.text_disabled
+		_icons[i].position.z = 0.003 + lift
+		_icons[i].scale = Vector3.ONE * (1.12 if lit else 1.0)
+		_labels[i].modulate = (tokens.text if (lit or on) else tokens.text_dim) if enabled else tokens.text_disabled
+		_labels[i].position.z = 0.004 + lift
 
 
 func _update_centre() -> void:
+	## Above the ring: what the pointed-at wedge does (or, greyed, why it cannot); with nothing pointed at, the ring's own name.
 	if _hover >= 0 and _hover < _entries.size():
 		var entry: Dictionary = _entries[_hover]
 		var enabled := bool(entry.get("enabled", true))
 		_centre_title.text = str(entry.get("label", ""))
 		_centre_title.modulate = tokens.text if enabled else tokens.text_disabled
 		_centre_hint.text = str(entry.get("hint", "")) if enabled else str(entry.get("hint_disabled", "Not available right now"))
+		_centre_hint.modulate = tokens.text_dim if enabled else tokens.warn
 	else:
-		_centre_title.text = _title if _title != "" else "Tools"
-		_centre_title.modulate = tokens.text_dim
-		_centre_hint.text = "release here to cancel"
+		var ring_name := _title
+		if ring_name == "" and title_provider.is_valid():
+			ring_name = str(title_provider.call())
+		_centre_title.text = ring_name if ring_name != "" else "Tools"
+		_centre_title.modulate = tokens.text
+		_centre_hint.text = "move to a tile, let go to choose · let go here to cancel"
+		_centre_hint.modulate = tokens.text_dim
 
 
-func _wedge_mesh(index: int, count: int) -> ArrayMesh:
-	var outline := Math.wedge_outline(index, count)
+func _poly_mesh(outline: PackedVector2Array) -> ArrayMesh:
 	var indices := Geometry2D.triangulate_polygon(outline)
 	var mesh := ArrayMesh.new()
 	if indices.is_empty():
@@ -322,6 +375,20 @@ func _wedge_mesh(index: int, count: int) -> ArrayMesh:
 	return mesh
 
 
+func _node_for(outline: PackedVector2Array, priority: int) -> MeshInstance3D:
+	var n := MeshInstance3D.new()
+	n.mesh = _poly_mesh(outline)
+	var m := _material(Color.WHITE, 1.0)
+	m.render_priority = priority
+	n.material_override = m
+	_ring.add_child(n)
+	return n
+
+
+func _set_colour(n: MeshInstance3D, colour: Color) -> void:
+	(n.material_override as StandardMaterial3D).albedo_color = colour
+
+
 func _material(colour: Color, alpha: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -333,7 +400,7 @@ func _material(colour: Color, alpha: float) -> StandardMaterial3D:
 	return m
 
 
-func _make_label(font_size: int, pixel_size: float) -> Label3D:
+func _make_label(font_size: int, pixel_size: float, add: bool = true) -> Label3D:
 	var l := Label3D.new()
 	l.font_size = font_size
 	l.pixel_size = pixel_size
@@ -342,6 +409,10 @@ func _make_label(font_size: int, pixel_size: float) -> Label3D:
 	l.outline_size = 8
 	l.render_priority = 14
 	l.outline_render_priority = 13
+	l.outline_modulate = Color(tokens.bg_panel.r, tokens.bg_panel.g, tokens.bg_panel.b, 0.9)
 	l.modulate = tokens.text
-	add_child(l)
+	if tokens.get("font") != null:
+		l.font = tokens.get("font")
+	if add:
+		add_child(l)
 	return l
