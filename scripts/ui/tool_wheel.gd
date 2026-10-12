@@ -37,6 +37,7 @@ const MIN_LABEL_FONT := 22
 const MIN_RING_FONT := 26 ## the smallest the ring-wide name size goes; a name that would not fit even then runs a little past its tile
 const PILL_TRACKING := 0.004 ## metres of extra space between the glyphs of the pill's curved name
 const PILL_TEXT_SCALE := 1.55 ## the pill's name is this much bigger than a tile's
+const PILL_TEXT_RAISE := 0.06 ## ems: the name sits this much nearer the ring (its tops point that way). A label is centred on its line box, so the lowercase bodies of a name sat about 0.1 em below the middle of the band (measured); this puts them and the capitals either side of it
 const PILL_ICON_SIZE := 0.042 ## metres: the pill's icon
 const PILL_ICON_GAP := 0.014 ## metres between the pill's icon and its name
 const NAME_PADDING := 0.014 ## metres of clear space kept between a name and its tile's edges (both sides together)
@@ -403,6 +404,7 @@ func _build_pill() -> void:
 		total += w
 	# Read left to right along the bottom: the angle (clockwise from straight up) decreases from PI + half the run to PI - half.
 	var angle := PI + (total / radius) * 0.5
+	var text_radius := radius - PILL_TEXT_RAISE * float(size) * LABEL_PIXEL_SIZE
 	var index := 0
 	if has_icon:
 		var step := widths[0] / radius
@@ -427,7 +429,7 @@ func _build_pill() -> void:
 		glyph.outline_size = 4
 		glyph.text = label[i]
 		text.add_child(glyph)
-		glyph.position = Vector3(sin(a) * radius, cos(a) * radius, 0.004)
+		glyph.position = Vector3(sin(a) * text_radius, cos(a) * text_radius, 0.004)
 		glyph.rotation.z = atan2(sin(a), -cos(a)) # baseline along the arc, tops towards the ring's centre
 		angle -= step
 
