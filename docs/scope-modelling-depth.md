@@ -1,8 +1,14 @@
 # Scope: modelling depth (design table)
 
 Scoping pass, 2026-10-08. Covers gap G8 (more sketch tools and features, a preview before Apply, redo) and the Build-tree part of G11 in
-`docs/design-table-gaps.md`, open item 7. Nothing here is built. The roadmap entry is in DIDSA-CAD `docs/roadmap.md`
+`docs/design-table-gaps.md`, open item 7. The roadmap entry is in DIDSA-CAD `docs/roadmap.md`
 ("DIDSA-VR: next-work candidates").
+
+> **Status, 2026-10-12: historical.** Everything in M0 to M6 below was built in Phase 5 and 6 (see `docs/status.md`, "2026-10-08", and `docs/implementation-plan.md`):
+> the per-feature interface, docked properties panel, body and sketch-curve picks, preview, feature redo, Create Plane (offset only), Loft, Sweep, Pattern, Boolean, Merge,
+> Split, Trim, Offset, the Modify category, Ellipse, Ellipse Arc, Spline and Text, each with Edit from its Build row. Tests and real-backend runs only; no headset.
+> The tables and phases below are kept as the record of the decisions. What is still open (option-level depth, surfacing, curves, the Build-tree sections, sketch Pattern /
+> Mirror) and its order is in DIDSA-CAD `docs/roadmap.md` ("DIDSA-VR: parity gap review and rollout order"). The "Correction" paragraph next is also resolved: Point was built.
 
 **Correction to the gap list:** open item 7 names *Point* as a missing sketch tool. It is already registered (`SKETCH_TOOLS` in `table_tools.gd`), so
 that line is stale and should be fixed when the list is next edited.
