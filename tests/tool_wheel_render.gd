@@ -1,9 +1,9 @@
 extends SceneTree
 ## NEEDS A REAL RENDER, not --headless (Xvfb + llvmpipe, same recipe as tests/tablet_render.gd and tests/dock_panels_render.gd):
 ##   WHEEL_RENDER_DIR=/tmp/wheel xvfb-run -a "$GODOT" --path . --script res://tests/tool_wheel_render.gd
-## Picture-only (a human reads the PNGs; not run by ci_render.sh). Walks the Constraint flow in the real scene with the box-and-cylinder
+## Picture-only (a human reads the PNGs; not run by ci_render.sh). Walks the Mates flow in the real scene with the box-and-cylinder
 ## fixture and no backend, saving NN_name.png at each step from the player's own eye (the XR camera's pose, so the prompt that hangs in
-## front of the camera is in the picture): the root ring, Constraint hovered, the first and second pick prompts, the Constraint ring with
+## front of the camera is in the picture): the root ring, Mates hovered, the first and second pick prompts, the Mates ring with
 ## Create greyed, the Type sub-wheel, Create ready, and the result of pressing Create (no backend, so it reports why it could not).
 ## The mate's blue ghost preview needs the backend and is not drawn here. The chord signal and release handler are called directly
 ## (headless / Xvfb has no real grip). GL-compatibility software render, not a headset view: a layout check.
@@ -51,9 +51,9 @@ func _initialize() -> void:
 	await _open()
 	await _shot("01_root_ring")
 	await _move(Vector2(0.0, 0.12))
-	await _shot("02_root_constraint_hovered")
+	await _shot("02_root_mates_hovered")
 	_release()
-	print("SMOKE Constraint switched Mates on: ", manager.is_active("mates"))
+	print("SMOKE Choosing Mates switched it on: ", manager.is_active("mates"))
 	await _shot("03_prompt_pick_first")
 
 	var parts := _parts()
@@ -62,7 +62,7 @@ func _initialize() -> void:
 
 	await _open()
 	await _move(Vector2(0.0, 0.12)) # Create, greyed with one pick
-	await _shot("05_constraint_ring_create_greyed")
+	await _shot("05_mates_ring_create_greyed")
 	await _move(Vector2(0.0, -0.12) * 0.0 + Vector2(sin(PI), cos(PI)) * 0.24) # towards Type, opens its ring
 	_anchor = _r.global_position
 	await _move(Vector2(sin(TAU / 5.0), cos(TAU / 5.0)) * 0.12) # Concentric
@@ -77,7 +77,7 @@ func _initialize() -> void:
 	await _shot("07_prompt_ready_to_create")
 	await _open()
 	await _move(Vector2(0.0, 0.12))
-	await _shot("08_constraint_ring_create_ready")
+	await _shot("08_mates_ring_create_ready")
 	_release()
 	for i in 20:
 		await process_frame

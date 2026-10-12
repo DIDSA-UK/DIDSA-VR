@@ -430,7 +430,7 @@ live-synced.
 18. **Tool wheel.** Squeeze the **right trigger and grip together** (press them within a
     quarter of a second of each other; either alone still grabs or selects as before). A ring
     of wedges opens at your hand. **Move your hand** towards a wedge (it is steered by hand
-    movement, not aim) and **let go to choose**; let go at the centre to cancel. Constraint,
+    movement, not aim) and **let go to choose**; let go at the centre to cancel. Mates,
     Measure, Summon table, Colour gun, Shoot hide, Section, Visibility (a sub-wheel: Show all,
     Invert, Isolate part, Categories) and Undo are on the first ring. A wedge with a sub-wheel
     opens it once your hand travels well out towards it. While a tool is on the ring follows

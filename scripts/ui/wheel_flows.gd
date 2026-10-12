@@ -96,7 +96,7 @@ func prompt_text() -> String:
 	match _manager.active_id:
 		"mates":
 			var type_label: String = MATE_TYPE_LABELS.get(_mates.mate_type, _mates.mate_type)
-			return "Constraint · %s\n%s\nWheel: Create · Flip · Clear · type" % [type_label, _mates.status_text()]
+			return "Mates · %s\n%s\nWheel: Create · Flip · Clear · type" % [type_label, _mates.status_text()]
 		"measure":
 			var line: String = _measure.status_text()
 			if not _measure.result.is_empty():
@@ -144,7 +144,7 @@ func ring_title() -> String:
 	## The ring's name above it while nothing is pointed at.
 	match _manager.active_id:
 		"mates":
-			return "Constraint"
+			return "Mates"
 		"measure":
 			return "Measure"
 		"colour_gun":
@@ -155,7 +155,7 @@ func ring_title() -> String:
 func root_entries() -> Array:
 	var has_selection: bool = _main.current_selected_part() != null
 	return [
-		_tool_entry("mates", "Constraint", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
+		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
 		_tool_entry("colour_gun", "Colour gun", "colour_gun", Color(0.48, 0.88, 0.69), "Shoot a part to paint it"),

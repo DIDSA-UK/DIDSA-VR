@@ -46,7 +46,7 @@ func _initialize() -> void:
 
 	print("SMOKE the wheel is built and the right hand is wired for it (the left is not): ", wheel != null and r.wheel_enabled and not l.wheel_enabled)
 	var root_ids: Array = _ids(flows.entries())
-	print("SMOKE the root ring: constraint, measure, table, colour gun, shoot hide, section, visibility, undo: ", root_ids == ["mates", "measure", "table", "colour_gun", "shoot_hide", "sections", "visibility", "undo"])
+	print("SMOKE the root ring: mates, measure, table, colour gun, shoot hide, section, visibility, undo: ", root_ids == ["mates", "measure", "table", "colour_gun", "shoot_hide", "sections", "visibility", "undo"])
 	print("SMOKE nothing is active and the wheel is closed at the start: ", manager.active_id == "" and not wheel.is_open() and not r.wheel_is_open())
 
 	# --- the chord takes the hand
@@ -59,14 +59,14 @@ func _initialize() -> void:
 	_move(Vector2(0.01, 0.01))
 	print("SMOKE a hand near the centre hovers nothing: ", wheel.hovered_index() == -1)
 	_move(Vector2(0.0, 0.12))
-	print("SMOKE moving the hand up hovers the first wedge (Constraint): ", wheel.hovered_index() == 0)
+	print("SMOKE moving the hand up hovers the first wedge (Mates): ", wheel.hovered_index() == 0)
 	_move(Vector2(0.12, 0.0))
 	print("SMOKE moving it right hovers the third wedge (Summon table): ", wheel.hovered_index() == 2)
 
 	# --- release on a wedge runs it
 	_move(Vector2(0.0, 0.12))
 	wheel._on_released("trigger_click") # one button up: the choice is made
-	print("SMOKE releasing on Constraint switches the Mates tool on through the tool manager: ", manager.is_active("mates") and main._mates_tool.active and r.mates_tool_active)
+	print("SMOKE releasing on Mates switches the Mates tool on through the tool manager: ", manager.is_active("mates") and main._mates_tool.active and r.mates_tool_active)
 	# (a real headset keeps the other button down, so the hand stays the wheel's until BOTH are up; headless has no
 	# live button state, so the first release already counts as both)
 	print("SMOKE after the release the ring is gone and the hand is its own again: ", not wheel.is_shown() and not wheel.is_open() and not r.wheel_is_open() and not r.is_manipulating())
@@ -76,7 +76,7 @@ func _initialize() -> void:
 	var mate_ids: Array = _ids(wheel.current_entries())
 	print("SMOKE with Mates on the ring is Create / Flip / Clear / Type / Done / All tools: ", mate_ids == ["mate_create", "mate_flip", "mate_clear", "mate_type", "mate_exit", "all_tools"])
 	print("SMOKE Create is greyed until two parts are picked: ", not bool(wheel.current_entries()[0]["enabled"]))
-	print("SMOKE the prompt leads the user through Mates: ", flows.prompt_text().begins_with("Constraint · Coincident") and "Pick a face" in flows.prompt_text())
+	print("SMOKE the prompt leads the user through Mates: ", flows.prompt_text().begins_with("Mates · Coincident") and "Pick a face" in flows.prompt_text())
 	_move(Vector2(0.0, 0.12))
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
