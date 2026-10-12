@@ -157,7 +157,7 @@ func pill_entry() -> Dictionary:
 	## The pill under every top-level ring: put the tool away. Greyed (with the reason) when there is nothing in the hand.
 	var in_hand: bool = _manager.active_id != ""
 	var def = _registry.tool_def(_manager.active_id) if in_hand else null
-	return {"id": "clear_tool", "label": "Clear", "title": "Clear tool", "accent": Color(0.62, 0.70, 0.80), "text_colour": tokens.danger, "enabled": in_hand,
+	return {"id": "clear_tool", "label": "Clear", "title": "Clear tool", "icon": "close", "accent": Color(0.62, 0.70, 0.80), "text_colour": tokens.danger, "enabled": in_hand,
 		"hint": "Put %s away: hands free" % (str(def.label) if def != null else "the tool"), "hint_disabled": "Nothing in your hand",
 		"run": _clear_tool}
 

@@ -35,7 +35,10 @@ const ICON_SIZE := ICON_PX * ICON_PIXEL_SIZE
 const ICON_LABEL_GAP := 0.008 ## metres between a tile's icon and its name
 const MIN_LABEL_FONT := 22
 const MIN_RING_FONT := 26 ## the smallest the ring-wide name size goes; a name that would not fit even then runs a little past its tile
-const PILL_TRACKING := 0.003 ## metres of extra space between the glyphs of the pill's curved name
+const PILL_TRACKING := 0.004 ## metres of extra space between the glyphs of the pill's curved name
+const PILL_TEXT_SCALE := 1.55 ## the pill's name is this much bigger than a tile's
+const PILL_ICON_SIZE := 0.042 ## metres: the pill's icon
+const PILL_ICON_GAP := 0.014 ## metres between the pill's icon and its name
 const NAME_PADDING := 0.014 ## metres of clear space kept between a name and its tile's edges (both sides together)
 const LABEL_LINE_HEIGHT := 1.28 ## a line of label text is this many font sizes tall
 const HOVER_LIFT := 0.012 ## metres: the hovered wedge lifts towards you
@@ -370,7 +373,8 @@ func _rebuild() -> void:
 
 func _build_pill() -> void:
 	## The pill under a top-level ring: an action that is not a wedge (e.g. "Clear", which puts the tool away). Styled like a
-	## tile (same fill, corner, border, hover), with its name set along the arc, one glyph at a time, because a label cannot bend.
+	## tile (same fill, corner, border, hover). Its icon and name are set along the arc, the name one glyph at a time because a
+	## label cannot bend; both are in the entry's own text colour (red for Clear), and bigger than a tile's name.
 	if _pill.is_empty():
 		return
 	var outline := Math.pill_outline(24, _corner)
@@ -380,22 +384,44 @@ func _build_pill() -> void:
 	var text := Node3D.new()
 	_ring.add_child(text)
 	_pill_nodes["text"] = text
-	var size := _ring_font
+	var size := int(float(_ring_font) * PILL_TEXT_SCALE)
 	var probe := _make_label(size, LABEL_PIXEL_SIZE, false)
 	var font: Font = probe.font if probe.font != null else ThemeDB.fallback_font
 	probe.free()
 	var label := str(_pill.get("label", ""))
 	var radius := Math.OUTER_RADIUS + Math.PILL_GAP + Math.PILL_DEPTH * 0.5 # the middle of the band
+	# What goes along the arc, in reading order: the icon (if the entry has one), then each letter. Each is its width in metres.
+	var has_icon := str(_pill.get("icon", "")) != ""
 	var widths: Array[float] = []
 	var total := 0.0
+	if has_icon:
+		widths.append(PILL_ICON_SIZE + PILL_ICON_GAP)
+		total += widths[0]
 	for ch in label:
 		var w := font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * LABEL_PIXEL_SIZE + PILL_TRACKING
 		widths.append(w)
 		total += w
-	# Read left to right along the bottom: the angle (clockwise from straight up) decreases from PI + half the text to PI - half.
+	# Read left to right along the bottom: the angle (clockwise from straight up) decreases from PI + half the run to PI - half.
 	var angle := PI + (total / radius) * 0.5
+	var index := 0
+	if has_icon:
+		var step := widths[0] / radius
+		var a := angle - (PILL_ICON_SIZE * 0.5 / radius) # the icon's centre, its own width in from the start of the run
+		var icon := Sprite3D.new()
+		icon.texture = UiIcons.texture(str(_pill["icon"]), ICON_PX)
+		icon.pixel_size = PILL_ICON_SIZE / float(ICON_PX)
+		icon.shaded = false
+		icon.double_sided = true
+		icon.no_depth_test = true
+		icon.render_priority = 12
+		icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		text.add_child(icon)
+		icon.position = Vector3(sin(a) * radius, cos(a) * radius, 0.003)
+		icon.rotation.z = atan2(sin(a), -cos(a))
+		angle -= step
+		index = 1
 	for i in label.length():
-		var step := widths[i] / radius
+		var step := widths[index + i] / radius
 		var a := angle - step * 0.5
 		var glyph := _make_label(size, LABEL_PIXEL_SIZE, false)
 		glyph.outline_size = 4
@@ -550,7 +576,7 @@ func _paint_pill() -> void:
 	var text: Node3D = _pill_nodes["text"]
 	text.position.z = lift
 	for glyph in text.get_children():
-		(glyph as Label3D).modulate = text_colour
+		glyph.set("modulate", text_colour) # the icon (a Sprite3D) and the letters (Label3D) share the colour
 
 
 func _summary_for(entry: Dictionary) -> Dictionary:
