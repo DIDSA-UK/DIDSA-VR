@@ -7,12 +7,12 @@ Everything is VR client work, tested headless, in a software render and against 
 
 ## Pre-checks (done 2026-10-12) and what they found
 
-1. **Can the Properties panel take more options? Yes, but it already scrolls, so it needs sections first.**
+1. **Can the Properties panel take more options? Yes, but it already scrolls, so its rows need to get cheaper first.**
    `table_props_window.gd` is a 0.30 x 0.40 m panel (516 x 688 px) with a title, the tool tip, a "Selected" list and a `ScrollContainer` of rows. Each non-toggle
    option is one 56 px button (64 px with the gap); toggles flow side by side (150 px minimum, about three to a line). Estimated, not measured: the header takes
    roughly 200 px, so about 7 lines are visible before scrolling. Pattern (rectangular with a second direction) is already about 12 lines; Extrude is about 5 today
    and would be about 10 with the options below. The right stick scrolls the panel (`scroll_target`), so nothing is blocked, but a 10-line Extrude is a poor first
-   screen. **Decision: Phase 7 starts with 7.0, collapsible sections in the option list.** This is not the layout and human-factors pass (roadmap item 8); it is the
+   screen. **Decision (revised 2026-10-12 after a first draft that folded groups): Phase 7 starts with 7.0, smaller rows and a second colour for typed values; nothing is hidden.** This is not the layout and human-factors pass (roadmap item 8); it is the
    smallest change that keeps the first screen short.
 2. **Backend routes accept everything.** `ExtrudeFeatureCreate/Update`: `thickness`, `thickness_direction` (outward / inward / symmetric), `draft_angle` (strictly inside 0 to 90),
    `draft_outward`, `profile_refs`. `ChamferFeatureCreate/Update`: `edge_options` (`{index: {face_ref?, angle?, flip}}`). `MoveFaceFeatureUpdate`: `direction_ref` + `direction_distance`
@@ -33,17 +33,25 @@ Same as `docs/implementation-plan.md` ("Rules for the implementing session"), wi
 the real-backend list (`tests/ci_e2e.sh`) after each sub-phase. Register new tests per `tests/README.md`. Update `docs/status.md`, `docs/design-table.md`, `docs/design-table-gaps.md` and the roadmap as items
 close. Report plainly what ran headless, in a render, against the real backend, or not at all. Each sub-phase ends with a **GODOT GATE**: suite counts before and after, and the honest "not seen in a headset" line.
 
-## 7.0 Panel sections (S)
+## 7.0 Panel density and a second colour (S)
 
-Why first: 7.1, 7.2 and 7.3 all add rows. Do this before any of them.
+Why first: 7.1, 7.2 and 7.3 all add rows. No folding (decided 2026-10-12: hiding settings behind a tap is a poor fit for a laser UI); instead make every row cheaper and make the two kinds of control look different at a glance.
 
-- **Option protocol** (`features/feature_tool.gd` doc, `table_props_window.gd` `_rebuild`): an option may carry `"section": "<name>"`. Consecutive options with the same section sit under one heading button.
-  A section may carry `"collapsed": true` (the default for advanced groups); the heading toggles it. Options without a section behave exactly as now, so every existing tool is unchanged.
-- State: the panel remembers which sections the user opened for the current tool until the tool changes. `option_ids()` still lists every option, folded or not, so tests and the editor are unaffected.
-- First users: Pattern (fold "Second direction" and, for circular, "Orientation"), then the new Extrude groups in 7.1.
-- Budget to hold to from here on: the **default view** of any tool fits in about 7 lines; measure the real header height in the render test and replace the estimate above.
-- Tests: extend `design_table_props_panel.gd` (a section folds and unfolds; a folded option is still in `option_ids()`; pressing a folded option's id still routes); add Pattern and Extrude to `dock_panels_render.gd` and look at the pictures.
-- Exit: Pattern's default view is 7 lines or fewer; nothing else changed in behaviour; suite green.
+- **Two kinds of control, two colours.** Today every option is the same grey button and a toggle's selected state uses the tool's category accent. Choices (toggles) keep the category accent. **Values** (anything typed: depth, wall, angle, count, spacing) get a
+  second, fixed colour, so a glance tells "pick one of these" from "type a number". Proposed: a new theme token `value` (a pale gold for the number, a darker fill of it on hover), set per preset in `ui/themes/` (Navy / Simple / Dark) and read through
+  `didsa_ui_theme.gd` next to `accent`, with a new button variation `ButtonValue`. The colour is never the only cue: a value row is also laid out differently (name left and dim, number right and bright) and a choice is a chip. The exact gold is a
+  proposal; the render test (below) draws it beside the cyan so it can be changed in one place. Amber (`warn`) and green (`ok`) stay reserved for attention and success.
+- **Smaller rows.** Button height 56 to 44 px with a 6 px gap (50 px per line instead of 64); value text stays `font_small` (18), names drop to `font_tiny` (16) dim. Chips shrink from a 150 px to a 110 px minimum so four fit a line instead of three
+  (labels get shortened to fit: "Boss", "Cut", "Flip", "Dir X"). On a 0.40 m panel a 44 px row is about 2.6 cm tall, still a comfortable laser target, but this is **not verified on a headset** and is one constant to change.
+- **Value rows pair up.** Two value rows share a line when each fits in half the width (Count | Spacing, Depth | Angle); one that does not fit stays full width.
+- **Group labels, not folds.** An option may carry `"group": "<name>"`; consecutive options with the same group get a small dim caption and a thin rule above them (about 20 px). Everything stays visible; the labels just make a long list readable.
+- **Option protocol** (`features/feature_tool.gd` doc, `table_props_window.gd` `_rebuild`): a value option may carry `"label": "Depth"` and `"value": "5.00 mm"` instead of one `text` string; `text` is still honoured, so an unmigrated tool renders as it does now (only
+  smaller). Migrate the tools Phase 7 touches first (Extrude, Chamfer, Move Face, Pattern, Loft, Create Plane), the rest as they are next edited.
+- **Budget** for the default view of any tool: at the new heights about 8 lines fit in the roughly 450 px under the header (an estimate; measure the real header in the render test and correct it). The same estimate puts rectangular Pattern with a second
+  direction at about 8 lines, down from about 12, and Extrude with all of 7.1 at about 8. Anything that still overflows scrolls, as now.
+- Tests: extend `design_table_props_panel.gd` (a `label` / `value` option shows both parts; an old `text` option still renders; two value rows share a line only when they fit; `option_ids()` and routing unchanged); add Extrude, Pattern, Create Plane and Chamfer
+  to `dock_panels_render.gd` and look at the pictures in all three themes, with the value colour beside the accent.
+- Exit: the pictures show choices and values clearly apart; Pattern's default view is about 8 lines or fewer; no tool's behaviour changed; suite green.
 
 ## 7.1 Extrude depth (M)
 
@@ -52,8 +60,8 @@ Everything is options on `extrude_tool.gd` and `PartFeatures.extrude_request`; E
 | Option | Backend field | VR behaviour |
 |---|---|---|
 | Both sides (symmetric) | `start_distance` / `end_distance` | Client mapping only: depth `d` becomes `-d/2 .. +d/2`. Flip is ignored while it is on. |
-| Thin wall | `thickness`, `thickness_direction` | Section "Thin wall": a toggle, the wall thickness (typed, mm, greater than 0) and Outward / Inward / Symmetric. |
-| Draft | `draft_angle`, `draft_outward` | Section "Draft": the angle (typed, greater than 0 and less than 90) and an Outward toggle. |
+| Thin wall | `thickness`, `thickness_direction` | Group "Thin wall": a toggle, the wall thickness (typed, mm, greater than 0) and Outward / Inward / Symmetric. |
+| Draft | `draft_angle`, `draft_outward` | Group "Draft": the angle (typed, greater than 0 and less than 90) and an Outward toggle. |
 | Which profiles | `profile_refs` | Only when the sketch has several outer profiles: a "Pick profiles" mode using the existing sketch-curve picks (`sketch_picks.gd`); empty means all, as now. Droppable if it fights the seed-sketch flow. |
 
 - **Exclusions in the UI, not just the backend:** turning Thin wall on greys Draft and the other way round, with the reason in the tool tip; Draft is greyed while more than one profile would be extruded.
@@ -64,20 +72,20 @@ Everything is options on `extrude_tool.gd` and `PartFeatures.extrude_request`; E
 - Tests: request building and the exclusions (`design_table_feature_tools.gd`); Edit round trip (`design_table_editing.gd`); a new real-backend `e2e_extrude_options.gd`: a symmetric 20 mm box spans -10 to 10, a thin
   wall has the expected volume (Measure), a drafted prism has a tapered side face, turning thin off by Edit restores a solid, the thin + draft conflict is refused with the backend's message. Open the saved file in the
   flat app's test harness if one can run, otherwise say it was not run (as for Phase 6).
-- Exit: all four in the panel with sections, Edit and Undo / Redo work, e2e true.
+- Exit: all four in the panel, Edit and Undo / Redo work, e2e true.
 
 ## 7.2 Small tool options (M)
 
 Four independent pieces; any order.
 
-- **Chamfer angle and flip.** Section "Angle": On/Off, the angle (typed, degrees), Flip. Applies to every picked edge by writing `edge_options[i] = {angle, flip}` for each index (the reference face defaults to the
+- **Chamfer angle and flip.** Group "Angle": On/Off, the angle (typed, degrees), Flip. Applies to every picked edge by writing `edge_options[i] = {angle, flip}` for each index (the reference face defaults to the
   lower-indexed adjacent face; `face_ref` is not sent). Per-edge overrides are later. Edit loads `edge_options` back (all equal means the simple form shows; mixed values show "per edge, edit in the flat app").
 - **Move Face by direction.** A mode toggle Offset | Direction. Direction takes a fixed axis X / Y / Z or a picked sketch line (reuse `PatternTool._direction`) and a distance; sends `direction_ref` + `direction_distance`
   and no `offset_distance`. The `delta` mode stays out.
-- **Pattern: skipped instances and orientation.** Section "Skip": a typed comma-separated list of instance numbers on the popup keyboard (`open_keyboard_for`), validated against count (the seed, 0, is refused; the backend
-  also validates). Section "Orientation" (circular only): Rotate with pattern | Keep orientation (`orientation_mode`; the backend documents Radial-to-axis as identical to Rotate, so it is not offered). v1 is typed; tapping
+- **Pattern: skipped instances and orientation.** Group "Skip": a typed comma-separated list of instance numbers on the popup keyboard (`open_keyboard_for`), validated against count (the seed, 0, is refused; the backend
+  also validates). Group "Orientation" (circular only): Rotate with pattern | Keep orientation (`orientation_mode`; the backend documents Radial-to-axis as identical to Rotate, so it is not offered). v1 is typed; tapping
   ghost instances to switch them off is a later nicety and needs a way to pick one instance out of the preview (not checked against the coarse-preview output).
-- **Loft thin wall.** Section "Thin wall": thickness and the closed-profile toggle (`thickness`, `thin_from_closed_profile`); `patch_keys` and `load_from_row` extended; guide curves are **not** here (see Deferred).
+- **Loft thin wall.** Group "Thin wall": thickness and the closed-profile toggle (`thickness`, `thin_from_closed_profile`); `patch_keys` and `load_from_row` extended; guide curves are **not** here (see Deferred).
 - Tests: per-tool request and Edit tests as in 7.1; real-backend `e2e_options_small.gd` (an angled chamfer face, a face moved 10 mm along Y, a 5-instance pattern with instance 2 skipped has 4 bodies, a thin loft).
 - Exit: each piece reachable from the panel, edited from the Build row, undone and redone.
 
@@ -117,7 +125,7 @@ The riskiest sub-phase: it needs a new pick state and a method switch. Do the pr
 ## Order, sizes and gates
 
 Sizes: 7.0 S, 7.1 M, 7.2 M, 7.3 L, 7.4 M. 7.4 can run any time after 7.0. Suggested order is 7.0, 7.1, 7.2, 7.3, 7.4, because 7.1 and 7.2 are what everyday parts need soonest and 7.3 benefits from having had the
-sections for a while. After 7.4: **GODOT GATE E** (full headless suite, `ci_render.sh`, the whole `ci_e2e.sh`), then update `docs/design-table-gaps.md` (item 7 and G8), `docs/design-table.md` (the deck table's "Not built yet" column),
+denser panel for a while. After 7.4: **GODOT GATE E** (full headless suite, `ci_render.sh`, the whole `ci_e2e.sh`), then update `docs/design-table-gaps.md` (item 7 and G8), `docs/design-table.md` (the deck table's "Not built yet" column),
 `docs/status.md` and the roadmap.
 
 ## Deferred out of Phase 7 (now in roadmap step 4, "Sketch ergonomics and picks")
