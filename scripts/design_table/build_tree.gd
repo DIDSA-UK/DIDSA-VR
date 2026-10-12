@@ -105,7 +105,10 @@ static func summary(features: Array, index: int) -> String:
 		"fillet":
 			return "R %s mm, %d edge(s)" % [number(float(f.get("radius", 0.0))), (f.get("edge_refs", []) as Array).size()]
 		"chamfer":
-			return "%s mm, %d edge(s)" % [number(float(f.get("distance", 0.0))), (f.get("edge_refs", []) as Array).size()]
+			var chamfer := "%s mm, %d edge(s)" % [number(float(f.get("distance", 0.0))), (f.get("edge_refs", []) as Array).size()]
+			if f.get("edge_options") is Dictionary and not (f["edge_options"] as Dictionary).is_empty():
+				chamfer += ", angled"
+			return chamfer
 		"create_plane":
 			return str(f.get("plane_type", "plane")).replace("_", " ")
 	var tool = FeatureTools.for_type(str(f.get("type", "")))

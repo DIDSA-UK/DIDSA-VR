@@ -89,6 +89,7 @@ Four independent pieces; any order.
 - **Loft thin wall.** Group "Thin wall": thickness and the closed-profile toggle (`thickness`, `thin_from_closed_profile`); `patch_keys` and `load_from_row` extended; guide curves are **not** here (see Deferred).
 - Tests: per-tool request and Edit tests as in 7.1; real-backend `e2e_options_small.gd` (an angled chamfer face, a face moved 10 mm along Y, a 5-instance pattern with instance 2 skipped has 4 bodies, a thin loft).
 - Exit: each piece reachable from the panel, edited from the Build row, undone and redone.
+- **Done 2026-10-12** (see `docs/status.md`): all four, with a small backend change for the Loft wall (an explicit null now turns it off). Differences from the plan: Move Face by direction offers X / Y / Z only (a sketch line is deferred); Chamfer now edits in its own tool, as Extrude did in 7.1.
 
 ## 7.3 Create Plane types (L)
 

@@ -91,6 +91,15 @@ func _initialize() -> void:
 		ed.options["ext_draft"] = true
 		await _shoot("91_extrude_draft", "feature", "extrude", true)
 		ed.options["ext_draft"] = false
+		ed.options["ch_angle_on"] = true
+		await _shoot("92_chamfer_angle", "feature", "chamfer", true)
+		ed.options["ch_angle_on"] = false
+		ed.options["lo_thin"] = true
+		await _shoot("93_loft_thin", "feature", "loft", true)
+		ed.options["lo_thin"] = false
+		ed.options["pat_type"] = "circular"
+		await _shoot("94_pattern_circular", "feature", "pattern", true)
+		ed.options["pat_type"] = "rectangular"
 	print("SMOKE dock render saved %d pictures" % _saved)
 	quit()
 

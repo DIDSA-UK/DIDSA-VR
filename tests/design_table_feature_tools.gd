@@ -25,6 +25,7 @@ class FakeTable extends RefCounted:
 class Ed extends RefCounted:
 	const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 	var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false,
+		"ch_angle_on": false, "ch_angle": 45.0, "ch_flip": false, "ch_mixed": false, "mf_dir": "normal", "pat_skip": [], "pat_orient": "rotate_with_pattern", "lo_thin": false, "lo_wall": 2.0, "lo_closed": false,
 		"ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true}
 	var editing := {}
 	var activating_edit := false

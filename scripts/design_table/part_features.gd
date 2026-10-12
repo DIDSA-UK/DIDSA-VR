@@ -102,14 +102,19 @@ static func create_plane_request(base: Dictionary, offset: float) -> Dictionary:
 	return _good("create-plane-features", {"plane_type": "offset_face", "face_refs": [ref], "offset": offset})
 
 
-static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array) -> Dictionary:
-	## A loft through two or more sections, each the closed profile of a sketch (on its own plane).
+static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array, wall: float = 0.0, wall_from_closed: bool = false) -> Dictionary:
+	## A loft through two or more sections, each the closed profile of a sketch (on its own plane). `wall` over 0 makes it a thin-walled loft:
+	## `wall_from_closed` keeps the closed profiles and gives a hollow tube between them (the thin source for closed sections), otherwise the sections are open chains.
 	if section_sketch_ids.size() < 2:
 		return _bad("A loft needs at least two sections: pick a line of each of two different sketches.")
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
-	return _good("loft-features", {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
-		"ruled": ruled, "target_body_ids": target_body_ids})
+	var body := {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
+		"ruled": ruled, "target_body_ids": target_body_ids}
+	if wall > 0.0:
+		body["thickness"] = wall
+		body["thin_from_closed_profile"] = wall_from_closed
+	return _good("loft-features", body)
 
 
 static func sweep_request(sketch_feature_id: String, path_refs: Array, boss: bool, target_body_ids: Array) -> Dictionary:
@@ -149,12 +154,16 @@ static func split_request(target_body_id: String, plane_ref: Dictionary) -> Dict
 	return _good("split-features", {"target_body_id": target_body_id, "tool": {"plane_ref": plane_ref}})
 
 
-static func move_face_request(face_refs: Array, offset: float) -> Dictionary:
-	## Pushes (or pulls) the picked faces of one body along their normals by `offset` mm.
+static func move_face_request(face_refs: Array, offset: float, direction_axis: String = "") -> Dictionary:
+	## Pushes (or pulls) the picked faces of one body by `offset` mm: along each face's own normal, or (with `direction_axis` "x" / "y" / "z") along that world axis.
 	if face_refs.is_empty():
 		return _bad("Pick the faces to move first.")
 	if is_zero_approx(offset):
 		return _bad("The distance can't be zero.")
+	if direction_axis != "":
+		if not direction_axis in ["x", "y", "z"]:
+			return _bad("A direction from a sketch line can't be set here yet; use X, Y or Z.")
+		return _good("move-face-features", {"face_refs": face_refs, "direction_ref": {"fixed_axis": direction_axis}, "direction_distance": offset})
 	return _good("move-face-features", {"face_refs": face_refs, "offset_distance": offset})
 
 
@@ -194,12 +203,22 @@ static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	return _good("fillet-features", {"edge_refs": edges, "radius": radius})
 
 
-static func chamfer_request(edges: Array, distance: float) -> Dictionary:
+static func chamfer_request(edges: Array, distance: float, angle: float = 0.0, flip: bool = false) -> Dictionary:
+	## `angle` over 0 (degrees, under 90) makes every edge a distance-and-angle chamfer (`edge_options`, keyed by each edge's index in `edge_refs`); `flip` swaps
+	## which of an edge's two faces the distance is measured along. 0 is the plain symmetric chamfer.
 	if edges.is_empty():
 		return _bad("Pick the edges to chamfer first.")
 	if distance <= 0.0:
 		return _bad("The distance has to be bigger than zero.")
-	return _good("chamfer-features", {"edge_refs": edges, "distance": distance})
+	if angle < 0.0 or angle >= 90.0:
+		return _bad("The chamfer angle has to be more than 0 and less than 90 degrees.")
+	var body := {"edge_refs": edges, "distance": distance}
+	if angle > 0.0:
+		var options := {}
+		for i in edges.size():
+			options[str(i)] = {"angle": angle, "flip": flip}
+		body["edge_options"] = options
+	return _good("chamfer-features", body)
 
 
 func post(owner_part_id: String, request: Dictionary) -> Dictionary:

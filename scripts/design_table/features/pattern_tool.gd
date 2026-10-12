@@ -34,6 +34,10 @@ func options(ed) -> Array:
 		list.append({"id": "pat_angle", "text": "Total angle %s deg" % ed.BuildTree.number(float(o["pat_angle"]))})
 		list.append({"id": "pat_rev_ang", "text": "Reverse", "toggle": true, "pressed": bool(o["pat_rev_ang"])})
 	list.append({"id": "pat_merge", "text": "Merge in", "toggle": true, "pressed": bool(o["pat_merge"])})
+	if str(o["pat_type"]) == "circular":
+		list.append({"id": "pat_orient_rotate", "text": "Rotate", "toggle": true, "pressed": str(o["pat_orient"]) == "rotate_with_pattern"})
+		list.append({"id": "pat_orient_keep", "text": "Keep angle", "toggle": true, "pressed": str(o["pat_orient"]) == "maintain_orientation"})
+	list.append({"id": "pat_skip", "text": "Skip: %s" % (", ".join((o["pat_skip"] as Array).map(func(i): return str(i))) if not (o["pat_skip"] as Array).is_empty() else "none")})
 	list.append({"id": "clear_pattern", "text": "Clear"})
 	list.append({"id": "apply", "text": "Apply", "disabled": not can_apply(ed)})
 	return list
@@ -74,6 +78,13 @@ func handle_option(ed, option_id: String) -> bool:
 			o["pat_rev_ang"] = not bool(o["pat_rev_ang"])
 		"pat_merge":
 			o["pat_merge"] = not bool(o["pat_merge"])
+		"pat_orient_rotate":
+			o["pat_orient"] = "rotate_with_pattern"
+		"pat_orient_keep":
+			o["pat_orient"] = "maintain_orientation"
+		"pat_skip":
+			ed.table._main.open_keyboard_for(", ".join((o["pat_skip"] as Array).map(func(i): return str(i))), func(text: String) -> void: skip_typed(ed, text),
+				{"mode": "full", "title": "Instances to skip, e.g. 2 4 (1 is the first copy; leave empty for none)"})
 		"clear_pattern":
 			ed.clear_picks()
 		_:
@@ -86,7 +97,42 @@ func handle_option(ed, option_id: String) -> bool:
 	return true
 
 
+static func total_instances(o: Dictionary) -> int:
+	## How many instances the pattern holds counting the seed (0): what skipped numbers must stay under.
+	if str(o["pat_type"]) == "circular":
+		return int(o["pat_count_ang"])
+	return int(o["pat_count1"]) * (int(o["pat_count2"]) if str(o["pat_dir2"]) != "none" else 1)
+
+
+static func parse_skip(text: String, total: int) -> Dictionary:
+	## {ok, list, error}: "2, 4" or "2 4" to [2, 4] (sorted, no repeats). The seed (0) can't be skipped and each number has to be under the instance count.
+	var list: Array = []
+	for part in text.replace(",", " ").split(" ", false):
+		if not part.is_valid_int():
+			return {"ok": false, "list": [], "error": "'%s' is not a whole number." % part}
+		var n := int(part)
+		if n < 1 or n >= total:
+			return {"ok": false, "list": [], "error": "Skipped numbers go from 1 to %d here (0 is the original and can't be skipped)." % (total - 1)}
+		if not list.has(n):
+			list.append(n)
+	list.sort()
+	return {"ok": true, "list": list, "error": ""}
+
+
+func skip_typed(ed, text: String) -> void:
+	var parsed := parse_skip(text, total_instances(ed.options))
+	if not bool(parsed["ok"]):
+		ed.table.set_status(str(parsed["error"]))
+		return
+	ed.options["pat_skip"] = parsed["list"]
+	ed._update_options()
+	ed.schedule_preview()
+
+
 func on_activated(ed) -> void:
+	if not ed.activating_edit:
+		ed.options["pat_skip"] = []
+		ed.options["pat_orient"] = "rotate_with_pattern"
 	ed.options["pat_pick"] = "bodies"
 	ed.start_body_picks(1)
 	ed.table.set_status("Pick the body to repeat. A direction along X, Y or Z needs no line; for a line direction or a circular axis press Pick line and pick a line of an earlier sketch.")
@@ -119,6 +165,8 @@ func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	if ed.bodies.is_empty():
 		return PartFeatures._bad("Pick the body to repeat first.")
 	var body := {"source_body_ids": ed.body_refs(), "merge": "fuse_into_one" if bool(o["pat_merge"]) else "keep_separate"}
+	var skipped: Array = (o["pat_skip"] as Array).filter(func(i): return int(i) < total_instances(o)) # (the count may have been lowered since)
+	body["skip_indices"] = skipped # always sent: an empty list on a PATCH clears an old one
 	if str(o["pat_type"]) == "circular":
 		if ed.curve_picks.is_empty():
 			return PartFeatures._bad("Pick a line of an earlier sketch as the axis first.")
@@ -129,6 +177,7 @@ func request(ed, _extra: Dictionary = {}) -> Dictionary:
 		body["count_angular"] = int(o["pat_count_ang"])
 		body["angle_total"] = float(o["pat_angle"])
 		body["reverse_angular"] = bool(o["pat_rev_ang"])
+		body["orientation_mode"] = str(o["pat_orient"])
 		return PartFeatures._good("pattern-features", body)
 	if str(o["pat_dir1"]) == "line" and ed.curve_picks.is_empty():
 		return PartFeatures._bad("Pick a line of an earlier sketch as the direction first.")
@@ -152,7 +201,7 @@ func edits_in_tool() -> bool:
 
 
 func patch_keys() -> Array:
-	return ["source_body_ids", "pattern_type", "direction_1", "count_1", "spacing_1", "reverse_1", "direction_2", "count_2", "spacing_2", "reverse_2", "axis", "count_angular", "angle_total", "reverse_angular", "merge"]
+	return ["source_body_ids", "pattern_type", "direction_1", "count_1", "spacing_1", "reverse_1", "direction_2", "count_2", "spacing_2", "reverse_2", "axis", "count_angular", "angle_total", "reverse_angular", "merge", "skip_indices", "orientation_mode"]
 
 
 func load_from_row(ed, row: Dictionary) -> void:
@@ -178,6 +227,8 @@ func load_from_row(ed, row: Dictionary) -> void:
 	o["pat_count_ang"] = float(row.get("count_angular", 4))
 	o["pat_angle"] = float(row.get("angle_total", 360.0))
 	o["pat_rev_ang"] = bool(row.get("reverse_angular", false))
+	o["pat_skip"] = (row.get("skip_indices", []) as Array).map(func(i): return int(i))
+	o["pat_orient"] = str(row.get("orientation_mode", "rotate_with_pattern"))
 	var axis: Dictionary = row.get("axis", {}) if row.get("axis") is Dictionary else {}
 	if axis.get("sketch_line_ref") != null:
 		ed.curve_picks.append(_curve_from_ref(axis["sketch_line_ref"]))
