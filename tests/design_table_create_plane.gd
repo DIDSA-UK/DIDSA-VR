@@ -17,7 +17,7 @@ func _initialize() -> void:
 	table.manager.activate("create_plane")
 	await rig.frames(3)
 	print("SMOKE choosing Plane goes to plane picking and says what to do: ", ed.state == "pick_plane" and table.status().contains("offset"))
-	print("SMOKE ...the panel lists From, Offset, Reverse and a greyed Make plane: ", table.props.option_ids() == ["plane_base", "plane_offset", "plane_flip", "apply"] and table.props.option_button("apply").disabled)
+	print("SMOKE ...the panel lists the five ways, then From, Offset, Reverse and a greyed Make plane: ", table.props.option_ids() == ["pl_m_offset", "pl_m_midplane", "pl_m_vertex", "pl_m_edge", "pl_m_points", "plane_base", "plane_offset", "plane_flip", "apply"] and table.props.option_button("apply").disabled)
 	ed._hover_plane = "XY"
 	await ed._pick_plane()
 	print("SMOKE a pull on a reference plane makes it the base and turns Make plane on: ", ed.plane_base == {"fixed": "XY"} and not table.props.option_button("apply").disabled and table.props.option_button("plane_base").text.contains("XY"))

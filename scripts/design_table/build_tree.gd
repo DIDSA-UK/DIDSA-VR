@@ -109,8 +109,6 @@ static func summary(features: Array, index: int) -> String:
 			if f.get("edge_options") is Dictionary and not (f["edge_options"] as Dictionary).is_empty():
 				chamfer += ", angled"
 			return chamfer
-		"create_plane":
-			return str(f.get("plane_type", "plane")).replace("_", " ")
 	var tool = FeatureTools.for_type(str(f.get("type", "")))
 	return tool.summary(f, features) if tool != null else ""
 

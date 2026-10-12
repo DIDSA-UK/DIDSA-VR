@@ -100,6 +100,11 @@ func _initialize() -> void:
 		ed.options["pat_type"] = "circular"
 		await _shoot("94_pattern_circular", "feature", "pattern", true)
 		ed.options["pat_type"] = "rectangular"
+		for m in ["midplane", "vertex", "edge", "points"]: # Create Plane's other ways (7.3)
+			ed.options["pl_method"] = m
+			ed._update_options()
+			await _shoot("95_plane_" + m, "feature", "create_plane", true)
+		ed.options["pl_method"] = "offset"
 	print("SMOKE dock render saved %d pictures" % _saved)
 	quit()
 

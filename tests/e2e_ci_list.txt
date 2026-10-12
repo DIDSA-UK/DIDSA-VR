@@ -26,3 +26,4 @@ e2e_visibility
 e2e_visibility_auto
 e2e_extrude_options
 e2e_options_small
+e2e_plane_types

@@ -113,6 +113,7 @@ The riskiest sub-phase: it needs a new pick state and a method switch. Do the pr
   midway between two box faces; through a corner and parallel to a face; normal to an edge at its end vertex; through three corners), each followed by a sketch on it and a 5 mm extrude.
 - Risk: vertex picking only considers the hit face's own boundary and prefers the nearer of edge and vertex, so aiming at a corner has to be on a face close to it. Fine for a first version; flag it for the headset session.
 - Exit: the four methods make planes that render and take a sketch.
+- **Done 2026-10-12** (see `docs/status.md`) except plane Edit, which was not built: planes stay delete-and-remake. Real planes checked on the backend, and a sketch on a 3-corner plane extrudes.
 
 ## 7.4 Sketch construction methods and `point_on_ellipse` (M)
 

@@ -84,22 +84,62 @@ static func mirror_request(body_ids: Array, plane: Dictionary, fuse: bool) -> Di
 	return _good("mirror-features", {"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"})
 
 
+static func vertex_ref(body_id: String, index: int) -> Dictionary:
+	return {"body_id": body_id, "shape_type": "vertex", "index": index}
+
+
+static func plane_ref_of(base: Dictionary) -> Dictionary:
+	## The backend's PlaneRef for a pick: a reference plane ({"fixed": "XY"}), a flat face ({"face": {body_id, index}}) or a plane already made ({"plane_feature_id": id}). {} if it is none of them.
+	if base.has("fixed"):
+		return {"fixed_plane": str(base["fixed"])}
+	if base.has("face"):
+		return {"face_ref": face_ref(str(base["face"]["body_id"]), int(base["face"]["index"]))}
+	if base.has("plane_feature_id"):
+		return {"plane_feature_id": str(base["plane_feature_id"])}
+	return {}
+
+
 static func create_plane_request(base: Dictionary, offset: float) -> Dictionary:
-	## A plane offset from a reference plane ({"fixed": "XY"}), a flat face ({"face": {body_id, index}}) or a plane already made ({"plane_feature_id": id}).
+	## A plane offset from a reference plane, a flat face or a plane already made.
 	if base.is_empty():
 		return _bad("Pick a face or a plane to offset from first.")
 	if is_zero_approx(offset):
 		return _bad("The offset can't be zero.")
-	var ref := {}
-	if base.has("fixed"):
-		ref = {"fixed_plane": str(base["fixed"])}
-	elif base.has("face"):
-		ref = {"face_ref": face_ref(str(base["face"]["body_id"]), int(base["face"]["index"]))}
-	elif base.has("plane_feature_id"):
-		ref = {"plane_feature_id": str(base["plane_feature_id"])}
-	else:
+	var ref := plane_ref_of(base)
+	if ref.is_empty():
 		return _bad("Pick a face or a plane to offset from first.")
 	return _good("create-plane-features", {"plane_type": "offset_face", "face_refs": [ref], "offset": offset})
+
+
+static func create_plane_typed(method: String, bases: Array, edges: Array, vertices: Array) -> Dictionary:
+	## The other construction methods (Phase 7.3). `bases` are plane picks (see plane_ref_of), `edges` / `vertices` are the picked entities {body_id, index}.
+	## midplane: two planes. vertex: a plane and a corner, the new plane parallel to it through the corner. edge: a straight edge and a corner, normal to the edge through the corner.
+	## points: three corners.
+	match method:
+		"midplane":
+			if bases.size() < 2:
+				return _bad("Pick two planes or flat faces, parallel to each other.")
+			var refs: Array = bases.map(func(b): return plane_ref_of(b))
+			if refs.any(func(r): return r.is_empty()):
+				return _bad("Pick two planes or flat faces, parallel to each other.")
+			return _good("create-plane-features", {"plane_type": "midplane", "face_refs": refs})
+		"vertex":
+			if bases.is_empty() or plane_ref_of(bases[0]).is_empty():
+				return _bad("Pick a plane or a flat face first.")
+			if vertices.is_empty():
+				return _bad("Pick the corner the plane goes through.")
+			return _good("create-plane-features", {"plane_type": "parallel_to_face_through_vertex", "face_refs": [plane_ref_of(bases[0])], "vertex_ref": vertex_ref(str(vertices[0]["body_id"]), int(vertices[0]["index"]))})
+		"edge":
+			if edges.is_empty():
+				return _bad("Pick a straight edge first.")
+			if vertices.is_empty():
+				return _bad("Pick the corner the plane goes through.")
+			return _good("create-plane-features", {"plane_type": "normal_to_edge_through_vertex", "edge_ref": edge_ref(str(edges[0]["body_id"]), int(edges[0]["index"])), "vertex_ref": vertex_ref(str(vertices[0]["body_id"]), int(vertices[0]["index"]))})
+		"points":
+			if vertices.size() < 3:
+				return _bad("Pick three corners (%d so far)." % vertices.size())
+			return _good("create-plane-features", {"plane_type": "three_points", "point_refs": vertices.slice(0, 3).map(func(v): return {"vertex_ref": vertex_ref(str(v["body_id"]), int(v["index"]))})})
+	return _bad("That way of making a plane isn't offered.")
 
 
 static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array, wall: float = 0.0, wall_from_closed: bool = false) -> Dictionary:
