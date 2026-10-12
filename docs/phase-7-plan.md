@@ -12,7 +12,7 @@ Everything is VR client work, tested headless, in a software render and against 
    option is one 56 px button (64 px with the gap); toggles flow side by side (150 px minimum, about three to a line). Estimated, not measured: the header takes
    roughly 200 px, so about 7 lines are visible before scrolling. Pattern (rectangular with a second direction) is already about 12 lines; Extrude is about 5 today
    and would be about 10 with the options below. The right stick scrolls the panel (`scroll_target`), so nothing is blocked, but a 10-line Extrude is a poor first
-   screen. **Decision (revised 2026-10-12 after a first draft that folded groups): Phase 7 starts with 7.0, smaller rows and a second colour for typed values; nothing is hidden.** This is not the layout and human-factors pass (roadmap item 8); it is the
+   screen. **Decision (revised 2026-10-12 after a first draft that folded groups): Phase 7 starts with 7.0, a second column and smaller rows; nothing is hidden.** This is not the layout and human-factors pass (roadmap item 8); it is the
    smallest change that keeps the first screen short.
 2. **Backend routes accept everything.** `ExtrudeFeatureCreate/Update`: `thickness`, `thickness_direction` (outward / inward / symmetric), `draft_angle` (strictly inside 0 to 90),
    `draft_outward`, `profile_refs`. `ChamferFeatureCreate/Update`: `edge_options` (`{index: {face_ref?, angle?, flip}}`). `MoveFaceFeatureUpdate`: `direction_ref` + `direction_distance`
@@ -33,25 +33,24 @@ Same as `docs/implementation-plan.md` ("Rules for the implementing session"), wi
 the real-backend list (`tests/ci_e2e.sh`) after each sub-phase. Register new tests per `tests/README.md`. Update `docs/status.md`, `docs/design-table.md`, `docs/design-table-gaps.md` and the roadmap as items
 close. Report plainly what ran headless, in a render, against the real backend, or not at all. Each sub-phase ends with a **GODOT GATE**: suite counts before and after, and the honest "not seen in a headset" line.
 
-## 7.0 Panel density and a second colour (S)
+## 7.0 Panel density: two columns and smaller rows (S)
 
-Why first: 7.1, 7.2 and 7.3 all add rows. No folding (decided 2026-10-12: hiding settings behind a tap is a poor fit for a laser UI); instead make every row cheaper and make the two kinds of control look different at a glance.
+Why first: 7.1, 7.2 and 7.3 all add rows. No folding (decided 2026-10-12: hiding settings behind a tap is a poor fit for a laser UI); instead make every row cheaper.
 
-- **Two kinds of control, two colours.** Today every option is the same grey button and a toggle's selected state uses the tool's category accent. Choices (toggles) keep the category accent. **Values** (anything typed: depth, wall, angle, count, spacing) get a
-  second, fixed colour, so a glance tells "pick one of these" from "type a number". Proposed: a new theme token `value` (a pale gold for the number, a darker fill of it on hover), set per preset in `ui/themes/` (Navy / Simple / Dark) and read through
-  `didsa_ui_theme.gd` next to `accent`, with a new button variation `ButtonValue`. The colour is never the only cue: a value row is also laid out differently (name left and dim, number right and bright) and a choice is a chip. The exact gold is a
-  proposal; the render test (below) draws it beside the cyan so it can be changed in one place. Amber (`warn`) and green (`ok`) stay reserved for attention and success.
-- **Smaller rows.** Button height 56 to 44 px with a 6 px gap (50 px per line instead of 64); value text stays `font_small` (18), names drop to `font_tiny` (16) dim. Chips shrink from a 150 px to a 110 px minimum so four fit a line instead of three
-  (labels get shortened to fit: "Boss", "Cut", "Flip", "Dir X"). On a 0.40 m panel a 44 px row is about 2.6 cm tall, still a comfortable laser target, but this is **not verified on a headset** and is one constant to change.
-- **Value rows pair up.** Two value rows share a line when each fits in half the width (Count | Spacing, Depth | Angle); one that does not fit stays full width.
-- **Group labels, not folds.** An option may carry `"group": "<name>"`; consecutive options with the same group get a small dim caption and a thin rule above them (about 20 px). Everything stays visible; the labels just make a long list readable.
-- **Option protocol** (`features/feature_tool.gd` doc, `table_props_window.gd` `_rebuild`): a value option may carry `"label": "Depth"` and `"value": "5.00 mm"` instead of one `text` string; `text` is still honoured, so an unmigrated tool renders as it does now (only
-  smaller). Migrate the tools Phase 7 touches first (Extrude, Chamfer, Move Face, Pattern, Loft, Create Plane), the rest as they are next edited.
-- **Budget** for the default view of any tool: at the new heights about 8 lines fit in the roughly 450 px under the header (an estimate; measure the real header in the render test and correct it). The same estimate puts rectangular Pattern with a second
-  direction at about 8 lines, down from about 12, and Extrude with all of 7.1 at about 8. Anything that still overflows scrolls, as now.
-- Tests: extend `design_table_props_panel.gd` (a `label` / `value` option shows both parts; an old `text` option still renders; two value rows share a line only when they fit; `option_ids()` and routing unchanged); add Extrude, Pattern, Create Plane and Chamfer
-  to `dock_panels_render.gd` and look at the pictures in all three themes, with the value colour beside the accent.
-- Exit: the pictures show choices and values clearly apart; Pattern's default view is about 8 lines or fewer; no tool's behaviour changed; suite green.
+- **Two columns.** Today every non-toggle option is a full-width row and only toggles share a line. The panel lays options out in a two-column grid: two buttons per line wherever each fits in half the width (Count | Spacing, Depth | Angle, Clear | Apply),
+  and a full-width row only for something that does not fit (a long "Targets" or picked-line label, the tool tip). Toggles flow four to a line (110 px minimum instead of 150). Pairing is by order in the option list, so a tool controls it by putting related
+  options next to each other; an option may carry `"wide": true` to take a whole line. Apply stays full width at the bottom.
+- **Smaller rows and text.** Button height 56 to 44 px with a 6 px gap (50 px per line instead of 64); text drops from `font_small` (18) to `font_tiny` (16) in the panel only, and labels get shortened to fit a half-width button ("Depth 5.00 mm" fits;
+  "Reverse direction" becomes "Reverse"). On a 0.40 m panel a 44 px row is about 2.6 cm tall, still a comfortable laser target, but this is **not verified on a headset**; both numbers are constants in `table_props_window.gd`.
+- **If two columns are still tight:** widen the panel from 0.30 m to about 0.36 m (`panel_size`, `viewport_size`) before shrinking anything further; the dock sits at the console's right so there is room. Decide from the pictures.
+- **Group captions, not folds.** An option may carry `"group": "<name>"`; consecutive options with the same group get a small dim caption and a thin rule above them (about 20 px), so a long list reads in blocks. Everything stays visible.
+- **Option protocol** (`features/feature_tool.gd` doc, `table_props_window.gd` `_rebuild`): two new optional keys, `wide` and `group`. Options without them still render (now in the grid), so no tool has to change for the panel to work; tools get reordered
+  and their labels shortened as Phase 7 touches them (Extrude, Chamfer, Move Face, Pattern, Loft, Create Plane first).
+- **Budget** for the default view of any tool: at the new heights about 8 lines fit in the roughly 450 px under the header (an estimate; measure the real header in the render test and correct it). By the same estimate rectangular Pattern with a second direction goes
+  from about 12 lines to about 8, and Extrude with all of 7.1 fits in about 8. Anything that still overflows scrolls, as now.
+- Tests: extend `design_table_props_panel.gd` (two options that fit share a line; a `wide` one does not; toggles wrap four to a line; `option_ids()` and routing unchanged); add Extrude, Pattern, Create Plane and Chamfer to `dock_panels_render.gd` and look at the
+  pictures in all three themes, with and without the wider panel.
+- Exit: the pictures show Pattern and Extrude readable at about 8 lines; no tool's behaviour changed; suite green.
 
 ## 7.1 Extrude depth (M)
 
