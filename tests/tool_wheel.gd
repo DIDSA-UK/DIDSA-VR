@@ -146,6 +146,7 @@ func _initialize() -> void:
 
 	# --- themes: the ring takes its shape, glow and colours from the live theme, and re-skins if it changes while it is up
 	var UiThemes = load("res://scripts/ui/ui_themes.gd")
+	UiThemes.set_fx(true) # not whatever an earlier test left saved in the settings file
 	var theme_fill := {}
 	var summaries := {}
 	_open_at_anchor()
