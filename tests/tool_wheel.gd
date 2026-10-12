@@ -74,7 +74,7 @@ func _initialize() -> void:
 	# --- the ring follows the open tool
 	_open_at_anchor()
 	var mate_ids: Array = _ids(wheel.current_entries())
-	print("SMOKE with Mates on the ring is Create / Type / Flip / Clear / All tools (no sub-wheel in the bottom 120 degrees, which is the pill's): ", mate_ids == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"])
+	print("SMOKE with Mates on the ring is Create / Type / Flip / Clear / All tools (no sub-wheel in the bottom 90 degrees, which is the pill's): ", mate_ids == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"])
 	print("SMOKE Create is greyed until two parts are picked: ", not bool(wheel.current_entries()[0]["enabled"]))
 	print("SMOKE the prompt leads the user through Mates: ", flows.prompt_text().begins_with("Mates · Coincident") and "Pick a face" in flows.prompt_text())
 	_move(Vector2(0.0, 0.12))

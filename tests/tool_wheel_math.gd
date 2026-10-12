@@ -52,7 +52,7 @@ func _initialize() -> void:
 
 	print("SMOKE straight below and past the ring is the pill: ", Math.in_pill(Vector2(0, -0.26)))
 	print("SMOKE inside the ring, above it or to the side is not: ", not Math.in_pill(Vector2(0, -0.15)) and not Math.in_pill(Vector2(0, 0.26)) and not Math.in_pill(Vector2(0.26, 0)) and not Math.in_pill(Vector2(-0.26, 0)))
-	print("SMOKE the pill spans 120 degrees (60 either side of straight down): ", Math.in_pill(Vector2(sin(deg_to_rad(125)), cos(deg_to_rad(125))) * 0.26) and not Math.in_pill(Vector2(sin(deg_to_rad(115)), cos(deg_to_rad(115))) * 0.26) and Math.in_pill(Vector2(sin(deg_to_rad(-125)), cos(deg_to_rad(-125))) * 0.26))
+	print("SMOKE the pill spans 90 degrees (45 either side of straight down): ", Math.in_pill(Vector2(sin(deg_to_rad(140)), cos(deg_to_rad(140))) * 0.26) and not Math.in_pill(Vector2(sin(deg_to_rad(130)), cos(deg_to_rad(130))) * 0.26) and Math.in_pill(Vector2(sin(deg_to_rad(-140)), cos(deg_to_rad(-140))) * 0.26))
 	var pill := Math.pill_outline()
 	var in_band := true
 	for p in pill:

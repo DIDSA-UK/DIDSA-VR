@@ -35,6 +35,7 @@ const ICON_SIZE := ICON_PX * ICON_PIXEL_SIZE
 const ICON_LABEL_GAP := 0.008 ## metres between a tile's icon and its name
 const MIN_LABEL_FONT := 22
 const MIN_RING_FONT := 26 ## the smallest the ring-wide name size goes; a name that would not fit even then runs a little past its tile
+const PILL_TRACKING := 0.003 ## metres of extra space between the glyphs of the pill's curved name
 const NAME_PADDING := 0.014 ## metres of clear space kept between a name and its tile's edges (both sides together)
 const LABEL_LINE_HEIGHT := 1.28 ## a line of label text is this many font sizes tall
 const HOVER_LIFT := 0.012 ## metres: the hovered wedge lifts towards you
@@ -82,6 +83,7 @@ var _pill: Dictionary = {}
 var _pill_hover := false
 var _pill_nodes: Dictionary = {}
 var _summary: Dictionary = {}
+var _ring_font := 28 ## the ring-wide name size (_layout_tiles): the pill's curved name uses it too
 var _cursor: MeshInstance3D
 var _ring: Node3D
 
@@ -367,36 +369,41 @@ func _rebuild() -> void:
 
 
 func _build_pill() -> void:
-	## The pill under a top-level ring (120 degrees, just outside it): an action that is not a wedge, e.g. "Clear tool".
+	## The pill under a top-level ring: an action that is not a wedge (e.g. "Clear", which puts the tool away). Styled like a
+	## tile (same fill, corner, border, hover), with its name set along the arc, one glyph at a time, because a label cannot bend.
 	if _pill.is_empty():
 		return
-	var outline := Math.pill_outline()
+	var outline := Math.pill_outline(24, _corner)
 	_pill_nodes["glow"] = _node_for(Math.grown(outline, GLOW), 8)
 	_pill_nodes["border"] = _node_for(Math.grown(outline, _border), 9)
 	_pill_nodes["fill"] = _node_for(outline, 10)
-	var icon := Sprite3D.new()
-	icon.texture = UiIcons.texture(str(_pill.get("icon", "")), ICON_PX)
-	icon.pixel_size = ICON_PIXEL_SIZE * 0.75
-	icon.shaded = false
-	icon.double_sided = true
-	icon.no_depth_test = true
-	icon.render_priority = 12
-	icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	_ring.add_child(icon)
-	var label := _make_label(int(float(tokens.font_small) * 1.9), LABEL_PIXEL_SIZE, false)
-	label.outline_size = 4
-	label.text = str(_pill.get("label", ""))
-	_ring.add_child(label)
-	_pill_nodes["icon"] = icon
-	_pill_nodes["label"] = label
-	# icon and name side by side, centred in the pill
-	var font: Font = label.font if label.font != null else ThemeDB.fallback_font
-	var text_w := font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.font_size).x * LABEL_PIXEL_SIZE
-	var icon_w := ICON_PX * ICON_PIXEL_SIZE * 0.75
-	var total := icon_w + 0.012 + text_w
-	var centre := Math.pill_centre()
-	icon.position = Vector3(-total * 0.5 + icon_w * 0.5, centre.y, 0.003)
-	label.position = Vector3(-total * 0.5 + icon_w + 0.012 + text_w * 0.5, centre.y, 0.004)
+	var text := Node3D.new()
+	_ring.add_child(text)
+	_pill_nodes["text"] = text
+	var size := _ring_font
+	var probe := _make_label(size, LABEL_PIXEL_SIZE, false)
+	var font: Font = probe.font if probe.font != null else ThemeDB.fallback_font
+	probe.free()
+	var label := str(_pill.get("label", ""))
+	var radius := Math.OUTER_RADIUS + Math.PILL_GAP + Math.PILL_DEPTH * 0.5 # the middle of the band
+	var widths: Array[float] = []
+	var total := 0.0
+	for ch in label:
+		var w := font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * LABEL_PIXEL_SIZE + PILL_TRACKING
+		widths.append(w)
+		total += w
+	# Read left to right along the bottom: the angle (clockwise from straight up) decreases from PI + half the text to PI - half.
+	var angle := PI + (total / radius) * 0.5
+	for i in label.length():
+		var step := widths[i] / radius
+		var a := angle - step * 0.5
+		var glyph := _make_label(size, LABEL_PIXEL_SIZE, false)
+		glyph.outline_size = 4
+		glyph.text = label[i]
+		text.add_child(glyph)
+		glyph.position = Vector3(sin(a) * radius, cos(a) * radius, 0.004)
+		glyph.rotation.z = atan2(sin(a), -cos(a)) # baseline along the arc, tops towards the ring's centre
+		angle -= step
 
 
 func _layout_tiles() -> void:
@@ -418,6 +425,7 @@ func _layout_tiles() -> void:
 			lines = _fit_label(label, text, maxf(span.y, 0.03))
 		best = mini(best, label.font_size)
 	best = maxi(best, MIN_RING_FONT)
+	_ring_font = best
 	for i in count:
 		var label := _labels[i]
 		label.font_size = best
@@ -515,36 +523,41 @@ func _paint() -> void:
 func _paint_pill() -> void:
 	if _pill_nodes.is_empty():
 		return
-	var accent: Color = _pill.get("accent", tokens.danger)
+	var accent: Color = _pill.get("accent", tokens.accent)
+	var hot: Color = _pill.get("text_colour", accent) # its own colour (red for Clear): the hover tint, so red text never sits on a pale fill
 	var enabled := bool(_pill.get("enabled", true))
 	var lit := _pill_hover and enabled
-	var fill: Color = tokens.surface
+	var fill: Color = tokens.surface # the same as a tile at rest
 	var border_colour: Color = accent if enabled else tokens.border
 	var border_alpha := 0.6
 	if lit:
-		fill = tokens.surface_hover.lerp(accent, 0.28)
+		fill = tokens.surface_hover.lerp(hot, 0.16)
+		border_colour = hot
 		border_alpha = 1.0
 	elif _pill_hover:
 		border_colour = tokens.warn
 		border_alpha = 0.8
 	_set_colour(_pill_nodes["fill"], Color(fill.r, fill.g, fill.b, 0.97))
 	_set_colour(_pill_nodes["border"], Color(border_colour.r, border_colour.g, border_colour.b, border_alpha))
-	_set_colour(_pill_nodes["glow"], Color(accent.r, accent.g, accent.b, _glow_alpha))
+	_set_colour(_pill_nodes["glow"], Color(hot.r, hot.g, hot.b, _glow_alpha))
 	_pill_nodes["glow"].visible = lit and _glow_alpha > 0.001
 	var lift := HOVER_LIFT if lit else 0.0
 	for key in ["fill", "border", "glow"]:
 		_pill_nodes[key].position.z = lift
-	(_pill_nodes["icon"] as Sprite3D).modulate = accent if enabled else tokens.text_disabled
-	(_pill_nodes["icon"] as Sprite3D).position.z = 0.003 + lift
-	(_pill_nodes["label"] as Label3D).modulate = tokens.text if enabled else tokens.text_disabled
-	(_pill_nodes["label"] as Label3D).position.z = 0.004 + lift
+	var text_colour: Color = _pill.get("text_colour", tokens.text) if enabled else tokens.text_disabled
+	if lit:
+		text_colour = text_colour.lightened(0.35)
+	var text: Node3D = _pill_nodes["text"]
+	text.position.z = lift
+	for glyph in text.get_children():
+		(glyph as Label3D).modulate = text_colour
 
 
 func _summary_for(entry: Dictionary) -> Dictionary:
 	## What the wrist panel says about a pointed-at tile: its name and what it does, or (greyed) why it cannot be chosen.
 	var enabled := bool(entry.get("enabled", true))
 	return {
-		"title": str(entry.get("label", "")),
+		"title": str(entry.get("title", entry.get("label", ""))),
 		"body": str(entry.get("hint", "")) if enabled else str(entry.get("hint_disabled", "Not available right now")),
 		"tone": "normal" if enabled else "warn",
 		"accent": entry.get("accent", tokens.accent),
