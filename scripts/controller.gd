@@ -55,6 +55,8 @@ const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
+signal wheel_chord_started() ## trigger + grip pressed together on a hand with wheel_enabled: tool_wheel.gd opens the wheel
+
 var held_node: Node3D = null
 var selected_node: Node3D = null
 var parts_enabled := true ## mode switch on the wrist tablet ("Individual part manipulation") — gates both grip-grab and laser-select
@@ -65,8 +67,14 @@ var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 var measure_tool_active := false ## wrist tablet's Measure tab: trigger picks a measure entity instead of selecting/hiding
 var measure_tool = null ## set by main.gd; a shared measure_tool.gd instance
+var paint_active := false ## Paint mode tool (tool wheel / tablet): trigger paints whatever the laser hits with paint_hex
+var paint_hex := "#d94a3b" ## the colour the Paint tool puts on a part
+var colour_tool = null ## set by main.gd; a shared colour_tool.gd instance (Paint applies colours through it)
+var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
+var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
 
+var _wheel_press_ms := {} ## action name -> Time.get_ticks_msec() of its last press, for wheel chord detection
 var _laser: MeshInstance3D
 var _laser_mesh: CylinderMesh
 var _part_hit_distance := -1.0 ## metres to whatever _update_aim_hover()'s own raycast last hit, or -1 for nothing — set alongside _aim_hover_node
@@ -179,7 +187,7 @@ func _physics_process(delta: float) -> void:
 		_update_held_part(delta)
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
-	if selected_node == null or _table_owns_input():
+	if selected_node == null or _table_owns_input() or wheel_is_open():
 		return # (the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
 
 	var stick: Vector2 = get_vector2("primary")
@@ -268,7 +276,7 @@ func is_manipulating() -> bool:
 	## Lets locomotion.gd know this hand's thumbstick is busy rotating a
 	## selected part (or the part on the design table) right now, so it doesn't
 	## also drive movement/turning.
-	return selected_node != null or _table_owns_input()
+	return selected_node != null or _table_owns_input() or wheel_is_open()
 
 
 func set_parts_enabled(on: bool) -> void:
@@ -287,7 +295,35 @@ func reset_interaction() -> void:
 	_set_aim_hover(null, Vector3.ZERO)
 
 
+func wheel_is_open() -> bool:
+	## True from the wheel chord until BOTH buttons are up again (tool_wheel.gd owns the meta): the grip / trigger
+	## / stick must not also grab, select, drag the world or turn you while the wheel has them.
+	return bool(get_meta("wheel_open", false))
+
+
+func _wheel_chord_completed_by(action_name: String) -> bool:
+	## Records the press and says whether it completes the trigger + grip chord (the other one is held, and was
+	## pressed within wheel_window_ms). Only on a hand with wheel_enabled.
+	if not wheel_enabled or (action_name != grab_action and action_name != select_action):
+		return false
+	var now := Time.get_ticks_msec()
+	_wheel_press_ms[action_name] = now
+	var other := select_action if action_name == grab_action else grab_action
+	return is_button_pressed(other) and now - int(_wheel_press_ms.get(other, -1000000)) <= wheel_window_ms
+
+
+func cancel_for_wheel() -> void:
+	## The first press of a chord already did its normal job (began a grab, selected a part...); the second one
+	## turns it into the wheel, so let go of whatever the first started.
+	_try_release()
+
+
 func _on_button_pressed(action_name: String) -> void:
+	if wheel_is_open():
+		return
+	if _wheel_chord_completed_by(action_name):
+		wheel_chord_started.emit()
+		return
 	if action_name == grab_action:
 		if _try_grab_table():
 			return
@@ -309,6 +345,8 @@ func _on_button_pressed(action_name: String) -> void:
 		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
+		elif paint_active:
+			_try_shoot_colour()
 		elif parts_enabled and laser_select_enabled:
 			_try_select()
 
@@ -316,6 +354,8 @@ func _on_button_pressed(action_name: String) -> void:
 func _on_button_released(action_name: String) -> void:
 	if action_name == grab_action:
 		_try_release()
+	if wheel_is_open():
+		return
 
 
 func _try_grab() -> void:
@@ -580,6 +620,36 @@ func _try_shoot_hide() -> void:
 	part.visible = false
 
 
+func _try_shoot_colour() -> void:
+	## Paint: the same real ray test as shoot-hide, but the trigger paints the hit part paint_hex.
+	## Undoable: the part's colour before the shot is put back (colour_tool.gd's set_color with the old hex, or
+	## "" to clear back to no override).
+	if colour_tool == null or bool(colour_tool.is_busy()):
+		return
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var part: Node3D = hit.get("part")
+	if part == null:
+		return
+	var before: String = str(part.get_meta("paint_prev", ""))
+	var hex := paint_hex
+	var result: Dictionary = await colour_tool.set_color(part, hex)
+	if not result.get("ok", false):
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		return
+	part.set_meta("paint_prev", hex)
+	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+	if command_stack:
+		command_stack.push("colour %s" % part.name,
+			func() -> void:
+				if is_instance_valid(part):
+					colour_tool.set_color(part, before)
+					part.set_meta("paint_prev", before),
+			func() -> void:
+				if is_instance_valid(part):
+					colour_tool.set_color(part, hex)
+					part.set_meta("paint_prev", hex))
+
+
 func _try_pick_mate_entity() -> void:
 	## Mates tab active: the same ray test as laser-select, handed to
 	## mates_tool.gd instead of selecting/hiding — see that script's own
@@ -600,7 +670,7 @@ func _try_pick_measure_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or measure_tool == null:
 		return
-	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit))
+	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit), hit.get("point", Vector3.INF))
 
 
 func _mate_entity(hit: Dictionary) -> Dictionary:
@@ -861,6 +931,8 @@ func _update_laser_visual() -> void:
 	## the "ui_hit_distance" meta those scripts set on us every frame — same
 	## convention "ui_hover" already uses) takes priority over a plain part
 	## hit, which takes priority over the default full length.
+	if _laser != null:
+		_laser.visible = not wheel_is_open() # the wheel is driven by hand movement, not aim
 	var distance := laser_length
 	var ui_distance: float = get_meta("ui_hit_distance", -1.0)
 	var longest := laser_length

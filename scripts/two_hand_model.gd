@@ -325,6 +325,9 @@ func _hand_free_ignoring_button(hand: XRController3D) -> bool:
 	# independent of the world, so the grip must not also drag the model.
 	if hand.has_meta("table_part_held") and hand.get_meta("table_part_held"):
 		return false
+	# The tool wheel (tool_wheel.gd sets "wheel_open" from the trigger + grip chord until both are up): the grip belongs to it.
+	if hand.has_meta("wheel_open") and hand.get_meta("wheel_open"):
+		return false
 	# controller.gd exposes held_node; a hand carrying a part isn't free.
 	return hand.get("held_node") == null
 

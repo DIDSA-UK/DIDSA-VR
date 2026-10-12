@@ -50,6 +50,13 @@ const _ICONS := {
 	"environment": '<circle cx="24" cy="19" r="8"/><path d="M4 36H44M12 43H36"/>',
 	# Assembly tools
 	"mates": '<circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="8"/><path d="M24 24V24.5"/>',
+	"paint": '<path d="M6 17H30V29H6Z"/><path d="M30 20H40"/><path d="M40 14V26"/><path d="M12 29V38H20V29"/>',
+	"invert": '<circle cx="24" cy="24" r="16"/><path d="M24 8A16 16 0 0 1 24 40Z" fill="white"/>',
+	"flip": '<path d="M8 18H36"/><path d="M30 12L36 18L30 24"/><path d="M40 30H12"/><path d="M18 24L12 30L18 36"/>',
+	"clear_picks": '<path d="M10 10L38 38"/><path d="M38 10L10 38"/><circle cx="24" cy="24" r="17"/>',
+	"layers": '<path d="M24 6L42 16L24 26L6 16Z"/><path d="M6 24L24 34L42 24"/><path d="M6 32L24 42L42 32"/>',
+	"tablet": '<rect x="9" y="6" width="30" height="36" rx="4"/><path d="M21 36H27"/>',
+	"tools": '<circle cx="24" cy="24" r="6"/><circle cx="24" cy="8" r="3"/><circle cx="24" cy="40" r="3"/><circle cx="8" cy="24" r="3"/><circle cx="40" cy="24" r="3"/>',
 	"colours": '<path d="M24 6C24 6 10 22 10 31a14 14 0 0 0 28 0C38 22 24 6 24 6Z"/>',
 	"sections": '<rect x="8" y="8" width="26" height="26" rx="2"/><path d="M4 42L42 4"/>',
 	"measure": '<path d="M8 36L36 8L42 14L14 42Z"/><path d="M16 28L20 32M22 22L26 26M28 16L32 20"/>',

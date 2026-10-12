@@ -427,6 +427,22 @@ live-synced.
     isn't built: [`docs/design-table.md`](docs/design-table.md); the gap list and what became of
     each: [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 
+18. **Tool wheel.** Squeeze the **right trigger and grip together** (press them within a
+    quarter of a second of each other; either alone still grabs or selects as before). A ring
+    of tiles opens above your hand. **Move your hand** towards a tile (it is steered by hand
+    movement, not aim) and **let go to choose**; let go in the middle to cancel. Mates,
+    Measure, Summon table, Paint, Shoot hide, Section, Visibility (a sub-wheel: Show all,
+    Invert, Isolate part, Categories) and Undo are on the first ring. A tile with a sub-wheel
+    opens it once your hand travels well out towards it. While a tool is on the ring follows
+    it: Mates offers Create, Type, Flip and Clear picks; Measure offers Clear and the tablet;
+    Paint offers its palette; each also has "All tools". **Clear tool** is a pill under every
+    top-level ring: move your hand down past the ring to it and let go to put the tool in
+    your hand away. The tool tips are on your **right wrist**: while the ring is up the
+    panel names the tile you are pointing at and what it does (or why it is greyed), and
+    with a tool on it says what the trigger does next. Measure draws its dimensions on the
+    model itself and opens the tablet for volume, area and mass. The wheel follows the
+    tablet's theme, and can be switched off or resized in Settings -> Comfort.
+
 ## 1. Drop in a real assembly
 
 Export or copy a saved assembly file — a `.DIDSAprt`/`.didsa` file whose

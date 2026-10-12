@@ -28,6 +28,8 @@ var view_render_mode: int = 0 ## 0 shaded, 1 shaded + edges, 2 wireframe (view_m
 var table_keep_turn: bool = false ## a part sent back to the arena keeps the turn it has on the design table (false: its original orientation)
 var table_max_scale: float = 3.0 ## the biggest the part may be scaled to on the table (8x while a sketch is open regardless)
 var table_slab_size: Vector2 = Vector2.ZERO ## the design table's slab as the user last dragged it (zero = never changed)
+var wheel_enabled: bool = true ## the tool wheel (right trigger + grip)
+var wheel_size: int = 1 ## index into tool_wheel.gd's SIZE_SCALES (Small / Normal / Large)
 var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 
 
@@ -39,6 +41,8 @@ func load_from_disk() -> void:
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
+	wheel_enabled = bool(config.get_value("comfort", "wheel_enabled", wheel_enabled))
+	wheel_size = clampi(int(config.get_value("comfort", "wheel_size", wheel_size)), 0, 2)
 	ui_theme = str(config.get_value("appearance", "theme", ui_theme))
 	view_render_mode = clampi(int(config.get_value("appearance", "view_render_mode", view_render_mode)), 0, 2)
 	fx_enabled = bool(config.get_value("appearance", "effects", fx_enabled))
@@ -55,6 +59,8 @@ func save_to_disk() -> void:
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
+	config.set_value("comfort", "wheel_enabled", wheel_enabled)
+	config.set_value("comfort", "wheel_size", wheel_size)
 	config.set_value("appearance", "theme", ui_theme)
 	config.set_value("appearance", "view_render_mode", view_render_mode)
 	config.set_value("appearance", "effects", fx_enabled)
@@ -116,6 +122,16 @@ func set_sound_enabled(on: bool) -> void:
 
 func set_sound_volume(v: float) -> void:
 	sound_volume = clampf(v, 0.0, 1.0)
+	save_to_disk()
+
+
+func set_wheel_enabled(on: bool) -> void:
+	wheel_enabled = on
+	save_to_disk()
+
+
+func set_wheel_size(index: int) -> void:
+	wheel_size = clampi(index, 0, 2)
 	save_to_disk()
 
 
