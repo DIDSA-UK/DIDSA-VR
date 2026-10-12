@@ -3,18 +3,18 @@ extends Node3D
 ##
 ## The ring follows what you are doing. With no tool on it is the root ring of everyday tools. With Mates on,
 ## the first wedges are the Mates steps (Create, Flip, Clear picks, the mate type); with Measure on, Clear and
-## the tablet; with the Colour gun on, the palette. "All tools" in each of those is a sub-wheel with the root
+## the tablet; with Paint on, the palette. "All tools" in each of those is a sub-wheel with the root
 ## ring, so any tool is still one gesture away. Every tool is switched on through ToolManager (the tablet's
 ## own path), so the badge, the tablet chip and the one-active-tool rule stay right.
 ##
-## The prompt is a small billboard label low in front of you, shown while a mode tool is on: it says what the
-## trigger will do now (pick the first face, pick the second, a preview is showing...), because a tool can
-## outlive the moment you chose it and you should never have to wonder what the trigger is about to do.
+## What the right wrist's hint panel (wrist_hint.gd) says is decided here too: while the wheel is up it is the tool tip for
+## the tile the hand points at; with a mode tool on and the wheel down it says what the trigger will do now (pick the
+## first face, pick the second, a preview is showing...), because a tool can outlive the moment you chose it and you
+## should never have to wonder what the trigger is about to do.
 ## Nothing here calls the backend directly; it goes through the tool scripts that already do.
 
 const Visibility := preload("res://scripts/design_table/visibility.gd")
-const PROMPT_FONT_SIZE := 40
-const PROMPT_PIXEL_SIZE := 0.0007
+const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
 const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle"}
 const MATE_TYPE_HINTS := {
@@ -35,8 +35,9 @@ var _measure
 var _hand
 var _design_table
 var _swatches: Array = []
-var _prompt: Label3D
-var _wheel_open := false ## the ring is up: the prompt steps out of its way
+var _hint: Node3D ## wrist_hint.gd, on the right wrist
+var _ring_shown := false ## the wheel is up: the panel shows its tool tip instead of the tool prompt
+var _wheel_summary: Dictionary = {}
 var _toast_text := ""
 var _toast_until_ms := 0
 
@@ -52,21 +53,9 @@ func setup(ctx: Dictionary, p_tokens: Resource) -> void:
 	_hand = ctx["hand"]
 	_design_table = ctx.get("design_table")
 	_swatches = ctx.get("swatches", [])
-	_prompt = Label3D.new()
-	_prompt.font_size = PROMPT_FONT_SIZE
-	_prompt.pixel_size = PROMPT_PIXEL_SIZE
-	_prompt.shaded = false
-	_prompt.no_depth_test = true
-	_prompt.outline_size = 10
-	_prompt.render_priority = 20
-	_prompt.outline_render_priority = 19
-	_prompt.modulate = tokens.text
-	_prompt.outline_modulate = Color(tokens.bg_panel.r, tokens.bg_panel.g, tokens.bg_panel.b, 0.9)
-	if tokens.get("font") != null:
-		_prompt.font = tokens.get("font")
-	_prompt.position = Vector3(0.0, -0.26, -0.85)
-	(ctx["camera"] as Node3D).add_child(_prompt)
-	_prompt.visible = false
+	_hint = WristHint.new()
+	_hint.name = "WristHint"
+	_hint.setup(_hand, tokens)
 	_manager.active_changed.connect(func(_id: String) -> void: refresh_prompt())
 	_mates.picks_changed.connect(refresh_prompt)
 	_measure.picks_changed.connect(refresh_prompt)
@@ -102,8 +91,8 @@ func prompt_text() -> String:
 			if not _measure.result.is_empty():
 				line = "Dimensions are on the model; volume, area and mass are on the tablet."
 			return "Measure\n%s" % line
-		"colour_gun":
-			return "Colour gun · %s\nTrigger paints the part you point at." % _gun_hex()
+		"paint":
+			return "Paint · %s\nTrigger paints the part you point at." % _paint_hex()
 		"shoot_hide":
 			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
@@ -111,19 +100,43 @@ func prompt_text() -> String:
 	return ""
 
 
-func set_wheel_open(on: bool) -> void:
-	_wheel_open = on
+func on_ring_shown(shown: bool) -> void:
+	## The wheel's ring went up or down (wheel signal): up, the wrist panel is the tool tip; down, it is the tool prompt again.
+	_ring_shown = shown
 	refresh_prompt()
 
 
+func on_wheel_summary(summary: Dictionary) -> void:
+	## What the wheel is pointing at (wheel signal).
+	_wheel_summary = summary
+	if _ring_shown:
+		refresh_prompt()
+
+
+func hint_panel() -> Node3D:
+	return _hint
+
+
+func _tool_accent() -> Color:
+	var cat = _registry.category_of(_manager.active_id) if _manager.active_id != "" else null
+	return cat.accent if cat != null else tokens.accent
+
+
 func refresh_prompt() -> void:
+	## Puts the right thing on the wrist panel: the wheel's tool tip while the ring is up, else the open tool's prompt.
+	if _ring_shown and not _wheel_summary.is_empty():
+		_hint.show_text(str(_wheel_summary.get("title", "")), str(_wheel_summary.get("body", "")), _wheel_summary.get("accent", tokens.accent), str(_wheel_summary.get("tone", "normal")))
+		return
 	var text := prompt_text()
-	_prompt.text = text
-	_prompt.visible = text != "" and not _wheel_open
+	if text == "":
+		_hint.clear()
+		return
+	var lines := text.split("\n")
+	_hint.show_text(lines[0], "\n".join(lines.slice(1)), _tool_accent())
 
 
-func _gun_hex() -> String:
-	return _tablet.pages.gun_colour()
+func _paint_hex() -> String:
+	return _tablet.pages.paint_colour()
 
 
 # --- Entries -----------------------------------------------------------------------------------
@@ -135,9 +148,23 @@ func entries() -> Array:
 			return _mates_entries()
 		"measure":
 			return _measure_entries()
-		"colour_gun":
+		"paint":
 			return _colour_entries()
 	return root_entries()
+
+
+func pill_entry() -> Dictionary:
+	## The pill under every top-level ring: put the tool away. Greyed (with the reason) when there is nothing in the hand.
+	var in_hand: bool = _manager.active_id != ""
+	var def = _registry.tool_def(_manager.active_id) if in_hand else null
+	return {"id": "clear_tool", "label": "Clear tool", "icon": "close", "accent": tokens.danger, "enabled": in_hand,
+		"hint": "Put %s away: hands free" % (str(def.label) if def != null else "the tool"), "hint_disabled": "Nothing in your hand",
+		"run": _clear_tool}
+
+
+func _clear_tool() -> void:
+	_manager.deactivate()
+	say("Hands free", 2.0)
 
 
 func ring_title() -> String:
@@ -147,8 +174,8 @@ func ring_title() -> String:
 			return "Mates"
 		"measure":
 			return "Measure"
-		"colour_gun":
-			return "Colour gun"
+		"paint":
+			return "Paint"
 	return "Tools"
 
 
@@ -158,7 +185,7 @@ func root_entries() -> Array:
 		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
-		_tool_entry("colour_gun", "Colour gun", "colour_gun", Color(0.48, 0.88, 0.69), "Shoot a part to paint it"),
+		_tool_entry("paint", "Paint", "paint", Color(0.48, 0.88, 0.69), "Shoot a part to colour it"),
 		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
@@ -215,12 +242,13 @@ func _summon_table() -> void:
 
 
 func _mates_entries() -> Array:
+	## The bottom 120 degrees of a top-level ring belong to the "Clear tool" pill, so a sub-wheel never sits there (the hand
+	## would drill into it on the way to the pill): Flip and Clear picks are the two wedges below.
 	return [
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, "Pick two faces first"),
+		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
 		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, "Pick two faces first"),
 		_action("mate_clear", "Clear picks", "clear_picks", Color(0.96, 0.69, 0.25), "Start again", _mates.clear_picks),
-		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
-		_action("mate_exit", "Done", "close", Color(0.62, 0.70, 0.80), "Switch the tool off", _manager.deactivate),
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 	]
 
@@ -256,10 +284,9 @@ func _create_mate() -> void:
 
 func _measure_entries() -> Array:
 	return [
+		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 		_action("measure_clear", "Clear", "clear_picks", Color(0.96, 0.69, 0.25), "Start a new measurement", _measure.clear_picks),
 		_action("measure_tablet", "Tablet", "tablet", Color(0.77, 0.55, 1.00), "Volume, area, mass", open_measure_tablet),
-		_action("measure_exit", "Done", "close", Color(0.62, 0.70, 0.80), "Switch the tool off", _manager.deactivate),
-		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 	]
 
 
@@ -267,15 +294,14 @@ func _colour_entries() -> Array:
 	var out := []
 	for swatch in _swatches:
 		var colour := Color.html(swatch["hex"])
-		out.append(_action("colour_" + str(swatch["name"]), swatch["name"], "colours", colour, "Fire %s" % str(swatch["name"]).to_lower(),
-			_set_gun_colour.bind(swatch["hex"]), true, _gun_hex() == swatch["hex"]))
-	out.append(_action("colour_exit", "Done", "close", Color(0.62, 0.70, 0.80), "Switch the gun off", _manager.deactivate))
+		out.append(_action("colour_" + str(swatch["name"]), swatch["name"], "colours", colour, "Paint with %s" % str(swatch["name"]).to_lower(),
+			_set_paint_colour.bind(swatch["hex"]), true, _paint_hex() == swatch["hex"]))
 	out.append(_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries))
 	return out
 
 
-func _set_gun_colour(hex: String) -> void:
-	_tablet.pages.set_gun_colour(hex)
+func _set_paint_colour(hex: String) -> void:
+	_tablet.pages.set_paint_colour(hex)
 	refresh_prompt()
 
 

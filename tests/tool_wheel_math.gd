@@ -49,4 +49,14 @@ func _initialize() -> void:
 	var low := Math.horizontal_room(wedge, 0.10, 0.09, 0.0)
 	print("SMOKE the top wedge is narrower near the hub than further out: ", low > 0.0 and high > low)
 	print("SMOKE a name gets the tightest of its slices (a tall name is no wider than its lowest line): ", Math.horizontal_room(wedge, 0.20, 0.09, 0.0) <= low + 0.0001)
+
+	print("SMOKE straight below and past the ring is the pill: ", Math.in_pill(Vector2(0, -0.26)))
+	print("SMOKE inside the ring, above it or to the side is not: ", not Math.in_pill(Vector2(0, -0.15)) and not Math.in_pill(Vector2(0, 0.26)) and not Math.in_pill(Vector2(0.26, 0)) and not Math.in_pill(Vector2(-0.26, 0)))
+	print("SMOKE the pill spans 120 degrees (60 either side of straight down): ", Math.in_pill(Vector2(sin(deg_to_rad(125)), cos(deg_to_rad(125))) * 0.26) and not Math.in_pill(Vector2(sin(deg_to_rad(115)), cos(deg_to_rad(115))) * 0.26) and Math.in_pill(Vector2(sin(deg_to_rad(-125)), cos(deg_to_rad(-125))) * 0.26))
+	var pill := Math.pill_outline()
+	var in_band := true
+	for p in pill:
+		in_band = in_band and p.length() >= Math.OUTER_RADIUS + Math.PILL_GAP - 0.001 and p.length() <= Math.OUTER_RADIUS + Math.PILL_GAP + Math.PILL_DEPTH + 0.001 and p.y < 0.0
+	print("SMOKE the pill's outline is a band just outside the ring, below its centre: ", in_band and not pill.is_empty())
+	print("SMOKE the pill triangulates and holds its own centre: ", not Geometry2D.triangulate_polygon(pill).is_empty() and Geometry2D.is_point_in_polygon(Math.pill_centre(), pill))
 	quit()

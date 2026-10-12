@@ -67,9 +67,9 @@ var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 var measure_tool_active := false ## wrist tablet's Measure tab: trigger picks a measure entity instead of selecting/hiding
 var measure_tool = null ## set by main.gd; a shared measure_tool.gd instance
-var colour_gun_active := false ## colour gun mode tool (tool wheel / tablet): trigger paints whatever the laser hits with colour_gun_hex
-var colour_gun_hex := "#d94a3b" ## the colour the gun fires
-var colour_tool = null ## set by main.gd; a shared colour_tool.gd instance (the colour gun paints through it)
+var paint_active := false ## Paint mode tool (tool wheel / tablet): trigger paints whatever the laser hits with paint_hex
+var paint_hex := "#d94a3b" ## the colour the Paint tool puts on a part
+var colour_tool = null ## set by main.gd; a shared colour_tool.gd instance (Paint applies colours through it)
 var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
 var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
@@ -345,7 +345,7 @@ func _on_button_pressed(action_name: String) -> void:
 		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
-		elif colour_gun_active:
+		elif paint_active:
 			_try_shoot_colour()
 		elif parts_enabled and laser_select_enabled:
 			_try_select()
@@ -621,7 +621,7 @@ func _try_shoot_hide() -> void:
 
 
 func _try_shoot_colour() -> void:
-	## Colour gun: the same real ray test as shoot-hide, but the trigger paints the hit part colour_gun_hex.
+	## Paint: the same real ray test as shoot-hide, but the trigger paints the hit part paint_hex.
 	## Undoable: the part's colour before the shot is put back (colour_tool.gd's set_color with the old hex, or
 	## "" to clear back to no override).
 	if colour_tool == null or bool(colour_tool.is_busy()):
@@ -630,24 +630,24 @@ func _try_shoot_colour() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null:
 		return
-	var before: String = str(part.get_meta("colour_gun_prev", ""))
-	var hex := colour_gun_hex
+	var before: String = str(part.get_meta("paint_prev", ""))
+	var hex := paint_hex
 	var result: Dictionary = await colour_tool.set_color(part, hex)
 	if not result.get("ok", false):
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
 		return
-	part.set_meta("colour_gun_prev", hex)
+	part.set_meta("paint_prev", hex)
 	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
 	if command_stack:
 		command_stack.push("colour %s" % part.name,
 			func() -> void:
 				if is_instance_valid(part):
 					colour_tool.set_color(part, before)
-					part.set_meta("colour_gun_prev", before),
+					part.set_meta("paint_prev", before),
 			func() -> void:
 				if is_instance_valid(part):
 					colour_tool.set_color(part, hex)
-					part.set_meta("colour_gun_prev", hex))
+					part.set_meta("paint_prev", hex))
 
 
 func _try_pick_mate_entity() -> void:

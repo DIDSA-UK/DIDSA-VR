@@ -26,6 +26,8 @@ const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 signal opened()
 signal closed()
 signal chosen(entry_id: String)
+signal summary_changed(summary: Dictionary) ## what the wrist hint panel should say: {title, body, tone, accent}
+signal shown_changed(shown: bool) ## the ring went up / down (it goes down on the first release, before the chord ends)
 
 const ICON_PX := 96
 const ICON_PIXEL_SIZE := 0.00047 ## metres per icon pixel: a 4.5 cm icon
@@ -74,8 +76,12 @@ var _seen_revision := -1 ## ui_themes.gd's revision when the ring was last built
 var _corner := 0.009
 var _border := 0.0035
 var _glow_alpha := 0.3
-var _centre_title: Label3D
-var _centre_hint: Label3D
+var pill_provider: Callable = Callable() ## () -> Dictionary: the entry for the pill under a top-level ring ({} = no pill)
+var ring_lift := 0.45 ## metres the ring is drawn above the hand (the hand's own steering is unchanged): the wrist panel hangs below the hand, so with the ring this far up it never covers the tile being pointed at
+var _pill: Dictionary = {}
+var _pill_hover := false
+var _pill_nodes: Dictionary = {}
+var _summary: Dictionary = {}
 var _cursor: MeshInstance3D
 var _ring: Node3D
 
@@ -88,12 +94,6 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 	_ring = Node3D.new()
 	_ring.name = "Ring"
 	add_child(_ring)
-	# The name and hint sit ABOVE the ring: the hand (its tracking ring and controller) is at the ring's centre and would cover them.
-	_centre_title = _make_label(52, 0.0006)
-	_centre_title.position = Vector3(0, Math.OUTER_RADIUS + 0.075, 0.004)
-	_centre_hint = _make_label(36, 0.0006)
-	_centre_hint.position = Vector3(0, Math.OUTER_RADIUS + 0.034, 0.004)
-	_centre_hint.modulate = tokens.text_dim
 	_hole_border = MeshInstance3D.new()
 	_ring.add_child(_hole_border)
 	_hole = MeshInstance3D.new()
@@ -133,6 +133,19 @@ func current_entries() -> Array:
 	return _entries
 
 
+func summary() -> Dictionary:
+	## What the wrist hint panel is being told right now.
+	return _summary
+
+
+func pill_entry() -> Dictionary:
+	return _pill
+
+
+func pill_hovered() -> bool:
+	return _pill_hover
+
+
 func set_enabled(on: bool) -> void:
 	if _hand:
 		_hand.wheel_enabled = on
@@ -160,15 +173,24 @@ func _on_chord() -> void:
 func _show_ring(entries: Array, at: Vector3) -> void:
 	_entries = entries
 	_hover = -1
+	_pill_hover = false
+	_pill = pill_provider.call() if pill_provider.is_valid() and _stack.is_empty() else {} # only a top-level ring has the pill
 	_anchor = at
 	_orient_to_user()
-	global_transform = Transform3D(_basis_for(), _anchor)
+	global_transform = Transform3D(_basis_for(), _anchor + Vector3.UP * ring_lift)
 	scale = Vector3.ONE * wheel_scale
 	_rebuild()
-	_shown = not _entries.is_empty()
+	_set_shown(not _entries.is_empty())
 	visible = _shown
 	set_process(_shown)
 	_update_centre()
+
+
+func _set_shown(on: bool) -> void:
+	if on == _shown:
+		return
+	_shown = on
+	shown_changed.emit(on)
 
 
 func _orient_to_user() -> void:
@@ -196,8 +218,9 @@ func _on_released(action_name: String) -> void:
 
 func _end() -> void:
 	_held = false
-	_shown = false
+	_set_shown(false)
 	_hover = -1
+	_pill_hover = false
 	_stack.clear()
 	visible = false
 	set_process(false)
@@ -210,13 +233,14 @@ func _commit() -> void:
 	## Release: do what the hovered wedge says. Release at the centre, over a greyed wedge or over a sub-wheel's
 	## label (the ring wasn't opened) does nothing.
 	var picked := _hover
-	_shown = false
+	var on_pill := _pill_hover and not _pill.is_empty()
+	_set_shown(false)
 	visible = false
 	set_process(false)
-	if picked < 0 or picked >= _entries.size():
+	if not on_pill and (picked < 0 or picked >= _entries.size()):
 		UiFeedback.play("close", self)
 		return
-	var entry: Dictionary = _entries[picked]
+	var entry: Dictionary = _pill if on_pill else _entries[picked]
 	if not bool(entry.get("enabled", true)) or entry.has("children") or not entry.has("run"):
 		UiFeedback.haptic(_hand, "error")
 		UiFeedback.play("error", self)
@@ -236,19 +260,21 @@ func _process(_delta: float) -> void:
 		_rebuild() # the theme (or the effects switch) changed while the ring is up: re-skin it in place
 		_update_centre()
 	var offset := Math.project_offset(_hand.global_position, _anchor, _right) / maxf(wheel_scale, 0.01)
-	_update_hover(Math.wedge_for(offset, _entries.size(), dead_zone), offset)
+	var on_pill := not _pill.is_empty() and Math.in_pill(offset)
+	_update_hover(-1 if on_pill else Math.wedge_for(offset, _entries.size(), dead_zone), on_pill)
 	var shown_len := minf(offset.length(), Math.OUTER_RADIUS * 1.15)
 	_cursor.position = Vector3(offset.normalized().x * shown_len, offset.normalized().y * shown_len, 0.006) if offset.length() > 0.0001 else Vector3(0, 0, 0.006)
-	if _hover >= 0 and _entries[_hover].has("children") and bool(_entries[_hover].get("enabled", true)) and Math.is_drilling(offset):
+	if not on_pill and _hover >= 0 and _entries[_hover].has("children") and bool(_entries[_hover].get("enabled", true)) and Math.is_drilling(offset):
 		_drill(_hover)
 
 
-func _update_hover(index: int, _offset: Vector2) -> void:
+func _update_hover(index: int, on_pill: bool) -> void:
 	# (a greyed wedge is still pointed at, to read why it is greyed; it just can't be chosen)
-	if index == _hover:
+	if index == _hover and on_pill == _pill_hover:
 		return
 	_hover = index
-	if _hover >= 0:
+	_pill_hover = on_pill
+	if _hover >= 0 or _pill_hover:
 		UiFeedback.haptic(_hand, "hover")
 	_paint()
 	_update_centre()
@@ -276,6 +302,9 @@ func _clear_nodes() -> void:
 		for n in group:
 			n.queue_free()
 		group.clear()
+	for n in _pill_nodes.values():
+		n.queue_free()
+	_pill_nodes.clear()
 
 
 func _read_theme() -> void:
@@ -285,13 +314,6 @@ func _read_theme() -> void:
 	_corner = clampf(float(tokens.radius_control) * PX * CORNER_SCALE, 0.002, 0.02)
 	_border = maxf(float(tokens.border_width) * BORDER_PER_PX, 0.0008)
 	_glow_alpha = float(tokens.fx_button_glow) if UiThemes.fx_enabled else 0.0
-	_centre_title.font_size = int(float(tokens.font_title) * 1.75)
-	_centre_hint.font_size = int(float(tokens.font_small) * 2.0)
-	_centre_title.outline_modulate = Color(tokens.bg_panel.r, tokens.bg_panel.g, tokens.bg_panel.b, 0.9)
-	_centre_hint.outline_modulate = _centre_title.outline_modulate
-	for l in [_centre_title, _centre_hint]:
-		if tokens.get("font") != null:
-			l.font = tokens.get("font")
 
 
 func style_summary() -> Dictionary:
@@ -329,6 +351,7 @@ func _rebuild() -> void:
 		_labels.append(label)
 		_outlines.append(outline)
 	_layout_tiles()
+	_build_pill()
 	# the centre: where the hand rests, and "release here to cancel"
 	var hole_outline := Math.circle(Math.INNER_RADIUS - Math.GAP)
 	_hole.mesh = _poly_mesh(hole_outline)
@@ -341,6 +364,39 @@ func _rebuild() -> void:
 	_hole_border.material_override = hole_border_mat
 	_cursor.position = Vector3(0, 0, 0.006)
 	_paint()
+
+
+func _build_pill() -> void:
+	## The pill under a top-level ring (120 degrees, just outside it): an action that is not a wedge, e.g. "Clear tool".
+	if _pill.is_empty():
+		return
+	var outline := Math.pill_outline()
+	_pill_nodes["glow"] = _node_for(Math.grown(outline, GLOW), 8)
+	_pill_nodes["border"] = _node_for(Math.grown(outline, _border), 9)
+	_pill_nodes["fill"] = _node_for(outline, 10)
+	var icon := Sprite3D.new()
+	icon.texture = UiIcons.texture(str(_pill.get("icon", "")), ICON_PX)
+	icon.pixel_size = ICON_PIXEL_SIZE * 0.75
+	icon.shaded = false
+	icon.double_sided = true
+	icon.no_depth_test = true
+	icon.render_priority = 12
+	icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_ring.add_child(icon)
+	var label := _make_label(int(float(tokens.font_small) * 1.9), LABEL_PIXEL_SIZE, false)
+	label.outline_size = 4
+	label.text = str(_pill.get("label", ""))
+	_ring.add_child(label)
+	_pill_nodes["icon"] = icon
+	_pill_nodes["label"] = label
+	# icon and name side by side, centred in the pill
+	var font: Font = label.font if label.font != null else ThemeDB.fallback_font
+	var text_w := font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.font_size).x * LABEL_PIXEL_SIZE
+	var icon_w := ICON_PX * ICON_PIXEL_SIZE * 0.75
+	var total := icon_w + 0.012 + text_w
+	var centre := Math.pill_centre()
+	icon.position = Vector3(-total * 0.5 + icon_w * 0.5, centre.y, 0.003)
+	label.position = Vector3(-total * 0.5 + icon_w + 0.012 + text_w * 0.5, centre.y, 0.004)
 
 
 func _layout_tiles() -> void:
@@ -456,23 +512,58 @@ func _paint() -> void:
 		_labels[i].position.z = 0.004 + lift
 
 
+func _paint_pill() -> void:
+	if _pill_nodes.is_empty():
+		return
+	var accent: Color = _pill.get("accent", tokens.danger)
+	var enabled := bool(_pill.get("enabled", true))
+	var lit := _pill_hover and enabled
+	var fill: Color = tokens.surface
+	var border_colour: Color = accent if enabled else tokens.border
+	var border_alpha := 0.6
+	if lit:
+		fill = tokens.surface_hover.lerp(accent, 0.28)
+		border_alpha = 1.0
+	elif _pill_hover:
+		border_colour = tokens.warn
+		border_alpha = 0.8
+	_set_colour(_pill_nodes["fill"], Color(fill.r, fill.g, fill.b, 0.97))
+	_set_colour(_pill_nodes["border"], Color(border_colour.r, border_colour.g, border_colour.b, border_alpha))
+	_set_colour(_pill_nodes["glow"], Color(accent.r, accent.g, accent.b, _glow_alpha))
+	_pill_nodes["glow"].visible = lit and _glow_alpha > 0.001
+	var lift := HOVER_LIFT if lit else 0.0
+	for key in ["fill", "border", "glow"]:
+		_pill_nodes[key].position.z = lift
+	(_pill_nodes["icon"] as Sprite3D).modulate = accent if enabled else tokens.text_disabled
+	(_pill_nodes["icon"] as Sprite3D).position.z = 0.003 + lift
+	(_pill_nodes["label"] as Label3D).modulate = tokens.text if enabled else tokens.text_disabled
+	(_pill_nodes["label"] as Label3D).position.z = 0.004 + lift
+
+
+func _summary_for(entry: Dictionary) -> Dictionary:
+	## What the wrist panel says about a pointed-at tile: its name and what it does, or (greyed) why it cannot be chosen.
+	var enabled := bool(entry.get("enabled", true))
+	return {
+		"title": str(entry.get("label", "")),
+		"body": str(entry.get("hint", "")) if enabled else str(entry.get("hint_disabled", "Not available right now")),
+		"tone": "normal" if enabled else "warn",
+		"accent": entry.get("accent", tokens.accent),
+	}
+
+
 func _update_centre() -> void:
-	## Above the ring: what the pointed-at wedge does (or, greyed, why it cannot); with nothing pointed at, the ring's own name.
-	if _hover >= 0 and _hover < _entries.size():
-		var entry: Dictionary = _entries[_hover]
-		var enabled := bool(entry.get("enabled", true))
-		_centre_title.text = str(entry.get("label", ""))
-		_centre_title.modulate = tokens.text if enabled else tokens.text_disabled
-		_centre_hint.text = str(entry.get("hint", "")) if enabled else str(entry.get("hint_disabled", "Not available right now"))
-		_centre_hint.modulate = tokens.text_dim if enabled else tokens.warn
+	## Tells the wrist panel what the hand is pointing at; with nothing pointed at, the ring's own name and how to use it.
+	if _pill_hover and not _pill.is_empty():
+		_summary = _summary_for(_pill)
+	elif _hover >= 0 and _hover < _entries.size():
+		_summary = _summary_for(_entries[_hover])
 	else:
 		var ring_name := _title
 		if ring_name == "" and title_provider.is_valid():
 			ring_name = str(title_provider.call())
-		_centre_title.text = ring_name if ring_name != "" else "Tools"
-		_centre_title.modulate = tokens.text
-		_centre_hint.text = "move to a tile, let go to choose · let go here to cancel"
-		_centre_hint.modulate = tokens.text_dim
+		_summary = {"title": ring_name if ring_name != "" else "Tools", "body": "Move to a tile and let go to choose it. Let go in the middle to cancel.", "tone": "normal", "accent": tokens.accent}
+	_paint_pill()
+	summary_changed.emit(_summary)
 
 
 func _poly_mesh(outline: PackedVector2Array) -> ArrayMesh:

@@ -429,15 +429,19 @@ live-synced.
 
 18. **Tool wheel.** Squeeze the **right trigger and grip together** (press them within a
     quarter of a second of each other; either alone still grabs or selects as before). A ring
-    of wedges opens at your hand. **Move your hand** towards a wedge (it is steered by hand
-    movement, not aim) and **let go to choose**; let go at the centre to cancel. Mates,
-    Measure, Summon table, Colour gun, Shoot hide, Section, Visibility (a sub-wheel: Show all,
-    Invert, Isolate part, Categories) and Undo are on the first ring. A wedge with a sub-wheel
+    of tiles opens above your hand. **Move your hand** towards a tile (it is steered by hand
+    movement, not aim) and **let go to choose**; let go in the middle to cancel. Mates,
+    Measure, Summon table, Paint, Shoot hide, Section, Visibility (a sub-wheel: Show all,
+    Invert, Isolate part, Categories) and Undo are on the first ring. A tile with a sub-wheel
     opens it once your hand travels well out towards it. While a tool is on the ring follows
-    it: Mates offers Create, Flip, Clear picks and the mate Type; Measure offers Clear and the
-    tablet; the Colour gun offers its palette. A small prompt in front of you says what the
-    trigger does next. Measure draws its dimensions on the model itself and opens the tablet
-    for volume, area and mass. The wheel can be switched off or resized in Settings -> Comfort.
+    it: Mates offers Create, Type, Flip and Clear picks; Measure offers Clear and the tablet;
+    Paint offers its palette; each also has "All tools". **Clear tool** is a pill under every
+    top-level ring: move your hand down past the ring to it and let go to put the tool in
+    your hand away. The tool tips are on your **right wrist**: while the ring is up the
+    panel names the tile you are pointing at and what it does (or why it is greyed), and
+    with a tool on it says what the trigger does next. Measure draws its dimensions on the
+    model itself and opens the tablet for volume, area and mass. The wheel follows the
+    tablet's theme, and can be switched off or resized in Settings -> Comfort.
 
 ## 1. Drop in a real assembly
 

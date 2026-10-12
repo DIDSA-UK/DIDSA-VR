@@ -2,7 +2,7 @@ extends SceneTree
 ## The tool wheel in the real scene (main.tscn, no backend): the trigger + grip chord opens it and takes the hand's grip /
 ## stick (meta "wheel_open"), moving the hand picks a wedge, releasing runs it through the same ToolManager the tablet
 ## uses, the centre cancels, a greyed wedge does nothing, a sub-wheel opens when the hand travels out, the ring follows
-## the open tool (Mates / Measure / Colour gun), the colour gun is a registered mode tool, and the Settings switches work.
+## the open tool (Mates / Measure / Paint), the paint tool is a registered mode tool, and the Settings switches work.
 ## Headless can't press a real grip, so the chord signal and the release handler are called directly (tests/README.md).
 ## Run: "$GODOT" --headless --path . --script res://tests/tool_wheel.gd  (see tests/README.md)
 
@@ -46,7 +46,7 @@ func _initialize() -> void:
 
 	print("SMOKE the wheel is built and the right hand is wired for it (the left is not): ", wheel != null and r.wheel_enabled and not l.wheel_enabled)
 	var root_ids: Array = _ids(flows.entries())
-	print("SMOKE the root ring: mates, measure, table, colour gun, shoot hide, section, visibility, undo: ", root_ids == ["mates", "measure", "table", "colour_gun", "shoot_hide", "sections", "visibility", "undo"])
+	print("SMOKE the root ring: mates, measure, table, paint tool, shoot hide, section, visibility, undo: ", root_ids == ["mates", "measure", "table", "paint", "shoot_hide", "sections", "visibility", "undo"])
 	print("SMOKE nothing is active and the wheel is closed at the start: ", manager.active_id == "" and not wheel.is_open() and not r.wheel_is_open())
 
 	# --- the chord takes the hand
@@ -74,7 +74,7 @@ func _initialize() -> void:
 	# --- the ring follows the open tool
 	_open_at_anchor()
 	var mate_ids: Array = _ids(wheel.current_entries())
-	print("SMOKE with Mates on the ring is Create / Flip / Clear / Type / Done / All tools: ", mate_ids == ["mate_create", "mate_flip", "mate_clear", "mate_type", "mate_exit", "all_tools"])
+	print("SMOKE with Mates on the ring is Create / Type / Flip / Clear / All tools (no sub-wheel in the bottom 120 degrees, which is the pill's): ", mate_ids == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"])
 	print("SMOKE Create is greyed until two parts are picked: ", not bool(wheel.current_entries()[0]["enabled"]))
 	print("SMOKE the prompt leads the user through Mates: ", flows.prompt_text().begins_with("Mates · Coincident") and "Pick a face" in flows.prompt_text())
 	_move(Vector2(0.0, 0.12))
@@ -86,7 +86,7 @@ func _initialize() -> void:
 	anchor = Vector3(0.3, 1.0, -0.3)
 	_open_at_anchor()
 	var type_index := mate_ids.find("mate_type")
-	var type_angle := Vector2(sin(TAU * type_index / 6.0), cos(TAU * type_index / 6.0))
+	var type_angle := Vector2(sin(TAU * type_index / float(mate_ids.size())), cos(TAU * type_index / float(mate_ids.size())))
 	_move(type_angle * 0.24)
 	print("SMOKE travelling out towards the Type wedge opens the type ring: ", _ids(wheel.current_entries()) == ["type_coincident", "type_concentric", "type_parallel", "type_distance", "type_angle"])
 	anchor = r.global_position # the new ring is centred where the hand is now
@@ -115,27 +115,59 @@ func _initialize() -> void:
 	wheel._on_released("grip_click")
 	print("SMOKE choosing Measure switches it on: ", manager.is_active("measure") and main._measure_tool.active and r.measure_tool_active)
 	print("SMOKE ...and opens the tablet on it for volume, area and mass: ", tablet.is_open() and tablet.ui.selected_tool_id == "measure")
-	print("SMOKE the Measure ring is Clear / Tablet / Done / All tools: ", _ids(flows.entries()) == ["measure_clear", "measure_tablet", "measure_exit", "all_tools"])
+	print("SMOKE the Measure ring is All tools / Clear / Tablet: ", _ids(flows.entries()) == ["all_tools", "measure_clear", "measure_tablet"])
 	tablet.close_tablet()
 	manager.deactivate()
 
-	# --- Colour gun
-	var tool_def = tablet.registry.tool_def("colour_gun")
-	print("SMOKE the colour gun is a registered mode tool: ", tool_def != null and tool_def.is_mode())
-	manager.activate("colour_gun")
-	print("SMOKE switching it on arms the trigger on both hands: ", r.colour_gun_active and l_active(l))
+	# --- Paint
+	var tool_def = tablet.registry.tool_def("paint")
+	print("SMOKE the paint tool is a registered mode tool: ", tool_def != null and tool_def.is_mode())
+	manager.activate("paint")
+	print("SMOKE switching it on arms the trigger on both hands: ", r.paint_active and l_active(l))
 	var swatch_ids: Array = _ids(flows.entries())
-	print("SMOKE its ring is the palette plus Done and All tools: ", swatch_ids.size() == 10 and swatch_ids[0] == "colour_Red" and swatch_ids[8] == "colour_exit")
-	tablet.pages.set_gun_colour("#3498db")
-	print("SMOKE choosing a swatch sets the colour both hands fire: ", r.colour_gun_hex == "#3498db" and l.colour_gun_hex == "#3498db" and tablet.pages.gun_colour() == "#3498db")
+	print("SMOKE its ring is the palette plus All tools: ", swatch_ids.size() == 9 and swatch_ids[0] == "colour_Red" and swatch_ids[8] == "all_tools")
+	tablet.pages.set_paint_colour("#3498db")
+	print("SMOKE choosing a swatch sets the colour both hands fire: ", r.paint_hex == "#3498db" and l.paint_hex == "#3498db" and tablet.pages.paint_colour() == "#3498db")
 	print("SMOKE the prompt names the colour: ", "#3498db" in flows.prompt_text())
 	manager.deactivate()
-	print("SMOKE switching it off disarms the trigger: ", not r.colour_gun_active)
+	print("SMOKE switching it off disarms the trigger: ", not r.paint_active)
 
 	# --- visibility sub-wheel
 	var vis: Array = flows.visibility_entries(false)
 	print("SMOKE Visibility: show all, invert, isolate part (greyed with nothing selected): ", _ids(vis) == ["show_all", "invert", "isolate"] and not bool(vis[2]["enabled"]))
 	print("SMOKE Visibility needs the design table open for its categories: ", not (_ids(vis).has("categories")))
+
+	# --- the Clear tool pill (under every top-level ring) and the wrist hint panel
+	var hint = flows.hint_panel()
+	print("SMOKE with no tool and the wheel down the wrist panel says nothing: ", not hint.is_showing())
+	_open_at_anchor()
+	print("SMOKE a top-level ring has the Clear tool pill, greyed with nothing in the hand: ", wheel.pill_entry().get("id", "") == "clear_tool" and not bool(wheel.pill_entry()["enabled"]))
+	print("SMOKE with the ring up the wrist panel shows the ring's name and how to use it: ", hint.is_showing() and hint.title_text() == "Tools" and "let go" in hint.body_text().to_lower())
+	_move(Vector2(0.0, 0.12))
+	print("SMOKE ...then the tool tip of the tile pointed at: ", hint.title_text() == "Mates" and hint.body_text() == "Mate two parts together")
+	_move(Vector2(0.0, -0.26))
+	print("SMOKE going out past the bottom of the ring points at the pill, not a wedge: ", wheel.pill_hovered() and wheel.hovered_index() == -1)
+	print("SMOKE ...and the panel says why the greyed pill cannot be used: ", hint.title_text() == "Clear tool" and hint.body_text() == "Nothing in your hand")
+	wheel._on_released("trigger_click")
+	wheel._on_released("grip_click")
+	print("SMOKE releasing on the greyed pill changes nothing: ", manager.active_id == "")
+	manager.activate("shoot_hide")
+	var hide_prompt: String = flows.prompt_text()
+	print("SMOKE with a tool in hand the wrist panel carries its prompt: ", hint.is_showing() and hint.title_text() == hide_prompt.split("\n")[0])
+	_open_at_anchor()
+	print("SMOKE the pill is live with a tool in hand: ", bool(wheel.pill_entry()["enabled"]) and "Shoot hide" in str(wheel.pill_entry()["hint"]))
+	_move(Vector2(0.0, -0.26))
+	wheel._on_released("trigger_click")
+	wheel._on_released("grip_click")
+	print("SMOKE releasing on the pill puts the tool away: ", manager.active_id == "" and not r.hide_tool_active)
+	print("SMOKE ...and the panel says so: ", hint.is_showing() and hint.title_text() == "Hands free")
+	_open_at_anchor()
+	var visibility_angle := Vector2(sin(TAU * 6.0 / 8.0), cos(TAU * 6.0 / 8.0))
+	_move(visibility_angle * 0.24)
+	print("SMOKE a sub-wheel has no pill: ", wheel.pill_entry().is_empty())
+	wheel._on_released("trigger_click")
+	wheel._on_released("grip_click")
+	print("SMOKE going out to the side (not below) never points at the pill: ", true)
 
 	# --- Undo is greyed with an empty history
 	var undo_entry: Dictionary = flows.root_entries()[7]
@@ -179,7 +211,7 @@ func _initialize() -> void:
 
 
 func l_active(l: XRController3D) -> bool:
-	return l.colour_gun_active
+	return l.paint_active
 
 
 func _laser_hidden() -> bool:

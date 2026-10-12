@@ -71,7 +71,7 @@ var _mates_relax_button: Button
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
 var _colour_group_toggle: Button
-var _gun_hex_label: Label
+var _paint_hex_label: Label
 var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
@@ -139,10 +139,10 @@ func register(reg) -> void:
 		"caption": "shaded · edges · wire",
 		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
 	reg.add_tool("view", "colours", "Colours", "colours", _build_colours_page, {
-		"caption": "paint parts", "status": _colour_status,
+		"caption": "colour parts", "status": _colour_status,
 		"help": "Laser-select a part first, then tap a swatch. Apply to whole group colours every occurrence sharing its owner. Not undoable: pick another colour or Clear."})
-	reg.add_tool("view", "colour_gun", "Colour gun", "colour_gun", _build_colour_gun_page, {
-		"kind": "mode", "on_activate": _set_colour_gun.bind(true), "on_deactivate": _set_colour_gun.bind(false),
+	reg.add_tool("view", "paint", "Paint", "paint", _build_paint_page, {
+		"kind": "mode", "on_activate": _set_paint.bind(true), "on_deactivate": _set_paint.bind(false),
 		"caption": "shoot to paint",
 		"hint": "Point at a part and pull the right trigger to paint it.",
 		"help": "Switch the tool on, pick a colour, then point the right laser at a part and pull the trigger to paint it. Undo puts the old colour back. The tool wheel (right trigger + grip) has the palette too."})
@@ -218,33 +218,33 @@ func _set_shoot_hide(on: bool) -> void:
 	_right.hide_tool_active = on
 
 
-func _set_colour_gun(on: bool) -> void:
-	_left.colour_gun_active = on
-	_right.colour_gun_active = on
+func _set_paint(on: bool) -> void:
+	_left.paint_active = on
+	_right.paint_active = on
 
 
-func set_gun_colour(hex: String) -> void:
-	## The colour the colour gun fires (the tool wheel's palette and this tool's own page both set it).
-	_left.colour_gun_hex = hex
-	_right.colour_gun_hex = hex
-	if _gun_hex_label:
-		_gun_hex_label.text = "Firing: %s" % hex
+func set_paint_colour(hex: String) -> void:
+	## The colour the Paint tool applies (the tool wheel's palette and this tool's own page both set it).
+	_left.paint_hex = hex
+	_right.paint_hex = hex
+	if _paint_hex_label:
+		_paint_hex_label.text = "Colour: %s" % hex
 
 
-func gun_colour() -> String:
-	return _right.colour_gun_hex
+func paint_colour() -> String:
+	return _right.paint_hex
 
 
-func _build_colour_gun_page() -> Control:
+func _build_paint_page() -> Control:
 	var page := _page()
-	_gun_hex_label = _hint("Firing: %s" % _right.colour_gun_hex)
-	page.add_child(_gun_hex_label)
+	_paint_hex_label = _hint("Colour: %s" % _right.paint_hex)
+	page.add_child(_paint_hex_label)
 	var grid := GridContainer.new()
 	grid.columns = 4
 	for swatch in COLOUR_SWATCHES:
 		var b := Button.new()
 		b.text = swatch["name"]
-		b.pressed.connect(set_gun_colour.bind(swatch["hex"]))
+		b.pressed.connect(set_paint_colour.bind(swatch["hex"]))
 		grid.add_child(b)
 	page.add_child(grid)
 	return page
