@@ -23,7 +23,7 @@ var _saved := 0
 
 
 func _initialize() -> void:
-	DisplayServer.window_set_size(Vector2i(1280, 720))
+	DisplayServer.window_set_size(Vector2i(1920, 1080))
 	_main = load("res://scenes/main.tscn").instantiate()
 	_main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(_main)
@@ -138,6 +138,11 @@ func _shot(shot_name: String) -> void:
 	_eye.global_transform = _cam.global_transform
 	await RenderingServer.frame_post_draw
 	var img := root.get_texture().get_image()
+	var zoom_rect := Rect2i()
+	if true:
+		var screen := _eye.unproject_position(_r.global_position) * Vector2(img.get_size()) / root.get_visible_rect().size
+		var centre := Vector2i(screen)
+		zoom_rect = Rect2i(centre - Vector2i(380, 360), Vector2i(760, 720)).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
 	var lit := false
 	for y in range(0, img.get_height(), 8):
 		for x in range(0, img.get_width(), 8):
@@ -147,4 +152,6 @@ func _shot(shot_name: String) -> void:
 	if _dir != "":
 		DirAccess.make_dir_recursive_absolute(_dir)
 		img.save_png("%s/%s.png" % [_dir, shot_name])
+		if zoom_rect.size.x > 0:
+			img.get_region(zoom_rect).save_png("%s/%s_zoom.png" % [_dir, shot_name]) # the ring up close, to judge text and spacing
 		_saved += 1

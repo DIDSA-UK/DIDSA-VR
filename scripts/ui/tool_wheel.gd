@@ -28,14 +28,19 @@ signal closed()
 signal chosen(entry_id: String)
 
 const ICON_PX := 96
-const ICON_PIXEL_SIZE := 0.0005 ## metres per icon pixel: a 4.8 cm icon
+const ICON_PIXEL_SIZE := 0.00047 ## metres per icon pixel: a 4.5 cm icon
+const ICON_SIZE := ICON_PX * ICON_PIXEL_SIZE
+const ICON_LABEL_GAP := 0.008 ## metres between a tile's icon and its name
+const MIN_LABEL_FONT := 22
+const MIN_RING_FONT := 26 ## the smallest the ring-wide name size goes; a name that would not fit even then runs a little past its tile
+const NAME_PADDING := 0.014 ## metres of clear space kept between a name and its tile's edges (both sides together)
+const LABEL_LINE_HEIGHT := 1.28 ## a line of label text is this many font sizes tall
 const HOVER_LIFT := 0.012 ## metres: the hovered wedge lifts towards you
 const PX := 1.0 / 2667.0 ## metres per tablet pixel (wrist_tablet.gd's pixels_per_metre): the theme's shape tokens are in these pixels
 const CORNER_SCALE := 1.5 ## the ring is seen from further off than the tablet, so its corners and borders are drawn a little heavier
 const BORDER_PER_PX := 0.00175 ## metres of border per theme border_width pixel
 const GLOW := 0.014 ## metres: how far the hovered wedge's glow reaches
 const LABEL_PIXEL_SIZE := 0.0006
-const LABEL_WRAP_PX := 200 ## a wedge's name wraps to two lines rather than spilling over its neighbours
 const SIZE_NAMES: Array[String] = ["Small", "Normal", "Large"]
 const SIZE_SCALES: Array[float] = [0.8, 1.0, 1.3]
 const TRIGGER_ACTION := "trigger_click"
@@ -63,6 +68,7 @@ var _glows: Array[MeshInstance3D] = []
 var _labels: Array[Label3D] = []
 var _icons: Array[Sprite3D] = []
 var _hole: MeshInstance3D
+var _outlines: Array = [] ## each wedge's polygon, kept to lay its name out inside it
 var _hole_border: MeshInstance3D
 var _seen_revision := -1 ## ui_themes.gd's revision when the ring was last built: a theme change while it is up rebuilds it
 var _corner := 0.009
@@ -295,6 +301,7 @@ func style_summary() -> Dictionary:
 
 func _rebuild() -> void:
 	_clear_nodes()
+	_outlines.clear()
 	_read_theme()
 	var count := _entries.size()
 	for i in count:
@@ -315,18 +322,13 @@ func _rebuild() -> void:
 		icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		_ring.add_child(icon)
 		_icons.append(icon)
-		var label := _make_label(int(float(tokens.font_small) * 1.55), LABEL_PIXEL_SIZE, false)
-		label.text = str(_entries[i].get("label", ""))
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.width = LABEL_WRAP_PX
+		var label := _make_label(int(float(tokens.font_small) * 1.9), LABEL_PIXEL_SIZE, false)
+		label.outline_size = 4
 		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 		_ring.add_child(label)
 		_labels.append(label)
-		var dir := Math.centre_direction(i, count)
-		var mid := (Math.INNER_RADIUS + Math.OUTER_RADIUS) * 0.5
-		var centre := dir * mid
-		icon.position = Vector3(centre.x, centre.y + 0.018, 0.003)
-		label.position = Vector3(centre.x, centre.y - 0.012, 0.004)
+		_outlines.append(outline)
+	_layout_tiles()
 	# the centre: where the hand rests, and "release here to cancel"
 	var hole_outline := Math.circle(Math.INNER_RADIUS - Math.GAP)
 	_hole.mesh = _poly_mesh(hole_outline)
@@ -339,6 +341,85 @@ func _rebuild() -> void:
 	_hole_border.material_override = hole_border_mat
 	_cursor.position = Vector3(0, 0, 0.006)
 	_paint()
+
+
+func _layout_tiles() -> void:
+	## Puts each tile's icon and name where they sit best. Each name is sized for the room its tile really has at that height
+	## (_fit_label), centred in that slice of the tile rather than on the wedge's axis (a diagonal tile is lopsided at the
+	## text's height), and one size is used for the whole ring so the names read as a set.
+	var count := _entries.size()
+	var texts: Array = []
+	var best := int(float(tokens.font_small) * 1.9)
+	for i in count:
+		var text := str(_entries[i].get("label", ""))
+		texts.append(text)
+		var centre_y := Math.centre_direction(i, count).y * Math.CONTENT_RADIUS
+		var label := _labels[i]
+		label.font_size = int(float(tokens.font_small) * 1.9)
+		var lines := 1
+		for pass_number in 2:
+			var span := _span(_outlines[i], centre_y, lines, label.font_size)
+			lines = _fit_label(label, text, maxf(span.y, 0.03))
+		best = mini(best, label.font_size)
+	best = maxi(best, MIN_RING_FONT)
+	for i in count:
+		var label := _labels[i]
+		label.font_size = best
+		var centre := Math.centre_direction(i, count) * Math.CONTENT_RADIUS
+		var lines := 1
+		var span := Vector2.ZERO
+		for pass_number in 2:
+			span = _span(_outlines[i], centre.y, lines, best)
+			lines = _fit_label(label, texts[i], maxf(span.y, 0.03))
+		var text_h := float(lines) * float(label.font_size) * LABEL_PIXEL_SIZE * LABEL_LINE_HEIGHT
+		var block := ICON_SIZE + ICON_LABEL_GAP + text_h
+		var top := centre.y + block * 0.5
+		var x := span.x
+		_icons[i].position = Vector3(x, top - ICON_SIZE * 0.5, 0.003)
+		label.position = Vector3(x, top - ICON_SIZE - ICON_LABEL_GAP, 0.004)
+
+
+func _span(outline: PackedVector2Array, centre_y: float, lines: int, font_size: int) -> Vector2:
+	## (x of the middle of the tile's slice at the name's height, room for the name there), for an icon-over-name block
+	## centred at centre_y.
+	var name_y := _name_centre_y(centre_y, lines, font_size)
+	var half := float(lines) * float(font_size) * LABEL_PIXEL_SIZE * LABEL_LINE_HEIGHT * 0.5
+	var lr := Math.horizontal_span(outline, name_y + half, name_y - half)
+	return Vector2((lr.x + lr.y) * 0.5, lr.y - lr.x - NAME_PADDING)
+
+
+func _name_centre_y(content_y: float, lines: int, font_size: int) -> float:
+	## Where the middle of the name's text falls (plane y, metres) for an icon-over-name block centred at content_y.
+	var text_h := float(lines) * float(font_size) * LABEL_PIXEL_SIZE * LABEL_LINE_HEIGHT
+	var block := ICON_SIZE + ICON_LABEL_GAP + text_h
+	return content_y + block * 0.5 - ICON_SIZE - ICON_LABEL_GAP - text_h * 0.5
+
+
+func _fit_label(label: Label3D, text: String, room: float) -> int:
+	## Sets the label's text at the largest size that fits `room` metres: one line if it fits, else wrapped at its spaces onto
+	## two lines, else the type shrinks (down to MIN_LABEL_FONT). Returns the number of lines.
+	var font: Font = label.font if label.font != null else ThemeDB.fallback_font
+	var size := label.font_size
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var words := text.split(" ")
+	while size >= MIN_LABEL_FONT:
+		var whole := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * LABEL_PIXEL_SIZE
+		if whole <= room:
+			label.font_size = size
+			return 1
+		if words.size() > 1:
+			var widest := 0.0
+			for w in words:
+				widest = maxf(widest, font.get_string_size(w, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * LABEL_PIXEL_SIZE)
+			if widest <= room:
+				label.font_size = size
+				label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				label.width = room / LABEL_PIXEL_SIZE
+				return 2
+		size -= 2
+	label.font_size = MIN_LABEL_FONT
+	return 1
 
 
 func _paint() -> void:
@@ -371,7 +452,7 @@ func _paint() -> void:
 		_icons[i].modulate = accent if enabled else tokens.text_disabled
 		_icons[i].position.z = 0.003 + lift
 		_icons[i].scale = Vector3.ONE * (1.12 if lit else 1.0)
-		_labels[i].modulate = (tokens.text if (lit or on) else tokens.text_dim) if enabled else tokens.text_disabled
+		_labels[i].modulate = tokens.text if enabled else tokens.text_disabled
 		_labels[i].position.z = 0.004 + lift
 
 

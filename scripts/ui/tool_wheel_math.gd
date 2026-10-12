@@ -10,6 +10,7 @@ const DEAD_ZONE := 0.045 ## metres: inside this the hand is "at the centre" = no
 const DRILL_DISTANCE := 0.20 ## metres: a sub-wheel wedge opens its ring once the hand is this far out
 const OUTER_RADIUS := 0.22 ## metres: drawn radius of the ring
 const INNER_RADIUS := 0.075 ## metres: drawn inner radius (a little bigger than the dead zone, so the centre reads as a hole)
+const CONTENT_RADIUS := 0.168 ## metres: where a tile's icon and name are centred. A wedge is narrower at the hub, so this sits outside the middle of the radius (0.1475), near the tile's area centre
 const GAP := 0.014 ## metres: visual gap between neighbouring wedges
 const CORNER := 0.009 ## metres: how round a wedge's corners are (the tablet's tiles are rounded the same way)
 
@@ -86,3 +87,58 @@ static func project_offset(hand: Vector3, anchor: Vector3, right: Vector3) -> Ve
 
 static func is_drilling(offset: Vector2, drill_distance: float = DRILL_DISTANCE) -> bool:
 	return offset.length() >= drill_distance
+
+
+static func tile_width(count: int, radius: float = CONTENT_RADIUS, gap: float = GAP, padding: float = 0.012) -> float:
+	## How wide a tile is at `radius` (the chord across its wedge, less the gap between tiles and some padding): the room a name has.
+	## Capped for rings of just two or three wedges, whose chords are huge.
+	if count <= 0:
+		return 0.0
+	var chord := 2.0 * radius * sin(PI / float(maxi(count, 2)))
+	return clampf(chord - gap - padding, 0.02, 0.13)
+
+
+static func horizontal_room(poly: PackedVector2Array, y_top: float, y_bottom: float, centre_x: float) -> float:
+	## How wide a horizontal line of text centred on `centre_x` can be and stay inside a convex tile, over the text's whole height:
+	## the tightest of the slices at its top, middle and bottom. Text is horizontal and tiles slant, so this is the real room,
+	## not the chord across the wedge. 0 if the text falls outside the tile.
+	var room := INF
+	for y: float in [y_top, (y_top + y_bottom) * 0.5, y_bottom]:
+		var left := INF
+		var right := -INF
+		for i in poly.size():
+			var a := poly[i]
+			var b := poly[(i + 1) % poly.size()]
+			if (a.y - y) * (b.y - y) > 0.0 or is_equal_approx(a.y, b.y):
+				continue
+			var x := a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x)
+			left = minf(left, x)
+			right = maxf(right, x)
+		if left > right:
+			return 0.0
+		room = minf(room, 2.0 * minf(centre_x - left, right - centre_x))
+	return maxf(room, 0.0)
+
+
+static func horizontal_span(poly: PackedVector2Array, y_top: float, y_bottom: float) -> Vector2:
+	## The widest horizontal interval (left, right) that is inside a convex tile over a whole band of height: the tightest
+	## of the slices at the band's top, middle and bottom. Text centred on the interval's middle gets all the room the tile
+	## has at that height, which on a slanted tile is not centred on the wedge's own axis. (left > right = outside the tile.)
+	var left := -INF
+	var right := INF
+	for y: float in [y_top, (y_top + y_bottom) * 0.5, y_bottom]:
+		var lo := INF
+		var hi := -INF
+		for i in poly.size():
+			var a := poly[i]
+			var b := poly[(i + 1) % poly.size()]
+			if (a.y - y) * (b.y - y) > 0.0 or is_equal_approx(a.y, b.y):
+				continue
+			var x := a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x)
+			lo = minf(lo, x)
+			hi = maxf(hi, x)
+		if lo > hi:
+			return Vector2(0.0, -1.0)
+		left = maxf(left, lo)
+		right = minf(right, hi)
+	return Vector2(left, right)
