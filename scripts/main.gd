@@ -354,6 +354,8 @@ func _add_tool_wheel() -> void:
 	_tool_wheel.name = "ToolWheel"
 	add_child(_tool_wheel)
 	_tool_wheel.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, tokens, _wheel_flows.entries)
+	_tool_wheel.opened.connect(_wheel_flows.set_wheel_open.bind(true))
+	_tool_wheel.closed.connect(_wheel_flows.set_wheel_open.bind(false))
 	_tool_wheel.set_size(_settings.wheel_size)
 	_tool_wheel.set_enabled(_settings.wheel_enabled)
 	_measure_dimensions = preload("res://scripts/measure_dimensions.gd").new()

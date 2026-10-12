@@ -65,10 +65,11 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 	_ring = Node3D.new()
 	_ring.name = "Ring"
 	add_child(_ring)
-	_centre_title = _make_label(40, 0.0006)
-	_centre_title.position = Vector3(0, 0.012, 0.004)
-	_centre_hint = _make_label(24, 0.0006)
-	_centre_hint.position = Vector3(0, -0.018, 0.004)
+	# The name and hint sit ABOVE the ring: the hand (its tracking ring and controller) is at the ring's centre and would cover them.
+	_centre_title = _make_label(64, 0.0006)
+	_centre_title.position = Vector3(0, Math.OUTER_RADIUS + 0.035, 0.004)
+	_centre_hint = _make_label(36, 0.0006)
+	_centre_hint.position = Vector3(0, Math.OUTER_RADIUS + 0.078, 0.004)
 	_centre_hint.modulate = tokens.text_dim
 	_cursor = MeshInstance3D.new()
 	var dot := SphereMesh.new()
@@ -283,7 +284,7 @@ func _paint() -> void:
 		var mat := _wedges[i].material_override as StandardMaterial3D
 		mat.albedo_color = Color(fill.r, fill.g, fill.b, 0.93 if hovered else 0.84)
 		_wedges[i].position.z = HOVER_LIFT if hovered and enabled else 0.0
-		_icons[i].modulate = (accent if enabled else tokens.text_disabled) if not hovered else Color.WHITE
+		_icons[i].modulate = Color.WHITE if (hovered and enabled) else (accent if enabled else tokens.text_disabled)
 		_icons[i].position.z = 0.003 + (HOVER_LIFT if hovered and enabled else 0.0)
 		_icons[i].scale = Vector3.ONE * (1.25 if hovered and enabled else 1.0)
 

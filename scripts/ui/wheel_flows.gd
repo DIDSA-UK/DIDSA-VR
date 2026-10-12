@@ -36,6 +36,7 @@ var _hand
 var _design_table
 var _swatches: Array = []
 var _prompt: Label3D
+var _wheel_open := false ## the ring is up: the prompt steps out of its way
 var _toast_text := ""
 var _toast_until_ms := 0
 
@@ -107,10 +108,15 @@ func prompt_text() -> String:
 	return ""
 
 
+func set_wheel_open(on: bool) -> void:
+	_wheel_open = on
+	refresh_prompt()
+
+
 func refresh_prompt() -> void:
 	var text := prompt_text()
 	_prompt.text = text
-	_prompt.visible = text != ""
+	_prompt.visible = text != "" and not _wheel_open
 
 
 func _gun_hex() -> String:
