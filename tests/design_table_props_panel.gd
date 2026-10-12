@@ -2,7 +2,7 @@ extends SceneTree
 ## The docked PROPERTIES panel (scripts/design_table/table_props_window.gd) that replaced the deck's options row: it opens with a tool
 ## that has settings and shows every one of them, one per row (toggles grouped), with the tool's name and hint above; a press reaches the
 ## editor like the row's did; it follows the tool and the options (greys Apply, rewrites a label); it goes away with no tool; the deck's
-## own row stays hidden; it is docked at the console's right and follows the slab when it is resized; closing the table puts it away.
+## own row stays hidden; buttons pair two to a line and toggles wrap four to a line, with `wide` and `group` honoured (Phase 7.0); it is docked at the console's right and follows the slab when it is resized; closing the table puts it away.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_props_panel.gd  (see tests/README.md)
 
 const Rig := preload("res://tests/helpers/table_rig.gd")
@@ -34,7 +34,8 @@ func _initialize() -> void:
 	table.manager.activate("fillet")
 	await rig.frames(3)
 	print("SMOKE changing tool changes the panel: Fillet shows Radius, Clear and a greyed Apply: ", props._title.text == "Fillet" and props.option_ids() == ["radius", "clear_edges", "apply"] and props.option_button("apply").disabled)
-	print("SMOKE ...the toggles of a tool sit side by side in one group, the buttons one per row: ", _groups(props) == 0)
+	print("SMOKE ...Fillet has no toggles, so no toggle group: ", _groups(props) == 0)
+	print("SMOKE ...its Radius and Clear share one line, and Apply has a line of its own: ", props.option_button("radius").get_parent() == props.option_button("clear_edges").get_parent() and props.option_button("apply").get_parent() == props._rows)
 	table.manager.activate("extrude")
 	await rig.frames(3)
 	print("SMOKE ...and Extrude's four toggles are one group: ", _groups(props) == 1)
@@ -44,6 +45,23 @@ func _initialize() -> void:
 	table.manager.activate("polygon")
 	await rig.frames(3)
 	print("SMOKE a sketch tool with settings opens it too (Polygon: Fewer, the count, More): ", props.is_open() and props.option_ids() == ["sides_down", "sides_label", "sides_up"])
+	props.set_options([
+		{"id": "a", "text": "Count 3"}, {"id": "b", "text": "Spacing 25.00 mm"},
+		{"id": "c", "text": "A long label that cannot share a half line"}, {"id": "d", "text": "Short", "wide": true},
+		{"id": "e", "text": "One"}, {"id": "f", "text": "Two"}, {"id": "g", "text": "Three"},
+		{"id": "t1", "text": "T1", "toggle": true}, {"id": "t2", "text": "T2", "toggle": true},
+		{"id": "h", "text": "Angle", "group": "Draft"}, {"id": "i", "text": "Outward", "toggle": true, "group": "Draft"},
+		{"id": "apply", "text": "Apply"}])
+	await rig.frames(2)
+	print("SMOKE layout: two short buttons share a line: ", props.option_button("a").get_parent() == props.option_button("b").get_parent() and props.option_button("a").get_parent() is HBoxContainer)
+	print("SMOKE ...a long label and a `wide` option each take a whole line: ", props.option_button("c").get_parent() == props._rows and props.option_button("d").get_parent() == props._rows)
+	print("SMOKE ...pairing restarts after a wide one: One and Two share a line, Three starts the next: ", props.option_button("e").get_parent() == props.option_button("f").get_parent() and props.option_button("g").get_parent() != props.option_button("f").get_parent())
+	print("SMOKE ...toggles are chips in one flow group and rows are 44 px: ", props.option_button("t1").get_parent() == props.option_button("t2").get_parent() and props.option_button("t1").get_parent() is HFlowContainer and props.option_button("a").custom_minimum_size.y == 44.0 and props.option_button("t1").custom_minimum_size.x == 110.0)
+	print("SMOKE ...a `group` puts a caption over the run, and every option is still listed and routes: ", _captions(props) == ["DRAFT"] and props.option_ids().size() == 12)
+	var got: Array = []
+	props.option_pressed.connect(func(id: String) -> void: got.append(id))
+	props.option_button("h").pressed.emit()
+	print("SMOKE ...pressing a grouped option emits its id: ", got == ["h"])
 	var before: float = props.position.x
 	table.set_slab_size(table.slab_size + Vector2(0.2, 0.0))
 	print("SMOKE resizing the slab moves the panel out with its edge: ", is_equal_approx(props.position.x - before, 0.1) and is_equal_approx(props.dock_position.x, table.slab_size.x * 0.5 + 0.20))
@@ -59,3 +77,11 @@ func _groups(props) -> int:
 		if child is HFlowContainer:
 			n += 1
 	return n
+
+
+func _captions(props) -> Array:
+	var out: Array = []
+	for child in props._rows.get_children():
+		if child is Label:
+			out.append(child.text)
+	return out

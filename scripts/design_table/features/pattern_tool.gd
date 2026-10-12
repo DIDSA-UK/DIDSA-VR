@@ -14,17 +14,17 @@ func options(ed) -> Array:
 	var list: Array = [
 		{"id": "pat_rect", "text": "Rectangular", "toggle": true, "pressed": str(o["pat_type"]) == "rectangular"},
 		{"id": "pat_circ", "text": "Circular", "toggle": true, "pressed": str(o["pat_type"]) == "circular"},
-		{"id": "pick_bodies", "text": "Pick body (%d)" % ed.bodies.size(), "toggle": true, "pressed": str(o["pat_pick"]) == "bodies"},
-		{"id": "pick_lines", "text": "Pick line (%d)" % ed.curve_picks.size(), "toggle": true, "pressed": str(o["pat_pick"]) == "curves"},
+		{"id": "pick_bodies", "text": "Body (%d)" % ed.bodies.size(), "toggle": true, "pressed": str(o["pat_pick"]) == "bodies"},
+		{"id": "pick_lines", "text": "Line (%d)" % ed.curve_picks.size(), "toggle": true, "pressed": str(o["pat_pick"]) == "curves"},
 	]
 	if str(o["pat_type"]) == "rectangular":
 		for d in ["x", "y", "z", "line"]:
-			list.append({"id": "pat_dir1_" + d, "text": "Dir %s" % d.to_upper() if d != "line" else "Dir: picked line", "toggle": true, "pressed": str(o["pat_dir1"]) == d})
+			list.append({"id": "pat_dir1_" + d, "text": "Dir %s" % d.to_upper() if d != "line" else "Dir: line", "toggle": true, "pressed": str(o["pat_dir1"]) == d})
 		list.append({"id": "pat_count1", "text": "Count %d" % int(o["pat_count1"])})
 		list.append({"id": "pat_spacing1", "text": "Spacing %.2f mm" % float(o["pat_spacing1"])})
 		list.append({"id": "pat_rev1", "text": "Reverse", "toggle": true, "pressed": bool(o["pat_rev1"])})
 		for d in ["none", "x", "y", "z"]:
-			list.append({"id": "pat_dir2_" + d, "text": "2nd: %s" % d.to_upper() if d != "none" else "No 2nd direction", "toggle": true, "pressed": str(o["pat_dir2"]) == d})
+			list.append({"id": "pat_dir2_" + d, "text": "2nd: %s" % d.to_upper() if d != "none" else "No 2nd", "toggle": true, "pressed": str(o["pat_dir2"]) == d})
 		if str(o["pat_dir2"]) != "none":
 			list.append({"id": "pat_count2", "text": "Count 2: %d" % int(o["pat_count2"])})
 			list.append({"id": "pat_spacing2", "text": "Spacing 2: %.2f mm" % float(o["pat_spacing2"])})
@@ -33,7 +33,7 @@ func options(ed) -> Array:
 		list.append({"id": "pat_count_ang", "text": "Count %d" % int(o["pat_count_ang"])})
 		list.append({"id": "pat_angle", "text": "Total angle %s deg" % ed.BuildTree.number(float(o["pat_angle"]))})
 		list.append({"id": "pat_rev_ang", "text": "Reverse", "toggle": true, "pressed": bool(o["pat_rev_ang"])})
-	list.append({"id": "pat_merge", "text": "Merge into the body", "toggle": true, "pressed": bool(o["pat_merge"])})
+	list.append({"id": "pat_merge", "text": "Merge in", "toggle": true, "pressed": bool(o["pat_merge"])})
 	list.append({"id": "clear_pattern", "text": "Clear"})
 	list.append({"id": "apply", "text": "Apply", "disabled": not can_apply(ed)})
 	return list

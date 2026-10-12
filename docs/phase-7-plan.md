@@ -51,6 +51,7 @@ Why first: 7.1, 7.2 and 7.3 all add rows. No folding (decided 2026-10-12: hiding
 - Tests: extend `design_table_props_panel.gd` (two options that fit share a line; a `wide` one does not; toggles wrap four to a line; `option_ids()` and routing unchanged); add Extrude, Pattern, Create Plane and Chamfer to `dock_panels_render.gd` and look at the
   pictures in all three themes, with and without the wider panel.
 - Exit: the pictures show Pattern and Extrude readable at about 8 lines; no tool's behaviour changed; suite green.
+- **Done 2026-10-12** (see `docs/status.md`): rectangular Pattern with a second direction fits with no scrolling (about 7 lines). Group captions cost more lines than they saved on Pattern, so they are available but not used there. The panel was not widened.
 
 ## 7.1 Extrude depth (M)
 
