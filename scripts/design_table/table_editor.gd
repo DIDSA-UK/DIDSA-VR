@@ -414,7 +414,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
-		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
+		view.set_preview(session.preview_id(), taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
@@ -658,6 +658,26 @@ func _show_sketch_pick() -> void:
 	if seed_sketch == "":
 		table.set_status(_sketch_pick_hint())
 	_update_options()
+
+
+func _method_hint() -> String:
+	## What to tap for the circle / rectangle / line way just chosen.
+	match [session.tool, session.circle_method if session.tool == "circle" else (session.rect_method if session.tool == "rectangle" else session.line_method)]:
+		["circle", "three"]:
+			return "Pick three points on the circle."
+		["circle", "centre"]:
+			return "Pick the centre, then a point on the circle."
+		["rectangle", "centre"]:
+			return "Pick the centre, then a corner."
+		["rectangle", "three"]:
+			return "Pick the two ends of one side, then a point for the width."
+		["rectangle", "corners"]:
+			return "Pick two opposite corners."
+		["line", "middle"]:
+			return "Pick the middle of the line, then one end."
+		["line", "ends"]:
+			return "Point at the sheet and pull the trigger to place the start, then the end."
+	return ""
 
 
 func _sketch_pick_hint() -> String:
@@ -1519,7 +1539,17 @@ func _update_option_list() -> void:
 			if session != null:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
-			list = [{"id": "finish_line", "text": "Finish line"}]
+			if session != null:
+				list = [{"id": "lm_ends", "text": "End to end", "toggle": true, "pressed": session.line_method == "ends"}, {"id": "lm_middle", "text": "From middle", "toggle": true, "pressed": session.line_method == "middle"}]
+				if session.line_method == "ends":
+					list.append({"id": "finish_line", "text": "Finish line"})
+		"circle":
+			if session != null:
+				list = [{"id": "cm_centre", "text": "Centre", "toggle": true, "pressed": session.circle_method == "centre"}, {"id": "cm_three", "text": "3 points", "toggle": true, "pressed": session.circle_method == "three"}]
+		"rectangle":
+			if session != null:
+				list = [{"id": "rm_corners", "text": "Corners", "toggle": true, "pressed": session.rect_method == "corners"}, {"id": "rm_centre", "text": "From centre", "toggle": true, "pressed": session.rect_method == "centre"},
+					{"id": "rm_three", "text": "3 points", "toggle": true, "pressed": session.rect_method == "three"}]
 		"spline":
 			list = [{"id": "finish_spline", "text": "Finish spline (%d points)" % (session.pending.size() if session != null else 0), "disabled": session == null or session.pending.size() < 2}]
 		"text":
@@ -1589,6 +1619,12 @@ func on_option(option_id: String) -> void:
 	if active_feature != null and option_id != "apply" and active_feature.handle_option(self, option_id):
 		_update_options()
 		schedule_preview()
+		return
+	if session != null and (option_id.begins_with("lm_") or option_id.begins_with("cm_") or option_id.begins_with("rm_")):
+		session.set_method({"l": "line", "c": "circle", "r": "rectangle"}[option_id[0]], option_id.substr(3))
+		_refresh_view()
+		_update_options()
+		table.set_status(_method_hint())
 		return
 	match option_id:
 		"sides_down":

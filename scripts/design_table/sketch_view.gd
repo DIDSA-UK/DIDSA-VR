@@ -664,6 +664,26 @@ func _preview_pass(verts: PackedVector3Array, colors: PackedColorArray, tool_id:
 		"circle":
 			_polyline(verts, colors, circle_points(first, first.distance_to(c), CIRCLE_SEGMENTS), w, colour, true, lift)
 			_ribbon(verts, colors, first, c, w * 0.6, colour, lift)
+		"circle3":
+			var fit := {"ok": false}
+			if taps.size() >= 2:
+				fit = SketchMath.circumcircle(first, taps[1], c)
+			if bool(fit["ok"]):
+				_polyline(verts, colors, circle_points(fit["centre"], float(fit["radius"]), CIRCLE_SEGMENTS), w, colour, true, lift)
+			else:
+				_ribbon(verts, colors, first, c if taps.size() < 2 else taps[1], w * 0.6, colour, lift)
+		"rect_centre":
+			var corners := SketchMath.rect_from_centre(first, c)
+			if not corners.is_empty():
+				_polyline(verts, colors, corners, w, colour, true, lift)
+		"rect3":
+			var turned := SketchMath.rect_from_three(first, taps[1], c) if taps.size() >= 2 else []
+			if not turned.is_empty():
+				_polyline(verts, colors, turned, w, colour, true, lift)
+			else:
+				_ribbon(verts, colors, first, c if taps.size() < 2 else taps[1], w * 0.6, colour, lift)
+		"line_mid":
+			_ribbon(verts, colors, SketchMath.mirrored_end(first, c), c, w, colour, lift)
 		"arc":
 			if taps.size() == 1:
 				_ribbon(verts, colors, first, c, w * 0.6, colour, lift)

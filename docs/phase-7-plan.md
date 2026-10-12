@@ -124,6 +124,9 @@ The riskiest sub-phase: it needs a new pick state and a method switch. Do the pr
 - Tests: pure geometry for the three computed shapes (a circle through three known points, a rotated rectangle of known size), `sketch_session.gd` calls against the fake backend, `e2e_sketch_select.gd` extended with the new menu
   entry against the real constraint schema, and a picture test for the rotated rectangle.
 - Exit: each method draws, dimensions and extrudes; a point can be held on an ellipse.
+- **Done 2026-10-12** (see `docs/status.md`). The circle, rectangle and line shapes extrude and the point-on-ellipse constraint solves on the real backend. Not done: a picture of the rubber bands, and a change to `e2e_sketch_select.gd` (the new e2e covers the menu entry).
+
+**Phase 7 is complete (2026-10-12), apart from Extrude profile selection and plane Edit, which were not built.**
 
 ## Order, sizes and gates
 
