@@ -144,6 +144,29 @@ func _initialize() -> void:
 	# --- a single press still behaves as before (only a chord makes the wheel)
 	print("SMOKE the left hand never opens the wheel: ", not l.wheel_enabled)
 
+	# --- themes: the ring takes its shape, glow and colours from the live theme, and re-skins if it changes while it is up
+	var UiThemes = load("res://scripts/ui/ui_themes.gd")
+	var theme_fill := {}
+	var summaries := {}
+	_open_at_anchor()
+	for theme_name in ["Navy", "Simple", "Dark"]:
+		UiThemes.apply(theme_name)
+		wheel._process(0.0) # a theme change while the ring is up rebuilds it in place
+		summaries[theme_name] = wheel.style_summary()
+		theme_fill[theme_name] = (wheel._wedges[0].material_override as StandardMaterial3D).albedo_color
+	print("SMOKE a theme change while the ring is up re-skins it (the revision it was built for follows): ", summaries["Dark"]["revision"] == UiThemes.revision)
+	print("SMOKE Simple is squarer and thinner-outlined than Navy: ", summaries["Simple"]["corner"] < summaries["Navy"]["corner"] and summaries["Simple"]["border"] < summaries["Navy"]["border"])
+	print("SMOKE Dark sits between Navy and Simple in corner roundness: ", summaries["Dark"]["corner"] < summaries["Navy"]["corner"] and summaries["Dark"]["corner"] > summaries["Simple"]["corner"])
+	print("SMOKE each theme's own tile colour is used: ", theme_fill["Navy"] != theme_fill["Simple"] and theme_fill["Simple"] != theme_fill["Dark"])
+	print("SMOKE the glow follows the theme's strength: ", summaries["Simple"]["glow"] < summaries["Navy"]["glow"] and summaries["Navy"]["glow"] > 0.0)
+	UiThemes.set_fx(false)
+	wheel._process(0.0)
+	print("SMOKE Settings > Shader effects off removes the glow: ", is_equal_approx(wheel.style_summary()["glow"], 0.0))
+	UiThemes.set_fx(true)
+	UiThemes.apply("Navy")
+	wheel._on_released("trigger_click")
+	wheel._on_released("grip_click")
+
 	# --- settings
 	main.set_wheel_enabled(false)
 	print("SMOKE the Settings switch turns the wheel off: ", not r.wheel_enabled and not main.wheel_enabled())

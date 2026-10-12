@@ -61,6 +61,9 @@ func setup(ctx: Dictionary, p_tokens: Resource) -> void:
 	_prompt.render_priority = 20
 	_prompt.outline_render_priority = 19
 	_prompt.modulate = tokens.text
+	_prompt.outline_modulate = Color(tokens.bg_panel.r, tokens.bg_panel.g, tokens.bg_panel.b, 0.9)
+	if tokens.get("font") != null:
+		_prompt.font = tokens.get("font")
 	_prompt.position = Vector3(0.0, -0.26, -0.85)
 	(ctx["camera"] as Node3D).add_child(_prompt)
 	_prompt.visible = false

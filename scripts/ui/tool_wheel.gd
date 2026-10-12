@@ -21,6 +21,7 @@ extends Node3D
 const Math := preload("res://scripts/ui/tool_wheel_math.gd")
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 
 signal opened()
 signal closed()
@@ -29,9 +30,10 @@ signal chosen(entry_id: String)
 const ICON_PX := 96
 const ICON_PIXEL_SIZE := 0.0005 ## metres per icon pixel: a 4.8 cm icon
 const HOVER_LIFT := 0.012 ## metres: the hovered wedge lifts towards you
-const BORDER := 0.0035 ## metres: a wedge's accent border, like the tablet tiles' outline
+const PX := 1.0 / 2667.0 ## metres per tablet pixel (wrist_tablet.gd's pixels_per_metre): the theme's shape tokens are in these pixels
+const CORNER_SCALE := 1.5 ## the ring is seen from further off than the tablet, so its corners and borders are drawn a little heavier
+const BORDER_PER_PX := 0.00175 ## metres of border per theme border_width pixel
 const GLOW := 0.014 ## metres: how far the hovered wedge's glow reaches
-const LABEL_FONT_SIZE := 28
 const LABEL_PIXEL_SIZE := 0.0006
 const LABEL_WRAP_PX := 200 ## a wedge's name wraps to two lines rather than spilling over its neighbours
 const SIZE_NAMES: Array[String] = ["Small", "Normal", "Large"]
@@ -61,6 +63,11 @@ var _glows: Array[MeshInstance3D] = []
 var _labels: Array[Label3D] = []
 var _icons: Array[Sprite3D] = []
 var _hole: MeshInstance3D
+var _hole_border: MeshInstance3D
+var _seen_revision := -1 ## ui_themes.gd's revision when the ring was last built: a theme change while it is up rebuilds it
+var _corner := 0.009
+var _border := 0.0035
+var _glow_alpha := 0.3
 var _centre_title: Label3D
 var _centre_hint: Label3D
 var _cursor: MeshInstance3D
@@ -81,6 +88,8 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 	_centre_hint = _make_label(36, 0.0006)
 	_centre_hint.position = Vector3(0, Math.OUTER_RADIUS + 0.034, 0.004)
 	_centre_hint.modulate = tokens.text_dim
+	_hole_border = MeshInstance3D.new()
+	_ring.add_child(_hole_border)
 	_hole = MeshInstance3D.new()
 	_ring.add_child(_hole)
 	_cursor = MeshInstance3D.new()
@@ -217,6 +226,9 @@ func _commit() -> void:
 func _process(_delta: float) -> void:
 	if not _shown:
 		return
+	if _seen_revision != UiThemes.revision:
+		_rebuild() # the theme (or the effects switch) changed while the ring is up: re-skin it in place
+		_update_centre()
 	var offset := Math.project_offset(_hand.global_position, _anchor, _right) / maxf(wheel_scale, 0.01)
 	_update_hover(Math.wedge_for(offset, _entries.size(), dead_zone), offset)
 	var shown_len := minf(offset.length(), Math.OUTER_RADIUS * 1.15)
@@ -260,13 +272,35 @@ func _clear_nodes() -> void:
 		group.clear()
 
 
+func _read_theme() -> void:
+	## Shape and effects come from the live theme like the tablet's do: Navy is rounded with a heavier outline and a
+	## strong glow, Simple is squarer with a thin outline, Dark sits between; Settings > Appearance > Shader effects turns the glow off.
+	_seen_revision = UiThemes.revision
+	_corner = clampf(float(tokens.radius_control) * PX * CORNER_SCALE, 0.002, 0.02)
+	_border = maxf(float(tokens.border_width) * BORDER_PER_PX, 0.0008)
+	_glow_alpha = float(tokens.fx_button_glow) if UiThemes.fx_enabled else 0.0
+	_centre_title.font_size = int(float(tokens.font_title) * 1.75)
+	_centre_hint.font_size = int(float(tokens.font_small) * 2.0)
+	_centre_title.outline_modulate = Color(tokens.bg_panel.r, tokens.bg_panel.g, tokens.bg_panel.b, 0.9)
+	_centre_hint.outline_modulate = _centre_title.outline_modulate
+	for l in [_centre_title, _centre_hint]:
+		if tokens.get("font") != null:
+			l.font = tokens.get("font")
+
+
+func style_summary() -> Dictionary:
+	## What the live theme currently makes of the ring (tests compare it across themes).
+	return {"corner": _corner, "border": _border, "glow": _glow_alpha, "revision": _seen_revision}
+
+
 func _rebuild() -> void:
 	_clear_nodes()
+	_read_theme()
 	var count := _entries.size()
 	for i in count:
-		var outline := Math.wedge_outline(i, count)
+		var outline := Math.wedge_outline(i, count, Math.INNER_RADIUS, Math.OUTER_RADIUS, Math.GAP, 14, _corner)
 		var glow := _node_for(Math.grown(outline, GLOW), 8)
-		var border := _node_for(Math.grown(outline, BORDER), 9)
+		var border := _node_for(Math.grown(outline, _border), 9)
 		var fill := _node_for(outline, 10)
 		_glows.append(glow)
 		_borders.append(border)
@@ -281,7 +315,7 @@ func _rebuild() -> void:
 		icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		_ring.add_child(icon)
 		_icons.append(icon)
-		var label := _make_label(LABEL_FONT_SIZE, LABEL_PIXEL_SIZE, false)
+		var label := _make_label(int(float(tokens.font_small) * 1.55), LABEL_PIXEL_SIZE, false)
 		label.text = str(_entries[i].get("label", ""))
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.width = LABEL_WRAP_PX
@@ -296,9 +330,13 @@ func _rebuild() -> void:
 	# the centre: where the hand rests, and "release here to cancel"
 	var hole_outline := Math.circle(Math.INNER_RADIUS - Math.GAP)
 	_hole.mesh = _poly_mesh(hole_outline)
-	var hole_mat := _material(tokens.bg_panel, 0.8)
-	hole_mat.render_priority = 8
+	var hole_mat := _material(tokens.bg_panel, 0.85)
+	hole_mat.render_priority = 9
 	_hole.material_override = hole_mat
+	_hole_border.mesh = _poly_mesh(Math.grown(hole_outline, _border))
+	var hole_border_mat := _material(tokens.border, 0.9)
+	hole_border_mat.render_priority = 8
+	_hole_border.material_override = hole_border_mat
 	_cursor.position = Vector3(0, 0, 0.006)
 	_paint()
 
@@ -324,8 +362,8 @@ func _paint() -> void:
 			border_alpha = 0.8
 		_set_colour(_wedges[i], Color(fill.r, fill.g, fill.b, 0.97))
 		_set_colour(_borders[i], Color(border_colour.r, border_colour.g, border_colour.b, border_alpha))
-		_set_colour(_glows[i], Color(accent.r, accent.g, accent.b, 0.30))
-		_glows[i].visible = lit
+		_set_colour(_glows[i], Color(accent.r, accent.g, accent.b, _glow_alpha))
+		_glows[i].visible = lit and _glow_alpha > 0.001
 		var lift := HOVER_LIFT if lit else 0.0
 		_wedges[i].position.z = lift
 		_borders[i].position.z = lift

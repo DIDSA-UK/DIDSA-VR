@@ -82,6 +82,26 @@ func _initialize() -> void:
 	for i in 20:
 		await process_frame
 	await _shot("09_prompt_after_create_no_backend")
+	# The same ring in each theme (and with shader effects off): Navy, Simple and Dark differ in colour, corner radius, outline and glow.
+	var UiThemes = load("res://scripts/ui/ui_themes.gd")
+	manager.deactivate()
+	var n := 10
+	for theme_name in ["Navy", "Simple", "Dark"]:
+		UiThemes.apply(theme_name)
+		await _open()
+		await _move(Vector2(0.0, 0.12))
+		await _shot("%d_theme_%s" % [n, theme_name.to_lower()])
+		await _move(Vector2.ZERO) # let go at the centre: cancel, so the next theme starts from the same root ring
+		_release()
+		n += 1
+	UiThemes.set_fx(false)
+	await _open()
+	await _move(Vector2(0.0, 0.12))
+	await _shot("%d_theme_dark_effects_off" % n)
+	await _move(Vector2.ZERO)
+	_release()
+	UiThemes.set_fx(true)
+	UiThemes.apply("Navy")
 	print("SMOKE %d pictures saved" % _saved)
 	quit()
 
