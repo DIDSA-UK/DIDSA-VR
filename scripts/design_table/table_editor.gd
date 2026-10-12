@@ -81,7 +81,7 @@ var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
 	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
 	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
@@ -1593,6 +1593,10 @@ func option_typed(key: String, text: String) -> void:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	if key == "ext_angle" and cleaned.to_float() >= 90.0:
+		table.set_status("A draft angle has to be less than 90 degrees.")
+		UiFeedback.haptic(table._right, "error")
+		return
 	if (key == "angle" or key == "pat_angle") and cleaned.to_float() > 360.0:
 		table.set_status("An angle can't be more than 360 degrees.")
 		UiFeedback.haptic(table._right, "error")
@@ -1851,6 +1855,8 @@ func extrude_targets() -> Array:
 func extrude_distances() -> Array:
 	## [start, end] along the sketch normal. A boss grows along it (out of a face); a cut goes the other way (into the part).
 	var depth := float(options["depth"])
+	if bool(options["ext_sym"]):
+		return [-depth * 0.5, depth * 0.5] # both sides of the sketch plane, so Boss / Cut / Flip make no difference to the span
 	var sign := 1.0 if bool(options["boss"]) else -1.0
 	if bool(options["flip"]):
 		sign = -sign

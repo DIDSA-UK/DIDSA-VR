@@ -73,6 +73,7 @@ Everything is options on `extrude_tool.gd` and `PartFeatures.extrude_request`; E
   wall has the expected volume (Measure), a drafted prism has a tapered side face, turning thin off by Edit restores a solid, the thin + draft conflict is refused with the backend's message. Open the saved file in the
   flat app's test harness if one can run, otherwise say it was not run (as for Phase 6).
 - Exit: all four in the panel, Edit and Undo / Redo work, e2e true.
+- **Done 2026-10-12 except profile selection** (see `docs/status.md`): Both sides, Thin wall and Draft, Edit in the tool, e2e true (11 lines). Edit from the Build row now opens the tool for an extrude. Profile selection (`profile_refs`) was the droppable item and is not built.
 
 ## 7.2 Small tool options (M)
 

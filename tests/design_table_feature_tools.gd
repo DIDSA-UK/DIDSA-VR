@@ -24,7 +24,10 @@ class FakeTable extends RefCounted:
 
 class Ed extends RefCounted:
 	const BuildTree := preload("res://scripts/design_table/build_tree.gd")
-	var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false}
+	var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false,
+		"ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true}
+	var editing := {}
+	var activating_edit := false
 	var session: RefCounted = null
 	var table := FakeTable.new()
 	var state := "sketch"
@@ -41,7 +44,7 @@ class Ed extends RefCounted:
 	func seed_axis_sketch_id() -> String: return session.sketch_id if session != null else ""
 	func seed_ready() -> bool: return session != null and session.profile_ok()
 	func start_sketch_pick() -> void: state_set = "pick_sketch"
-	func extrude_distances() -> Array: return [0.0, 10.0]
+	func extrude_distances() -> Array: return [-float(options["depth"]) * 0.5, float(options["depth"]) * 0.5] if bool(options["ext_sym"]) else [0.0, 10.0]
 	func extrude_targets() -> Array: return []
 	func edge_refs() -> Array: return edges.map(func(e): return PartFeatures.edge_ref(str(e["body_id"]), int(e["index"])))
 	func body_ids() -> Array: return ["B1"]
@@ -68,7 +71,7 @@ func _initialize() -> void:
 
 	# Extrude
 	var ex = tools["extrude"]
-	print("SMOKE Extrude's options are Boss, Cut, Flip, New body, Depth, Targets (a picked sketch's bodies to fuse into, shown with no sketch open), Apply (Apply off with no sketch): ", ex.options(ed).map(func(o): return o["id"]) == ["boss", "cut", "flip", "new_body", "depth", "targets", "apply"] and ex.options(ed)[-1]["disabled"])
+	print("SMOKE Extrude's options are Boss, Cut, Flip, Both sides, New body, Depth, Thin wall, Draft, Targets (a picked sketch's bodies to fuse into, shown with no sketch open), Apply (Apply off with no sketch): ", ex.options(ed).map(func(o): return o["id"]) == ["boss", "cut", "flip", "ext_sym", "new_body", "depth", "ext_thin", "ext_draft", "targets", "apply"] and ex.options(ed)[-1]["disabled"])
 	ed.options["boss"] = false
 	print("SMOKE ...Cut takes New body away: ", not ex.options(ed).any(func(o): return o["id"] == "new_body"))
 	print("SMOKE ...without a closed shape its request is refused with a reason: ", not ex.request(ed)["ok"] and str(ex.request(ed)["error"]) != "")
@@ -78,6 +81,61 @@ func _initialize() -> void:
 	print("SMOKE ...with one it is the extrude-features body: ", req["ok"] and req["route"] == "extrude-features" and req["body"]["sketch_feature_id"] == "S1" and req["body"]["extrude_type"] == "boss" and req["body"]["end_distance"] == 10.0, " ", req["body"])
 	print("SMOKE ...handle_option toggles Flip and asks for a typed Depth, and leaves Apply to the editor: ", ex.handle_option(ed, "flip") and ed.options["flip"] and ex.handle_option(ed, "depth") and ed.typed == [["depth", "Depth (mm)"]] and not ex.handle_option(ed, "apply"))
 	print("SMOKE ...it spends the sketch: ", ex.finishes_sketch())
+	# Phase 7.1: both sides, thin wall, draft
+	ed.options["depth"] = 20.0
+	ex.handle_option(ed, "ext_sym")
+	req = ex.request(ed)
+	print("SMOKE 7.1 Both sides spans minus half to plus half of the depth: ", req["ok"] and req["body"]["start_distance"] == -10.0 and req["body"]["end_distance"] == 10.0, " ", req["body"])
+	print("SMOKE ...and greys Flip: ", ex.options(ed).filter(func(o): return o["id"] == "flip")[0]["disabled"])
+	ex.handle_option(ed, "ext_sym")
+	req = ex.request(ed)
+	print("SMOKE ...a plain extrude sends no wall or draft fields at all: ", not req["body"].has("thickness") and not req["body"].has("draft_angle"))
+	ex.handle_option(ed, "ext_thin")
+	ed.options["ext_wall"] = 1.5
+	ex.handle_option(ed, "ext_dir_inward")
+	req = ex.request(ed)
+	print("SMOKE ...Thin wall sends the wall and its side: ", req["ok"] and req["body"]["thickness"] == 1.5 and req["body"]["thickness_direction"] == "inward", " ", req["body"])
+	var ids: Array = ex.options(ed).map(func(o): return o["id"])
+	print("SMOKE ...it adds the wall value and Out / In / Mid, and greys Draft: ", ids.has("ext_wall") and ids.has("ext_dir_symmetric") and ex.options(ed).filter(func(o): return o["id"] == "ext_draft")[0]["disabled"])
+	ed.options["ext_draft"] = true
+	print("SMOKE ...a wall and a draft together are refused with a reason: ", not ex.request(ed)["ok"] and str(ex.request(ed)["error"]).contains("can't be combined"))
+	ed.options["ext_thin"] = false
+	ed.options["ext_angle"] = 7.0
+	req = ex.request(ed)
+	print("SMOKE ...Draft sends the angle and whether it widens: ", req["ok"] and req["body"]["draft_angle"] == 7.0 and req["body"]["draft_outward"] == true and not req["body"].has("thickness"), " ", req["body"])
+	ed.options["ext_angle"] = 90.0
+	print("SMOKE ...a draft of 90 degrees or more is refused: ", not ex.request(ed)["ok"])
+	ed.options["ext_angle"] = 5.0
+	ed.options["ext_draft"] = false
+	ed.options["ext_thin"] = true
+	ed.options["ext_wall"] = 0.0
+	print("SMOKE ...a wall of zero is refused: ", not ex.request(ed)["ok"])
+	ed.options["ext_thin"] = false
+	ex.handle_option(ed, "ext_angle")
+	print("SMOKE ...Angle and Wall ask for a typed number: ", ed.typed.back() == ["ext_angle", "Draft angle (degrees, under 90)"])
+	# Edit in the tool: the row's settings come back, a PATCH turns a wall off with an explicit null, never resends the profile or the bodies
+	ed.options["ext_draft"] = false
+	var row := {"type": "extrude", "id": "E1", "sketch_feature_id": "S9", "extrude_type": "boss", "start_distance": -10.0, "end_distance": 10.0, "thickness": -1.5, "thickness_direction": "symmetric", "draft_angle": null, "draft_outward": true, "target_body_ids": ["B1"]}
+	ex.load_from_row(ed, row)
+	print("SMOKE Edit loads a symmetric thin extrude: ", ed.options["ext_sym"] and ed.options["ext_thin"] and ed.options["ext_wall"] == 1.5 and ed.options["ext_dir"] == "symmetric" and not ed.options["ext_draft"] and ed.options["depth"] == 20.0)
+	ed.editing = {"id": "E1", "type": "extrude", "original": row}
+	ed.session = null
+	ed.seed_sketch = ""
+	var edit_req: Dictionary = ex.request(ed)
+	print("SMOKE ...its PATCH body keeps the old sketch and bodies out and, with the span untouched, the distances too: ", edit_req["ok"] and not edit_req["body"].has("sketch_feature_id") and not edit_req["body"].has("target_body_ids") and not edit_req["body"].has("start_distance"), " ", edit_req["body"])
+	ed.options["ext_thin"] = false
+	var off: Dictionary = ex.patch_body(ex.request(ed))
+	print("SMOKE ...turning the wall off PATCHes thickness: null, and the draft stays null: ", off.has("thickness") and off["thickness"] == null and off.has("draft_angle") and off["draft_angle"] == null)
+	ed.options["depth"] = 30.0
+	print("SMOKE ...changing the depth sends the new span: ", ex.request(ed)["body"].has("end_distance"))
+	print("SMOKE ...undo's payload is the row's old values (a null wall stays a null): ", ex.row_payload(row).has("thickness") and ex.row_payload(row)["start_distance"] == -10.0 and ex.row_payload(row).has("draft_angle"))
+	print("SMOKE ...Extrude edits in its own tool and its Build row says both sides / wall / draft: ", ex.edits_in_tool() and BuildTree.summary([row], 0) == "Boss 20 mm, both sides, wall 1.5")
+	ed.editing = {}
+	ed.session = FakeSession.new() # (back to where the checks after this block expect to find the editor)
+	ed.options["depth"] = 10.0
+	ed.options["ext_sym"] = false
+	ed.options["ext_thin"] = false
+
 
 	# Revolve
 	var rv = tools["revolve"]

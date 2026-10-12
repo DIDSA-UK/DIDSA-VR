@@ -28,18 +28,27 @@ static func _good(route: String, body: Dictionary) -> Dictionary:
 	return {"ok": true, "error": "", "route": route, "body": body}
 
 
-static func extrude_request(sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array) -> Dictionary:
-	## Boss with no targets starts a new body; a cut must name the bodies it cuts.
+static func extrude_request(sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array, extra: Dictionary = {}) -> Dictionary:
+	## Boss with no targets starts a new body; a cut must name the bodies it cuts. `extra` carries the optional thin wall (`thickness`, `thickness_direction`)
+	## or draft (`draft_angle`, `draft_outward`); the backend refuses both together, and a draft on a sketch of more than one profile.
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
 	if is_equal_approx(start_distance, end_distance):
 		return _bad("The depth can't be zero.")
-	return _good("extrude-features", {
+	if extra.has("thickness") and extra.has("draft_angle"):
+		return _bad("A thin wall and a draft can't be combined. Turn one off.")
+	if extra.has("thickness") and float(extra["thickness"]) <= 0.0:
+		return _bad("The wall thickness has to be more than zero.")
+	if extra.has("draft_angle") and (float(extra["draft_angle"]) <= 0.0 or float(extra["draft_angle"]) >= 90.0):
+		return _bad("The draft angle has to be more than 0 and less than 90 degrees.")
+	var body := {
 		"sketch_feature_id": sketch_feature_id,
 		"extrude_type": "boss" if boss else "cut",
 		"start_distance": minf(start_distance, end_distance),
 		"end_distance": maxf(start_distance, end_distance),
-		"target_body_ids": target_body_ids})
+		"target_body_ids": target_body_ids}
+	body.merge(extra)
+	return _good("extrude-features", body)
 
 
 static func revolve_request(sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:

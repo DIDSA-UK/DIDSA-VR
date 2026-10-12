@@ -84,6 +84,13 @@ func _initialize() -> void:
 			for t in cat[1]:
 				n += 1
 				await _shoot("%02d_%s_%s" % [n, cat[0], t[0]], str(cat[0]), str(t[0]), true)
+	if OS.get_environment("DOCK_MODE") != "before": # Extrude with its optional groups switched on (7.1), the longest the panel gets for it
+		ed.options["ext_thin"] = true
+		await _shoot("90_extrude_thin", "feature", "extrude", true)
+		ed.options["ext_thin"] = false
+		ed.options["ext_draft"] = true
+		await _shoot("91_extrude_draft", "feature", "extrude", true)
+		ed.options["ext_draft"] = false
 	print("SMOKE dock render saved %d pictures" % _saved)
 	quit()
 

@@ -82,7 +82,14 @@ static func summary(features: Array, index: int) -> String:
 			return "on a reference plane"
 		"extrude":
 			var depth := absf(float(f.get("end_distance", 0.0)) - float(f.get("start_distance", 0.0)))
-			return "%s %s mm" % ["Cut" if str(f.get("extrude_type", "boss")) == "cut" else "Boss", number(depth)]
+			var text := "%s %s mm" % ["Cut" if str(f.get("extrude_type", "boss")) == "cut" else "Boss", number(depth)]
+			if float(f.get("start_distance", 0.0)) < 0.0 and is_equal_approx(float(f.get("start_distance", 0.0)), -float(f.get("end_distance", 0.0))):
+				text += ", both sides"
+			if f.get("thickness") != null:
+				text += ", wall %s" % number(absf(float(f["thickness"])))
+			if f.get("draft_angle") != null:
+				text += ", draft %s deg" % number(float(f["draft_angle"]))
+			return text
 		"revolve":
 			return "%s %s deg" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", number(float(f.get("angle", 360.0)))]
 		"shell":
