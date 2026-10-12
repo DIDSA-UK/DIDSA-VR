@@ -242,7 +242,7 @@ func _summon_table() -> void:
 
 
 func _mates_entries() -> Array:
-	## The bottom 90 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand
+	## The bottom 60 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand
 	## would drill into it on the way to the pill): Flip and Clear picks are the two wedges below.
 	return [
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, "Pick two faces first"),

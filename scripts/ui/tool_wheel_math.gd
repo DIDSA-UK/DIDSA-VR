@@ -11,7 +11,7 @@ const DRILL_DISTANCE := 0.20 ## metres: a sub-wheel wedge opens its ring once th
 const OUTER_RADIUS := 0.22 ## metres: drawn radius of the ring
 const INNER_RADIUS := 0.075 ## metres: drawn inner radius (a little bigger than the dead zone, so the centre reads as a hole)
 const CONTENT_RADIUS := 0.168 ## metres: where a tile's icon and name are centred. A wedge is narrower at the hub, so this sits outside the middle of the radius (0.1475), near the tile's area centre
-const PILL_HALF_ANGLE := PI / 4.0 ## the pill under the ring spans 90 degrees: 45 either side of straight down
+const PILL_HALF_ANGLE := PI / 6.0 ## the pill under the ring spans 60 degrees: 30 either side of straight down
 const PILL_GAP := 0.018 ## metres between the ring's outer edge and the pill
 const PILL_DEPTH := 0.058 ## metres: how thick the pill is
 const GAP := 0.014 ## metres: visual gap between neighbouring wedges
@@ -148,7 +148,7 @@ static func horizontal_span(poly: PackedVector2Array, y_top: float, y_bottom: fl
 
 
 static func pill_outline(steps: int = 24, corner: float = CORNER) -> PackedVector2Array:
-	## The pill under the ring: an arc band 90 degrees wide centred on straight down, just outside the ring, with the same
+	## The pill under the ring: an arc band 60 degrees wide centred on straight down, just outside the ring, with the same
 	## rounded corners as the ring's tiles. (Wedge 0 is straight up, so "down" is an angle of PI.)
 	var inner := OUTER_RADIUS + PILL_GAP
 	var outer := inner + PILL_DEPTH
@@ -167,7 +167,7 @@ static func pill_centre() -> Vector2:
 
 
 static func in_pill(offset: Vector2) -> bool:
-	## The hand has gone out past the ring, into the 90 degrees straight below it.
+	## The hand has gone out past the ring, into the 60 degrees straight below it.
 	if offset.length() < OUTER_RADIUS + 0.004:
 		return false
 	return absf(atan2(offset.x, offset.y)) >= PI - PILL_HALF_ANGLE
