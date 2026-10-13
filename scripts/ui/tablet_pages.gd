@@ -985,6 +985,7 @@ func _build_settings_movement() -> Control:
 	page.add_child(_hint("How much hand shake is filtered out of a held part and of moving the whole model."))
 	page.add_child(_choice_row("Steadiness (hold-still shake)", _two_hand.STEADINESS_NAMES, _two_hand.steadiness, func(i: int) -> void:
 		_two_hand.set_steadiness(i) # whole-model moves
+		_main.room_manager.apply_steadiness(i) # and each Assembly Room's whole-room moves
 		_left.set_steadiness(i) # a single held part (grip), each hand
 		_right.set_steadiness(i)
 		if _section_tool:

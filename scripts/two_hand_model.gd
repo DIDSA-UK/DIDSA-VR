@@ -80,6 +80,8 @@ var _prev_pivot := Vector3.ZERO ## virtual pivot the transform is built around e
 var _gesture_active := false
 var _gesture_start_transform: Transform3D
 var command_stack = null ## set via setup(); a shared command_stack.gd instance for undo/redo
+var focus := Callable() ## (hand) -> bool: whether a grip on empty space by this hand belongs to THIS model. The world's says "not inside any Assembly Room", a room's "inside me". Decided once, when the grip goes down, and kept until it comes up (a drag that carries the hand out of the room does not hand the gesture to the world).
+var _claim: Dictionary = {} ## hand -> bool, the latched answer for the grip that is down now
 
 
 func setup(root: Node3D, left: XRController3D, right: XRController3D, real_life_scale: float, stack = null) -> void:
@@ -194,8 +196,12 @@ func _push_move_command(label: String, before: Transform3D) -> void:
 		return # no net change: nothing worth undoing
 	var target := _root
 	command_stack.push(label,
-		func() -> void: target.global_transform = before,
-		func() -> void: target.global_transform = after)
+		func() -> void:
+			if is_instance_valid(target): # (an Assembly Room's content may have been closed since)
+				target.global_transform = before,
+		func() -> void:
+			if is_instance_valid(target):
+				target.global_transform = after)
 
 
 func _ratio_hint(multiple: float) -> String:
@@ -206,8 +212,8 @@ func _process(delta: float) -> void:
 	if _root == null or _left == null or _right == null:
 		return
 
-	var left_free := enabled and _hand_free(_left)
-	var right_free := enabled and _hand_free(_right)
+	var left_free := enabled and _claims(_left, _hand_free(_left))
+	var right_free := enabled and _claims(_right, _hand_free(_right))
 	var left_pos := _steady(_left_filter, _left.global_position, left_free, delta)
 	var right_pos := _steady(_right_filter, _right.global_position, right_free, delta)
 
@@ -218,6 +224,16 @@ func _process(delta: float) -> void:
 	else:
 		_end_gesture()
 		_mode = Mode.NONE
+
+
+func _claims(hand: Node3D, raw_free: bool) -> bool:
+	## `raw_free`: this hand is gripping empty space. It is this model's only if focus says so at the moment the grip went down (then latched until release).
+	if not raw_free:
+		_claim.erase(hand)
+		return false
+	if not _claim.has(hand):
+		_claim[hand] = focus.is_null() or bool(focus.call(hand))
+	return _claim[hand]
 
 
 func _begin_gesture() -> void:
@@ -351,8 +367,8 @@ func _model_bounds() -> AABB:
 	var box := AABB()
 	var first := true
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
-		if not (node is MeshInstance3D) or (node.has_meta("held") and node.get_meta("held")):
-			continue
+		if not (node is MeshInstance3D) or (node.has_meta("held") and node.get_meta("held")) or not _root.is_ancestor_of(node):
+			continue # (only this model's own parts: the world's bounds do not include a room's, nor a room's the world's)
 		var b: AABB = node.global_transform * node.get_aabb()
 		box = b if first else box.merge(b)
 		first = false

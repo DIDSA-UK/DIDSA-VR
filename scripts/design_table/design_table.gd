@@ -1008,7 +1008,7 @@ func node_for_occurrence(occurrence_id: String) -> Node3D:
 	## The arena node showing this placed occurrence, if there is one that can be taken (visible, not already on a table).
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
 		if node is MeshInstance3D and node.has_meta("occurrence_id") and str(node.get_meta("occurrence_id")) == occurrence_id \
-				and node.visible and not node.has_meta("on_table") and not node.get_meta("held", false):
+				and node.visible and not node.has_meta("on_table") and not node.has_meta("room_id") and not node.get_meta("held", false): # (the table takes the world's part; a room's copy is the same occurrence in another frame)
 			return node
 	return null
 
@@ -1214,7 +1214,7 @@ func add_mate_baseline(captured: Array) -> void:
 func update_mate_drift() -> void:
 	## After the part's mesh changed: which mates now name a different face than when they were made. Replaces the last answer, so
 	## undoing an edit that brings the faces back also clears the warning.
-	var arena := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D)
+	var arena := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D and not n.has_meta("room_id"))
 	var drifted := MateHealth.drifted(mate_baseline, arena)
 	mate_drift.clear()
 	for d in drifted:
@@ -1236,7 +1236,7 @@ func enforce_mates() -> void:
 		return
 	enforce_button.set_busy(true)
 	var suppressed := 0
-	var arena_nodes := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D)
+	var arena_nodes := get_tree().get_nodes_in_group("grabbable_parts").filter(func(n): return n is MeshInstance3D and not n.has_meta("room_id"))
 	remake_plan = MateHealth.remake_plan(_mates_tool.mates, MateHealth.flatten_drift(mate_drift), mate_baseline, arena_nodes)
 	for mate_id in mate_drift.keys():
 		var r: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/mates/%s" % [owner_id, mate_id], {"suppressed": true})

@@ -75,6 +75,39 @@ static func slot_of(part: Node) -> int:
 	return int(part.get_meta(META, -1)) if part != null else -1
 
 
+static func is_room_part(node: Node) -> bool:
+	## A part that lives in an Assembly Room (room.gd tags it `room_id`), as opposed to the world's.
+	return node != null and node.has_meta("room_id")
+
+
+static func world_parts(tree: SceneTree) -> Array:
+	## The arena's own parts: everything grabbable that is not in a room (and not the one sitting on the design table).
+	return tree.get_nodes_in_group("grabbable_parts").filter(func(p: Node) -> bool: return not p.has_meta("room_id") and not p.has_meta("on_table"))
+
+
+static func parts_in_room(tree: SceneTree, room_id: int) -> Array:
+	return tree.get_nodes_in_group("grabbable_parts").filter(func(p: Node) -> bool: return int(p.get_meta("room_id", 0)) == room_id)
+
+
+static func part_centre(part: Node3D) -> Vector3:
+	if part is MeshInstance3D:
+		return part.global_transform * (part as MeshInstance3D).get_aabb().get_center()
+	return part.global_position
+
+
+static func stray_reason(part: Node3D) -> String:
+	## Why a part that was just put down must go back where it was, or "" if it may stay. A room's part may not leave its room (nothing outside the
+	## walls is its to show), and a world part may not be left inside one (it would be cut away, invisible and unreachable): both snap back. Putting a
+	## NEW item into a room is the separate drop-to-add flow (docs/assembly-rooms-scope.md), not a stray move.
+	if rooms.is_empty() or part == null:
+		return ""
+	var slot := slot_of(part)
+	var centre := part_centre(part)
+	if is_room_part(part) and slot >= 0:
+		return "" if slot < rooms.size() and rooms[slot] != null and rooms[slot].contains(centre) else "left_room"
+	return "entered_room" if room_at(centre) != -1 else ""
+
+
 static func room_at(world_point: Vector3) -> int:
 	## The slot of the room containing the point, or -1.
 	for i in rooms.size():

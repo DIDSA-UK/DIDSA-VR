@@ -106,24 +106,34 @@ to the walls, and the world clipped around it. A viewer for now: no wall draggin
 - `Show all` (Tools tab) will re-show the hidden world copy under an open room; harmless but untidy.
 - The design table's tree has no Room button (its `_add_row_actions` is its own).
 
-## R2: interaction parity (next; replaces the old R2 to R5 ordering)
+## R2: interaction parity (done, headless-confirmed; not on a headset or against a live backend)
 
-The room is a world within a world: grab to move, two-hand to turn and scale, A/B to send and retrieve, select, hide, undo, all inside it. Do
-this before the glass look and wall dragging, because it decides how the rest is built.
+The room is a world within a world: grab to move, two-hand to turn and scale, A/B to send and retrieve, select, hide, undo, all inside it.
 
-1. **Parts become grabbable in rooms** (join `grabbable_parts` with collision). Picking and gripping already respect the walls (R0).
-2. **Persistence per room**: `mates_tool` (and colour / measure) take the owner Part from the part itself, not a single global: a top-level
-   occurrence of ITS room's root is managed; nested ones stay unmanaged exactly as in the world today.
-3. **Whole-room gestures**: `TwoHandModel` already takes any root node, so each room gets its own instance on `content_root` (own scale
-   limits). A grip on empty space goes to the room containing the hand, else to the world (a focus filter on `_hand_free`); one hand
-   moves the content, two hands move / turn / scale it about their midpoint. Room scale is therefore the content scale.
-4. **Room-scoped group operations**: Hide all / Show all / Reverse / Isolate, undo, tool modes act on the focused room.
-5. **Send / retrieve** across the wall: the drop-to-add flow from the scope document, plus parts pushed out of the walls clipping and
-   snapping back.
-6. Mates, Colours, Sections, Measure per room (the focused room's root).
+### What was built
 
-Then the old R2 (draggable walls, grab handle, scale control, glass look, tabs), R3 remainder (console, group selection), R4 and R5 as in
-the scope document, section 11.
+| Area | What changed |
+|---|---|
+| Touchable parts | `Room.set_interactive(true)` puts the parts in `grabbable_parts` with collision. The manager does it once the room's Part state has been read (`activate`). Picking and gripping already respected the walls (R0). |
+| Saving moves | `mates_tool.gd` is owner-aware. A part's pose is saved under **its own owner Part** (`persist_path`): the loaded root's for the world, the room's Part for a room. `load_owner_state` / `set_owner_state` / `drop_owner_state` register a room's Part (its occurrences' `fixed` flags and which occurrences have Mates), so **grounded parts stay put and mated parts are steered** in a room exactly as in the world. The active root (what the Mates page lists) never moves when a room's mates are refreshed. |
+| Right copy | The sub-assembly's occurrences exist twice while its room is open (the room's, and the world's hidden copy, same owner and occurrence ids). `_find_loaded_part` resolves by context: beside a given node, else a room's Part means the room's node. |
+| Whole-room gestures | Each room has its own `TwoHandModel` on its content: one hand drags it, two hands move / turn / scale it (room scale = content scale; limits 0.01x to 2000x of real life). A grip on empty space is **claimed by the room the hand is in, else the world**, decided when the grip goes down and latched until it comes up. The world's gesture now measures only its own parts. |
+| Send / retrieve | A/B nudge, rotate and select already work in any frame. **A room's part put down outside the room, or a world part left inside a room, goes back to where it was picked up** (no undo step, a message says why). |
+| Scoped operations | Hide all / Show all / Reverse / Isolate act on the room you are standing in (head inside its walls), or the room of the selected part for Isolate, else the world. The design table takes the world's part only; its mate-drift checks look at the world's parts. |
+| Colours | Already owner-correct (a PATCH on the occurrence's own owner), so colouring a room's part works and the preview also reaches the hidden world copy. |
+| Tests | `tests/room_interaction.gd` (36 headless checks). |
+
+### Known gaps (honest list)
+
+- **Not run against a live backend.** The saved-pose path, `load_owner_state`, and enforced mates in a room are unit-tested for their decisions and paths, but the HTTP round trips were not exercised here. The existing e2e style tests (`tests/e2e_*.gd`) need a backend; run one with a room open before trusting it.
+- **Mates page list, Enforce all, and Relax are still the world's.** Creating a mate between two parts of a room works (the pick carries the room's Part as its owner and the mate is saved there), but the Mates page lists the world's mates, and Enforce all acts on the world.
+- **Measure** still assumes the loaded root, so measuring on a room's part is refused or wrong until it is made owner-aware the same way.
+- **A mated part slid by its mates can leave the room** (the snap-back check covers hand and laser moves, not mate-steered drags): the walls clip it, you get it back by undo or by moving it.
+- **Drop-to-add** (carry a world item into a room to add it to the room's assembly) is not built. R2 only refuses the stray drop. It needs a backend call that adds an existing Part as an occurrence, with a placement; not found yet.
+- **The tablet's Scale page, Fit and Home** act on the world only. A room's own scale control lives on the room console (later).
+- **Undo** is the one shared stack. Undoing a room move after closing that room is safe (the room's changes are guarded) but does nothing.
+- **Nested sub-sub-assembly parts** inside a room are not managed (not saved), exactly like nested parts in the world today.
+- Wall dragging, grab handle, scale control, glass look, tabs, console: still to do (next).
 
 ## Earlier R2 to R5 notes
 

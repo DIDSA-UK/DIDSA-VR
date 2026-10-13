@@ -3,9 +3,10 @@ extends Node3D
 ## code know about it) holding one assembly's meshes, drawn with a thin wireframe for its walls. The node sits at the box's centre and orientation (no scale:
 ## walls are never scaled); the content hangs off `content_root`, which carries the room's own scale, millimetres to metres times the fit factor.
 ##
-## R1 is a viewer: the content is clipped to the walls (the world is clipped around them) and can be walked round, but it is not grabbable or pickable
-## yet. Its parts are in the `room_parts` group, NOT `grabbable_parts`, on purpose: the grab, nudge and select code persists a part's pose to the backend
-## relative to the arena's root, which would be wrong for a part in a room with a different frame and scale (R3 brings per-room editing).
+## A room is a world within the world (R2): once the manager has read its Part's state from the backend and called `set_interactive(true)`, its parts
+## are `grabbable_parts` like the world's (grip, laser, nudge, rotate, hide, undo all work, filtered by the walls), a `TwoHandModel` on `content_root`
+## moves, turns and scales the whole content when you grip empty space inside the room, and a moved part is saved to the room's own Part.
+## Before that (and in tests that skip the backend) the parts are only in `room_parts`: visible and clipped, not touchable.
 
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const RoomVolume := preload("res://scripts/room/room_volume.gd")
@@ -23,7 +24,11 @@ var seed_occurrence_id := ""
 var colour := Color.WHITE
 var content_root: Node3D
 var parts: Array[MeshInstance3D] = []
-var content_scale := 0.001 ## metres per backend unit (mm) at the room's current scale; 0.001 is 1:1
+var content_scale: float: ## metres per backend unit (mm) at the room's current scale; 0.001 is 1:1. Whole-room gestures change it by scaling content_root.
+	get:
+		return content_root.scale.x if content_root != null else 0.001
+var two_hand: Node ## the TwoHandModel moving / turning / scaling this room's content (room_manager.gd makes it); null until the room is interactive
+var interactive := false
 
 var _walls: MeshInstance3D
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
@@ -101,9 +106,9 @@ func owner_part_ids() -> Dictionary:
 
 func set_content_scale(metres_per_unit: float) -> void:
 	## The room's scale (a display transform on the content only): keeps the content's middle at the room's middle.
-	content_scale = maxf(metres_per_unit, 0.000001)
-	content_root.scale = Vector3.ONE * content_scale
-	content_root.position = -content_scale * _bounds.get_center()
+	var s := maxf(metres_per_unit, 0.000001)
+	content_root.scale = Vector3.ONE * s
+	content_root.position = -s * _bounds.get_center()
 
 
 func scale_text() -> String:
@@ -122,7 +127,27 @@ func register(slot: int) -> void:
 	_build_walls()
 
 
+func set_interactive(on: bool) -> void:
+	## Makes the parts touchable (grabbable_parts, with collision for the laser and the grip) or not. Idempotent.
+	if on == interactive:
+		return
+	interactive = on
+	for p in parts:
+		if not is_instance_valid(p):
+			continue
+		if on:
+			p.add_to_group("grabbable_parts")
+			p.create_trimesh_collision() # so the laser and the grip can find real geometry, like main.gd does for the world's parts
+		else:
+			p.remove_from_group("grabbable_parts")
+			for child in p.get_children():
+				if child is StaticBody3D:
+					p.remove_child(child)
+					child.free()
+
+
 func close() -> void:
+	set_interactive(false)
 	RoomRegistry.remove_room(volume)
 	queue_free()
 

@@ -235,6 +235,7 @@ func _add_room_manager() -> void:
 	add_child(room_manager)
 	room_manager.setup(self, view_modes)
 	room_manager.status.connect(_set_status)
+	_two_hand.focus = func(hand: Node3D) -> bool: return RoomRegistry.room_at(hand.global_position) == -1 # a grip on empty space inside a room is the room's
 
 
 func max_rooms() -> int:
@@ -466,10 +467,10 @@ func show_all_parts() -> void:
 	_set_all_visibility(true, "show all")
 
 
-func _arena_parts() -> Array:
-	## The arena's parts, not counting the one sitting on the design table (hidden on purpose,
-	## and not for hide / show / isolate to bring back).
-	return get_tree().get_nodes_in_group("grabbable_parts").filter(func(p: Node) -> bool: return not p.has_meta("on_table"))
+func _arena_parts(anchor: Node = null) -> Array:
+	## The parts hide / show / reverse / isolate act on: the arena's, not counting the one sitting on the design table (hidden on purpose, and not for
+	## them to bring back); or, when the user is standing in an Assembly Room (or the anchor part is in one), that room's.
+	return room_manager.scope_parts(anchor)
 
 
 func reverse_visibility() -> void:
@@ -488,7 +489,7 @@ func isolate_selected() -> void:
 	var target := current_selected_part()
 	if target == null:
 		return
-	var parts := _arena_parts()
+	var parts := _arena_parts(target)
 	var before := {}
 	for p in parts:
 		before[p] = p.visible
@@ -1450,7 +1451,7 @@ func restore_stale_mates() -> void:
 	var listed = _native_extras.get(STALE_MATES_KEY, [])
 	if not (listed is Array) or (listed as Array).is_empty():
 		return
-	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+	for node in RoomRegistry.world_parts(get_tree()):
 		if (listed as Array).has(str(node.get_meta("occurrence_id", ""))):
 			DirtyMates.mark(node)
 

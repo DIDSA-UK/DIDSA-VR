@@ -74,8 +74,9 @@ func apply_all() -> void:
 		return
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
 		apply_to(node)
-	for node in get_tree().get_nodes_in_group("room_parts"): # the parts in Assembly Rooms follow the same mode
-		apply_to(node)
+	for node in get_tree().get_nodes_in_group("room_parts"): # the parts in Assembly Rooms follow the same mode (interactive ones are grabbable too: done above)
+		if not node.is_in_group("grabbable_parts"):
+			apply_to(node)
 	if _main != null and _main.get("design_table") != null:
 		_main.design_table.apply_view_mode()
 
