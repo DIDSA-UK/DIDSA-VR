@@ -285,7 +285,7 @@ static func room_action(row: Dictionary, manager) -> Dictionary:
 	if str(row.get("id", "")) == "" or part_id == "" or manager == null:
 		return {}
 	return {
-		"text": "Close room" if manager.is_open_for(part_id) else "Room",
+		"text": "Cancel" if manager.has_method("is_placing_for") and manager.is_placing_for(part_id) else ("Close room" if manager.is_open_for(part_id) else "Room"),
 		"part_id": part_id,
 		"label": str(row.get("name", "")),
 		"parent_part_id": str(row.get("parent_part_id", "")),

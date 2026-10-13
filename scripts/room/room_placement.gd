@@ -11,6 +11,24 @@ const RINGS := 4 ## how many steps further out to try
 const SIDE_STEPS := 4 ## and how many rooms' widths to either side of straight ahead
 
 
+static func floor_hit(origin: Vector3, direction: Vector3, max_distance: float = 15.0, floor_y: float = 0.0) -> Variant:
+	## Where a laser from `origin` along `direction` meets the floor, or null: pointing level or up, the floor behind you, or further than `max_distance`.
+	if direction.y >= -0.02:
+		return null
+	var t := (floor_y - origin.y) / direction.y
+	if t < 0.05 or t > max_distance:
+		return null
+	return origin + direction * t
+
+
+static func transform_at(floor_point: Vector3, eye: Vector3, size: Vector3) -> Transform3D:
+	## A room of `size` centred over `floor_point`, standing on the floor, turned to face the user (its front, local -Z, looks away from them).
+	var heading := Vector3(floor_point.x - eye.x, 0.0, floor_point.z - eye.z)
+	if heading.length() < 0.001:
+		heading = Vector3(0, 0, -1)
+	return Transform3D(Basis.looking_at(heading.normalized(), Vector3.UP), Vector3(floor_point.x, size.y * 0.5, floor_point.z))
+
+
 static func find_spot(eye: Vector3, forward: Vector3, size: Vector3, others: Array) -> Variant:
 	## A Transform3D for the room's centre and orientation (floor at y = 0), or null if nothing was clear.
 	var heading := Vector3(forward.x, 0.0, forward.z)

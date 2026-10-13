@@ -52,6 +52,20 @@ static func add_room(volume: RefCounted) -> int:
 	return slot
 
 
+static func next_slot() -> int:
+	## The slot the next room would get (a hole left by a closed room first), so a placement ghost can wear the colour the room will have.
+	var hole := rooms.find(null)
+	return hole if hole != -1 else rooms.size()
+
+
+static func would_overlap(volume: RefCounted, ignoring: RefCounted = null) -> bool:
+	## Would this box share volume with any open room (other than `ignoring`, the room being moved or resized)?
+	for other in rooms:
+		if other != null and other != ignoring and other.overlaps(volume):
+			return true
+	return false
+
+
 static func remove_room(volume: RefCounted) -> void:
 	var slot := rooms.find(volume)
 	if slot == -1:

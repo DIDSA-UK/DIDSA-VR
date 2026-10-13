@@ -320,8 +320,8 @@ func cancel_for_wheel() -> void:
 
 
 func _on_button_pressed(action_name: String) -> void:
-	if wheel_is_open():
-		return
+	if wheel_is_open() or bool(get_meta("room_placing", false)):
+		return # (placing an Assembly Room: this hand's laser and trigger are the room's - room_manager.gd)
 	if _wheel_chord_completed_by(action_name):
 		wheel_chord_started.emit()
 		return

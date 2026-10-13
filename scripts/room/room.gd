@@ -185,7 +185,12 @@ func close() -> void:
 
 
 func _build_walls() -> void:
-	var h: Vector3 = volume.half
+	_walls = wall_lines(volume.half, colour)
+	add_child(_walls)
+
+
+static func wall_lines(h: Vector3, line_colour: Color) -> MeshInstance3D:
+	## The twelve edges of a box with half extents `h`, as a thin wireframe in `line_colour` (a room's walls for now; the placement ghost uses it too).
 	var corners: Array[Vector3] = []
 	for i in 8:
 		corners.append(Vector3(h.x if i & 1 else -h.x, h.y if i & 2 else -h.y, h.z if i & 4 else -h.z))
@@ -201,14 +206,14 @@ func _build_walls() -> void:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(colour.r, colour.g, colour.b, 0.9)
+	mat.albedo_color = Color(line_colour.r, line_colour.g, line_colour.b, 0.9)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mesh.surface_set_material(0, mat)
-	_walls = MeshInstance3D.new()
-	_walls.name = "Walls"
-	_walls.mesh = mesh
-	_walls.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_walls)
+	var node := MeshInstance3D.new()
+	node.name = "Walls"
+	node.mesh = mesh
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return node
 
 
 static func _descendants(root: Node) -> Array:

@@ -341,6 +341,9 @@ func _hand_free_ignoring_button(hand: XRController3D) -> bool:
 	# independent of the world, so the grip must not also drag the model.
 	if hand.has_meta("table_part_held") and hand.get_meta("table_part_held"):
 		return false
+	# Placing an Assembly Room (room_manager.gd): the laser is aiming the room, the grip is not a grab.
+	if hand.has_meta("room_placing") and hand.get_meta("room_placing"):
+		return false
 	# The tool wheel (tool_wheel.gd sets "wheel_open" from the trigger + grip chord until both are up): the grip belongs to it.
 	if hand.has_meta("wheel_open") and hand.get_meta("wheel_open"):
 		return false

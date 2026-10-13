@@ -20,6 +20,10 @@ const RoomPlacement := preload("res://scripts/room/room_placement.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd")
 const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const DropCue := preload("res://scripts/room/drop_cue.gd")
+const RoomGhost := preload("res://scripts/room/room_ghost.gd")
+
+const PLACE_CONFIRM := "trigger_click" ## placing a room: the right trigger drops it where the laser meets the floor,
+const PLACE_CANCEL := "by_button" ## B / Y gives up
 
 const ROOM_MIN_MULTIPLE := 0.01 ## a room's content may be scaled between these multiples of real life (the world's are 0.1 to 50): a 10 mm part fits a 3 m room at about 200x
 const ROOM_MAX_MULTIPLE := 2000.0
@@ -36,6 +40,8 @@ var _was_active := false
 var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
 var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
 var _cued: Dictionary = {} ## hand -> the part it carries that currently shows the drop cue
+var _placing: Dictionary = {} ## while a room is being placed: part_id, label, seed_owner, seed_occurrence, token, hand, ghost, size, bytes, spot (Transform3D or null), confirmed
+var _place_token := 0
 var _steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES, as the tablet last set it
 
 
@@ -288,15 +294,138 @@ func room_for_part(part_id: String) -> Node:
 
 
 func is_open_for(part_id: String) -> bool:
-	return room_for_part(part_id) != null or _opening.has(part_id)
+	return room_for_part(part_id) != null or _opening.has(part_id) or is_placing_for(part_id)
+
+
+func is_placing_for(part_id: String) -> bool:
+	return not _placing.is_empty() and _placing["part_id"] == part_id
 
 
 func toggle_room(part_id: String, label: String, seed_owner_part_id: String = "", seed_occurrence_id: String = "") -> void:
+	## The tree's Room button: closes the room if open, gives up the placement if one is in progress, else starts placing one.
+	if is_placing_for(part_id):
+		cancel_placement()
+		return
 	var existing := room_for_part(part_id)
 	if existing != null:
 		close_room(existing)
 		return
-	await open_room(part_id, label, seed_owner_part_id, seed_occurrence_id)
+	await begin_placement(part_id, label, seed_owner_part_id, seed_occurrence_id)
+
+
+func begin_placement(part_id: String, label: String, seed_owner_part_id: String = "", seed_occurrence_id: String = "") -> void:
+	## Summoning a room: aim the right laser at the floor where its middle should go (a ghost follows, red where it can't), trigger to drop it, B / Y to
+	## give up. The Part's mesh loads while you aim. With no laser to aim (no headset: the desktop preview) it opens in front of the user, as before.
+	if part_id == "" or is_open_for(part_id):
+		return
+	var hand = _main.get_node_or_null("XROrigin3D/RightController") if _main != null else null
+	var xr = _main.get("xr_interface") if _main != null else null
+	if hand == null or xr == null or not xr.is_initialized():
+		await open_room(part_id, label, seed_owner_part_id, seed_occurrence_id)
+		return
+	if not RoomRegistry.can_add():
+		status.emit("Room limit reached (%d). Close a room, or raise the limit in Settings > Display." % RoomRegistry.max_rooms)
+		return
+	var e := edit_api()
+	if e == null or _backend_url == "" or _api_key == "":
+		status.emit("No backend configured: rooms open a Part from the backend.")
+		return
+	cancel_placement()
+	_place_token += 1
+	var token := _place_token
+	var size := RoomVolume.spawn_size(Vector3.ZERO)
+	var ghost := RoomGhost.new()
+	ghost.setup(size * 0.5, Room.colour_for(RoomRegistry.next_slot()))
+	_main.add_child(ghost)
+	_placing = {"part_id": part_id, "label": label, "seed_owner": seed_owner_part_id, "seed_occurrence": seed_occurrence_id, "token": token,
+		"hand": hand, "ghost": ghost, "size": size, "bytes": PackedByteArray(), "spot": null, "confirmed": false}
+	hand.set_meta("room_placing", true)
+	hand.button_pressed.connect(_on_placement_button)
+	status.emit("Aim your right laser at the floor where the room should go, trigger to drop it, B to cancel.")
+	rooms_changed.emit()
+	var bytes: PackedByteArray = await e.fetch_part_glb(part_id)
+	if _placing.is_empty() or int(_placing["token"]) != token:
+		return # given up (or replaced) while the mesh was loading
+	if bytes.is_empty():
+		status.emit("Couldn't load %s's mesh." % label)
+		_end_placement()
+		return
+	_placing["bytes"] = bytes
+	if _placing["confirmed"]:
+		_complete_placement()
+
+
+func cancel_placement() -> void:
+	if _placing.is_empty():
+		return
+	_end_placement()
+	status.emit("Placement cancelled.")
+
+
+func _end_placement() -> void:
+	var hand = _placing.get("hand")
+	if hand != null and is_instance_valid(hand):
+		hand.set_meta("room_placing", false)
+		if hand.button_pressed.is_connected(_on_placement_button):
+			hand.button_pressed.disconnect(_on_placement_button)
+	var ghost = _placing.get("ghost")
+	if ghost != null and is_instance_valid(ghost):
+		ghost.queue_free()
+	_placing = {}
+	rooms_changed.emit()
+
+
+func _on_placement_button(action_name: String) -> void:
+	if _placing.is_empty():
+		return
+	if action_name == PLACE_CANCEL:
+		cancel_placement()
+	elif action_name == PLACE_CONFIRM:
+		if _placing["spot"] == null:
+			status.emit("The room can't go there: aim at clear floor (red means it would overlap another room).")
+			var hand = _placing["hand"]
+			hand.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+			return
+		_placing["confirmed"] = true
+		_placing["final"] = _placing["spot"]
+		(_placing["ghost"] as Node3D).visible = false
+		if (_placing["bytes"] as PackedByteArray).is_empty():
+			status.emit("Loading %s's mesh..." % _placing["label"])
+		else:
+			_complete_placement()
+
+
+func _complete_placement() -> void:
+	var p := _placing
+	_end_placement()
+	var room := open_from_bytes(p["bytes"], p["part_id"], p["label"], p["seed_owner"], p["seed_occurrence"], p["final"])
+	if room != null:
+		await _ready_room(room, p["part_id"], p["label"])
+
+
+func _update_placement() -> void:
+	## Each frame while placing: the ghost sits where the right laser meets the floor, turned to face the user; red if the room would overlap another.
+	if _placing.is_empty():
+		return
+	var hand = _placing["hand"]
+	if not is_instance_valid(hand):
+		_end_placement()
+		return
+	var ghost: Node3D = _placing["ghost"]
+	if _placing["confirmed"]:
+		return
+	var hit = RoomPlacement.floor_hit(hand.global_position, -hand.global_transform.basis.z.normalized())
+	if hit == null:
+		ghost.visible = false
+		_placing["spot"] = null
+		return
+	var size: Vector3 = _placing["size"]
+	var spot := RoomPlacement.transform_at(hit, _eye(), size)
+	var clear := not RoomRegistry.would_overlap(RoomVolume.make(spot, size))
+	ghost.transform = spot
+	ghost.visible = true
+	ghost.set_valid(clear)
+	_placing["spot"] = spot if clear else null
 
 
 func open_room(part_id: String, label: String, seed_owner_part_id: String = "", seed_occurrence_id: String = "") -> Node:
@@ -316,22 +445,28 @@ func open_room(part_id: String, label: String, seed_owner_part_id: String = "", 
 	_opening[part_id] = true
 	rooms_changed.emit()
 	status.emit("Opening a room for %s..." % label)
-	var bytes := await _fetch_glb(part_id)
+	var bytes: PackedByteArray = await edit_api().fetch_part_glb(part_id)
+	if bytes.is_empty():
+		status.emit("Couldn't load %s's mesh." % label)
 	_opening.erase(part_id)
 	if bytes.is_empty():
 		rooms_changed.emit()
 		return null
 	var room := open_from_bytes(bytes, part_id, label, seed_owner_part_id, seed_occurrence_id)
 	if room != null:
-		# The room's Part's occurrences and Mates, so moves are saved to it and its mates steer; then its parts become touchable.
-		var mates := mates_tool()
-		if mates != null:
-			var loaded: bool = await mates.load_owner_state(part_id)
-			if not loaded:
-				status.emit("Room for %s is open, but its mates and saved poses could not be read: parts move but are not saved." % label)
-		if is_instance_valid(room) and rooms.has(room):
-			activate(room)
+		await _ready_room(room, part_id, label)
 	return room
+
+
+func _ready_room(room: Node, part_id: String, label: String) -> void:
+	## The room's Part's occurrences and Mates, so moves are saved to it and its mates steer; then its parts become touchable.
+	var mates := mates_tool()
+	if mates != null:
+		var loaded: bool = await mates.load_owner_state(part_id)
+		if not loaded:
+			status.emit("Room for %s is open, but its mates and saved poses could not be read: parts move but are not saved." % label)
+	if is_instance_valid(room) and rooms.has(room):
+		activate(room)
 
 
 func activate(room: Node) -> void:
@@ -386,9 +521,9 @@ func scope_parts(anchor: Node = null) -> Array:
 	return RoomRegistry.parts_in_room(get_tree(), room_id) if room_id != 0 else RoomRegistry.world_parts(get_tree())
 
 
-func open_from_bytes(bytes: PackedByteArray, part_id: String, label: String, seed_owner_part_id: String = "", seed_occurrence_id: String = "") -> Node:
-	## The part of opening a room that needs no network: parse the mesh, find a clear spot in front of the user, register the box, hide the world's copy.
-	## (Split out so tests/room_manager.gd can drive it with a built glb.)
+func open_from_bytes(bytes: PackedByteArray, part_id: String, label: String, seed_owner_part_id: String = "", seed_occurrence_id: String = "", placement: Variant = null) -> Node:
+	## The part of opening a room that needs no network: parse the mesh, put the room where the user chose (`placement`, a Transform3D) or else find a clear
+	## spot in front of them, register the box, hide the world's copy. (Split out so tests/room_manager.gd can drive it with a built glb.)
 	if not RoomRegistry.can_add():
 		status.emit("Room limit reached (%d). Close a room, or raise the limit in Settings > Display." % RoomRegistry.max_rooms)
 		return null
@@ -400,7 +535,7 @@ func open_from_bytes(bytes: PackedByteArray, part_id: String, label: String, see
 		status.emit("Couldn't read %s's mesh." % label)
 		rooms_changed.emit()
 		return null
-	var spot = RoomPlacement.find_spot(_eye(), _forward(), size, RoomRegistry.rooms)
+	var spot = placement if placement is Transform3D else RoomPlacement.find_spot(_eye(), _forward(), size, RoomRegistry.rooms)
 	if spot == null:
 		room.free()
 		status.emit("No clear space for a room here. Walk somewhere roomier or close a room.")
@@ -471,6 +606,7 @@ func reseed_rooms() -> void:
 
 
 func _process(_delta: float) -> void:
+	_update_placement()
 	_update_drop_cues()
 	if RoomRegistry.rooms.is_empty():
 		if _was_active:
@@ -526,17 +662,3 @@ func _eye() -> Vector3:
 func _forward() -> Vector3:
 	var cam := get_viewport().get_camera_3d()
 	return -cam.global_transform.basis.z if cam != null else Vector3(0, 0, -1)
-
-
-func _fetch_glb(part_id: String) -> PackedByteArray:
-	var url := "%s/document/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [_backend_url, part_id, str(_main.quality), str(_main.include_hidden).to_lower()]
-	if _main.tier != "":
-		url += "&tier=%s" % _main.tier
-	var req := HTTPRequest.new()
-	add_child(req)
-	var result: Array = await _main._get_mesh_result(req, url)
-	req.queue_free()
-	if result[0] != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
-		status.emit("Couldn't load the room's mesh: %s" % _main._http_error_text(int(result[1]), int(result[0]), result[3]))
-		return PackedByteArray()
-	return result[3]
