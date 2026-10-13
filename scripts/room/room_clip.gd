@@ -1,0 +1,75 @@
+extends RefCounted
+## Puts parts under the room clip: every part, the world's and each room's, has to wear shaders/section_clip.gdshader once rooms exist, because a
+## plain glTF StandardMaterial3D cannot discard by a uniform. This is the section tool's wrap (section_tool.gd), kept apart so the two do not fight:
+## `assign()` installs the clip material (carrying the part's colour) and sets its `room_slot` and the part's `room_slot` meta; `release()` puts the
+## part's own material back. section_tool.gd's wrap ADOPTS a part already wearing this material instead of replacing it (and losing the slot).
+## Edge lines and hover / selection overlays are separate nodes with their own materials; they are not handled here yet (plan task for R1).
+
+const ClipShader := preload("res://shaders/section_clip.gdshader")
+const ClipGlobals := preload("res://scripts/clip_globals.gd")
+const RoomRegistry := preload("res://scripts/room/room_registry.gd")
+
+const WRAPPED := "room_clip_material" ## meta: the ShaderMaterial we installed as the part's material_override
+const PRIOR := "room_clip_prior" ## meta: whatever material_override the part had before (Material or null)
+
+
+static func assign(part: MeshInstance3D, slot: int) -> void:
+	## slot -1 = the world, >= 0 = that room.
+	ClipGlobals.ensure()
+	part.set_meta(RoomRegistry.META, slot)
+	var mat := part.material_override as ShaderMaterial
+	if mat == null or mat.shader != ClipShader:
+		var prior: Material = part.material_override
+		mat = ShaderMaterial.new()
+		mat.shader = ClipShader
+		mat.set_shader_parameter("albedo_color", _albedo(prior, part))
+		part.set_meta(PRIOR, prior)
+		part.set_meta(WRAPPED, mat)
+		part.material_override = mat
+	mat.set_shader_parameter("room_slot", slot)
+
+
+static func release(part: MeshInstance3D) -> void:
+	## Back to exactly what the part wore before assign(). A part we did not wrap (the section tool got there first, say) just loses its slot.
+	part.remove_meta(RoomRegistry.META)
+	var mat := part.material_override as ShaderMaterial
+	if mat != null:
+		mat.set_shader_parameter("room_slot", -2)
+	if part.has_meta(WRAPPED):
+		if part.material_override == part.get_meta(WRAPPED):
+			part.material_override = part.get_meta(PRIOR)
+		part.remove_meta(WRAPPED)
+		part.remove_meta(PRIOR)
+
+
+static func reconcile(parts: Array) -> void:
+	## `parts` is the arena's parts (main.gd's _arena_parts()): NOT the design table's copy or anything else meant to ignore rooms; those are never passed.
+	## Once a frame while rooms exist (cheap: a meta read and a reference compare per part): wraps any part whose override was replaced since
+	## (colour_tool.gd paints by setting material_override) or that has never been wrapped, keeping each part in the room its meta says.
+	if RoomRegistry.rooms.is_empty():
+		for part in parts:
+			if part is MeshInstance3D and part.has_meta(WRAPPED):
+				release(part)
+		return
+	for part in parts:
+		if not (part is MeshInstance3D):
+			continue
+		var slot := RoomRegistry.slot_of(part)
+		var mat := part.material_override as ShaderMaterial
+		if mat == null or mat.shader != ClipShader or _slot_of_material(mat) != slot:
+			assign(part, slot)
+
+
+static func _slot_of_material(mat: ShaderMaterial) -> int:
+	## The material's room_slot; null (never set, so the shader's default) means -2, "ignore rooms".
+	var value = mat.get_shader_parameter("room_slot")
+	return -2 if value == null else int(value)
+
+
+static func _albedo(material: Material, part: MeshInstance3D) -> Color:
+	if material is BaseMaterial3D:
+		return (material as BaseMaterial3D).albedo_color
+	var base := part.get_active_material(0)
+	if base is BaseMaterial3D:
+		return (base as BaseMaterial3D).albedo_color
+	return Color(0.7, 0.7, 0.7, 1.0) ## colour_tool.gd's neutral default

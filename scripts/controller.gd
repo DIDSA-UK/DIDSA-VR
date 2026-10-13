@@ -38,6 +38,7 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const LaserPick := preload("res://scripts/laser_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which spots of which parts a room's clip has cut away: neither the laser nor a grip may take them
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -512,6 +513,8 @@ func _find_grab_target() -> Node3D:
 		var reach := _reach_distance(node)
 		if reach > grab_reach:
 			continue
+		if not RoomRegistry.part_visible_at(node, _closest_point_on_part(node)):
+			continue # the part's nearest bit to your hand is cut away by a room's walls: there is nothing there to touch
 		var volume: float = node.get_aabb().get_volume() * absf(node.global_transform.basis.determinant())
 		if reach < best_reach - 0.001 or (absf(reach - best_reach) <= 0.001 and volume < best_volume):
 			best = node
@@ -522,10 +525,14 @@ func _find_grab_target() -> Node3D:
 
 func _reach_distance(part: MeshInstance3D) -> float:
 	## World distance from this hand to the part's bounding box (0 if inside it).
+	return global_position.distance_to(_closest_point_on_part(part))
+
+
+func _closest_point_on_part(part: MeshInstance3D) -> Vector3:
+	## World-space point of the part's bounding box nearest this hand (the hand itself if it is inside the box).
 	var box := part.get_aabb()
 	var local: Vector3 = part.global_transform.affine_inverse() * global_position
-	var closest := local.clamp(box.position, box.end)
-	return global_position.distance_to(part.global_transform * closest)
+	return part.global_transform * local.clamp(box.position, box.end)
 
 
 func _update_grab_hover() -> void:
@@ -732,7 +739,7 @@ func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> 
 			return LaserPick.BLOCK # something solid that isn't an arena part (a design table copy): nothing behind it can be picked
 		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
 			return LaserPick.SKIP
-		return LaserPick.HIT)
+		return LaserPick.HIT, 0xFFFFFFFF, RoomRegistry.part_visible_at)
 
 
 func _update_aim_hover() -> void:

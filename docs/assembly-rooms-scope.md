@@ -1,7 +1,6 @@
 # Assembly Rooms: scope
 
-Status: scoping complete except the items in section 12; next is the plan phase, starting with the R0
-spike. Written from a design conversation plus a read of `README.md`, `docs/design-table-brief.md`,
+Status: scoping complete except the items in section 12. R0 is built (see `docs/assembly-rooms-plan.md`). Written from a design conversation plus a read of `README.md`, `docs/design-table-brief.md`,
 `scripts/controller.gd`, `scripts/clip_globals.gd` and `scripts/mesh_identity.gd`. `main.gd` and the
 design-table scripts have **not** been read yet; statements about them are inference.
 
@@ -32,12 +31,14 @@ parallel mechanism next to the world and the table.
 |---|---|
 | Table vs room | Table = modelling a part. Room = assembling. Table stays separate. |
 | Root of a room | Any part/assembly file or occurrence. A part opened in a room can have parts added to it. |
-| Dropping into an occupied room | **Adds the item to the tree of the assembly in that room** (a new instance; the source is untouched). A novel way to add parts. |
+| Dropping into an occupied room | **Adds the item to the tree of the assembly in that room** (a new instance; the source is untouched). A novel way to add parts. Carrying a world item in is a **copy**; the user can **delete the seed part** afterwards if they want a move (needs a delete-occurrence action: tree row, selected part, console). |
 | Concurrent rooms | Multiple rooms in v1. **Cap 4**, held in one setting (`max_rooms`, user adjustable). |
 | Overlap | **No overlapping rooms.** Spawn and wall-drag refuse or push apart. |
 | Nesting | **No rooms inside rooms.** Sub-assemblies at **all levels** can be opened in rooms in the world. |
 | Wall shape | Oriented box, axis-aligned in room space, movable as a whole by a grab handle. |
-| Minimum size | A **new room is at least a 3 m cube**, larger if fit-to-contents needs it. A separate, smaller minimum applies to later wall-dragging (value TBD, ~0.5 m). |
+| Minimum size | A **new room is at least a 3 m cube**, larger if fit-to-contents needs it. Wall-dragging may shrink a side down to **0.5 m**. |
+| Thumbnails | **Cached client render** (rendered once on first sight, stored under `user://`, keyed by file path + modified time); icon-and-name fallback while pending. |
+| Laser breadcrumb position | At the **hit point**. |
 | Shared definition | Editing in a room edits the shared definition: all instances update. The console shows the instance count ("used 4x"); adding to or editing a definition with more than one instance asks first (edit shared / Save as...). |
 | "Make unique" | A **Save as...** path: write the room's assembly to a new file/part and re-point *that one instance* at it. Others keep the old definition. |
 | Picking a group (grip) | Grip latches, right trigger cycles the level, leaving the dead zone commits. |
@@ -90,8 +91,9 @@ all use the same mechanism.
   (adds a top-level occurrence there), or on the table (new part).
 - On drop the real file loads in the background; the proxy stays as a placeholder bounding box with a
   progress cue, then swaps for the real geometry.
-- Thumbnails: source TBD (backend render, client-side render cached under `user://`, or an icon and
-  name fallback). Fallback must exist so the feature does not depend on thumbnails.
+- Thumbnails: a **cached client render** (decided): rendered once the first time a file is listed,
+  stored under `user://` keyed by path + modified time, with an icon-and-name fallback while pending
+  so the feature never depends on them.
 - Conflict to handle: a laser-grip on a panel currently carries the whole panel
   (`_try_grab_panel_at_distance`); a thumbnail tile has to claim the grip before that.
 
@@ -291,7 +293,7 @@ Settings > Appearance effects switch.
 10. **Drop-to-add backend support**: confirm `POST /parts/{id}/add-component` can take a placement
     transform (or whether a follow-up PATCH is needed), and that an added occurrence can be removed
     for undo. Large files take time to load: proxy placeholder.
-11. **Thumbnails**: no known source yet; fallback icon required.
+11. **Thumbnails**: client render cost on large assemblies; render once, cache, fall back to an icon.
 
 ## 11. Phasing and plan-phase tasks
 
@@ -313,8 +315,6 @@ Settings > Appearance effects switch.
 
 ## 12. Open questions
 
-- Carrying a world item into an occupied room copies it (original stays). Should there be a way to
-  *move* it instead (for example holding a button), or is copy-only right for v1?
-- Thumbnail source (backend render, client render cached locally, or icon fallback only for v1).
-- Wall-drag minimum size value.
-- Whether the breadcrumb should open at the hit point (proposed) or at the hand.
+- Delete-occurrence: which backend call, and is it undoable? Needed both for "delete the seed part" and for undoing an add.
+- Thumbnail render details: size, which view angle, who renders (a SubViewport on the headset is cheap for one part; confirm for large assemblies).
+- Whether Preview should be on by default when a room is opened from a world instance.
