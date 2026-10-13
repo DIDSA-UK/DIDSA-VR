@@ -71,6 +71,30 @@ func contains_part(container_id: String, target_id: String) -> bool:
 	return false
 
 
+func instance_count(root_part_id: String, target_part_id: String) -> int:
+	## How many times `target_part_id` is placed in the assembly under `root_part_id`, counting every path to it (a bolt in a bracket that is placed three
+	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them.
+	var memo := {}
+	return await _count_placements(root_part_id, target_part_id, memo, 0)
+
+
+func _count_placements(container_id: String, target_id: String, memo: Dictionary, depth: int) -> int:
+	if depth > 24:
+		return 0 # (a cycle the server let through: stop rather than loop)
+	if memo.has(container_id):
+		return memo[container_id]
+	var total := 0
+	for row in await occurrences_of(container_id):
+		var child = row.get("resolved_part_id")
+		if child == null or str(child) == "":
+			continue
+		if str(child) == target_id:
+			total += 1
+		total += await _count_placements(str(child), target_id, memo, depth + 1)
+	memo[container_id] = total
+	return total
+
+
 func check_addable(room_part_id: String, definition_id: String) -> String:
 	## "" if `definition_id` may be added to the room's Part, else why not (plain text for a status line).
 	if definition_id == "":

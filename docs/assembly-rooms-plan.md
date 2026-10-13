@@ -135,6 +135,28 @@ The room is a world within a world: grab to move, two-hand to turn and scale, A/
 - **Nested sub-sub-assembly parts** inside a room are not managed (not saved), exactly like nested parts in the world today.
 - Wall dragging, grab handle, scale control, glass look, tabs, console: still to do (next).
 
+## R3: placing, shaping and controlling a room (built; headless-, render- and live-backend-confirmed; not on a headset)
+
+| Piece | Where | What it does |
+|---|---|---|
+| Summon by laser | `room_manager.gd` `begin_placement`, `room_placement.gd`, `room_ghost.gd` | Pressing **Room** starts a placement: aim the right laser at the floor, a ghost of the room (in the colour it will have) follows, **red where it would overlap another room**; trigger drops it there, **facing you**, standing on the floor; **B / Y cancels**; pressing the Room button again cancels. The mesh loads while you aim, so dropping before it has arrived still works. The right hand's laser and grip belong to the room meanwhile. No XR interface (desktop preview): opens in front, as before. |
+| Glass walls | `shaders/room_walls.gdshader`, `room.gd` | See-through tint, fresnel, a **soft glow along the edges** (the room is always marked), a **grid that fades in near each hand**, and a round real-world grid step (1, 2 or 5 x 10^k mm) chosen so a cell stays 0.25 to 0.625 m wide at any scale; the console says which ("grid 20 mm"). No blur (a real blur needs a screen copy: costly on a headset). Optional: Settings > Appearance > **Glass room walls** (off = thin wireframe only). |
+| Shaping and moving | `room_handles.gd` | **Five face handles** (sides and roof; none on the floor, a room always stands on it) and a **move bar** on the floor at the front edge. Grip one by hand (18 cm) or by laser (12 cm of its line): the face follows your hand while the opposite face **and the content stay put in the world**; 0.5 m minimum, 40 m maximum; a drag that would overlap another room holds the last valid size. The bar carries the room (content and all) on the floor and turns it about your hand. A held face lights up. Handles show only near a hand. |
+| Console | `room_console.gd`, `room_actions.gd` | A small grab-movable panel beside the room on your side, a child of the room (carrying the room carries it). Scale: **1:1, Fit, Half, Double** (about the room's middle; undoable; same limits as the whole-room gesture). Walls: **Fit walls** (shrink-wrap to the content with a margin, floor to just above it) and **3 m cube** (refused with a message if it would overlap another room). "Placed N times: editing it here changes all of them". **Delete selected part** (two presses, naming the Mates). **Close room**. |
+| Pedestal | `shaders/room_pedestal.gdshader` | A faint column from the console's foot to the floor, with a ring, following the console wherever it is carried. Optional: Settings > Appearance > **Room console pedestal**. |
+| Tests | `room_laser_placement` (20), `room_walls` (13), `room_walls_render` (7, real shader), `room_handles` (28), `room_console` (25), `room_scene_render` (a picture of the whole thing: the glass, grid near a hand, a handle, content, console and pedestal) | The full headless suite is 2509 checks, 0 failures; the render tests 42; `e2e_rooms` against the live backend still 23 of 23. |
+
+Corrects the scope note: "grid spacing follows room scale (600 mm at 1:1 becomes 60 mm at 10:1)" had it backwards (enlarging a room makes real cells bigger on screen).
+
+### Known gaps (R3)
+
+- **No tab list or minimise yet** (the "Rooms" tile on the wrist tablet and the snow-globe minimise). Rooms are closed from the console or the tree button.
+- **One console panel per room** (each a small SubViewport): fine at the default cap of 4, to be measured on a headset.
+- **No two-hand wall squeeze** (grip two opposite faces to resize), no tilting or lifting a room off the floor.
+- **No clip modes** (hide / ghost / preview of the world's copy): the world's copy is hidden while the room is open. Preview is R4.
+- **Console has no "Save as..."** (the "make unique" path): needs a backend call to create a Part and re-point one occurrence.
+- **Feel is unverified**: reach distances (18 cm hand, 12 cm laser), handle sizes, the console's distance and size, the dead zone, and the placement ghost all want a headset session.
+
 ## Drop-to-add and delete: what the backend gives us (checked live)
 
 Looked up in DIDSA-CAD (`app/document/router.py`) and then run against a local backend (`tests/data/probe_add_occurrence.py`, fixture

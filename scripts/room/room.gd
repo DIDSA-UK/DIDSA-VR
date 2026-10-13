@@ -41,6 +41,7 @@ var _glass: MeshInstance3D ## the glass box (when `glass`)
 var _glass_material: ShaderMaterial
 var _grid_scale := -1.0 ## the content scale the grid step was last worked out for
 var handles: Node3D ## room_handles.gd: the face handles and the move bar
+var console: Node3D ## room_console.gd: this room's own controls (null until the manager makes it, and in tests with no headset nodes)
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
 
 
@@ -210,6 +211,12 @@ func _build_walls() -> void:
 	handles.name = "Handles"
 	add_child(handles)
 	handles.setup(self)
+
+
+func refit(metres_per_unit: float) -> void:
+	## The scale set and the content centred in the room again, from the content's CURRENT bounds (parts may have been added, deleted or moved since it opened).
+	_bounds = content_bounds(content_root)
+	set_content_scale(metres_per_unit)
 
 
 func set_box(new_xform: Transform3D, new_half: Vector3) -> void:

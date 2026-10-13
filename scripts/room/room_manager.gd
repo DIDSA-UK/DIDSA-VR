@@ -21,6 +21,7 @@ const TwoHandModel := preload("res://scripts/two_hand_model.gd")
 const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const DropCue := preload("res://scripts/room/drop_cue.gd")
 const RoomGhost := preload("res://scripts/room/room_ghost.gd")
+const RoomConsole := preload("res://scripts/room/room_console.gd")
 
 const PLACE_CONFIRM := "trigger_click" ## placing a room: the right trigger drops it where the laser meets the floor,
 const PLACE_CANCEL := "by_button" ## B / Y gives up
@@ -37,6 +38,7 @@ var _api_key := ""
 var _opening: Dictionary = {} ## part_id -> true while its mesh is being fetched
 var _seed_hidden: Dictionary = {} ## room instance id -> Array of world nodes this room hid
 var _was_active := false
+var pedestal := true ## the faint column from each room console down to the floor (Settings > Appearance)
 var glass := true ## the see-through wall look for new and open rooms (Settings > Appearance); off = wireframe only
 var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
 var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
@@ -474,6 +476,7 @@ func activate(room: Node) -> void:
 	## Makes a room a world within the world: its parts become grabbable and a whole-room gesture (grip on empty space inside it) moves, turns and scales
 	## its content. (Split out of opening so it waits for the Part's state, and so tests can drive it.)
 	room.set_interactive(true)
+	_make_console(room)
 	var left = _main.get_node_or_null("XROrigin3D/LeftController") if _main != null else null
 	var right = _main.get_node_or_null("XROrigin3D/RightController") if _main != null else null
 	if room.two_hand == null and left != null and right != null:
@@ -489,6 +492,30 @@ func activate(room: Node) -> void:
 	if _view_modes != null:
 		for p in room.parts:
 			_view_modes.apply_to(p)
+
+
+func _make_console(room: Node) -> void:
+	## The room's own console, beside it on the user's side. Needs the headset nodes (hands and head); tests without them skip it.
+	if room.console != null or _main == null:
+		return
+	var left = _main.get_node_or_null("XROrigin3D/LeftController")
+	var right = _main.get_node_or_null("XROrigin3D/RightController")
+	var camera = _main.get_node_or_null("XROrigin3D/XRCamera3D")
+	if left == null or right == null or camera == null:
+		return
+	var console := RoomConsole.new()
+	console.name = "Console"
+	room.add_child(console)
+	console.pedestal_enabled = pedestal
+	console.setup_console(room, self, _main, left, right, camera)
+	room.console = console
+
+
+func set_pedestal(on: bool) -> void:
+	pedestal = on
+	for r in rooms:
+		if is_instance_valid(r) and r.console != null:
+			r.console.set_pedestal(on)
 
 
 func apply_steadiness(level: int) -> void:
