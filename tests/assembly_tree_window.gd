@@ -40,4 +40,25 @@ func _initialize() -> void:
 	var full_rows := AssemblyTreeWindow._occurrences_to_rows(full_shape)
 	print("SMOKE a full real-shaped OccurrenceResponse still builds correctly: ", full_rows.size() == 1 and full_rows[0]["name"] == "Full Shape" and full_rows[0]["resolved_part_id"] == "part-x")
 
+	# the Room button (Assembly Rooms): which rows have one, what it says, and what pressing it asks the manager to open
+	var manager := _StubRooms.new()
+	var occurrence_row: Dictionary = {"id": "occ-1", "name": "Gearbox", "resolved_part_id": "part-g", "parent_part_id": "part-root"}
+	var action := AssemblyTreeWindow.room_action(occurrence_row, manager)
+	print("SMOKE a placed occurrence's row gets a Room button that opens its Part, naming where it sits: ", action.get("text") == "Room" and action.get("part_id") == "part-g" and action.get("label") == "Gearbox" and action.get("parent_part_id") == "part-root" and action.get("occurrence_id") == "occ-1")
+	manager.open_parts["part-g"] = true
+	print("SMOKE ...which reads Close room while that Part's room is open: ", AssemblyTreeWindow.room_action(occurrence_row, manager).get("text") == "Close room")
+	print("SMOKE the root row (the world itself) has no Room button: ", AssemblyTreeWindow.room_action({"id": "", "name": "Assembly", "resolved_part_id": "part-root"}, manager).is_empty())
+	print("SMOKE a row with nothing behind it has none: ", AssemblyTreeWindow.room_action({"id": "occ-2", "name": "x", "resolved_part_id": ""}, manager).is_empty())
+	print("SMOKE no room manager (an old scene, a test) means no button and no error: ", AssemblyTreeWindow.room_action(occurrence_row, null).is_empty())
+
+	# Delete asks twice, and the second ask names the Mates that would go with the part
+	print("SMOKE Delete reads Delete until pressed once, then Sure? (naming the Mates that would go): ", AssemblyTreeWindow.delete_label(false, 3) == "Delete" and AssemblyTreeWindow.delete_label(true, 0) == "Sure?" and AssemblyTreeWindow.delete_label(true, 1) == "Sure? (1 mate)" and AssemblyTreeWindow.delete_label(true, 3) == "Sure? (3 mates)")
+
 	quit()
+
+
+class _StubRooms:
+	var open_parts := {}
+
+	func is_open_for(part_id: String) -> bool:
+		return open_parts.has(part_id)

@@ -385,6 +385,12 @@ func reconcile(parts: Array) -> void:
 
 func _wrap(part: MeshInstance3D) -> void:
 	var current: Material = part.material_override
+	if current is ShaderMaterial and (current as ShaderMaterial).shader == ClipShader:
+		# Already wearing the clip material (a room's part, scripts/room/room_clip.gd): adopt it, so its colour and room slot survive, and leave
+		# it as it is when the tool goes off (the section plane itself is a global uniform every such material already reads).
+		_unclipped_override[part] = current
+		_wrapped[part] = current
+		return
 	_unclipped_override[part] = current
 	var albedo := _albedo_of(current, part)
 	var shader_mat := ShaderMaterial.new()

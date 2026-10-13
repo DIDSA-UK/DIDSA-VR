@@ -38,6 +38,7 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const LaserPick := preload("res://scripts/laser_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which spots of which parts a room's clip has cut away: neither the laser nor a grip may take them
 
 @export var grab_action: String = "grip_click"
 @export var grab_reach: float = 0.05 ## metres: your hand grabs a part if it's inside the part's bounding box or within this
@@ -319,14 +320,16 @@ func cancel_for_wheel() -> void:
 
 
 func _on_button_pressed(action_name: String) -> void:
-	if wheel_is_open():
-		return
+	if wheel_is_open() or bool(get_meta("room_placing", false)):
+		return # (placing an Assembly Room: this hand's laser and trigger are the room's - room_manager.gd)
 	if _wheel_chord_completed_by(action_name):
 		wheel_chord_started.emit()
 		return
 	if action_name == grab_action:
 		if _try_grab_table():
 			return
+		if _try_grab_room_handle():
+			return # a wall handle or the move bar of an Assembly Room (room_handles.gd)
 		if _try_grab_panel_at_distance():
 			return
 		# The section-plane gizmo is independent of "Individual part
@@ -512,6 +515,8 @@ func _find_grab_target() -> Node3D:
 		var reach := _reach_distance(node)
 		if reach > grab_reach:
 			continue
+		if not RoomRegistry.part_visible_at(node, _closest_point_on_part(node)):
+			continue # the part's nearest bit to your hand is cut away by a room's walls: there is nothing there to touch
 		var volume: float = node.get_aabb().get_volume() * absf(node.global_transform.basis.determinant())
 		if reach < best_reach - 0.001 or (absf(reach - best_reach) <= 0.001 and volume < best_volume):
 			best = node
@@ -522,10 +527,14 @@ func _find_grab_target() -> Node3D:
 
 func _reach_distance(part: MeshInstance3D) -> float:
 	## World distance from this hand to the part's bounding box (0 if inside it).
+	return global_position.distance_to(_closest_point_on_part(part))
+
+
+func _closest_point_on_part(part: MeshInstance3D) -> Vector3:
+	## World-space point of the part's bounding box nearest this hand (the hand itself if it is inside the box).
 	var box := part.get_aabb()
 	var local: Vector3 = part.global_transform.affine_inverse() * global_position
-	var closest := local.clamp(box.position, box.end)
-	return global_position.distance_to(part.global_transform * closest)
+	return part.global_transform * local.clamp(box.position, box.end)
 
 
 func _update_grab_hover() -> void:
@@ -546,7 +555,20 @@ func _set_grab_hover(target: Node3D) -> void:
 		_hover_node.material_overlay = _hover_material
 
 
+func _try_grab_room_handle() -> bool:
+	if held_node != null:
+		return false
+	for h in get_tree().get_nodes_in_group("room_handles"):
+		if h.try_grab(self):
+			_set_grab_hover(null)
+			return true
+	return false
+
+
 func _try_release() -> void:
+	for h in get_tree().get_nodes_in_group("room_handles"):
+		if h.release(self):
+			return
 	for table in get_tree().get_nodes_in_group("design_tables"):
 		if table.release_grab(self):
 			return # let go of the part on the design table: it stays there or goes back to the arena (design_table.gd)
@@ -583,7 +605,18 @@ func _update_held_part(delta: float) -> void:
 
 
 func _push_move_command(part: Node3D, before: Transform3D) -> void:
-	if command_stack == null or not is_instance_valid(part):
+	if not is_instance_valid(part):
+		return
+	var stray := RoomRegistry.stray_reason(part)
+	if stray != "":
+		# A room's part put down outside its room, or a world part left inside a room: back to where it was picked up (the walls are the edge of its
+		# world). The move was never recorded or saved, so there is nothing to undo.
+		var dropped := part.global_transform
+		part.global_transform = before
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		get_tree().call_group("room_listeners", "on_part_refused", part, stray, dropped) # (a drop INTO a room becomes a copy added to it: room_manager.gd)
+		return
+	if command_stack == null:
 		return
 	var after := part.global_transform
 	if before.is_equal_approx(after):
@@ -732,7 +765,7 @@ func _raycast_part(origin: Vector3, direction: Vector3, max_distance: float) -> 
 			return LaserPick.BLOCK # something solid that isn't an arena part (a design table copy): nothing behind it can be picked
 		if (part.has_meta("held") and part.get_meta("held")) or not part.visible:
 			return LaserPick.SKIP
-		return LaserPick.HIT)
+		return LaserPick.HIT, 0xFFFFFFFF, RoomRegistry.part_visible_at)
 
 
 func _update_aim_hover() -> void:

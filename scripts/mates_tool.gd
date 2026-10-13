@@ -102,7 +102,8 @@ var _ghost: Node3D = null ## the preview: a see-through copy of the driven part,
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
 var _busy := false
-var _current_owner_part_id := ""
+var _current_owner_part_id := "" ## the ACTIVE root: the one the Mates page lists and creates mates on (the world's loaded root)
+var _other_states: Dictionary = {} ## owner Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every OTHER root whose parts can be moved and saved: each open Assembly Room's Part (load_owner_state)
 
 
 func setup(stack) -> void:
@@ -332,6 +333,12 @@ func create_mate() -> Dictionary:
 
 
 func refresh_mates(owner_part_id: String) -> void:
+	if _other_states.has(owner_part_id):
+		# A room's Part (a mate was just made or deleted there): re-read ITS state, and leave the active root alone. Making it the active one would
+		# stop the world's own parts being managed (saved, steered).
+		await load_owner_state(owner_part_id)
+		mates_changed.emit()
+		return
 	_current_owner_part_id = owner_part_id
 	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if result["ok"]:
@@ -383,7 +390,7 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	## without this it solved from wherever the part used to be, not where you
 	## left it. A grounded (fixed) occurrence can't be the driven side — say so
 	## rather than letting the backend's 422 vanish.
-	if bool(occurrences.get(occurrence_id, {}).get("fixed", false)):
+	if bool(occurrence_state(owner_part_id).get("occurrences", {}).get(occurrence_id, {}).get("fixed", false)):
 		return {"ok": false, "error": "that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	_busy = true
 	var part := _find_loaded_part(owner_part_id, occurrence_id)
@@ -470,22 +477,74 @@ func is_managed(part: Node3D) -> bool:
 	## sync to — the only kind of part whose pose the backend can hold (a
 	## nested occurrence's node transform is flattened root-relative, not its
 	## owner-relative one, and root content has no occurrence at all).
-	if backend_url.is_empty() or api_key.is_empty() or _current_owner_part_id.is_empty():
+	if backend_url.is_empty() or api_key.is_empty():
 		return false
 	var ref := MeshIdentity.occurrence_ref_for(part)
-	return not ref.is_empty() and ref.get("occurrence_id", "") != "" and ref.get("owner_part_id", "") == _current_owner_part_id
+	if ref.is_empty() or ref.get("occurrence_id", "") == "":
+		return false
+	var owner := str(ref.get("owner_part_id", ""))
+	return owner != "" and (owner == _current_owner_part_id or _other_states.has(owner))
 
 
 func _occ_id(part: Node3D) -> String:
 	return str(MeshIdentity.occurrence_ref_for(part).get("occurrence_id", ""))
 
 
+func owner_of(part: Node3D) -> String:
+	## The Part this node's occurrence sits directly on: whose occurrence list holds it, and so the path its pose and flags are saved under. For a part in
+	## the world that is the loaded root; for a part in an Assembly Room it is the room's own Part (a room's root), because there the node's local
+	## transform IS that Part's stored one (the room's glb is that Part's own, so its children are its top-level occurrences).
+	return str(MeshIdentity.occurrence_ref_for(part).get("owner_part_id", ""))
+
+
+func occurrence_state(owner_part_id: String) -> Dictionary:
+	## {"occurrences": ..., "mated": ...} for a root this tool knows (the active one, or a room's), else {}.
+	if owner_part_id == "":
+		return {}
+	if owner_part_id == _current_owner_part_id:
+		return {"occurrences": occurrences, "mated": _mated_ids}
+	return _other_states.get(owner_part_id, {})
+
+
+func set_owner_state(owner_part_id: String, p_occurrences: Dictionary, p_mated: Dictionary) -> void:
+	## Registers another root (an Assembly Room's Part) as one whose parts are managed: moves are saved to it, its mates are enforced. The dictionaries
+	## are what refresh_state() builds for the active root: occurrence id -> {"fixed": bool}, and occurrence id -> true for every one a Mate references.
+	if owner_part_id == "" or owner_part_id == _current_owner_part_id:
+		return
+	_other_states[owner_part_id] = {"occurrences": p_occurrences, "mated": p_mated}
+
+
+func load_owner_state(owner_part_id: String) -> bool:
+	## Reads a room's Part's top-level occurrences (their `fixed` flags) and Mates from the backend and registers it (set_owner_state). Does NOT touch the
+	## active root. False if the backend could not be read (the room then stays unmanaged: parts show but are not saved or steered).
+	if backend_url.is_empty() or api_key.is_empty() or owner_part_id.is_empty() or owner_part_id == _current_owner_part_id:
+		return false
+	var occ_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner_part_id, null)
+	if not occ_result["ok"] or not (occ_result["json"] is Array):
+		return false
+	var occs := {}
+	for occ in occ_result["json"]:
+		occs[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+	var mated := {}
+	var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
+	if mate_result["ok"] and mate_result["json"] is Array:
+		for mate in mate_result["json"]:
+			for ref in mate.get("references", []):
+				mated[str(ref.get("occurrence_id", ""))] = true
+	set_owner_state(owner_part_id, occs, mated)
+	return true
+
+
+func drop_owner_state(owner_part_id: String) -> void:
+	_other_states.erase(owner_part_id)
+
+
 func is_fixed(part: Node3D) -> bool:
-	return is_managed(part) and bool(occurrences.get(_occ_id(part), {}).get("fixed", false))
+	return is_managed(part) and bool(occurrence_state(owner_of(part)).get("occurrences", {}).get(_occ_id(part), {}).get("fixed", false))
 
 
 func is_mated(part: Node3D) -> bool:
-	return is_managed(part) and _mated_ids.has(_occ_id(part))
+	return is_managed(part) and occurrence_state(owner_of(part)).get("mated", {}).has(_occ_id(part))
 
 
 func is_locked(part: Node3D) -> bool:
@@ -524,12 +583,14 @@ func toggle_fixed(part: Node3D) -> void:
 		_report("Select a placed part first (laser-select it).")
 		return
 	var occ := _occ_id(part)
-	var now_fixed := not bool(occurrences.get(occ, {}).get("fixed", false))
-	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [_current_owner_part_id, occ], {"fixed": now_fixed})
+	var owner := owner_of(part)
+	var occs: Dictionary = occurrence_state(owner).get("occurrences", {})
+	var now_fixed := not bool(occs.get(occ, {}).get("fixed", false))
+	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner, occ], {"fixed": now_fixed})
 	if not result["ok"]:
 		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", str(part.name), _friendly_error(result)])
 		return
-	occurrences[occ] = {"fixed": now_fixed}
+	occs[occ] = {"fixed": now_fixed}
 	document_changed.emit()
 	_report("%s is now %s." % [str(part.name), "grounded (fixed)" if now_fixed else "floating (free to move)"])
 
@@ -611,10 +672,16 @@ func persist_pose(part: Node3D) -> void:
 	if not is_managed(part):
 		return
 	var occ := _occ_id(part)
-	var entry: Dictionary = _persist.get_or_add(occ, {"pose": null, "running": false})
+	var entry: Dictionary = _persist.get_or_add(occ, {"pose": null, "running": false, "owner": ""})
 	entry["pose"] = pose_to_json(_local_pose(part))
+	entry["owner"] = owner_of(part)
 	if not entry["running"]:
 		_persist_loop(occ, entry)
+
+
+func persist_path(part: Node3D) -> String:
+	## Where a move of this part is saved: its own owner Part's occurrence (the loaded root's for the world, the room's Part for a part in a room).
+	return "/parts/%s/occurrences/%s" % [owner_of(part), _occ_id(part)]
 
 
 func _persist_loop(occ: String, entry: Dictionary) -> void:
@@ -622,8 +689,9 @@ func _persist_loop(occ: String, entry: Dictionary) -> void:
 	while entry["pose"] != null:
 		var pose: Dictionary = entry["pose"]
 		entry["pose"] = null
-		var path := "/parts/%s/occurrences/%s" % [_current_owner_part_id, occ]
-		var fixed := bool(occurrences.get(occ, {}).get("fixed", false))
+		var owner := str(entry.get("owner", _current_owner_part_id))
+		var path := "/parts/%s/occurrences/%s" % [owner, occ]
+		var fixed := bool(occurrence_state(owner).get("occurrences", {}).get(occ, {}).get("fixed", false))
 		# The backend locks a grounded occurrence's transform: float it in the
 		# same request as the move, then re-ground it.
 		var body := {"transform": pose, "fixed": false} if fixed else {"transform": pose}
@@ -753,7 +821,7 @@ func _new_drag_state(part: Node3D) -> Dictionary:
 	return {
 		"start": _local_pose(part), "desired": null, "wish": null,
 		"active": true, "running": false, "finishing": false,
-		"owner": _current_owner_part_id, "occ": _occ_id(part),
+		"owner": owner_of(part), "occ": _occ_id(part), "part": part, # the grabbed node: which copy (the world's or a room's) the followers are looked up beside
 		"lever_arm": lever, # sent until the first accepted answer; afterwards chart.lever_arm
 		"hyst": DofHysteresis.new(), "blender": MotionBlender.new(1),
 		"sched": ReanchorScheduler.new(_now_ms), "last_sent_ms": -100000.0,
@@ -935,7 +1003,7 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 		state["blender"] = blender
 		for occ in ids:
 			if not state["nodes"].has(occ):
-				var node := _find_loaded_part(state["owner"], occ)
+				var node := _find_loaded_part(state["owner"], occ, state["part"])
 				if node != null:
 					state["nodes"][occ] = node
 					if not state["starts"].has(occ):
@@ -986,7 +1054,7 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			var occ := str(mem["occurrence_id"])
 			var node: Node3D = part if occ == state["occ"] else state["nodes"].get(occ)
 			if node == null or not is_instance_valid(node):
-				node = _find_loaded_part(state["owner"], occ)
+				node = _find_loaded_part(state["owner"], occ, state["part"])
 			if node == null:
 				continue
 			var before: Transform3D = starts.get(occ, _local_pose(node))
@@ -1049,12 +1117,23 @@ func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
 	return true
 
 
-func _find_loaded_part(owner_part_id: String, occurrence_id: String) -> Node3D:
+func _find_loaded_part(owner_part_id: String, occurrence_id: String, near: Node3D = null) -> Node3D:
+	## The node showing this occurrence. A sub-assembly's occurrences are on screen twice while its Assembly Room is open (the room's, and the world's
+	## hidden copy, same owner and occurrence ids): `near` (a node in the same place) decides which, and without it a room's Part means the room's node.
+	var fallback: Node3D = null
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
 		var ref := MeshIdentity.occurrence_ref_for(node)
-		if ref.get("owner_part_id", "") == owner_part_id and ref.get("occurrence_id", "") == occurrence_id:
+		if ref.get("owner_part_id", "") != owner_part_id or ref.get("occurrence_id", "") != occurrence_id:
+			continue
+		var in_room: bool = node.has_meta("room_id")
+		if near != null:
+			if in_room == near.has_meta("room_id") and node.get_meta("room_id", 0) == near.get_meta("room_id", 0):
+				return node
+		elif in_room == _other_states.has(owner_part_id):
 			return node
-	return null
+		elif fallback == null:
+			fallback = node
+	return fallback
 
 
 func _apply_solved_transform(part: Node3D, transform_json: Dictionary) -> void:

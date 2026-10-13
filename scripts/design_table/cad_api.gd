@@ -90,7 +90,7 @@ func _send(method: int, path: String, body_dict, want_bytes: bool = false) -> Di
 	var req := HTTPRequest.new()
 	add_child(req)
 	var headers := BackendSession.headers(api_key, true)
-	var body := "" if body_dict == null else JSON.stringify(body_dict)
+	var body: String = "" if body_dict == null else (body_dict if body_dict is String else JSON.stringify(body_dict)) # a String is sent as it is: a native file's own text keeps its integers (re-serialising would turn 0 into 0.0)
 	var err := req.request(backend_url + path, headers, method, body)
 	if err != OK:
 		req.queue_free()

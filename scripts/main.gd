@@ -59,6 +59,7 @@ var _settings := preload("res://scripts/app_settings.gd").new() ## project folde
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
+const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
@@ -78,6 +79,7 @@ var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
 var _browser_window: Node
+var room_manager: Node ## Assembly Rooms: opens a Part in a clipped box of space — see scripts/room/room_manager.gd and docs/assembly-rooms-scope.md
 var design_table: Node ## milestone 2: the design table — see scripts/design_table/design_table.gd
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
@@ -111,6 +113,7 @@ func _ready() -> void:
 	_add_colour_tool()
 	_add_section_tool()
 	_add_view_modes() # after the section tool: its edge shader uses the section clip's global uniforms
+	_add_room_manager() # before the tree window: its rows have a Room button
 	_add_assembly_tree_window()
 	_add_calculator_window()
 	_add_image_viewer_window()
@@ -140,6 +143,7 @@ func _ready() -> void:
 	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
 	_assembly_tree_window.configure_backend(backend_url, api_key)
+	room_manager.configure_backend(backend_url, api_key)
 	design_table.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
@@ -222,6 +226,45 @@ func app_settings() -> RefCounted:
 
 func save_view_mode(mode: int) -> void:
 	_settings.set_view_render_mode(mode)
+
+
+func _add_room_manager() -> void:
+	RoomRegistry.set_max_rooms(_settings.max_rooms)
+	room_manager = preload("res://scripts/room/room_manager.gd").new()
+	room_manager.name = "RoomManager"
+	add_child(room_manager)
+	room_manager.setup(self, view_modes)
+	room_manager.glass = _settings.room_glass
+	room_manager.pedestal = _settings.room_pedestal
+	room_manager.status.connect(_set_status)
+	_two_hand.focus = func(hand: Node3D) -> bool: return RoomRegistry.room_at(hand.global_position) == -1 # a grip on empty space inside a room is the room's
+
+
+func room_pedestal() -> bool:
+	return _settings.room_pedestal
+
+
+func set_room_pedestal(on: bool) -> void:
+	_settings.set_room_pedestal(on)
+	room_manager.set_pedestal(on)
+
+
+func room_glass() -> bool:
+	return _settings.room_glass
+
+
+func set_room_glass(on: bool) -> void:
+	_settings.set_room_glass(on)
+	room_manager.set_glass(on)
+
+
+func max_rooms() -> int:
+	return RoomRegistry.max_rooms
+
+
+func set_max_rooms(count: int) -> void:
+	_settings.set_max_rooms(count)
+	RoomRegistry.set_max_rooms(count)
 
 
 func _add_assembly_tree_window() -> void:
@@ -444,10 +487,10 @@ func show_all_parts() -> void:
 	_set_all_visibility(true, "show all")
 
 
-func _arena_parts() -> Array:
-	## The arena's parts, not counting the one sitting on the design table (hidden on purpose,
-	## and not for hide / show / isolate to bring back).
-	return get_tree().get_nodes_in_group("grabbable_parts").filter(func(p: Node) -> bool: return not p.has_meta("on_table"))
+func _arena_parts(anchor: Node = null) -> Array:
+	## The parts hide / show / reverse / isolate act on: the arena's, not counting the one sitting on the design table (hidden on purpose, and not for
+	## them to bring back); or, when the user is standing in an Assembly Room (or the anchor part is in one), that room's.
+	return room_manager.scope_parts(anchor)
 
 
 func reverse_visibility() -> void:
@@ -466,7 +509,7 @@ func isolate_selected() -> void:
 	var target := current_selected_part()
 	if target == null:
 		return
-	var parts := _arena_parts()
+	var parts := _arena_parts(target)
 	var before := {}
 	for p in parts:
 		before[p] = p.visible
@@ -978,6 +1021,10 @@ func _open_native_file_impl(path: String) -> void:
 
 
 func add_component_file(path: String) -> void:
+	var room: Node = room_manager.focus_room()
+	if room != null:
+		await room_manager.add_file_to_room(room, path) # standing in an Assembly Room: the file is added to THAT room's assembly
+		return
 	if not _claim_load("Add"):
 		return
 	await _add_component_file_impl(path)
@@ -1037,6 +1084,42 @@ func _add_component_file_impl(path: String) -> void:
 		return
 	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
+
+
+var _reloading_world := false ## reload_world_model() is swapping the same document's model: open Assembly Rooms stay open
+
+
+func reload_world_model(dirty: bool = true) -> bool:
+	## Fetches the loaded root's mesh again and shows it, keeping where the user has put the world (position, turn, scale). For when the document
+	## changed under the world without the world doing it (parts added to or deleted from a sub-assembly in a room, a delete from the tree): the
+	## world's own copies are out of date. What it costs: the undo history (the parts it pointed at are rebuilt), and any open room (its hidden copy of
+	## the world is rebuilt too). The unsaved-changes flag is raised if `dirty`.
+	if backend_url.is_empty() or api_key.is_empty() or _resolved_part_id.is_empty():
+		return false
+	if not _claim_load("reload"):
+		return false
+	var pose := assembly_root.transform
+	var req := HTTPRequest.new()
+	add_child(req)
+	var url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()]
+	if tier != "":
+		url += "&tier=%s" % tier
+	var result: Array = await _get_mesh_result(req, url)
+	req.queue_free()
+	var shown := false
+	if result[0] == HTTPRequest.RESULT_SUCCESS and int(result[1]) == 200:
+		_reloading_world = true
+		shown = _show_model(result[3], "", spawn_scale)
+		_reloading_world = false
+		if shown:
+			assembly_root.transform = pose
+			room_manager.reseed_rooms()
+	else:
+		_set_status("Couldn't refresh the world after the change: %s" % _http_error_text(int(result[1]), int(result[0]), result[3]))
+	_load_busy = false
+	if shown and dirty:
+		mark_dirty()
+	return shown
 
 
 func load_glb_file(path: String) -> void:
@@ -1223,6 +1306,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
+	room_manager.on_model_replaced(_reloading_world) # rooms hold copies of parts of the model that is about to go (unless it is only being re-read)
 	command_stack.clear()
 	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()
@@ -1427,7 +1511,7 @@ func restore_stale_mates() -> void:
 	var listed = _native_extras.get(STALE_MATES_KEY, [])
 	if not (listed is Array) or (listed as Array).is_empty():
 		return
-	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+	for node in RoomRegistry.world_parts(get_tree()):
 		if (listed as Array).has(str(node.get_meta("occurrence_id", ""))):
 			DirtyMates.mark(node)
 

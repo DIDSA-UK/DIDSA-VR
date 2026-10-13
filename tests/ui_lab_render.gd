@@ -75,7 +75,7 @@ func _initialize() -> void:
 	# Assemble > Mates (mode tool with a list) via the real tile / header path.
 	tablet.home_tile("assemble").pressed.emit()
 	await process_frame
-	print("SMOKE a category with one tool shows no chip strip: ", not tablet._strip_scroll.visible)
+	print("SMOKE a category with two tools (Mates, Rooms) shows the chip strip: ", tablet._strip_scroll.visible)
 	tablet.select_tool("mates", true)
 	await process_frame
 	await process_frame

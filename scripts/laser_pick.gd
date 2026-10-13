@@ -18,8 +18,10 @@ const BLOCK := 2
 const MAX_SKIPS := 8 ## generous, so a stack of hidden / held parts can't loop forever
 
 
-static func ray(world: World3D, origin: Vector3, direction: Vector3, max_distance: float, classify: Callable, mask: int = 0xFFFFFFFF) -> Dictionary:
+static func ray(world: World3D, origin: Vector3, direction: Vector3, max_distance: float, classify: Callable, mask: int = 0xFFFFFFFF, point_filter: Callable = Callable()) -> Dictionary:
 	## {} if nothing was hit, else {part, point (world), face_index, normal (world), distance}.
+	## `point_filter(part, world_point) -> bool`, if given, is asked about each HIT-classified hit: false means that spot is not visible (a room's
+	## clip cut it away) so the ray carries on through it, exactly like SKIP (room_registry.gd's part_visible_at).
 	var space_state := world.direct_space_state
 	var excluded: Array[RID] = []
 	for _attempt in MAX_SKIPS:
@@ -37,6 +39,9 @@ static func ray(world: World3D, origin: Vector3, direction: Vector3, max_distanc
 			excluded.append((collider as StaticBody3D).get_rid())
 			continue
 		var point: Vector3 = result.get("position")
+		if point_filter.is_valid() and not bool(point_filter.call(part, point)):
+			excluded.append((collider as StaticBody3D).get_rid())
+			continue
 		return {"part": part, "point": point, "face_index": result.get("face_index", -1),
 			"normal": result.get("normal", Vector3.ZERO), "distance": origin.distance_to(point)}
 	return {}

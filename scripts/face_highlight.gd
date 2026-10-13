@@ -1,4 +1,5 @@
 extends Node
+const RoomClip := preload("res://scripts/room/room_clip.gd")
 ## Face-, edge- and vertex-level highlighting for the Mates and Measure tools. The laser used to tint the WHOLE mesh under
 ## it, which says nothing about what a pick would actually take: a pick is one CAD face (the backend's
 ## `face_ids` / `body_ids` per triangle, see mesh_identity.gd). Now, while one of those tools is on:
@@ -286,6 +287,7 @@ func _attach(part: Node3D, node_name: String, mesh: Mesh, material: ShaderMateri
 	node.set_meta("window_clip_adopted", part.has_meta("window_clip")) # already switched on (or not needed): sketch_clip.gd leaves it
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	part.add_child(node)
+	RoomClip.sync_node(part, node) # cut by the same room walls as the part it lights
 	return node
 
 
@@ -331,6 +333,7 @@ func _build_node(part: Node3D, key: String, material: ShaderMaterial, lift: floa
 	node.set_meta("window_clip_adopted", part.has_meta("window_clip"))
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	part.add_child(node)
+	RoomClip.sync_node(part, node)
 	return node
 
 
