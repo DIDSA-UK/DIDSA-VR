@@ -121,11 +121,11 @@ The room is a world within a world: grab to move, two-hand to turn and scale, A/
 | Send / retrieve | A/B nudge, rotate and select already work in any frame. **A room's part put down outside the room, or a world part left inside a room, goes back to where it was picked up** (no undo step, a message says why). |
 | Scoped operations | Hide all / Show all / Reverse / Isolate act on the room you are standing in (head inside its walls), or the room of the selected part for Isolate, else the world. The design table takes the world's part only; its mate-drift checks look at the world's parts. |
 | Colours | Already owner-correct (a PATCH on the occurrence's own owner), so colouring a room's part works and the preview also reaches the hidden world copy. |
-| Tests | `tests/room_interaction.gd` (36 headless checks). |
+| Tests | `tests/room_interaction.gd` (36 headless checks); `tests/e2e_rooms.gd` (14 checks against a live backend, fixture in `tests/data/`). |
 
 ### Known gaps (honest list)
 
-- **Not run against a live backend.** The saved-pose path, `load_owner_state`, and enforced mates in a room are unit-tested for their decisions and paths, but the HTTP round trips were not exercised here. The existing e2e style tests (`tests/e2e_*.gd`) need a backend; run one with a room open before trusting it.
+- **Verified against the real DIDSA-CAD backend** (run locally from the CAD repo's own environment, not a mock) by `tests/e2e_rooms.gd`: the real mesh fetch, reading a room's Part state, a hand move saved under the room's Part at the right distance in millimetres with the world's placement untouched, colour, Fix / Float, and reopening. **Not verified live:** enforced mates steering a part in a room (`mate-motion`), because the test document has no mates; and anything on a headset.
 - **Mates page list, Enforce all, and Relax are still the world's.** Creating a mate between two parts of a room works (the pick carries the room's Part as its owner and the mate is saved there), but the Mates page lists the world's mates, and Enforce all acts on the world.
 - **Measure** still assumes the loaded root, so measuring on a room's part is refused or wrong until it is made owner-aware the same way.
 - **A mated part slid by its mates can leave the room** (the snap-back check covers hand and laser moves, not mate-steered drags): the walls clip it, you get it back by undo or by moving it.
