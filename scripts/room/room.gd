@@ -14,6 +14,7 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 
 const WallShader := preload("res://shaders/room_walls.gdshader")
+const RoomHandles := preload("res://scripts/room/room_handles.gd")
 const GRID_MIN_CELL_M := 0.25 ## the grid's cell, on screen, is at least this wide (and under 2.5 times it: the 1-2-5 steps)
 
 const FILL_FRACTION := 0.7 ## how much of the room the content fills when it opens (the table's "scales to fit" idea)
@@ -39,6 +40,7 @@ var _walls: MeshInstance3D ## the thin wireframe (always drawn)
 var _glass: MeshInstance3D ## the glass box (when `glass`)
 var _glass_material: ShaderMaterial
 var _grid_scale := -1.0 ## the content scale the grid step was last worked out for
+var handles: Node3D ## room_handles.gd: the face handles and the move bar
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
 
 
@@ -204,6 +206,28 @@ func _build_walls() -> void:
 	add_child(_glass)
 	apply_volume()
 	set_glass(glass)
+	handles = RoomHandles.new()
+	handles.name = "Handles"
+	add_child(handles)
+	handles.setup(self)
+
+
+func set_box(new_xform: Transform3D, new_half: Vector3) -> void:
+	## The box was reshaped (a wall dragged): the room's walls move, the CONTENT STAYS where it is in the world (it is not scaled or carried along).
+	var content_world := content_root.global_transform
+	volume.xform = new_xform
+	volume.half = new_half
+	transform = Transform3D(volume.xform.basis, volume.xform.origin)
+	content_root.global_transform = content_world
+	apply_volume()
+	RoomRegistry.push()
+
+
+func move_box(new_xform: Transform3D) -> void:
+	## The whole room carried (the move bar): the box and its content go together.
+	volume.xform = new_xform
+	transform = Transform3D(volume.xform.basis, volume.xform.origin)
+	RoomRegistry.push()
 
 
 func apply_volume() -> void:
@@ -219,6 +243,8 @@ func apply_volume() -> void:
 	_glass_material.set_shader_parameter("half_size", volume.half)
 	_grid_scale = -1.0
 	_update_grid()
+	if handles != null:
+		handles.refresh()
 
 
 func set_glass(on: bool) -> void:

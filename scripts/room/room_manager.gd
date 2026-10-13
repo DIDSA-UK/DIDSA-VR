@@ -626,6 +626,8 @@ func _update_walls() -> void:
 	for r in rooms:
 		if is_instance_valid(r):
 			r.update_reveal(hands)
+			if r.handles != null:
+				r.handles.update_visibility(hands)
 
 
 func _process(_delta: float) -> void:

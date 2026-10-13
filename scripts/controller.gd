@@ -328,6 +328,8 @@ func _on_button_pressed(action_name: String) -> void:
 	if action_name == grab_action:
 		if _try_grab_table():
 			return
+		if _try_grab_room_handle():
+			return # a wall handle or the move bar of an Assembly Room (room_handles.gd)
 		if _try_grab_panel_at_distance():
 			return
 		# The section-plane gizmo is independent of "Individual part
@@ -553,7 +555,20 @@ func _set_grab_hover(target: Node3D) -> void:
 		_hover_node.material_overlay = _hover_material
 
 
+func _try_grab_room_handle() -> bool:
+	if held_node != null:
+		return false
+	for h in get_tree().get_nodes_in_group("room_handles"):
+		if h.try_grab(self):
+			_set_grab_hover(null)
+			return true
+	return false
+
+
 func _try_release() -> void:
+	for h in get_tree().get_nodes_in_group("room_handles"):
+		if h.release(self):
+			return
 	for table in get_tree().get_nodes_in_group("design_tables"):
 		if table.release_grab(self):
 			return # let go of the part on the design table: it stays there or goes back to the arena (design_table.gd)
