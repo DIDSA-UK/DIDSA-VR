@@ -1015,6 +1015,7 @@ func _build_settings_appearance() -> Control:
 	var page := _page(14)
 	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
 	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
+	page.add_child(_mode_toggle("Glass room walls", func(on: bool) -> void: _main.set_room_glass(on), _main.room_glass()))
 	return page
 
 

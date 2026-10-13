@@ -13,6 +13,9 @@ const RoomVolume := preload("res://scripts/room/room_volume.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 
+const WallShader := preload("res://shaders/room_walls.gdshader")
+const GRID_MIN_CELL_M := 0.25 ## the grid's cell, on screen, is at least this wide (and under 2.5 times it: the 1-2-5 steps)
+
 const FILL_FRACTION := 0.7 ## how much of the room the content fills when it opens (the table's "scales to fit" idea)
 const COLOURS: Array[Color] = [Color(0.35, 0.85, 1.0), Color(1.0, 0.65, 0.25), Color(0.55, 0.95, 0.5), Color(0.95, 0.5, 0.9), Color(0.95, 0.9, 0.35), Color(0.6, 0.6, 1.0)]
 
@@ -31,7 +34,11 @@ var two_hand: Node ## the TwoHandModel moving / turning / scaling this room's co
 var interactive := false
 var members_changed := false ## parts were added to or deleted from this room's Part: the world's own copies of it are out of date until the world is reloaded
 
-var _walls: MeshInstance3D
+var glass := true ## the see-through walls with the soft edge glow and the grid near your hands; off = the thin wireframe only
+var _walls: MeshInstance3D ## the thin wireframe (always drawn)
+var _glass: MeshInstance3D ## the glass box (when `glass`)
+var _glass_material: ShaderMaterial
+var _grid_scale := -1.0 ## the content scale the grid step was last worked out for
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
 
 
@@ -187,6 +194,85 @@ func close() -> void:
 func _build_walls() -> void:
 	_walls = wall_lines(volume.half, colour)
 	add_child(_walls)
+	_glass_material = ShaderMaterial.new()
+	_glass_material.shader = WallShader
+	_glass_material.set_shader_parameter("tint", colour)
+	_glass = MeshInstance3D.new()
+	_glass.name = "Glass"
+	_glass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_glass.material_override = _glass_material
+	add_child(_glass)
+	apply_volume()
+	set_glass(glass)
+
+
+func apply_volume() -> void:
+	## The walls follow the box (after the walls were dragged): the wireframe and the glass are rebuilt for the current half extents.
+	if _walls == null:
+		return
+	var fresh := wall_lines(volume.half, colour)
+	_walls.mesh = fresh.mesh
+	fresh.free()
+	var box := BoxMesh.new()
+	box.size = volume.half * 2.0
+	_glass.mesh = box
+	_glass_material.set_shader_parameter("half_size", volume.half)
+	_grid_scale = -1.0
+	_update_grid()
+
+
+func set_glass(on: bool) -> void:
+	glass = on
+	if _glass != null:
+		_glass.visible = on
+
+
+static func grid_step_mm(metres_per_mm: float) -> float:
+	## The grid's cell in the room's real-world millimetres: the smallest round step (1, 2, 5, 10, 20, 50... mm) whose cell on screen is at least 0.25 m, so
+	## it stays between 0.25 and 0.625 m wide whatever the room's scale. (A 10:1 room is not 60 mm cells; that would be 0.6 m cells of real 60 mm.)
+	var step := 0.001
+	var k := -3
+	while k <= 8:
+		for m in [1.0, 2.0, 5.0]:
+			step = m * pow(10.0, k)
+			if step * metres_per_mm >= GRID_MIN_CELL_M:
+				return step
+		k += 1
+	return step
+
+
+func grid_text() -> String:
+	## "grid 20 mm" for the console.
+	var mm := grid_step_mm(content_scale)
+	return "grid %s mm" % _trim(mm) if mm < 1000.0 else "grid %s m" % _trim(mm / 1000.0)
+
+
+func _update_grid() -> void:
+	if _glass_material == null:
+		return
+	var s := content_scale
+	if is_equal_approx(s, _grid_scale):
+		return
+	_grid_scale = s
+	_glass_material.set_shader_parameter("grid_step", grid_step_mm(s) * s)
+
+
+func update_reveal(hand_positions: Array) -> void:
+	## Each frame: the two hands (world positions), so the grid fades in near them; and the grid keeps its round step as the room's scale changes.
+	if _glass_material == null:
+		return
+	_update_grid()
+	var far := Vector3(1.0e6, 1.0e6, 1.0e6)
+	var a: Vector3 = volume.to_local(hand_positions[0]) if hand_positions.size() > 0 else far
+	var b: Vector3 = volume.to_local(hand_positions[1]) if hand_positions.size() > 1 else far
+	_glass_material.set_shader_parameter("hand_a", a)
+	_glass_material.set_shader_parameter("hand_b", b)
+
+
+func set_active_face(face: int) -> void:
+	## Lights one face (0..5: +x, -x, +y, -y, +z, -z) while a wall-drag holds it, -1 for none.
+	if _glass_material != null:
+		_glass_material.set_shader_parameter("active_face", face)
 
 
 static func wall_lines(h: Vector3, line_colour: Color) -> MeshInstance3D:

@@ -37,6 +37,7 @@ var _api_key := ""
 var _opening: Dictionary = {} ## part_id -> true while its mesh is being fetched
 var _seed_hidden: Dictionary = {} ## room instance id -> Array of world nodes this room hid
 var _was_active := false
+var glass := true ## the see-through wall look for new and open rooms (Settings > Appearance); off = wireframe only
 var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
 var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
 var _cued: Dictionary = {} ## hand -> the part it carries that currently shows the drop cue
@@ -551,6 +552,7 @@ func open_from_bytes(bytes: PackedByteArray, part_id: String, label: String, see
 		status.emit("Couldn't place a room (limit reached or no clear space).")
 		rooms_changed.emit()
 		return null
+	room.glass = glass
 	_main.add_child(room)
 	room.register(slot)
 	rooms.append(room)
@@ -605,8 +607,30 @@ func reseed_rooms() -> void:
 			_hide_seed(r)
 
 
+func set_glass(on: bool) -> void:
+	glass = on
+	for r in rooms:
+		if is_instance_valid(r):
+			r.set_glass(on)
+
+
+func _update_walls() -> void:
+	## The grid in each room's glass walls fades in near the user's hands.
+	if rooms.is_empty() or _main == null:
+		return
+	var hands: Array = []
+	for hand_name in ["XROrigin3D/LeftController", "XROrigin3D/RightController"]:
+		var hand = _main.get_node_or_null(hand_name)
+		if hand != null:
+			hands.append(hand.global_position)
+	for r in rooms:
+		if is_instance_valid(r):
+			r.update_reveal(hands)
+
+
 func _process(_delta: float) -> void:
 	_update_placement()
+	_update_walls()
 	_update_drop_cues()
 	if RoomRegistry.rooms.is_empty():
 		if _was_active:

@@ -234,8 +234,18 @@ func _add_room_manager() -> void:
 	room_manager.name = "RoomManager"
 	add_child(room_manager)
 	room_manager.setup(self, view_modes)
+	room_manager.glass = _settings.room_glass
 	room_manager.status.connect(_set_status)
 	_two_hand.focus = func(hand: Node3D) -> bool: return RoomRegistry.room_at(hand.global_position) == -1 # a grip on empty space inside a room is the room's
+
+
+func room_glass() -> bool:
+	return _settings.room_glass
+
+
+func set_room_glass(on: bool) -> void:
+	_settings.set_room_glass(on)
+	room_manager.set_glass(on)
 
 
 func max_rooms() -> int:

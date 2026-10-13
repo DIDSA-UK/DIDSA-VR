@@ -32,6 +32,7 @@ var wheel_enabled: bool = true ## the tool wheel (right trigger + grip)
 var wheel_size: int = 1 ## index into tool_wheel.gd's SIZE_SCALES (Small / Normal / Large)
 var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 var max_rooms: int = 4 ## the most Assembly Rooms open at once (room_registry.gd; 1..16)
+var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
 
 
 func load_from_disk() -> void:
@@ -44,6 +45,7 @@ func load_from_disk() -> void:
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
 	wheel_enabled = bool(config.get_value("comfort", "wheel_enabled", wheel_enabled))
 	max_rooms = clampi(int(config.get_value("rooms", "max_rooms", max_rooms)), 1, 16)
+	room_glass = bool(config.get_value("rooms", "glass", room_glass))
 	wheel_size = clampi(int(config.get_value("comfort", "wheel_size", wheel_size)), 0, 2)
 	ui_theme = str(config.get_value("appearance", "theme", ui_theme))
 	view_render_mode = clampi(int(config.get_value("appearance", "view_render_mode", view_render_mode)), 0, 2)
@@ -63,6 +65,7 @@ func save_to_disk() -> void:
 	config.set_value("comfort", "haptics_level", haptics_level)
 	config.set_value("comfort", "wheel_enabled", wheel_enabled)
 	config.set_value("rooms", "max_rooms", max_rooms)
+	config.set_value("rooms", "glass", room_glass)
 	config.set_value("comfort", "wheel_size", wheel_size)
 	config.set_value("appearance", "theme", ui_theme)
 	config.set_value("appearance", "view_render_mode", view_render_mode)
@@ -135,6 +138,11 @@ func set_wheel_enabled(on: bool) -> void:
 
 func set_wheel_size(index: int) -> void:
 	wheel_size = clampi(index, 0, 2)
+	save_to_disk()
+
+
+func set_room_glass(on: bool) -> void:
+	room_glass = on
 	save_to_disk()
 
 
