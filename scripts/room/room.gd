@@ -302,10 +302,15 @@ func update_reveal(hand_positions: Array) -> void:
 	_glass_material.set_shader_parameter("hand_b", b)
 
 
-func set_active_face(face: int) -> void:
-	## Lights one face (0..5: +x, -x, +y, -y, +z, -z) while a wall-drag holds it, -1 for none.
+func set_active_faces(mask: int) -> void:
+	## Lights the faces in the bit mask (bit 0..5: +x, -x, +y, -y, +z, -z) while a corner-drag holds them, 0 for none.
 	if _glass_material != null:
-		_glass_material.set_shader_parameter("active_face", face)
+		_glass_material.set_shader_parameter("active_faces", mask)
+
+
+func set_active_face(face: int) -> void:
+	## One face (0..5), -1 for none.
+	set_active_faces(0 if face < 0 else 1 << face)
 
 
 static func wall_lines(h: Vector3, line_colour: Color) -> MeshInstance3D:

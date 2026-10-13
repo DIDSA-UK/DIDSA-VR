@@ -31,7 +31,7 @@ func _initialize() -> void:
 	var manager = main.room_manager
 	var room = manager.open_from_bytes(glb, "S", "Gearbox", "", "", Transform3D(Basis.IDENTITY, Vector3(0.0, 1.5, -3.5)))
 	manager.activate(room)
-	origin.get_node("RightController").global_position = Vector3(0.6, 1.2, -2.2) # a hand near the front face: the grid shows there
+	origin.get_node("RightController").global_position = Vector3(1.4, 2.8, -2.1) # a hand near the top front corner: its handle shows, and the grid near it
 	for i in 10:
 		await process_frame
 	var dir := OS.get_environment("ROOM_RENDER_DIR")

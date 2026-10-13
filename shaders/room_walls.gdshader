@@ -5,7 +5,7 @@ render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, shadows_disabl
 //   * a soft glow along the box's edges, which is what always marks where the room is,
 //   * a grid that FADES IN near your hands (so it shows where you are working, and nothing else is cluttered). Its cell is `grid_step` METRES in the room's
 //     frame; room.gd picks a round real-world step for the room's scale (1, 2, 5, 10... mm) so a cell stays 0.25 to 0.6 m wide,
-//   * the face a wall-drag is holding lights up (`active_face`: 0..5 for +x, -x, +y, -y, +z, -z; -1 none).
+//   * the faces a corner-drag is holding light up (`active_faces`: a bit mask, bit 0..5 for +x, -x, +y, -y, +z, -z; 0 none).
 // No blur: a real blur needs a copy of the screen, which is expensive on a headset and awkward in stereo. The mesh is a box of the room's full size in the
 // ROOM's frame (no scale), so local positions are metres from the room's centre.
 
@@ -20,7 +20,7 @@ uniform float fresnel_alpha = 0.10;
 uniform vec3 hand_a = vec3(1.0e6); // the two hands, in the room's frame (far away = no grid)
 uniform vec3 hand_b = vec3(1.0e6);
 uniform float reveal_radius = 0.9;
-uniform int active_face = -1;
+uniform int active_faces = 0;
 
 varying vec3 local_pos;
 
@@ -50,7 +50,7 @@ void fragment() {
 	float reveal = max(1.0 - smoothstep(0.0, reveal_radius, distance(local_pos, hand_a)), 1.0 - smoothstep(0.0, reveal_radius, distance(local_pos, hand_b)));
 
 	float face_index = float(n) * 2.0 + (local_pos[n] > 0.0 ? 0.0 : 1.0);
-	float held = abs(face_index - float(active_face)) < 0.5 ? 1.0 : 0.0;
+	float held = ((active_faces >> int(face_index)) & 1) == 1 ? 1.0 : 0.0;
 
 	float alpha = face_alpha + edge * edge_glow + fres * fresnel_alpha + grid * reveal * 0.55 + held * 0.18;
 	ALBEDO = mix(tint.rgb, vec3(1.0), edge * 0.35 + held * 0.3);

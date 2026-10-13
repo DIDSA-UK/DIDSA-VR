@@ -65,7 +65,9 @@ func _initialize() -> void:
 	room.update_reveal([])
 	print("SMOKE ...and the grid step follows the room's scale when a gesture changes it (no call needed): ", absf(float(mat.get_shader_parameter("grid_step")) - 20.0 * 0.021) < 0.0001)
 	room.set_active_face(4)
-	print("SMOKE a face can be lit while a wall-drag holds it: ", int(mat.get_shader_parameter("active_face")) == 4)
+	print("SMOKE a face can be lit while a drag holds it, and several at once (a corner moves three faces): ", int(mat.get_shader_parameter("active_faces")) == 16 and (func() -> bool:
+		room.set_active_faces(0b010101)
+		return int(mat.get_shader_parameter("active_faces")) == 21).call())
 
 	# --- the manager's setting reaches open and new rooms
 	RoomRegistry.clear()

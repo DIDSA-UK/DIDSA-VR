@@ -1,7 +1,8 @@
 extends SceneTree
-## Assembly Rooms R3, shaping and moving a room by hand (scripts/room/room_handles.gd): the resize and carry maths, where the handles are, which one a hand or a
-## laser would take, a face dragged by a hand (its opposite face and the content stay where they are in the world), the floor staying the floor, the 0.5 m
-## minimum, overlap stopping a drag, the move bar carrying the room, the grip going to a handle before a part, and the handle showing only near a hand.
+## Assembly Rooms R3, shaping and moving a room by hand (scripts/room/room_handles.gd): eight CORNER handles and the move bar. The resize and carry maths, where the
+## handles are, which one a hand or a laser would take, a corner dragged by a hand (its opposite corner and the content stay where they are in the world), a floor
+## corner leaving the height alone, the 0.5 m minimum, overlap stopping a drag, the move bar carrying the room, the grip going to a handle before a part, and
+## only the corner nearest a hand showing.
 ## Run: "$GODOT" --headless --path . --script res://tests/room_handles.gd  (see tests/README.md)
 
 const Room := preload("res://scripts/room/room.gd")
@@ -10,6 +11,9 @@ const RoomVolume := preload("res://scripts/room/room_volume.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd")
 const RoomManagerTest := preload("res://tests/room_manager.gd")
+
+const TOP_PX := 0b111 ## corner 7: +x, +y (top), +z
+const FLOOR_PX := 0b101 ## corner 5: +x, floor, +z
 
 
 func hand_at(parent: Node, pos: Vector3, aim_at: Vector3 = Vector3.INF) -> Node3D:
@@ -25,14 +29,17 @@ func _initialize() -> void:
 	RoomRegistry.clear()
 	# --- the maths
 	var half := Vector3(1.5, 1.5, 1.5)
-	var grown := RoomHandles.resize_face(half, 0, 1.5, 2.0)
-	print("SMOKE the +x face dragged 0.5 m out: the room is 0.5 m longer and its middle moves 0.25 m that way: ", (grown["half"] as Vector3).is_equal_approx(Vector3(1.75, 1.5, 1.5)) and is_equal_approx(grown["shift"], 0.25))
-	var pinched := RoomHandles.resize_face(half, 0, 1.5, -1.2)
-	print("SMOKE ...dragged in past the other side it stops at the 0.5 m minimum (the opposite face stays): ", is_equal_approx((pinched["half"] as Vector3).x, 0.25) and is_equal_approx(pinched["shift"], -1.25))
-	var minus := RoomHandles.resize_face(half, 1, -1.5, -2.5)
-	print("SMOKE the -x face dragged out works the same way round (4 m, its middle 0.5 m the other way): ", (minus["half"] as Vector3).is_equal_approx(Vector3(2.0, 1.5, 1.5)) and is_equal_approx(minus["shift"], -0.5))
-	print("SMOKE faces are numbered +x -x +y -y +z -z, two to an axis: ", RoomHandles.axis_of(0) == 0 and RoomHandles.axis_of(3) == 1 and RoomHandles.axis_of(5) == 2 and RoomHandles.sign_of(2) == 1.0 and RoomHandles.sign_of(3) == -1.0)
-	print("SMOKE there is a limit on size too: ", is_equal_approx((RoomHandles.resize_face(half, 0, 1.5, 500.0)["half"] as Vector3).x, RoomHandles.MAX_SIZE_M * 0.5))
+	print("SMOKE corners are numbered by bits: +x, top, +z (so 7 is the top corner on the user's side, 5 the floor corner under it): ", RoomHandles.corner_sign(7) == Vector3(1, 1, 1) and RoomHandles.corner_sign(0) == Vector3(-1, -1, -1) and RoomHandles.corner_sign(5) == Vector3(1, -1, 1) and RoomHandles.is_top(7) and not RoomHandles.is_top(5))
+	print("SMOKE a top corner moves three faces, a floor corner two (the floor never moves): ", RoomHandles.faces_of(7).size() == 3 and RoomHandles.faces_of(5).size() == 2 and RoomHandles.faces_mask(7) == (1 | 4 | 16) and RoomHandles.faces_mask(0) == (2 | 32))
+	var out := RoomHandles.resize_corner(half, TOP_PX, Vector3(1.5, 1.5, 1.5), Vector3(2.0, 2.5, 1.0))
+	print("SMOKE a top corner dragged out 0.5 m, up 1 m and in 0.5 m: 3.5 long, 4 tall, 2.5 deep, the middle shifted half of each: ", (out["half"] as Vector3).is_equal_approx(Vector3(1.75, 2.0, 1.25)) and (out["shift"] as Vector3).is_equal_approx(Vector3(0.25, 0.5, -0.25)))
+	var floor_drag := RoomHandles.resize_corner(half, FLOOR_PX, Vector3(1.5, -1.5, 1.5), Vector3(2.0, 3.0, 2.0))
+	print("SMOKE a floor corner leaves the height alone however the hand moves up or down (two floor axes only): ", (floor_drag["half"] as Vector3).is_equal_approx(Vector3(1.75, 1.5, 1.75)) and is_equal_approx(floor_drag["shift"].y, 0.0))
+	var minus := RoomHandles.resize_corner(half, 0, Vector3(-1.5, -1.5, -1.5), Vector3(-2.5, -1.5, -2.0))
+	print("SMOKE the far-side floor corner works the other way round (the -x, -z sides grow, the room's middle shifts that way): ", (minus["half"] as Vector3).is_equal_approx(Vector3(2.0, 1.5, 1.75)) and (minus["shift"] as Vector3).is_equal_approx(Vector3(-0.5, 0.0, -0.25)))
+	var pinched := RoomHandles.resize_corner(half, TOP_PX, Vector3(1.5, 1.5, 1.5), Vector3(-5.0, -5.0, 1.5))
+	print("SMOKE dragged in past the opposite corner each axis stops at the 0.5 m minimum, and an axis the hand did not move is unchanged: ", (pinched["half"] as Vector3).is_equal_approx(Vector3(0.25, 0.25, 1.5)))
+	print("SMOKE there is a limit on size too: ", is_equal_approx((RoomHandles.resize_corner(half, 7, Vector3(1.5, 1.5, 1.5), Vector3(500, 1.5, 1.5))["half"] as Vector3).x, RoomHandles.MAX_SIZE_M * 0.5))
 	var start := Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0))
 	var carried := RoomHandles.moved_transform(start, Vector3(0, 1, 2), 0.0, Vector3(1, 1.3, 3), 0.0)
 	print("SMOKE carrying the room: it goes where the hand goes on the floor and stays upright at the same height: ", carried.origin.is_equal_approx(Vector3(1, 1.5, 1)) and carried.basis.is_equal_approx(Basis.IDENTITY))
@@ -49,50 +56,51 @@ func _initialize() -> void:
 	room.register(RoomRegistry.add_room(room.volume))
 	await process_frame
 	var handles: Node3D = room.handles
-	print("SMOKE a room has handles on its five sides and roof, none on the floor, plus the move bar: ", handles != null and handles._handles.size() == 6 and not handles._handles.has(3) and handles._handles.has(RoomHandles.MOVE))
-	print("SMOKE the +x handle is just outside the +x wall at its middle, the roof's above the roof: ", handles.handle_world_position(0).is_equal_approx(Vector3(1.53, 1.5, 0)) and handles.handle_world_position(2).is_equal_approx(Vector3(0, 3.03, 0)))
+	print("SMOKE a room has a handle on each of its eight corners and the move bar, and no handles on the faces: ", handles != null and handles._handles.size() == 9 and handles._handles.has(RoomHandles.MOVE) and RoomHandles.CORNERS.size() == 8)
+	print("SMOKE each handle is at its corner: top +x +z at (1.5, 3, 1.5), floor -x -z at (-1.5, 0, -1.5): ", handles.handle_world_position(7).is_equal_approx(Vector3(1.5, 3.0, 1.5)) and handles.handle_world_position(0).is_equal_approx(Vector3(-1.5, 0.0, -1.5)))
 	print("SMOKE the move bar is on the floor at the front edge, outside the +z wall (the user's side): ", handles.handle_world_position(RoomHandles.MOVE).is_equal_approx(Vector3(0, 0.03, 1.64)))
 	var content_before := room.content_root.global_transform
 
 	# --- which handle a hand or a laser would take
-	var near_x := hand_at(holder, Vector3(1.55, 1.5, 0.05))
-	var near_z := hand_at(holder, Vector3(0.0, 1.5, 1.6))
-	var nowhere := hand_at(holder, Vector3(0.0, 1.5, 0.0), Vector3(1.4, 1.0, 1.4)) # (its laser points at a corner, between the handles)
-	print("SMOKE a hand at a handle takes it, a hand in the middle of the room takes nothing: ", handles.candidate_for(near_x) == 0 and handles.candidate_for(near_z) == 4 and handles.candidate_for(nowhere) == -1)
-	var lasering := hand_at(holder, Vector3(0.0, 1.4, 6.0), Vector3(0.0, 3.03, 0.0))
-	var missing := hand_at(holder, Vector3(0.0, 1.4, 6.0), Vector3(0.9, 3.03, 0.0))
-	print("SMOKE a laser aimed at a handle takes it from across the room; one aimed beside it doesn't: ", handles.candidate_for(lasering) == 2 and handles.candidate_for(missing) == -1)
+	var near_top := hand_at(holder, Vector3(1.55, 2.95, 1.5))
+	var near_floor := hand_at(holder, Vector3(-1.5, 0.05, 1.55))
+	var nowhere := hand_at(holder, Vector3(0.0, 1.5, 0.0), Vector3(1.4, 1.0, 0.2)) # (its laser points at the middle of a wall, between the corners)
+	print("SMOKE a hand at a corner takes it, a hand in the middle of the room takes nothing: ", handles.candidate_for(near_top) == 7 and handles.candidate_for(near_floor) == 4 and handles.candidate_for(nowhere) == -1)
+	var lasering := hand_at(holder, Vector3(0.0, 1.4, 7.0), Vector3(-1.5, 3.0, 1.5))
+	var missing := hand_at(holder, Vector3(0.0, 1.4, 7.0), Vector3(-0.5, 3.0, 1.5))
+	print("SMOKE a laser aimed at a corner takes it from across the room; one aimed beside it doesn't: ", handles.candidate_for(lasering) == 6 and handles.candidate_for(missing) == -1)
 
-	# --- dragging a face
-	var hand := hand_at(holder, Vector3(1.53, 1.5, 0.0))
-	var minus_x_world: Vector3 = room.volume.xform * Vector3(-1.5, 0, 0)
-	print("SMOKE gripping a handle takes it, marks the hand (so a whole-room drag stays out of it) and lights that face: ", handles.try_grab(hand) and handles.held_by(hand) and hand.get_meta("room_handle_held") == true and (room.get_node("Glass").material_override as ShaderMaterial).get_shader_parameter("active_face") == 0)
-	var other := hand_at(holder, Vector3(-1.53, 1.5, 0.0))
+	# --- dragging a top corner
+	var hand := hand_at(holder, Vector3(1.5, 3.0, 1.5))
+	var opposite_world: Vector3 = room.volume.xform * Vector3(-1.5, -1.5, -1.5)
+	print("SMOKE gripping a corner takes it, marks the hand (so a whole-room drag stays out of it) and lights the three faces that meet there: ", handles.try_grab(hand) and handles.held_by(hand) and hand.get_meta("room_handle_held") == true and int((room.get_node("Glass").material_override as ShaderMaterial).get_shader_parameter("active_faces")) == (1 | 4 | 16))
+	var other := hand_at(holder, Vector3(-1.5, 0.0, -1.5))
 	print("SMOKE ...and a second hand can't take another while one is held: ", not handles.try_grab(other))
-	hand.global_position = Vector3(2.03, 1.5, 0.0)
+	hand.global_position = Vector3(2.0, 4.0, 1.0)
 	handles.update_drag()
-	print("SMOKE dragging it 0.5 m out makes the room 3.5 m long, middle 0.25 m along: ", room.volume.half.is_equal_approx(Vector3(1.75, 1.5, 1.5)) and room.volume.xform.origin.is_equal_approx(Vector3(0.25, 1.5, 0)))
-	print("SMOKE ...the opposite wall has not moved in the world and nor has the content: ", (room.volume.xform * Vector3(-1.75, 0, 0)).is_equal_approx(minus_x_world) and room.content_root.global_transform.is_equal_approx(content_before))
-	print("SMOKE ...the walls, the glass and the shader follow, the handle stays on the wall, and the clip's rows are updated: ", (room.get_node("Glass").mesh as BoxMesh).size.is_equal_approx(Vector3(3.5, 3, 3)) and handles.handle_world_position(0).is_equal_approx(Vector3(2.03, 1.5, 0)) and absf(RoomRegistry.pack_image().get_pixel(3, room.volume.slot).r - 1.75) < 0.0001)
+	print("SMOKE dragging it out 0.5 m, up 1 m, in 0.5 m makes the room 3.5 x 4 x 2.5 with its floor still on the floor: ", room.volume.half.is_equal_approx(Vector3(1.75, 2.0, 1.25)) and absf(room.volume.xform.origin.y - 2.0) < 0.001 and room.volume.xform.origin.is_equal_approx(Vector3(0.25, 2.0, -0.25)))
+	print("SMOKE ...the opposite corner has not moved in the world and nor has the content: ", (room.volume.xform * Vector3(-1.75, -2.0, -1.25)).is_equal_approx(opposite_world) and room.content_root.global_transform.is_equal_approx(content_before))
+	print("SMOKE ...the walls, the glass, the handles and the clip's rows follow (the held handle is under the hand): ", (room.get_node("Glass").mesh as BoxMesh).size.is_equal_approx(Vector3(3.5, 4, 2.5)) and handles.handle_world_position(7).is_equal_approx(Vector3(2.0, 4.0, 1.0)) and absf(RoomRegistry.pack_image().get_pixel(3, room.volume.slot).r - 1.75) < 0.0001 and absf(RoomRegistry.pack_image().get_pixel(3, room.volume.slot).g - 2.0) < 0.0001)
 	handles.release(hand)
-	print("SMOKE letting go frees the hand and unlights the face: ", not handles.is_held() and hand.get_meta("room_handle_held") == false and (room.get_node("Glass").material_override as ShaderMaterial).get_shader_parameter("active_face") == -1)
+	print("SMOKE letting go frees the hand and unlights the faces: ", not handles.is_held() and hand.get_meta("room_handle_held") == false and int((room.get_node("Glass").material_override as ShaderMaterial).get_shader_parameter("active_faces")) == 0)
+	room.set_box(Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0)), Vector3(1.5, 1.5, 1.5))
 
-	# --- the roof: the floor stays the floor
-	var roof_hand := hand_at(holder, handles.handle_world_position(2))
-	handles.try_grab(roof_hand)
-	roof_hand.global_position += Vector3(0, 1.0, 0)
+	# --- a floor corner: the height stays
+	var floor_hand := hand_at(holder, handles.handle_world_position(5))
+	handles.try_grab(floor_hand)
+	floor_hand.global_position += Vector3(0.5, 2.0, 0.5) # (up as well: ignored)
 	handles.update_drag()
-	print("SMOKE dragging the roof up 1 m makes the room 4 m tall with its floor still on the floor (middle 2 m up): ", absf(room.volume.half.y - 2.0) < 0.001 and absf(room.volume.xform.origin.y - 2.0) < 0.001)
-	roof_hand.global_position += Vector3(0, -9.0, 0)
+	print("SMOKE dragging a floor corner changes the two floor dimensions only, whatever the hand does in height: ", room.volume.half.is_equal_approx(Vector3(1.75, 1.5, 1.75)) and absf(room.volume.xform.origin.y - 1.5) < 0.001)
+	floor_hand.global_position += Vector3(-9.0, 0.0, -9.0)
 	handles.update_drag()
-	print("SMOKE ...and dragged right down it stops at 0.5 m (the floor and its middle at 0.25 m): ", absf(room.volume.half.y - 0.25) < 0.001 and absf(room.volume.xform.origin.y - 0.25) < 0.001)
-	handles.release(roof_hand)
+	print("SMOKE ...and dragged right across, each floor dimension stops at 0.5 m: ", absf(room.volume.half.x - 0.25) < 0.001 and absf(room.volume.half.z - 0.25) < 0.001 and absf(room.volume.half.y - 1.5) < 0.001)
+	handles.release(floor_hand)
 
 	# --- overlap stops a drag
 	room.set_box(Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0)), Vector3(1.5, 1.5, 1.5))
 	var neighbour := RoomVolume.make(Transform3D(Basis.IDENTITY, Vector3(3.2, 1.5, 0)), Vector3(3, 3, 3))
 	RoomRegistry.add_room(neighbour)
-	var pusher := hand_at(holder, handles.handle_world_position(0))
+	var pusher := hand_at(holder, handles.handle_world_position(7))
 	handles.try_grab(pusher)
 	pusher.global_position += Vector3(0.1, 0, 0)
 	handles.update_drag()
@@ -115,6 +123,7 @@ func _initialize() -> void:
 	handles.update_drag()
 	print("SMOKE ...and turning the hand turns the room, which stays upright: ", absf(room.volume.xform.basis.get_euler().x) < 0.001 and absf(room.volume.xform.basis.get_euler().z) < 0.001 and absf(absf(room.volume.xform.basis.get_euler().y) - PI / 2.0) < 0.01)
 	handles.release(mover)
+	room.move_box(Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0)))
 
 	# --- the grip goes to a handle before anything else
 	var controller := XRController3D.new()
@@ -122,19 +131,24 @@ func _initialize() -> void:
 	controller.set_script(load("res://scripts/controller.gd"))
 	holder.add_child(controller)
 	await process_frame
-	controller.global_position = handles.handle_world_position(5)
+	controller.global_position = handles.handle_world_position(6)
 	controller._on_button_pressed("grip_click") # the real press path: handles are asked before a part
-	print("SMOKE a real controller's grip at a handle takes the handle, not a part: ", handles.held_by(controller) and controller.held_node == null and controller.get_meta("room_handle_held") == true)
+	print("SMOKE a real controller's grip at a corner takes the handle, not a part: ", handles.held_by(controller) and controller.held_node == null and controller.get_meta("room_handle_held") == true)
 	var gesture := TwoHandModel.new()
 	holder.add_child(gesture)
 	print("SMOKE ...and the whole-model / whole-room gesture treats that hand as busy: ", not gesture._hand_free_ignoring_button(controller))
 	controller._on_button_released("grip_click")
 	print("SMOKE letting go of the grip lets go of the handle: ", not handles.is_held() and gesture._hand_free_ignoring_button(controller))
 
-	# --- handles show near hands
-	handles.update_visibility([handles.handle_world_position(0) + Vector3(0.3, 0, 0)])
-	print("SMOKE a face handle shows when a hand is near it and hides otherwise (the move bar always shows): ", handles._handles[0].visible and not handles._handles[1].visible and not handles._handles[4].visible and handles._handles[RoomHandles.MOVE].visible)
-	handles.update_visibility([])
-	print("SMOKE ...and with no hand near they all hide: ", not handles._handles[0].visible)
+	# --- only the corner nearest a hand shows
+	handles.update_visibility([handles.handle_world_position(7) + Vector3(0.3, 0.2, 0.1)])
+	var shown := 0
+	for c in RoomHandles.CORNERS:
+		shown += 1 if handles._handles[c].visible else 0
+	print("SMOKE only the corner nearest a hand shows (one of eight), and the move bar always does: ", shown == 1 and handles._handles[7].visible and handles._handles[RoomHandles.MOVE].visible)
+	handles.update_visibility([handles.handle_world_position(7) + Vector3(0.3, 0.2, 0.1), handles.handle_world_position(0) + Vector3(-0.2, 0.0, 0.0)])
+	print("SMOKE ...two hands near two corners show both: ", handles._handles[7].visible and handles._handles[0].visible)
+	handles.update_visibility([Vector3(50, 50, 50)])
+	print("SMOKE ...and with no hand near, none shows: ", not handles._handles[7].visible and not handles._handles[0].visible)
 	RoomRegistry.clear()
 	quit()
