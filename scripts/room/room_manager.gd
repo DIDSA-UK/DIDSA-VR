@@ -211,7 +211,7 @@ func index_world() -> void:
 	await GroupIndex.index(e, root, RoomRegistry.world_parts(get_tree()))
 
 
-func index_room(room: Node) -> void:
+func index_room(room) -> void:
 	var e := edit_api()
 	if e == null or not is_instance_valid(room):
 		return
