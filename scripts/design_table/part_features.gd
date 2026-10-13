@@ -28,18 +28,27 @@ static func _good(route: String, body: Dictionary) -> Dictionary:
 	return {"ok": true, "error": "", "route": route, "body": body}
 
 
-static func extrude_request(sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array) -> Dictionary:
-	## Boss with no targets starts a new body; a cut must name the bodies it cuts.
+static func extrude_request(sketch_feature_id: String, boss: bool, start_distance: float, end_distance: float, target_body_ids: Array, extra: Dictionary = {}) -> Dictionary:
+	## Boss with no targets starts a new body; a cut must name the bodies it cuts. `extra` carries the optional thin wall (`thickness`, `thickness_direction`)
+	## or draft (`draft_angle`, `draft_outward`); the backend refuses both together, and a draft on a sketch of more than one profile.
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
 	if is_equal_approx(start_distance, end_distance):
 		return _bad("The depth can't be zero.")
-	return _good("extrude-features", {
+	if extra.has("thickness") and extra.has("draft_angle"):
+		return _bad("A thin wall and a draft can't be combined. Turn one off.")
+	if extra.has("thickness") and float(extra["thickness"]) <= 0.0:
+		return _bad("The wall thickness has to be more than zero.")
+	if extra.has("draft_angle") and (float(extra["draft_angle"]) <= 0.0 or float(extra["draft_angle"]) >= 90.0):
+		return _bad("The draft angle has to be more than 0 and less than 90 degrees.")
+	var body := {
 		"sketch_feature_id": sketch_feature_id,
 		"extrude_type": "boss" if boss else "cut",
 		"start_distance": minf(start_distance, end_distance),
 		"end_distance": maxf(start_distance, end_distance),
-		"target_body_ids": target_body_ids})
+		"target_body_ids": target_body_ids}
+	body.merge(extra)
+	return _good("extrude-features", body)
 
 
 static func revolve_request(sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
@@ -75,32 +84,77 @@ static func mirror_request(body_ids: Array, plane: Dictionary, fuse: bool) -> Di
 	return _good("mirror-features", {"source_body_ids": body_ids, "mirror_plane": plane, "merge": "fuse_into_one" if fuse else "keep_separate"})
 
 
+static func vertex_ref(body_id: String, index: int) -> Dictionary:
+	return {"body_id": body_id, "shape_type": "vertex", "index": index}
+
+
+static func plane_ref_of(base: Dictionary) -> Dictionary:
+	## The backend's PlaneRef for a pick: a reference plane ({"fixed": "XY"}), a flat face ({"face": {body_id, index}}) or a plane already made ({"plane_feature_id": id}). {} if it is none of them.
+	if base.has("fixed"):
+		return {"fixed_plane": str(base["fixed"])}
+	if base.has("face"):
+		return {"face_ref": face_ref(str(base["face"]["body_id"]), int(base["face"]["index"]))}
+	if base.has("plane_feature_id"):
+		return {"plane_feature_id": str(base["plane_feature_id"])}
+	return {}
+
+
 static func create_plane_request(base: Dictionary, offset: float) -> Dictionary:
-	## A plane offset from a reference plane ({"fixed": "XY"}), a flat face ({"face": {body_id, index}}) or a plane already made ({"plane_feature_id": id}).
+	## A plane offset from a reference plane, a flat face or a plane already made.
 	if base.is_empty():
 		return _bad("Pick a face or a plane to offset from first.")
 	if is_zero_approx(offset):
 		return _bad("The offset can't be zero.")
-	var ref := {}
-	if base.has("fixed"):
-		ref = {"fixed_plane": str(base["fixed"])}
-	elif base.has("face"):
-		ref = {"face_ref": face_ref(str(base["face"]["body_id"]), int(base["face"]["index"]))}
-	elif base.has("plane_feature_id"):
-		ref = {"plane_feature_id": str(base["plane_feature_id"])}
-	else:
+	var ref := plane_ref_of(base)
+	if ref.is_empty():
 		return _bad("Pick a face or a plane to offset from first.")
 	return _good("create-plane-features", {"plane_type": "offset_face", "face_refs": [ref], "offset": offset})
 
 
-static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array) -> Dictionary:
-	## A loft through two or more sections, each the closed profile of a sketch (on its own plane).
+static func create_plane_typed(method: String, bases: Array, edges: Array, vertices: Array) -> Dictionary:
+	## The other construction methods (Phase 7.3). `bases` are plane picks (see plane_ref_of), `edges` / `vertices` are the picked entities {body_id, index}.
+	## midplane: two planes. vertex: a plane and a corner, the new plane parallel to it through the corner. edge: a straight edge and a corner, normal to the edge through the corner.
+	## points: three corners.
+	match method:
+		"midplane":
+			if bases.size() < 2:
+				return _bad("Pick two planes or flat faces, parallel to each other.")
+			var refs: Array = bases.map(func(b): return plane_ref_of(b))
+			if refs.any(func(r): return r.is_empty()):
+				return _bad("Pick two planes or flat faces, parallel to each other.")
+			return _good("create-plane-features", {"plane_type": "midplane", "face_refs": refs})
+		"vertex":
+			if bases.is_empty() or plane_ref_of(bases[0]).is_empty():
+				return _bad("Pick a plane or a flat face first.")
+			if vertices.is_empty():
+				return _bad("Pick the corner the plane goes through.")
+			return _good("create-plane-features", {"plane_type": "parallel_to_face_through_vertex", "face_refs": [plane_ref_of(bases[0])], "vertex_ref": vertex_ref(str(vertices[0]["body_id"]), int(vertices[0]["index"]))})
+		"edge":
+			if edges.is_empty():
+				return _bad("Pick a straight edge first.")
+			if vertices.is_empty():
+				return _bad("Pick the corner the plane goes through.")
+			return _good("create-plane-features", {"plane_type": "normal_to_edge_through_vertex", "edge_ref": edge_ref(str(edges[0]["body_id"]), int(edges[0]["index"])), "vertex_ref": vertex_ref(str(vertices[0]["body_id"]), int(vertices[0]["index"]))})
+		"points":
+			if vertices.size() < 3:
+				return _bad("Pick three corners (%d so far)." % vertices.size())
+			return _good("create-plane-features", {"plane_type": "three_points", "point_refs": vertices.slice(0, 3).map(func(v): return {"vertex_ref": vertex_ref(str(v["body_id"]), int(v["index"]))})})
+	return _bad("That way of making a plane isn't offered.")
+
+
+static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array, wall: float = 0.0, wall_from_closed: bool = false) -> Dictionary:
+	## A loft through two or more sections, each the closed profile of a sketch (on its own plane). `wall` over 0 makes it a thin-walled loft:
+	## `wall_from_closed` keeps the closed profiles and gives a hollow tube between them (the thin source for closed sections), otherwise the sections are open chains.
 	if section_sketch_ids.size() < 2:
 		return _bad("A loft needs at least two sections: pick a line of each of two different sketches.")
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
-	return _good("loft-features", {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
-		"ruled": ruled, "target_body_ids": target_body_ids})
+	var body := {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
+		"ruled": ruled, "target_body_ids": target_body_ids}
+	if wall > 0.0:
+		body["thickness"] = wall
+		body["thin_from_closed_profile"] = wall_from_closed
+	return _good("loft-features", body)
 
 
 static func sweep_request(sketch_feature_id: String, path_refs: Array, boss: bool, target_body_ids: Array) -> Dictionary:
@@ -140,12 +194,16 @@ static func split_request(target_body_id: String, plane_ref: Dictionary) -> Dict
 	return _good("split-features", {"target_body_id": target_body_id, "tool": {"plane_ref": plane_ref}})
 
 
-static func move_face_request(face_refs: Array, offset: float) -> Dictionary:
-	## Pushes (or pulls) the picked faces of one body along their normals by `offset` mm.
+static func move_face_request(face_refs: Array, offset: float, direction_axis: String = "") -> Dictionary:
+	## Pushes (or pulls) the picked faces of one body by `offset` mm: along each face's own normal, or (with `direction_axis` "x" / "y" / "z") along that world axis.
 	if face_refs.is_empty():
 		return _bad("Pick the faces to move first.")
 	if is_zero_approx(offset):
 		return _bad("The distance can't be zero.")
+	if direction_axis != "":
+		if not direction_axis in ["x", "y", "z"]:
+			return _bad("A direction from a sketch line can't be set here yet; use X, Y or Z.")
+		return _good("move-face-features", {"face_refs": face_refs, "direction_ref": {"fixed_axis": direction_axis}, "direction_distance": offset})
 	return _good("move-face-features", {"face_refs": face_refs, "offset_distance": offset})
 
 
@@ -185,12 +243,22 @@ static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	return _good("fillet-features", {"edge_refs": edges, "radius": radius})
 
 
-static func chamfer_request(edges: Array, distance: float) -> Dictionary:
+static func chamfer_request(edges: Array, distance: float, angle: float = 0.0, flip: bool = false) -> Dictionary:
+	## `angle` over 0 (degrees, under 90) makes every edge a distance-and-angle chamfer (`edge_options`, keyed by each edge's index in `edge_refs`); `flip` swaps
+	## which of an edge's two faces the distance is measured along. 0 is the plain symmetric chamfer.
 	if edges.is_empty():
 		return _bad("Pick the edges to chamfer first.")
 	if distance <= 0.0:
 		return _bad("The distance has to be bigger than zero.")
-	return _good("chamfer-features", {"edge_refs": edges, "distance": distance})
+	if angle < 0.0 or angle >= 90.0:
+		return _bad("The chamfer angle has to be more than 0 and less than 90 degrees.")
+	var body := {"edge_refs": edges, "distance": distance}
+	if angle > 0.0:
+		var options := {}
+		for i in edges.size():
+			options[str(i)] = {"angle": angle, "flip": flip}
+		body["edge_options"] = options
+	return _good("chamfer-features", body)
 
 
 func post(owner_part_id: String, request: Dictionary) -> Dictionary:

@@ -667,9 +667,10 @@ headset.
   the faces a mate names); saving a session as a native file and reopening it.
 - **Not confirmed on a headset** — the feel of the laser on the sheet, the size and tilt of the console, the snap
   and pick radii. Rendered once in software (`tests/design_table_render.gd`).
-- **Not built:** most of the flat app's sketch and feature tools, the Modify and Inspect categories, editing
-  an existing sketch, dragging rows out of the tree, sub-assemblies on the table, a feature preview, and anything
-  Quest 2 specific (nothing about Quest 2 has been measured). The full list is in `docs/design-table.md`.
+- **Not built:** the surfacing family, curves, gears, the Inspect category on the table, constrained sketch drag, sketch Pattern / Mirror,
+  Loft guide curves, Mirror / Pattern of features, Extrude profile selection, planes from sketch lines or curves, dragging rows out of the
+  tree, sub-assemblies on the table, and anything Quest 2 specific (nothing about Quest 2 has been measured). Option depth on the existing
+  features is built (Phase 7, `docs/phase-7-plan.md`). The full list is in `docs/design-table.md`; the agreed order is in DIDSA-CAD `docs/roadmap.md`.
 
 ## Known gaps this project doesn't solve yet
 

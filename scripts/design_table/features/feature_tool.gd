@@ -46,6 +46,11 @@ func on_plane_picked(_ed, _spec: Dictionary) -> void:
 	pass
 
 
+func on_pick(_ed, _kind: String) -> void:
+	## the laser just picked something of this kind ("edge", "vertex") for the tool (a tool that needs one kind, then another, moves the pick on here)
+	pass
+
+
 func can_apply(_ed) -> bool:
 	return true
 

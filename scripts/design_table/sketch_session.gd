@@ -48,6 +48,9 @@ var origin_id := "" ## the sketch's real origin point (0, 0): fixed by the backe
 var tool := ""
 var pending: Array = [] ## taps so far for the current tool: [{uv, id}]
 var polygon_sides := 6
+var circle_method := "centre" ## "centre" (a centre and a point on it) | "three" (three points on it)
+var rect_method := "corners" ## "corners" (two opposite corners) | "centre" (the centre and a corner) | "three" (one side and the width)
+var line_method := "ends" ## "ends" (end to end, chained) | "middle" (the middle and one end)
 var busy := false
 
 var points := {} ## id -> Vector2 (sheet mm)
@@ -354,7 +357,29 @@ func set_tool(tool_id: String) -> void:
 
 
 func taps_needed() -> int:
+	if (tool == "circle" and circle_method == "three") or (tool == "rectangle" and rect_method == "three"):
+		return 3
 	return int(TAPS_NEEDED.get(tool, 0))
+
+
+func preview_id() -> String:
+	## What the rubber band should draw for the tool as it is set now (sketch_view.gd's set_preview): the tool, or a variant for another way of making it.
+	if tool == "circle" and circle_method == "three":
+		return "circle3"
+	if tool == "rectangle" and rect_method != "corners":
+		return "rect_centre" if rect_method == "centre" else "rect3"
+	if tool == "line" and line_method == "middle":
+		return "line_mid"
+	return tool
+
+
+func set_method(tool_id: String, method: String) -> void:
+	## Chooses how a circle, rectangle or line is made (taps already placed are forgotten: they meant something else).
+	match tool_id:
+		"circle": circle_method = method
+		"rectangle": rect_method = method
+		"line": line_method = method
+	pending.clear()
 
 
 func finish_chain() -> void:
@@ -626,6 +651,8 @@ func _make_point(taps: Array) -> Dictionary:
 
 
 func _make_line(taps: Array) -> Dictionary:
+	if line_method == "middle":
+		return await _make_line_from_middle(taps)
 	var created: Array = []
 	var a := await _point(taps[0], created)
 	var b := await _point(taps[1], created)
@@ -647,7 +674,34 @@ func _make_line(taps: Array) -> Dictionary:
 	return await _finish("line", calls)
 
 
+func _make_line_from_middle(taps: Array) -> Dictionary:
+	## The first tap is the line's middle, the second one end; the other end is the reflection. A point at the middle is held there (at-midpoint) so it stays in the middle.
+	var created: Array = []
+	var centre_uv: Vector2 = taps[0]["uv"]
+	var end_uv: Vector2 = taps[1]["uv"]
+	if centre_uv.distance_to(end_uv) < 0.01:
+		return {"ok": false, "message": "Pick an end away from the middle."}
+	var mid := await _point(taps[0], created)
+	var b := await _point(taps[1], created)
+	var a := await _point({"uv": SketchMath.mirrored_end(centre_uv, end_uv)}, created)
+	if mid == "" or a == "" or b == "" or a == b or mid == b:
+		await _cleanup(created)
+		return {"ok": false, "message": "A line needs two different ends and a middle between them."}
+	var r := await _post(SKETCH + sketch_id + "/lines", {"start_point_id": a, "end_point_id": b})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make the line: %s" % str(r["error"])}
+	var line_id := str(r["json"]["id"])
+	var calls: Array = [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/lines/" + line_id]]
+	var c := await _post(SKETCH + sketch_id + "/constraints", {"type": "at_midpoint", "point_id": mid, "line_id": line_id})
+	if c["ok"]:
+		calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(c["json"]["id"])])
+	return await _finish("line", calls)
+
+
 func _make_rectangle(taps: Array) -> Dictionary:
+	if rect_method != "corners":
+		return await _make_rectangle_by(taps)
 	var created: Array = []
 	var p1: Vector2 = taps[0]["uv"]
 	var p3: Vector2 = taps[1]["uv"]
@@ -673,7 +727,72 @@ func _make_rectangle(taps: Array) -> Dictionary:
 	return await _finish("rectangle", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/rectangles/" + str(r["json"]["id"])]])
 
 
+func _make_rectangle_by(taps: Array) -> Dictionary:
+	## Centre and a corner (axis-aligned), or one side and the width (turned). The corners are computed (sketch_math.gd); a tap that snapped to an existing point keeps that point
+	## as its corner (the second tap of Centre, the first two of Three).
+	var created: Array = []
+	var centre_method := rect_method == "centre"
+	var uvs: Array = []
+	if centre_method:
+		uvs = SketchMath.rect_from_centre(taps[0]["uv"], taps[1]["uv"])
+	else:
+		uvs = SketchMath.rect_from_three(taps[0]["uv"], taps[1]["uv"], taps[2]["uv"])
+	if uvs.is_empty():
+		return {"ok": false, "message": "Pick the centre and a corner that isn't in line with it." if centre_method else "Pick the two ends of one side, then a point off that side for the width."}
+	var ids: Array = []
+	for i in 4:
+		var pick := {"uv": uvs[i]}
+		if centre_method and i == 2 and str(taps[1].get("id", "")) != "":
+			pick["id"] = taps[1]["id"]
+		elif not centre_method and i < 2 and str(taps[i].get("id", "")) != "":
+			pick["id"] = taps[i]["id"]
+		var id := await _point(pick, created)
+		if id == "":
+			await _cleanup(created)
+			return {"ok": false, "message": "Couldn't place the corners."}
+		ids.append(id)
+	var r := await _post(SKETCH + sketch_id + "/rectangles", {"corner_point_ids": ids, "axis_aligned": centre_method})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make the rectangle: %s" % str(r["error"])}
+	return await _finish("rectangle", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/rectangles/" + str(r["json"]["id"])]])
+
+
+func _make_circle_through(taps: Array) -> Dictionary:
+	## Three points on the circle: its centre and radius are computed, the first point is the radius point, and the other two are held on the circle (point-on-circle).
+	var created: Array = []
+	var fit := SketchMath.circumcircle(taps[0]["uv"], taps[1]["uv"], taps[2]["uv"])
+	if not bool(fit["ok"]):
+		return {"ok": false, "message": "Those three points are in a line. Pick three that aren't."}
+	var rim := await _point(taps[0], created)
+	var second := await _point(taps[1], created)
+	var third := await _point(taps[2], created)
+	var c := await _point({"uv": fit["centre"]}, created)
+	if rim == "" or second == "" or third == "" or c == "" or rim == c:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't place the points."}
+	var r := await _post(SKETCH + sketch_id + "/circles", {"center_point_id": c, "radius_point_id": rim})
+	if not r["ok"]:
+		await _cleanup(created)
+		return {"ok": false, "message": "Couldn't make the circle: %s" % str(r["error"])}
+	var circle_id := str(r["json"]["id"])
+	var calls: Array = [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/circles/" + circle_id]]
+	for pid in [second, third]:
+		if pid == rim:
+			continue
+		var k := await _post(SKETCH + sketch_id + "/constraints", {"type": "point_on_circle", "point_id": pid, "circle_or_arc_id": circle_id})
+		if not k["ok"]:
+			for entry in calls:
+				await api.call(int(entry[0]), str(entry[1]), null)
+			await _cleanup(created)
+			return {"ok": false, "message": "Couldn't hold the points on the circle: %s" % str(k["error"])}
+		calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(k["json"]["id"])])
+	return await _finish("circle", calls)
+
+
 func _make_circle(taps: Array) -> Dictionary:
+	if circle_method == "three":
+		return await _make_circle_through(taps)
 	var created: Array = []
 	var c := await _point(taps[0], created)
 	var rim := await _point(taps[1], created)
@@ -1367,6 +1486,9 @@ func _bodies_for(option_id: String) -> Array:
 		"at_midpoint":
 			if points_sel.size() == 1 and lines_sel.size() == 1:
 				return [{"type": "at_midpoint", "point_id": points_sel[0], "line_id": lines_sel[0]}]
+		"point_on_ellipse":
+			if points_sel.size() == 1 and _ids_of("ellipse").size() == 1:
+				return [{"type": "point_on_ellipse", "point_id": points_sel[0], "ellipse_id": _ids_of("ellipse")[0]}]
 		"point_on_curve":
 			if points_sel.size() == 1 and curves.size() == 1:
 				return [{"type": "point_on_circle", "point_id": points_sel[0], "circle_or_arc_id": curves[0]}]
@@ -1881,7 +2003,7 @@ func _is_internal_angle(c: Dictionary) -> bool:
 
 
 const CONSTRAINT_GLYPHS := {"horizontal": "H", "vertical": "V", "parallel": "//", "perpendicular": "|_", "equal_length": "=", "equal_radius": "=", "collinear": "co",
-	"concentric": "(o)", "point_on_line": "on", "point_on_circle": "on", "at_midpoint": "M", "tangent": "T", "curve_tangent": "T", "fixed": "F"} ## plain letters: they always have a glyph in the font
+	"concentric": "(o)", "point_on_line": "on", "point_on_circle": "on", "at_midpoint": "M", "tangent": "T", "curve_tangent": "T", "point_on_ellipse": "on", "fixed": "F"} ## plain letters: they always have a glyph in the font
 
 
 func constraint_items() -> Array:
@@ -1902,7 +2024,7 @@ func constraint_items() -> Array:
 				owners = [str(c.get("line1_id", "")), str(c.get("line2_id", ""))]
 			"concentric", "equal_radius":
 				owners = [str(c.get("entity1_id", "")), str(c.get("entity2_id", ""))]
-			"point_on_line", "at_midpoint", "point_on_circle":
+			"point_on_line", "at_midpoint", "point_on_circle", "point_on_ellipse":
 				owners = [str(c.get("point_id", ""))]
 			"tangent":
 				owners = [str(c.get("line_id", ""))]

@@ -112,7 +112,7 @@ This page is what was decided and built, what the code turned out to say, and wh
    The new shape appears on the table **and on every other placed instance of that part in the arena**.
    * **Done** (deck) leaves the open sketch. If it was changed the part is rebuilt from it (everything built on the sketch follows) and the part's
      mates are flagged like any edit; an untouched sketch just closes. A sketch is also spent by an Extrude, as before.
-6. **Undo** (deck): takes back sketch steps first, then the features made on the table. (Undo only — like the flat sketcher, no redo.)
+6. **Undo** (deck): takes back sketch steps first, then the features made on the table. (Features and Build-tree edits also have Redo; sketch steps do not, like the flat sketcher.)
 7. **Handle it on the table** (all of this is on the table's copy and **independent of the world**: the real part, the model and
    the arena's scale are never touched):
    * **Grip** the part (one hand) to **move** it; it follows your hand 1:1 (through the same steadiness filter as an arena part).
@@ -162,12 +162,14 @@ speed dial, constraint ribbon and feature picker); a category with more than six
 
 | Category | Tools now | Not built yet (the flat app has them) |
 |---|---|---|
-| **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot (eight, so the row shows five and More, then three) | Ellipse, Ellipse Arc, Spline, Text; Trim, Offset, Convert, Pattern |
-| **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident (the rest, Equal, Collinear, Concentric, Equal radius, Tangent, Fix, are in Select's menu) | |
-| **Feature** | Extrude, Revolve, Fillet, Chamfer, Shell, Mirror | Sweep, Loft, Plane, Pattern, Merge/Subtract/Common/Split, the surfacing and direct-edit tools |
+| **Sketch** | Select, Line, Rectangle, Circle, Arc, Polygon, Point, Slot, Ellipse, Ellipse Arc, Spline, Text, Trim, Offset (the row pages); Circle, Rectangle and Line each have more than one way (3 points / from centre / from middle) | Convert as a tool (references are made silently by aiming at the part instead), sketch Pattern / Mirror, offset of a whole chain, explode polygon / slot / rectangle, constrained drag, auto-constraint inference while drawing |
+| **Constrain** | Dimension, Horizontal, Vertical, Parallel, Perpendicular, Coincident (the rest, Equal, Collinear, Concentric, Equal radius, Tangent, Point on line / curve / ellipse, Midpoint, Fix, are in Select's menu) | Spline tangent |
+| **Feature** | Create: Extrude (both sides, thin wall, draft), Revolve, Loft (thin wall), Sweep, Plane (offset, middle, on corner, to edge, 3 corners). Refine: Fillet, Chamfer (angle, flip), Shell, Mirror. Modify: Pattern (skips, orientation), Boolean (Subtract / Common), Merge, Split | The surfacing family, curves (helix, intersection), gears; Extrude profile selection, Loft guide curves, Mirror / Pattern of features, Pattern ghost-tap skips, Planes from sketch lines / arcs / curves, plane Edit |
+| **Modify** (direct edit) | Move Face (along the normal or X / Y / Z), Delete Face, Move Body (X / Y / Z), Scale Body, Delete Body | Move Face along a sketch line or by an XYZ shift, Move Body rotation and copy-along |
 
-The deck has room for two more categories (the concept art's five); **Modify** (direct edit) and **Inspect** (Measure, Section) are
-the natural ones and are not built. The deck is data (`table_tools.gd`), so adding a tool is one registration plus its behaviour.
+The deck has room for another category; **Inspect** (Measure, Section) is the natural one and is not built on the table (both exist on the wrist tablet).
+The deck is data (`table_tools.gd`), so adding a tool is one registration plus its behaviour. The order the missing items will be built in is in
+DIDSA-CAD `docs/roadmap.md` ("DIDSA-VR: parity gap review and rollout order").
 There is no AI category: the repo has no hook for it.
 
 ## What the code said about the brief
@@ -292,7 +294,7 @@ and the glb `quality` the table fetches (0.5).
 
 ## Not built / known gaps
 
-* The tool list above (the rest of Sketch / Feature, Modify, Inspect, AI).
+* The tool list above (the "Not built yet" column: option depth, surfacing, curves, gears, Inspect, AI).
 * **Editing an existing sketch** is now there (Build tree > a sketch row > Edit), except a sketch the flat app **flipped or turned** (refused with
   a message). The flat app's separate Planes / Surfaces / Curves sections are not built (planes are rows in the feature list; surfaces and curves
   are not shown).
@@ -304,7 +306,7 @@ and the glb `quality` the table fetches (0.5).
 * **Sub-assemblies:** the table edits one *part*. An assembly of other parts is refused with a message.
 * **Persisted dirty flags**, and a bulk "enforce" or mate-health endpoint on the backend (DIDSA-CAD roadmap's reference-drift idea). The
   client-side check above covers planar faces well and others loosely.
-* **A feature preview** before Apply, and redo. (Editing a feature's value afterwards is the Build tree's Edit.)
+* **Redo of sketch steps** (features and Build-tree edits have Redo, and a translucent preview before Apply, Phase 5).
 * **Not handled on the table yet:** rolling about the line between two hands (the stick spins about the slab instead), and snapping a turned part back to the nearest face. Where the **engaged** threshold sits (the laser has to pass within 1.4 x the part's bounding sphere, or be on the sheet), the 90 deg/s stick rate and the A / B speed are guesses until someone tries them.
 * **On a headset:** nothing here has been seen in a headset. The laser, the grips and the layout are tested with simulated
   controllers and rendered once in software; the feel (deck size, tilt, snap radius, ghost label hit radius) needs a session with a

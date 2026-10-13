@@ -84,6 +84,27 @@ func _initialize() -> void:
 			for t in cat[1]:
 				n += 1
 				await _shoot("%02d_%s_%s" % [n, cat[0], t[0]], str(cat[0]), str(t[0]), true)
+	if OS.get_environment("DOCK_MODE") != "before": # Extrude with its optional groups switched on (7.1), the longest the panel gets for it
+		ed.options["ext_thin"] = true
+		await _shoot("90_extrude_thin", "feature", "extrude", true)
+		ed.options["ext_thin"] = false
+		ed.options["ext_draft"] = true
+		await _shoot("91_extrude_draft", "feature", "extrude", true)
+		ed.options["ext_draft"] = false
+		ed.options["ch_angle_on"] = true
+		await _shoot("92_chamfer_angle", "feature", "chamfer", true)
+		ed.options["ch_angle_on"] = false
+		ed.options["lo_thin"] = true
+		await _shoot("93_loft_thin", "feature", "loft", true)
+		ed.options["lo_thin"] = false
+		ed.options["pat_type"] = "circular"
+		await _shoot("94_pattern_circular", "feature", "pattern", true)
+		ed.options["pat_type"] = "rectangular"
+		for m in ["midplane", "vertex", "edge", "points"]: # Create Plane's other ways (7.3)
+			ed.options["pl_method"] = m
+			ed._update_options()
+			await _shoot("95_plane_" + m, "feature", "create_plane", true)
+		ed.options["pl_method"] = "offset"
 	print("SMOKE dock render saved %d pictures" % _saved)
 	quit()
 

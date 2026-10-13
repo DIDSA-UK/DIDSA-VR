@@ -27,7 +27,7 @@ func _initialize() -> void:
 	# Move Face
 	table.manager.activate("move_face")
 	await rig.frames(3)
-	print("SMOKE Move Face picks faces and lists Distance, Reverse, Clear, Apply (off): ", ed.state == "pick_faces" and table.props.option_ids() == ["mf_offset", "mf_flip", "clear_faces", "apply"] and table.props.option_button("apply").disabled)
+	print("SMOKE Move Face picks faces and lists Distance, Reverse, Clear, Apply (off): ", ed.state == "pick_faces" and table.props.option_ids() == ["mf_dir_normal", "mf_dir_x", "mf_dir_y", "mf_dir_z", "mf_offset", "mf_flip", "clear_faces", "apply"] and table.props.option_button("apply").disabled)
 	print("SMOKE ...with no face it refuses: ", not ed.tools["move_face"].request(ed)["ok"])
 	ed.faces = [{"kind": "face", "body_id": "body_box", "index": 3, "key": "body_box:3"}]
 	ed.option_typed("mf_offset", "8")

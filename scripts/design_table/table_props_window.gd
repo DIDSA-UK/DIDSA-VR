@@ -9,6 +9,14 @@ extends "res://scripts/diegetic_panel.gd"
 
 signal option_pressed(option_id: String)
 
+## Layout (Phase 7.0 of docs/phase-7-plan.md): buttons are laid out two to a line, toggles four to a line, so a long option list needs fewer lines.
+## An option may carry "wide": true for a line of its own, and "group": "<name>" for a caption over a run of related options. Apply and any text
+## longer than HALF_LINE_CHARS always take a whole line. Not verified on a headset: the row height is about 2.6 cm on the 0.40 m panel.
+const ROW_HEIGHT := 44.0
+const ROW_GAP := 6
+const CHIP_WIDTH := 110.0
+const HALF_LINE_CHARS := 24
+
 
 var table ## design_table.gd
 var _title: Label
@@ -59,7 +67,7 @@ func _build_content() -> Control:
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_rows = VBoxContainer.new()
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation", 8)
+	_rows.add_theme_constant_override("separation", ROW_GAP)
 	_scroll.add_child(_rows)
 	column.add_child(_scroll)
 	scroll_target = _scroll
@@ -156,28 +164,56 @@ func _rebuild() -> void:
 		_rows.remove_child(child)
 		child.queue_free()
 	_buttons.clear()
-	var toggles: Array = []
-	var group: HFlowContainer = null
+	var group: HFlowContainer = null # the run of toggles being laid out side by side
+	var pair: HBoxContainer = null # the line of buttons being filled, two to a line
+	var current_group := ""
 	for o in _options:
+		var id := str(o.get("id", ""))
+		var named := str(o.get("group", ""))
+		if named != current_group:
+			current_group = named
+			group = null
+			pair = null
+			if named != "":
+				_add_group_caption(named)
 		var b := _make_button(o)
-		_buttons[str(o.get("id", ""))] = b
+		_buttons[id] = b
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if bool(o.get("toggle", false)):
+			pair = null
 			if group == null:
 				group = HFlowContainer.new()
-				group.add_theme_constant_override("h_separation", 8)
-				group.add_theme_constant_override("v_separation", 8)
+				group.add_theme_constant_override("h_separation", ROW_GAP)
+				group.add_theme_constant_override("v_separation", ROW_GAP)
 				_rows.add_child(group)
 			group.add_child(b)
-			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		else:
-			group = null # the next toggles start a new group
-			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			if str(o.get("id", "")) in ["apply", "fix_apply"]:
-				b.theme_type_variation = &"ButtonAccent"
+			continue
+		group = null # the next toggles start a new group
+		var is_apply := id in ["apply", "fix_apply"]
+		if is_apply:
+			b.theme_type_variation = &"ButtonAccent"
+		if is_apply or bool(o.get("wide", false)) or str(o.get("text", "")).length() > HALF_LINE_CHARS:
+			pair = null # a whole line of its own
 			_rows.add_child(b)
+			continue
+		if pair == null or pair.get_child_count() >= 2:
+			pair = HBoxContainer.new()
+			pair.add_theme_constant_override("separation", ROW_GAP)
+			_rows.add_child(pair)
+		pair.add_child(b)
 	_show_tool()
 	if table != null:
 		set_wanted(table.is_open())
+
+
+func _add_group_caption(named: String) -> void:
+	## A small dim caption over a thin rule, so a long list reads in blocks (nothing is hidden or folded).
+	var rule := HSeparator.new()
+	_rows.add_child(rule)
+	var caption := Label.new()
+	caption.text = named.to_upper()
+	caption.theme_type_variation = &"LabelSmall"
+	_rows.add_child(caption)
 
 
 func _make_button(o: Dictionary) -> Button:
@@ -187,12 +223,12 @@ func _make_button(o: Dictionary) -> Button:
 	b.set_pressed_no_signal(bool(o.get("pressed", false)))
 	b.disabled = bool(o.get("disabled", false))
 	b.clip_text = true
-	b.custom_minimum_size = Vector2(0, 56)
-	b.add_theme_font_size_override("font_size", tokens.font_small)
+	b.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	b.add_theme_font_size_override("font_size", tokens.font_tiny)
 	if b.toggle_mode:
 		b.add_theme_stylebox_override("pressed", tokens.selected_box(_accent))
 		b.add_theme_stylebox_override("hover_pressed", tokens.selected_box(_accent))
-		b.custom_minimum_size = Vector2(150, 56)
+		b.custom_minimum_size = Vector2(CHIP_WIDTH, ROW_HEIGHT)
 	var id := str(o.get("id", ""))
 	b.pressed.connect(func() -> void:
 		UiFeedback.haptic(_right, "tick")

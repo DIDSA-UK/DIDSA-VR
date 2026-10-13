@@ -225,8 +225,9 @@ func _initialize() -> void:
 	await frames(2)
 	find_button(table.tree._build_rows, "Edit").pressed.emit()
 	await frames(2)
-	print("SMOKE Edit opens the numeric pad on the current value: ", main._keyboard.is_open())
-	main._keyboard.close()
+	print("SMOKE Edit on an extrude opens the Extrude tool with the feature's settings (Phase 7.1; the number pad is for the other types): ", table.active_tool == "extrude" and not table.editor.editing.is_empty() and float(table.editor.options["depth"]) == 12.0 and bool(table.editor.options["boss"]) and not main._keyboard.is_open())
+	table.manager.deactivate()
+	await frames(2)
 	fake.calls.clear()
 	await table.build.edit_typed("body_box", "abc")
 	await table.build.edit_typed("body_box", "0")
@@ -240,6 +241,25 @@ func _initialize() -> void:
 	await table.editor.undo()
 	var undone: Array = calls_to("PATCH /document/parts/PART_BOX/extrude-features/body_box")
 	print("SMOKE ...exactly that: ", undone.size() == 1 and undone[0][1] == {"start_distance": 0.0, "end_distance": 12.0} and calls_to("DELETE").is_empty() and rows()[1].contains("Boss 12 mm"))
+
+	# --- Edit in the Extrude tool (7.1): a settings change is one PATCH, taken back by Undo
+	row_button("Extrude 1").pressed.emit()
+	await frames(2)
+	find_button(table.tree._build_rows, "Edit").pressed.emit()
+	await frames(2)
+	table.editor.option_typed("depth", "18")
+	table.editor.options["ext_thin"] = true
+	table.editor.options["ext_wall"] = 1.5
+	fake.calls.clear()
+	await table.editor.apply_feature()
+	var tool_patch: Array = calls_to("PATCH /document/parts/PART_BOX/extrude-features/body_box")
+	var tool_body: Dictionary = tool_patch[0][1] if tool_patch.size() == 1 else {}
+	print("SMOKE Apply in the tool PATCHes the extrude once, with the new span and the wall, and no profile or bodies: ", tool_body.get("end_distance") == 18.0 and tool_body.get("thickness") == 1.5 and not tool_body.has("sketch_feature_id") and not tool_body.has("target_body_ids"), " ", tool_body)
+	print("SMOKE ...the tool is left and Undo is available: ", table.editor.editing.is_empty() and table.editor.can_undo())
+	fake.calls.clear()
+	await table.editor.undo()
+	var tool_undo: Array = calls_to("PATCH /document/parts/PART_BOX/extrude-features/body_box")
+	print("SMOKE ...Undo puts the old span back: ", tool_undo.size() == 1 and tool_undo[0][1].get("end_distance") == 12.0)
 
 	# --- Hide / Show: only the table's copy
 	var arena_mesh_before = box.mesh

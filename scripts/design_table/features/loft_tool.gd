@@ -13,9 +13,13 @@ func options(ed) -> Array:
 		{"id": "boss", "text": "Boss", "toggle": true, "pressed": bool(ed.options["boss"])},
 		{"id": "cut", "text": "Cut", "toggle": true, "pressed": not bool(ed.options["boss"])},
 		{"id": "ruled", "text": "Ruled", "toggle": true, "pressed": bool(ed.options["ruled"])},
+		{"id": "lo_thin", "text": "Thin wall", "toggle": true, "pressed": bool(ed.options["lo_thin"])},
 		{"id": "clear_curves", "text": "Clear"},
 		{"id": "apply", "text": "Apply (%d sections)" % sections(ed).size(), "disabled": not can_apply(ed)},
 	]
+	if bool(ed.options["lo_thin"]):
+		list.insert(4, {"id": "lo_closed", "text": "From closed", "toggle": true, "pressed": bool(ed.options["lo_closed"])}) # a chip beside Thin wall, the value beside Clear
+		list.insert(5, {"id": "lo_wall", "text": "Wall %.2f mm" % float(ed.options["lo_wall"])})
 	if ed.session == null and ed.editing.is_empty():
 		list.insert(list.size() - 1, ed.targets_option())
 	return list
@@ -40,6 +44,12 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.options["boss"] = false
 		"ruled":
 			ed.options["ruled"] = not bool(ed.options["ruled"])
+		"lo_thin":
+			ed.options["lo_thin"] = not bool(ed.options["lo_thin"])
+		"lo_closed":
+			ed.options["lo_closed"] = not bool(ed.options["lo_closed"])
+		"lo_wall":
+			ed.type_option("lo_wall", "Wall thickness (mm)")
 		"clear_curves":
 			ed.clear_picks()
 		"targets":
@@ -69,7 +79,8 @@ func preview_route() -> String:
 
 
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
-	return PartFeatures.loft_request(sections(ed), bool(ed.options["boss"]), bool(ed.options["ruled"]), ed.extrude_targets())
+	var o: Dictionary = ed.options
+	return PartFeatures.loft_request(sections(ed), bool(o["boss"]), bool(o["ruled"]), ed.extrude_targets(), float(o["lo_wall"]) if bool(o["lo_thin"]) else 0.0, bool(o["lo_closed"]))
 
 
 func edits_in_tool() -> bool:
@@ -77,20 +88,31 @@ func edits_in_tool() -> bool:
 
 
 func patch_keys() -> Array:
-	return ["sections", "mode", "ruled", "target_body_ids"]
+	return ["sections", "mode", "ruled", "target_body_ids", "thickness", "thin_from_closed_profile"]
 
 
 func load_from_row(ed, row: Dictionary) -> void:
 	ed.options["boss"] = str(row.get("mode", "boss")) == "boss"
 	ed.options["ruled"] = bool(row.get("ruled", false))
+	ed.options["lo_thin"] = row.get("thickness") != null
+	ed.options["lo_wall"] = absf(float(row["thickness"])) if row.get("thickness") != null else 2.0
+	ed.options["lo_closed"] = bool(row.get("thin_from_closed_profile", false))
 	ed.curve_picks = []
 	for sec in row.get("sections", []):
 		var sid := str((sec as Dictionary).get("sketch_feature_id", ""))
 		ed.curve_picks.append({"kind": "curve", "sketch_feature_id": sid, "sketch_id": "", "entity_type": "", "entity_id": "", "key": "section:%s" % sid})
 
 
+func patch_body(req: Dictionary) -> Dictionary:
+	## Turning the wall OFF is an explicit null (the update route reads an omitted one as "leave it").
+	var body: Dictionary = (req["body"] as Dictionary).duplicate()
+	if not body.has("thickness"):
+		body["thickness"] = null
+	return body
+
+
 func summary(f: Dictionary, _features: Array) -> String:
-	return "%s, %d sections%s" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", (f.get("sections", []) as Array).size(), ", ruled" if bool(f.get("ruled", false)) else ""]
+	return "%s, %d sections%s%s" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", (f.get("sections", []) as Array).size(), ", ruled" if bool(f.get("ruled", false)) else "", ", thin wall" if f.get("thickness") != null else ""]
 
 
 func done_text() -> String:

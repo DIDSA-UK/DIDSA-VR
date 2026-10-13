@@ -16,6 +16,7 @@ extends RefCounted
 ##   2+ circles / arcs       Concentric, Equal radius (two arcs sharing an end also: Tangent)
 ##   point + line            On line, Midpoint, Distance
 ##   point + circle / arc    On curve
+##   point + ellipse         On ellipse
 ##   line + circle / arc     Tangent
 ##   any                     Fix, Construction / Solid (lines, circles, arcs), Delete, Clear
 
@@ -23,12 +24,12 @@ const TEXT := {
 	"horizontal": "Horizontal", "vertical": "Vertical", "parallel": "Parallel", "perpendicular": "Perpendicular",
 	"equal_length": "Equal", "collinear": "Collinear", "concentric": "Concentric", "equal_radius": "Equal radius",
 	"tangent": "Tangent", "coincident": "Coincident", "point_on_line": "On line", "at_midpoint": "Midpoint",
-	"point_on_curve": "On curve", "fix": "Fix", "delete": "Delete", "clear": "Clear",
+	"point_on_curve": "On curve", "point_on_ellipse": "On ellipse", "fix": "Fix", "delete": "Delete", "clear": "Clear",
 }
 
 
 static func counts(selection: Array) -> Dictionary:
-	var out := {"point": 0, "line": 0, "circle": 0, "arc": 0, "curve": 0}
+	var out := {"point": 0, "line": 0, "circle": 0, "arc": 0, "curve": 0, "ellipse": 0}
 	for e in selection:
 		var kind := str(e.get("kind", ""))
 		out[kind] = int(out.get(kind, 0)) + 1
@@ -64,6 +65,8 @@ static func constraint_ids(selection: Array, session = null) -> Array:
 		out.append_array(["point_on_line", "at_midpoint"])
 	elif n == 2 and c["point"] == 1 and c["curve"] == 1:
 		out.append("point_on_curve")
+	elif n == 2 and c["point"] == 1 and c["ellipse"] == 1:
+		out.append("point_on_ellipse")
 	elif n == 2 and c["line"] == 1 and c["curve"] == 1:
 		out.append("tangent")
 	return out

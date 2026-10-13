@@ -50,8 +50,8 @@ const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
-const PICK_STATES := ["pick_edges", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## the states where the laser picks things on the part itself
-const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## where choosing a picking tool is allowed to switch the state
+const PICK_STATES := ["pick_edges", "pick_vertices", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## the states where the laser picks things on the part itself
+const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_vertices", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## where choosing a picking tool is allowed to switch the state
 const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
 const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot"] ## settings that may be negative or zero (a move along an axis)
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
@@ -77,11 +77,15 @@ var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Mea
 var part_id := "" ## the PART DEFINITION being edited (every instance of it changes), resolved from the seated node's occurrence
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
 var chosen_plane := "" ## "XY" | "XZ" | "YZ" when it's on a reference plane
-var edges: Array = [] ## picked edge entities (Fillet / Chamfer)
+var edges: Array = [] ## picked edge entities (Fillet / Chamfer, Create Plane)
+var vertices: Array = [] ## picked vertex entities {kind: "vertex", body_id, index, key} (Create Plane)
+var edge_limit := 0 ## how many edges one pick may hold (0 = any number); the oldest goes when it is exceeded
+var vertex_limit := 0 ## likewise for vertices
+var plane_base2: Dictionary = {} ## the second plane of a midplane (the first is plane_base)
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "pl_method": "offset", "ch_angle_on": false, "ch_angle": 45.0, "ch_flip": false, "ch_mixed": false, "mf_dir": "normal", "pat_skip": [], "pat_orient": "rotate_with_pattern", "lo_thin": false, "lo_wall": 2.0, "lo_closed": false, "ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
 	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
 	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
@@ -323,6 +327,8 @@ func _process(_delta: float) -> void:
 			_hover_sketch(origin, dir)
 		"pick_edges":
 			_hover_edges(origin, dir)
+		"pick_vertices":
+			_hover_vertices(origin, dir)
 		"pick_faces":
 			_hover_faces(origin, dir)
 		"pick_bodies":
@@ -408,7 +414,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
-		view.set_preview(tool, taps, _snap["uv"], session.polygon_sides)
+		view.set_preview(session.preview_id(), taps, _snap["uv"], session.polygon_sides)
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
@@ -496,6 +502,47 @@ func _hover_curves(origin: Vector3, dir: Vector3) -> void:
 	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
 
 
+func _hover_vertices(origin: Vector3, dir: Vector3) -> void:
+	## Like the edge hover, but only a corner counts: aim at a face close to the corner (the pick takes the nearer of a corner and an edge within reach).
+	var hit := _copy_ray(origin, dir)
+	_hover_face = {}
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	hovering = _claim(float(hit["distance"]))
+	if not hovering:
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	var entity := LaserPick.entity_for(table.table_copy, hit, origin)
+	_hover_face = entity if str(entity.get("kind", "")) == "vertex" else {}
+	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
+
+
+func _toggle_vertex() -> void:
+	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "vertex":
+		return
+	for i in vertices.size():
+		if vertices[i]["key"] == _hover_face["key"]:
+			vertices.remove_at(i)
+			_refresh_lit()
+			_update_options()
+			schedule_preview()
+			return
+	vertices.append(_hover_face.duplicate())
+	if vertex_limit > 0 and vertices.size() > vertex_limit:
+		vertices.pop_front()
+	_refresh_lit()
+	table.set_status("%d corner(s) picked." % vertices.size())
+	_update_options()
+	var feature_tool = tools.get(table.active_tool)
+	if feature_tool != null:
+		feature_tool.on_pick(self, "vertex")
+
+
+func vertex_refs() -> Array:
+	return vertices.map(func(v): return PartFeatures.vertex_ref(str(v["body_id"]), int(v["index"])))
+
+
 func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 	var hit := _copy_ray(origin, dir)
 	_hover_face = {}
@@ -524,6 +571,8 @@ func _on_right_pressed(action: String) -> void:
 			await _sketch_trigger()
 		"pick_edges":
 			_toggle_edge()
+		"pick_vertices":
+			_toggle_vertex()
 		"pick_faces":
 			_toggle_face()
 		"pick_bodies":
@@ -609,6 +658,26 @@ func _show_sketch_pick() -> void:
 	if seed_sketch == "":
 		table.set_status(_sketch_pick_hint())
 	_update_options()
+
+
+func _method_hint() -> String:
+	## What to tap for the circle / rectangle / line way just chosen.
+	match [session.tool, session.circle_method if session.tool == "circle" else (session.rect_method if session.tool == "rectangle" else session.line_method)]:
+		["circle", "three"]:
+			return "Pick three points on the circle."
+		["circle", "centre"]:
+			return "Pick the centre, then a point on the circle."
+		["rectangle", "centre"]:
+			return "Pick the centre, then a corner."
+		["rectangle", "three"]:
+			return "Pick the two ends of one side, then a point for the width."
+		["rectangle", "corners"]:
+			return "Pick two opposite corners."
+		["line", "middle"]:
+			return "Pick the middle of the line, then one end."
+		["line", "ends"]:
+			return "Point at the sheet and pull the trigger to place the start, then the end."
+	return ""
 
 
 func _sketch_pick_hint() -> String:
@@ -1399,6 +1468,10 @@ func dimension_typed(ghost_key: String, text: String) -> void:
 
 func on_tool_changed(tool_id: String) -> void:
 	bodies.clear() # the bodies another tool picked are not this tool's targets
+	edge_limit = 0 # (Create Plane limits how many edges / corners it holds; no other tool does)
+	vertex_limit = 0
+	vertices.clear()
+	plane_base2 = {}
 	_targets_return = ""
 	if (seed_sketch != "" or not seed_sketches.is_empty()) and tool_id != _seed_tool:
 		seed_sketch = "" # the picked sketch was for another tool
@@ -1466,7 +1539,17 @@ func _update_option_list() -> void:
 			if session != null:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
 		"line":
-			list = [{"id": "finish_line", "text": "Finish line"}]
+			if session != null:
+				list = [{"id": "lm_ends", "text": "End to end", "toggle": true, "pressed": session.line_method == "ends"}, {"id": "lm_middle", "text": "From middle", "toggle": true, "pressed": session.line_method == "middle"}]
+				if session.line_method == "ends":
+					list.append({"id": "finish_line", "text": "Finish line"})
+		"circle":
+			if session != null:
+				list = [{"id": "cm_centre", "text": "Centre", "toggle": true, "pressed": session.circle_method == "centre"}, {"id": "cm_three", "text": "3 points", "toggle": true, "pressed": session.circle_method == "three"}]
+		"rectangle":
+			if session != null:
+				list = [{"id": "rm_corners", "text": "Corners", "toggle": true, "pressed": session.rect_method == "corners"}, {"id": "rm_centre", "text": "From centre", "toggle": true, "pressed": session.rect_method == "centre"},
+					{"id": "rm_three", "text": "3 points", "toggle": true, "pressed": session.rect_method == "three"}]
 		"spline":
 			list = [{"id": "finish_spline", "text": "Finish spline (%d points)" % (session.pending.size() if session != null else 0), "disabled": session == null or session.pending.size() < 2}]
 		"text":
@@ -1537,6 +1620,12 @@ func on_option(option_id: String) -> void:
 		_update_options()
 		schedule_preview()
 		return
+	if session != null and (option_id.begins_with("lm_") or option_id.begins_with("cm_") or option_id.begins_with("rm_")):
+		session.set_method({"l": "line", "c": "circle", "r": "rectangle"}[option_id[0]], option_id.substr(3))
+		_refresh_view()
+		_update_options()
+		table.set_status(_method_hint())
+		return
 	match option_id:
 		"sides_down":
 			if session != null:
@@ -1593,6 +1682,14 @@ func option_typed(key: String, text: String) -> void:
 		table.set_status("Enter a number bigger than zero.")
 		UiFeedback.haptic(table._right, "error")
 		return
+	if key == "ch_angle" and cleaned.to_float() >= 90.0:
+		table.set_status("A chamfer angle has to be less than 90 degrees.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	if key == "ext_angle" and cleaned.to_float() >= 90.0:
+		table.set_status("A draft angle has to be less than 90 degrees.")
+		UiFeedback.haptic(table._right, "error")
+		return
 	if (key == "angle" or key == "pat_angle") and cleaned.to_float() > 360.0:
 		table.set_status("An angle can't be more than 360 degrees.")
 		UiFeedback.haptic(table._right, "error")
@@ -1637,8 +1734,8 @@ func _toggle_face() -> void:
 
 
 func _refresh_lit() -> void:
-	## Lights the picked bodies and curves together (a tool may hold both).
-	highlight.set_set(table.table_copy, bodies + curve_picks)
+	## Lights what is picked together (a tool may hold several kinds: bodies and curves, or edges and vertices).
+	highlight.set_set(table.table_copy, bodies + curve_picks + edges + vertices)
 
 
 func set_pick_mode(mode: String) -> void:
@@ -1656,6 +1753,12 @@ func set_pick_mode(mode: String) -> void:
 		"plane":
 			if state in PICK_FROM_STATES:
 				set_state("pick_plane")
+		"vertices":
+			if state in PICK_FROM_STATES:
+				set_state("pick_vertices")
+		"edges":
+			if state in PICK_FROM_STATES:
+				set_state("pick_edges")
 	_refresh_lit()
 
 
@@ -1714,7 +1817,7 @@ func _toggle_edge() -> void:
 	for i in edges.size():
 		if edges[i]["key"] == _hover_face["key"]:
 			edges.remove_at(i)
-			highlight.set_set(table.table_copy, edges)
+			_refresh_lit()
 			_update_options()
 			schedule_preview()
 			return
@@ -1729,7 +1832,12 @@ func _toggle_edge() -> void:
 		schedule_preview()
 		return
 	edges.append(_hover_face.duplicate())
-	highlight.set_set(table.table_copy, edges)
+	if edge_limit > 0 and edges.size() > edge_limit:
+		edges.pop_front()
+	_refresh_lit()
+	var feature_tool = tools.get(table.active_tool)
+	if feature_tool != null:
+		feature_tool.on_pick(self, "edge")
 	table.set_status("%d edge(s) picked. Set the size, then Apply." % edges.size())
 	_update_options()
 	schedule_preview()
@@ -1851,6 +1959,8 @@ func extrude_targets() -> Array:
 func extrude_distances() -> Array:
 	## [start, end] along the sketch normal. A boss grows along it (out of a face); a cut goes the other way (into the part).
 	var depth := float(options["depth"])
+	if bool(options["ext_sym"]):
+		return [-depth * 0.5, depth * 0.5] # both sides of the sketch plane, so Boss / Cut / Flip make no difference to the span
 	var sign := 1.0 if bool(options["boss"]) else -1.0
 	if bool(options["flip"]):
 		sign = -sign
@@ -2056,6 +2166,14 @@ func _sync_text_settings() -> void:
 		session.text_rotation = float(options["text_rot"])
 
 
+func _plane_name(spec: Dictionary) -> String:
+	if spec.has("fixed"):
+		return "%s plane" % str(spec["fixed"])
+	if spec.has("plane_feature_id"):
+		return table.build.name_of_feature(str(spec["plane_feature_id"]))
+	return "a face"
+
+
 func selection_summary() -> Array:
 	## What the active tool has picked so far, one line per kind, for the Properties panel's "Selected" list.
 	var lines: Array = []
@@ -2078,6 +2196,10 @@ func selection_summary() -> Array:
 			lines.append("Axis: %s" % ("a sketch line, set" if revolve_axis != "" else "not picked yet"))
 	if not edges.is_empty():
 		lines.append("Edges: %d" % edges.size())
+	if not vertices.is_empty():
+		lines.append("Corners: %d" % vertices.size())
+	if not plane_base.is_empty() and table.active_tool == "create_plane":
+		lines.append("Plane: %s" % ("%s, %s" % [_plane_name(plane_base), _plane_name(plane_base2)] if not plane_base2.is_empty() else _plane_name(plane_base)))
 	if not faces.is_empty():
 		lines.append("Faces: %d" % faces.size())
 	if not bodies.is_empty():
@@ -2098,6 +2220,7 @@ func selection_summary() -> Array:
 func clear_picks() -> void:
 	## Forgets the picked edges, faces and bodies (a feature tool's Clear).
 	edges.clear()
+	vertices.clear()
 	faces.clear()
 	bodies.clear()
 	curve_picks.clear()

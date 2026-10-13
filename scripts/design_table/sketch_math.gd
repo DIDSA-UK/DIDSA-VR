@@ -116,3 +116,44 @@ static func plane_from_face_triangles(points: PackedVector3Array) -> Dictionary:
 
 static func _vec(a: Array) -> Vector3:
 	return Vector3(float(a[0]), float(a[1]), float(a[2]))
+
+
+# --- Construction methods (Phase 7.4): the maths of the shapes made from taps other than the plain ones ----------------
+
+static func circumcircle(a: Vector2, b: Vector2, c: Vector2) -> Dictionary:
+	## The circle through three points: {ok, centre, radius}. ok is false when they are in a line (or two coincide).
+	var d := 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+	if absf(d) < 1e-6:
+		return {"ok": false, "centre": Vector2.ZERO, "radius": 0.0}
+	var a2 := a.length_squared()
+	var b2 := b.length_squared()
+	var c2 := c.length_squared()
+	var centre := Vector2((a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d, (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d)
+	return {"ok": true, "centre": centre, "radius": centre.distance_to(a)}
+
+
+static func rect_from_centre(centre: Vector2, corner: Vector2) -> Array:
+	## The four corners, in order, of the axis-aligned rectangle with this centre and one corner. [] when it has no width or no height.
+	var dx := absf(corner.x - centre.x)
+	var dy := absf(corner.y - centre.y)
+	if dx < 0.01 or dy < 0.01:
+		return []
+	return [centre + Vector2(-dx, -dy), centre + Vector2(dx, -dy), centre + Vector2(dx, dy), centre + Vector2(-dx, dy)]
+
+
+static func rect_from_three(p1: Vector2, p2: Vector2, p3: Vector2) -> Array:
+	## The four corners, in order, of the rectangle whose first side is p1 to p2 and whose width reaches p3's side of that line (a turned rectangle).
+	## [] when the first side has no length or p3 is on the line.
+	var side := p2 - p1
+	if side.length() < 0.01:
+		return []
+	var normal := Vector2(-side.y, side.x).normalized()
+	var width := (p3 - p1).dot(normal)
+	if absf(width) < 0.01:
+		return []
+	return [p1, p2, p2 + normal * width, p1 + normal * width]
+
+
+static func mirrored_end(centre: Vector2, end: Vector2) -> Vector2:
+	## The other end of a line drawn from its middle: the first end reflected through the centre.
+	return centre * 2.0 - end
