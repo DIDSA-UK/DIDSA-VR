@@ -83,9 +83,15 @@ to the walls, and the world clipped around it. A viewer for now: no wall draggin
   Part or any Part nested in it, plus its own geometry (owner = its parent, occurrence = the one opened). If the **same Part is placed more
   than once, all its placements are hidden** while a room is open: a room edits the shared definition, and the later Preview feature
   shows the instances updated. Distinguishing individual instances would need the JSON endpoint's `occurrence_path`.
-- **Room parts are in `room_parts`, not `grabbable_parts`**, and have no collision. The grab, nudge and select code saves a part's pose to
-  the backend relative to the arena root; for a part in a room (different frame and scale) that would write a wrong pose into the
-  document. R3 brings per-room editing; until then a room is look-and-walk-round only.
+- **Room parts are in `room_parts`, not `grabbable_parts`**, and have no collision, so R1 is a viewer. This is a temporary guard, not a
+  design choice: the room is meant to be a world within the world with the same manipulation. What actually blocks parity (checked in
+  the code, and corrected from an earlier, overstated note that said a move would "write a wrong pose"):
+  `mates_tool.persist_pose` only saves a part that `is_managed()` says is a top-level occurrence of the single loaded root Part
+  (`_current_owner_part_id`). A room part's owner is the room's Part, so a move would be **refused silently: shown, but never saved**
+  (a save, which exports the backend's document, would lose it). Nothing is corrupted. The save path itself is right for a room: in a
+  room glb the room's Part is the root, so a child's node transform is exactly the owner-relative transform the backend stores.
+  What is missing is that the tools hold ONE root (`_current_owner_part_id`, `occurrences`, `mates`) instead of the focused room's.
+  See "R2: interaction parity" below.
 - **The room is always the 3 m cube** and the content is scaled to fit it (so a 100 mm part opens at about 21:1, a 12 m assembly at about
   1:6). The spawn size rule `max(3 m, content + margin)` is in `RoomVolume.spawn_size`, but content is always fitted, so it never grows.
 - **Close from the Assembly Tree** (button toggle) for now; the room console that will own Close, scale and bounds is R3.
@@ -100,7 +106,27 @@ to the walls, and the world clipped around it. A viewer for now: no wall draggin
 - `Show all` (Tools tab) will re-show the hidden world copy under an open room; harmless but untidy.
 - The design table's tree has no Room button (its `_add_row_actions` is its own).
 
-## R2 to R5
+## R2: interaction parity (next; replaces the old R2 to R5 ordering)
+
+The room is a world within a world: grab to move, two-hand to turn and scale, A/B to send and retrieve, select, hide, undo, all inside it. Do
+this before the glass look and wall dragging, because it decides how the rest is built.
+
+1. **Parts become grabbable in rooms** (join `grabbable_parts` with collision). Picking and gripping already respect the walls (R0).
+2. **Persistence per room**: `mates_tool` (and colour / measure) take the owner Part from the part itself, not a single global: a top-level
+   occurrence of ITS room's root is managed; nested ones stay unmanaged exactly as in the world today.
+3. **Whole-room gestures**: `TwoHandModel` already takes any root node, so each room gets its own instance on `content_root` (own scale
+   limits). A grip on empty space goes to the room containing the hand, else to the world (a focus filter on `_hand_free`); one hand
+   moves the content, two hands move / turn / scale it about their midpoint. Room scale is therefore the content scale.
+4. **Room-scoped group operations**: Hide all / Show all / Reverse / Isolate, undo, tool modes act on the focused room.
+5. **Send / retrieve** across the wall: the drop-to-add flow from the scope document, plus parts pushed out of the walls clipping and
+   snapping back.
+6. Mates, Colours, Sections, Measure per room (the focused room's root).
+
+Then the old R2 (draggable walls, grab handle, scale control, glass look, tabs), R3 remainder (console, group selection), R4 and R5 as in
+the scope document, section 11.
+
+## Earlier R2 to R5 notes
+
 
 As in the scope document, section 11 (R2 now also takes: the room grab handle, wall dragging, the scale control, the tab list). Each needs the previous; R3 (per-room tool and undo scoping, group selection) is the
 largest piece and should get its own plan once R1 has shown how much of `main.gd` has to move.
