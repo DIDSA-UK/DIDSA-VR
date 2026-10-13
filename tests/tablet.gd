@@ -169,6 +169,13 @@ func _initialize() -> void:
 	await open_category("assemble")
 	print("SMOKE opening a category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assemble" and ui.selected_tool_id == "mates" and tab.manager.active_id == "" and not r.mates_tool_active)
 	print("SMOKE a category with two tools (Mates, Rooms) shows the chip strip: ", ui._strip_scroll.visible)
+	ui.select_tool("rooms")
+	await process_frame
+	await process_frame
+	print("SMOKE Assemble > Rooms builds its page: the table part's world button and the Delete-selected button: ", find_button(func(b): return b.text.begins_with("Table part, in the world") or b.text.begins_with("Put a part")) != null and find_button(func(b): return b.text.begins_with("Delete")) != null)
+	ui.select_tool("mates")
+	await process_frame
+	await process_frame
 	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE the header switch turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)

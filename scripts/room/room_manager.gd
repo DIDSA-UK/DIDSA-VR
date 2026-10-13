@@ -47,6 +47,7 @@ var glass := true ## the see-through wall look for new and open rooms (Settings 
 var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
 var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
 var _cued: Dictionary = {} ## hand -> the part it carries that currently shows the drop cue
+var preview_message := "" ## what the last Push / mode change had to say (the console shows it)
 var previews: Dictionary = {} ## room instance id -> its WorldPreview
 var preview_live := true ## the previews follow the rooms' parts as they move (Settings: Auto-update world preview)
 var preview_pulse := false ## the previews breathe (Settings: Pulse world preview)
@@ -244,7 +245,8 @@ func set_preview_mode(room: Node, mode: int) -> bool:
 			return false
 		wp.rebuild(_world_parts())
 		if not wp.available():
-			status.emit("Nothing to show: %s isn't placed in the world copy that is open." % room.label)
+			preview_message = "Nothing to show: %s isn't placed in the world that is open." % room.label
+			status.emit(preview_message)
 			preview_changed.emit(room)
 			return false
 	var ok: bool = wp.set_mode(mode)
@@ -264,9 +266,10 @@ func push_preview(room: Node) -> void:
 	var wp := preview_of(room)
 	if wp.mode != WorldPreview.Mode.PREVIEW:
 		await set_preview_mode(room, WorldPreview.Mode.PREVIEW)
-	if is_instance_valid(room):
+	if is_instance_valid(room) and wp.mode == WorldPreview.Mode.PREVIEW:
 		wp.push()
-		status.emit("Pushed %d changed part%s to the world preview." % [wp.changed_count(), "" if wp.changed_count() == 1 else "s"])
+		preview_message = "Pushed %d changed part%s to the world preview." % [wp.changed_count(), "" if wp.changed_count() == 1 else "s"]
+		status.emit(preview_message)
 		preview_changed.emit(room)
 
 

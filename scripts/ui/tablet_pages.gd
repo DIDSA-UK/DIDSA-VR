@@ -549,6 +549,14 @@ func _build_rooms_page() -> Control:
 	page.tree_exiting.connect(func() -> void:
 		if rm.rooms_changed.is_connected(fill):
 			rm.rooms_changed.disconnect(fill))
+	var table = _main.design_table if _main.get("design_table") != null else null
+	if table != null and table.world_preview != null:
+		var world_button := _button("Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)], func() -> void: pass)
+		world_button.pressed.connect(func() -> void:
+			if table.world_preview.available():
+				table.world_preview.cycle()
+			world_button.text = "Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)] if table.world_preview.available() else "Put a part on the design table first")
+		page.add_child(world_button)
 	var del := _button(rm.delete_selected_label(), func() -> void: rm.delete_selected_press())
 	rm.delete_state_changed.connect(func() -> void:
 		if is_instance_valid(del):
@@ -1064,6 +1072,8 @@ func _build_settings_appearance() -> Control:
 	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
 	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
 	page.add_child(_mode_toggle("Glass room walls", func(on: bool) -> void: _main.set_room_glass(on), _main.room_glass()))
+	page.add_child(_mode_toggle("Auto-update world preview", func(on: bool) -> void: _main.set_world_preview_auto(on), _main.world_preview_auto()))
+	page.add_child(_mode_toggle("Pulse world preview", func(on: bool) -> void: _main.set_world_preview_pulse(on), _main.world_preview_pulse()))
 	page.add_child(_mode_toggle("Room console pedestal", func(on: bool) -> void: _main.set_room_pedestal(on), _main.room_pedestal()))
 	return page
 

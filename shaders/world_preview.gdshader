@@ -22,8 +22,7 @@ void fragment() {
 	if (clipped(world_pos)) {
 		discard;
 	}
-	NORMAL = FRONT_FACING ? NORMAL : -NORMAL;
-	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float facing = abs(dot(normalize(NORMAL), normalize(VIEW))); // (a double-sided surface's back faces arrive with their normal already turned; abs() is right either way)
 	float breathe = pulse > 0.0 ? pulse * sin((TIME + time_offset) * 2.4) : 0.0;
 	ALBEDO = tint.rgb;
 	EMISSION = tint.rgb * 0.25;

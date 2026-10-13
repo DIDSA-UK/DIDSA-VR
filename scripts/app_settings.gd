@@ -33,6 +33,8 @@ var wheel_size: int = 1 ## index into tool_wheel.gd's SIZE_SCALES (Small / Norma
 var haptics_level: int = 2 ## index into ui_feedback.gd's HAPTIC_LEVELS (Off / Low / Normal / High)
 var max_rooms: int = 4 ## the most Assembly Rooms open at once (room_registry.gd; 1..16)
 var room_pedestal: bool = true ## the faint column from a room's console down to the floor
+var world_preview_auto: bool = true ## a room's world preview follows its parts as they move (off: it shows the last Push)
+var world_preview_pulse: bool = false ## the world preview breathes (aesthetic)
 var group_deadzone: int = 1 ## the dead zone when you grip a part inside a sub-assembly (controller.gd group_deadzone): 0 Off, 1 Small (2 cm), 2 Medium (4 cm)
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
 
@@ -48,6 +50,8 @@ func load_from_disk() -> void:
 	wheel_enabled = bool(config.get_value("comfort", "wheel_enabled", wheel_enabled))
 	max_rooms = clampi(int(config.get_value("rooms", "max_rooms", max_rooms)), 1, 16)
 	room_glass = bool(config.get_value("rooms", "glass", room_glass))
+	world_preview_auto = bool(config.get_value("rooms", "preview_auto", world_preview_auto))
+	world_preview_pulse = bool(config.get_value("rooms", "preview_pulse", world_preview_pulse))
 	group_deadzone = clampi(int(config.get_value("rooms", "group_deadzone", group_deadzone)), 0, 2)
 	room_pedestal = bool(config.get_value("rooms", "pedestal", room_pedestal))
 	wheel_size = clampi(int(config.get_value("comfort", "wheel_size", wheel_size)), 0, 2)
@@ -71,6 +75,8 @@ func save_to_disk() -> void:
 	config.set_value("rooms", "max_rooms", max_rooms)
 	config.set_value("rooms", "glass", room_glass)
 	config.set_value("rooms", "group_deadzone", group_deadzone)
+	config.set_value("rooms", "preview_auto", world_preview_auto)
+	config.set_value("rooms", "preview_pulse", world_preview_pulse)
 	config.set_value("rooms", "pedestal", room_pedestal)
 	config.set_value("comfort", "wheel_size", wheel_size)
 	config.set_value("appearance", "theme", ui_theme)
@@ -154,6 +160,16 @@ func set_room_pedestal(on: bool) -> void:
 
 func set_room_glass(on: bool) -> void:
 	room_glass = on
+	save_to_disk()
+
+
+func set_world_preview_auto(on: bool) -> void:
+	world_preview_auto = on
+	save_to_disk()
+
+
+func set_world_preview_pulse(on: bool) -> void:
+	world_preview_pulse = on
 	save_to_disk()
 
 

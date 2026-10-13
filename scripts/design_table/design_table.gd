@@ -45,6 +45,7 @@ const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const TableUI := preload("res://scripts/design_table/table_ui.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const TableManip := preload("res://scripts/design_table/table_manip.gd")
+const TablePreview := preload("res://scripts/design_table/table_preview.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
 const NewDocument := preload("res://scripts/design_table/new_document.gd")
 const TableBuild := preload("res://scripts/design_table/table_build.gd")
@@ -125,6 +126,7 @@ var window_anchor := Vector3.ZERO ## console frame: the spot on the sketch plane
 var user_scale := 1.0 ## how much bigger / smaller than fitted the part has been made with two hands (the pivot carries it; fit_scale does not change)
 var build ## table_build.gd: the Build tree of the part on the table (the tree window's Build tab is its view)
 var manip ## table_manip.gd: gripping, turning, scaling and nudging the part, and whether the table is engaged
+var world_preview ## table_preview.gd: the seated part's place in the world shown as a ghost or a preview while it is on the table
 
 var _left: XRController3D
 var _right: XRController3D
@@ -223,6 +225,10 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	resizer.setup(self)
 	manip = TableManip.new()
 	manip.setup(self)
+	world_preview = TablePreview.new()
+	add_child(world_preview)
+	world_preview.setup(self)
+	world_preview.pulse = main.world_preview_pulse() if main.has_method("world_preview_pulse") else false
 	manip.engaged_changed.connect(set_engaged)
 	ui.undo_pressed.connect(func() -> void: editor.undo())
 	ui.redo_pressed.connect(func() -> void: editor.redo())
@@ -654,6 +660,7 @@ func seat(part: MeshInstance3D) -> bool:
 	UiFeedback.haptic(_right, "confirm")
 	part_seated.emit(part)
 	editor.on_seated() # finds which part this is, then opens plane picking (a coroutine: not waited for)
+	world_preview.on_seated()
 	return true
 
 
@@ -977,6 +984,8 @@ func on_model_replaced() -> void:
 
 
 func _clear_seat() -> void:
+	if world_preview != null:
+		world_preview.on_cleared()
 	if manip != null:
 		manip.cancel() # no grip outlives the part it was on
 	if ui != null:

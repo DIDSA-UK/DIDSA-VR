@@ -239,6 +239,8 @@ func _add_room_manager() -> void:
 	room_manager.setup(self, view_modes)
 	room_manager.glass = _settings.room_glass
 	room_manager.pedestal = _settings.room_pedestal
+	room_manager.preview_live = _settings.world_preview_auto
+	room_manager.preview_pulse = _settings.world_preview_pulse
 	room_manager.status.connect(_set_status)
 	_two_hand.focus = func(hand: Node3D) -> bool: return RoomRegistry.room_at(hand.global_position) == -1 # a grip on empty space inside a room is the room's
 
@@ -259,6 +261,24 @@ func room_glass() -> bool:
 func set_room_glass(on: bool) -> void:
 	_settings.set_room_glass(on)
 	room_manager.set_glass(on)
+
+
+func world_preview_auto() -> bool:
+	return _settings.world_preview_auto
+
+
+func set_world_preview_auto(on: bool) -> void:
+	_settings.set_world_preview_auto(on)
+	room_manager.set_preview_live(on)
+
+
+func world_preview_pulse() -> bool:
+	return _settings.world_preview_pulse
+
+
+func set_world_preview_pulse(on: bool) -> void:
+	_settings.set_world_preview_pulse(on)
+	room_manager.set_preview_pulse(on)
 
 
 const GROUP_DEADZONES := [0.0, 0.02, 0.04] ## metres, by AppSettings.group_deadzone

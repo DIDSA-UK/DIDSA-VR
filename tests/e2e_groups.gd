@@ -54,10 +54,12 @@ func _initialize() -> void:
 	var root_id: String = source["document"]["root_part_id"]
 	var occ_a := ""
 	var occ_b := ""
+	var s_id := ""
 	for p in source["document"]["parts"]:
 		if p["id"] == root_id:
 			occ_a = p["occurrences"][0]["id"]
 			occ_b = p["occurrences"][1]["id"]
+			s_id = p["occurrences"][0]["resolved_part_id"]
 	var secrets_path := "user://e2e_groups_secrets.cfg"
 	secrets.save(secrets_path)
 	var packed: PackedScene = load("res://scenes/main.tscn")
@@ -141,6 +143,29 @@ func _initialize() -> void:
 			break
 		await process_frame
 	print("SMOKE undo moves the leaves back on screen and puts the stored pose back: ", restored and not is_nan(back_x) and absf(other_a.global_position.x - start_a.x) < 0.001)
+
+	# --- the world preview: open the sub-assembly in a room and show its world copy at both placements
+	var manager = main.room_manager
+	var room = await manager.open_room(s_id, "Sub", root_id, occ_a)
+	if room == null:
+		print("SMOKE FAILED: the room did not open - status: ", main.status_text)
+		quit(1)
+		return
+	await _wait_for(func() -> bool: return room.interactive and room.parts.all(func(p): return p.has_meta("group_path")))
+	print("SMOKE the room's parts know their place in the sub-assembly (paths of one step, relative to its own root): ", room.parts.size() == 2 and room.parts.all(func(p): return p.get_meta("group_path").size() == 1))
+	var ok: bool = await manager.set_preview_mode(room, 2) # Preview
+	var wp = manager.preview_of(room)
+	print("SMOKE Preview finds both placements of the sub-assembly in the real world (", wp.instances.size(), "): ", ok and wp.instances.size() == 2)
+	var coincide := true
+	for entry in wp._proxies:
+		var seed_match: Node3D = null
+		for inst_seed in wp.instances[entry["inst"]]["seeds"]:
+			if str(inst_seed.get_meta("occurrence_id", "")) == str(entry["src"].get_meta("occurrence_id", "")):
+				seed_match = inst_seed
+		if seed_match == null or entry["node"].global_position.distance_to(seed_match.global_position) > 0.001:
+			coincide = false
+	print("SMOKE ...and with nothing edited every preview part sits exactly on its world twin (real units, both placements): ", coincide and wp._proxies.size() == 4)
+	print("SMOKE ...none of them tinted as changed: ", wp.changed_count() == 0)
 	quit(0)
 
 
