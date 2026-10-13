@@ -1,9 +1,9 @@
 extends RefCounted
 ## Puts parts under the room clip: every part, the world's and each room's, has to wear shaders/section_clip.gdshader once rooms exist, because a
 ## plain glTF StandardMaterial3D cannot discard by a uniform. This is the section tool's wrap (section_tool.gd), kept apart so the two do not fight:
-## `assign()` installs the clip material (carrying the part's colour) and sets its `room_slot` and the part's `room_slot` meta; `release()` puts the
+## `assign()` installs the clip material (carrying the part's colour) and sets the part's `room_slot` (a per-INSTANCE shader parameter, so the part's
+## edge lines and overlays, which are child nodes with their own materials, carry it too: `sync_node`) and its `room_slot` meta; `release()` puts the
 ## part's own material back. section_tool.gd's wrap ADOPTS a part already wearing this material instead of replacing it (and losing the slot).
-## Edge lines and hover / selection overlays are separate nodes with their own materials; they are not handled here yet (plan task for R1).
 
 const ClipShader := preload("res://shaders/section_clip.gdshader")
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
@@ -26,15 +26,27 @@ static func assign(part: MeshInstance3D, slot: int) -> void:
 		part.set_meta(PRIOR, prior)
 		part.set_meta(WRAPPED, mat)
 		part.material_override = mat
-	mat.set_shader_parameter("room_slot", slot)
+	part.set_instance_shader_parameter("room_slot", slot)
+	sync_children(part)
+
+
+static func sync_node(part: Node, node: Node) -> void:
+	## Gives one child of a part (its EdgeLines, a hover / pick overlay) the part's room slot, or "ignore rooms" (-2) if the part is under no room clip.
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).set_instance_shader_parameter("room_slot", int(part.get_meta(RoomRegistry.META)) if part.has_meta(RoomRegistry.META) else -2)
+
+
+static func sync_children(part: Node) -> void:
+	for child in part.get_children():
+		if child is MeshInstance3D and (child.name == "EdgeLines" or child.has_meta("highlight_kind")):
+			sync_node(part, child)
 
 
 static func release(part: MeshInstance3D) -> void:
 	## Back to exactly what the part wore before assign(). A part we did not wrap (the section tool got there first, say) just loses its slot.
 	part.remove_meta(RoomRegistry.META)
-	var mat := part.material_override as ShaderMaterial
-	if mat != null:
-		mat.set_shader_parameter("room_slot", -2)
+	part.set_instance_shader_parameter("room_slot", -2)
+	sync_children(part)
 	if part.has_meta(WRAPPED):
 		if part.material_override == part.get_meta(WRAPPED):
 			part.material_override = part.get_meta(PRIOR)
@@ -48,22 +60,18 @@ static func reconcile(parts: Array) -> void:
 	## (colour_tool.gd paints by setting material_override) or that has never been wrapped, keeping each part in the room its meta says.
 	if RoomRegistry.rooms.is_empty():
 		for part in parts:
-			if part is MeshInstance3D and part.has_meta(WRAPPED):
+			if is_instance_valid(part) and part is MeshInstance3D and part.has_meta(WRAPPED):
 				release(part)
 		return
 	for part in parts:
-		if not (part is MeshInstance3D):
-			continue
+		if not is_instance_valid(part) or not (part is MeshInstance3D):
+			continue # (a part freed since the list was made, say a room that just closed)
 		var slot := RoomRegistry.slot_of(part)
 		var mat := part.material_override as ShaderMaterial
-		if mat == null or mat.shader != ClipShader or _slot_of_material(mat) != slot:
+		if mat == null or mat.shader != ClipShader or not part.has_meta(RoomRegistry.META) or int(part.get_meta(RoomRegistry.META)) != slot:
 			assign(part, slot)
-
-
-static func _slot_of_material(mat: ShaderMaterial) -> int:
-	## The material's room_slot; null (never set, so the shader's default) means -2, "ignore rooms".
-	var value = mat.get_shader_parameter("room_slot")
-	return -2 if value == null else int(value)
+		else:
+			sync_children(part) # edge lines / overlays built since the last pass
 
 
 static func _albedo(material: Material, part: MeshInstance3D) -> Color:

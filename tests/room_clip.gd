@@ -113,9 +113,9 @@ func _initialize() -> void:
 	var wrap_part := box_part(holder, Vector3(1, 1, 1), Vector3(0, 0, 0), Color(0.1, 0.6, 0.3))
 	RoomClip.assign(wrap_part, 2)
 	var mat := wrap_part.material_override as ShaderMaterial
-	print("SMOKE assign wraps the part in the clip shader with its colour and room slot: ", mat != null and mat.shader == ClipShader and (mat.get_shader_parameter("albedo_color") as Color).is_equal_approx(Color(0.1, 0.6, 0.3)) and int(mat.get_shader_parameter("room_slot")) == 2 and RoomRegistry.slot_of(wrap_part) == 2)
+	print("SMOKE assign wraps the part in the clip shader with its colour and room slot: ", mat != null and mat.shader == ClipShader and (mat.get_shader_parameter("albedo_color") as Color).is_equal_approx(Color(0.1, 0.6, 0.3)) and int(wrap_part.get_instance_shader_parameter("room_slot")) == 2 and RoomRegistry.slot_of(wrap_part) == 2)
 	RoomClip.assign(wrap_part, 1)
-	print("SMOKE moving a part to another room keeps one material (no stacking): ", wrap_part.material_override == mat and int(mat.get_shader_parameter("room_slot")) == 1)
+	print("SMOKE moving a part to another room keeps one material (no stacking): ", wrap_part.material_override == mat and int(wrap_part.get_instance_shader_parameter("room_slot")) == 1)
 	RoomClip.release(wrap_part)
 	print("SMOKE release puts the part's own look back and forgets the slot: ", wrap_part.material_override == null and not wrap_part.has_meta(RoomRegistry.META) and RoomRegistry.slot_of(wrap_part) == -1)
 	var painted := box_part(holder, Vector3(1, 1, 1), Vector3(0, 0, 0))
@@ -135,7 +135,7 @@ func _initialize() -> void:
 	await process_frame
 	tool.set_active(true, null)
 	tool.reconcile([section_part])
-	print("SMOKE the section tool adopts a room part's clip material (slot and colour survive): ", section_part.material_override == before and int((before as ShaderMaterial).get_shader_parameter("room_slot")) == 3 and ((before as ShaderMaterial).get_shader_parameter("albedo_color") as Color).is_equal_approx(Color(0.2, 0.3, 0.9)))
+	print("SMOKE the section tool adopts a room part's clip material (slot and colour survive): ", section_part.material_override == before and int(section_part.get_instance_shader_parameter("room_slot")) == 3 and ((before as ShaderMaterial).get_shader_parameter("albedo_color") as Color).is_equal_approx(Color(0.2, 0.3, 0.9)))
 	tool.set_active(false)
 	print("SMOKE ...and leaves it in place when the tool goes off: ", section_part.material_override == before)
 	tool.free()
@@ -147,7 +147,7 @@ func _initialize() -> void:
 	print("SMOKE with no rooms, reconcile leaves parts alone: ", rec.material_override == null)
 	RoomRegistry.add_room(RoomVolume.make(Transform3D(Basis.IDENTITY, Vector3(0, 1, -3)), Vector3(3, 3, 3)))
 	RoomClip.reconcile([rec])
-	print("SMOKE with a room, reconcile wraps a world part (slot -1): ", rec.material_override is ShaderMaterial and int((rec.material_override as ShaderMaterial).get_shader_parameter("room_slot")) == -1)
+	print("SMOKE with a room, reconcile wraps a world part (slot -1): ", rec.material_override is ShaderMaterial and int(rec.get_instance_shader_parameter("room_slot")) == -1)
 	var repainted := StandardMaterial3D.new()
 	repainted.albedo_color = Color(0.5, 0.1, 0.1)
 	rec.material_override = repainted # colour_tool.gd paints by replacing the override

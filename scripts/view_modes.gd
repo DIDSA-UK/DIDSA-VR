@@ -16,6 +16,7 @@ enum Mode { SHADED, SHADED_EDGES, WIREFRAME }
 const NAMES: Array[String] = ["Shaded", "Shaded + edges", "Wireframe"]
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
 const EdgeOverlay := preload("res://scripts/edge_overlay.gd")
+const RoomClip := preload("res://scripts/room/room_clip.gd")
 const EDGE_SHADER := preload("res://shaders/edge_lines.gdshader")
 const EDGE_COLOUR := Color(0.14, 0.14, 0.15) ## over faces: dark, like the flat app's #333
 const WIRE_COLOUR := Color(0.62, 0.74, 0.86) ## alone: light, so it reads against the dark rooms too
@@ -73,6 +74,8 @@ func apply_all() -> void:
 		return
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
 		apply_to(node)
+	for node in get_tree().get_nodes_in_group("room_parts"): # the parts in Assembly Rooms follow the same mode
+		apply_to(node)
 	if _main != null and _main.get("design_table") != null:
 		_main.design_table.apply_view_mode()
 
@@ -92,7 +95,8 @@ func apply_to(node: Node) -> void:
 			lines.material_override = edge_material(part)
 	elif lines != null:
 		lines.visible = false
-	if part.is_in_group("grabbable_parts"):
+	RoomClip.sync_children(part) # the edge lines are cut by the same room walls as the part
+	if part.is_in_group("grabbable_parts") or part.is_in_group("room_parts"):
 		part.layers = 1 if shows_faces() else 0
 
 

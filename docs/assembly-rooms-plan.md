@@ -59,28 +59,55 @@ record of what each phase found. Phases are scope > plan > implement; R0 is impl
 - **Occurrence tree**: `assembly-mesh.glb` is flat, leaf instances only, with `occurrence_id` / `owner_part_id`; group membership
   comes from `GET /parts/{id}/occurrences`.
 
-## R1: a fixed room you can open a sub-assembly into
+## R1: a fixed room you can open a sub-assembly into (done, headless- and software-render-confirmed; not on a headset)
 
-Goal: tree "Room" button on a sub-assembly row opens a 3 m room, with that sub-assembly's meshes inside it, clipped, with the world
-clipped around it. No wall dragging, no console yet.
+Goal: a **Room** button on an Assembly Tree row opens that Part in a 3 m room in front of you, with the content scaled to fit, clipped
+to the walls, and the world clipped around it. A viewer for now: no wall dragging, no console, no editing inside the room.
 
-1. `scripts/room/room.gd`: a `Node3D` per room: content root, `RoomVolume`, scale, close. Mirrors the replace/reset sequence in
-   `main.gd._show_model`, but for its own root. Registers with `RoomRegistry`, tags parts with `RoomClip.assign`.
-2. Fetch a sub-assembly's mesh by part id (`GET /parts/{sub_id}/assembly-mesh.glb`) and tag it with `MeshIdentity` as now.
-3. Seed handling: hide (or ghost) the world's copy of the opened occurrence while the room is open; restore on close.
-4. Call `RoomClip.reconcile` once a frame from `main.gd._process` while rooms exist, over `_arena_parts()`.
-5. Propagate `room_slot` to edge lines and highlight overlays (`view_modes.gd`, `face_highlight.gd`).
-6. Wire `LaserPick`/grip filters for the design-table path if its picks can meet room parts (check `table_editor.gd`).
-7. Tests: room open/close restores the world; headless like `tests/section_tool.gd`; a render check with real glTF nodes.
-8. Settings: `max_rooms`.
+### What was built
+
+| Piece | File | What it does |
+|---|---|---|
+| Room | `scripts/room/room.gd` | A `Node3D` at the box's centre holding the Part's own `assembly-mesh.glb` (parsed and identity-tagged exactly like the world's), a coloured wireframe for the walls, and a `content_root` carrying the room's scale. Opens fitted to 70% of the room on its tightest axis, content middle at the room middle. `scale_text()` ("4.2:1"). |
+| Manager | `scripts/room/room_manager.gd` | Fetches a Part's mesh, opens/closes/toggles rooms, hides the world's copy while a room is open and restores it on close, reconciles the clip every frame while rooms exist, closes everything when the world's model is replaced. Respects the `max_rooms` limit with a message. |
+| Placement | `scripts/room/room_placement.gd` | In front of the user on the floor, turned to their heading (flattened), clear of every other room; tries along the user's sides and further out; null if nothing is clear. |
+| Per-instance slot | `shaders/clip_common.gdshaderinc`, `scripts/room/room_clip.gd` | `room_slot` is now an `instance uniform` (set on the MeshInstance3D), so a part's faces, its **edge lines** and its **hover / pick overlays** all carry it without separate materials. `view_modes.gd` and `face_highlight.gd` sync it. |
+| Tree button | `scripts/assembly_tree_window.gd` | Rows get a **Room** button (reads **Close room** while open). Not on the root row. Rows now know their parent Part (how the world's copy is found). |
+| Setting | `scripts/app_settings.gd`, `scripts/main.gd`, `scripts/ui/tablet_pages.gd` | `max_rooms` persisted; Settings > Display > Max rooms (1, 2, 3, 4, 6, 8). |
+| Tests | `tests/room_manager.gd` (29 headless), `tests/room_render.gd` (real shader), extended `tests/assembly_tree_window.gd` | Registered in `run_all.sh` / `ci_render.sh`. |
+
+### Decisions made while building (please check)
+
+- **How the world's copy is found.** The backend walks the whole tree and tags every node with its *immediate parent Part* (`owner_part_id`)
+  and the Occurrence that placed it (`router.py`, `_walk_assembly_glb_instances`). So the nodes to hide are those owned by the opened
+  Part or any Part nested in it, plus its own geometry (owner = its parent, occurrence = the one opened). If the **same Part is placed more
+  than once, all its placements are hidden** while a room is open: a room edits the shared definition, and the later Preview feature
+  shows the instances updated. Distinguishing individual instances would need the JSON endpoint's `occurrence_path`.
+- **Room parts are in `room_parts`, not `grabbable_parts`**, and have no collision. The grab, nudge and select code saves a part's pose to
+  the backend relative to the arena root; for a part in a room (different frame and scale) that would write a wrong pose into the
+  document. R3 brings per-room editing; until then a room is look-and-walk-round only.
+- **The room is always the 3 m cube** and the content is scaled to fit it (so a 100 mm part opens at about 21:1, a 12 m assembly at about
+  1:6). The spawn size rule `max(3 m, content + margin)` is in `RoomVolume.spawn_size`, but content is always fitted, so it never grows.
+- **Close from the Assembly Tree** (button toggle) for now; the room console that will own Close, scale and bounds is R3.
+
+### Not done / not verified
+
+- On a headset: placement comfort, the wall wireframe's visibility, the clip cost (still the R0 open item).
+- Real backend round trip (`tests/e2e_*` style): the mesh fetch reuses `main.gd._get_mesh_result`, but opening a room against a live backend
+  was not run here. The DIDSA-CAD backend source was read (not run).
+- Walls are a plain wireframe; the glass look, proximity grid, room colour on tabs and corner brackets are R2.
+- Wall dragging, scale control, grab handle for the room: R2/R3.
+- `Show all` (Tools tab) will re-show the hidden world copy under an open room; harmless but untidy.
+- The design table's tree has no Room button (its `_add_row_actions` is its own).
 
 ## R2 to R5
 
-As in the scope document, section 11. Each needs the previous; R3 (per-room tool and undo scoping, group selection) is the
+As in the scope document, section 11 (R2 now also takes: the room grab handle, wall dragging, the scale control, the tab list). Each needs the previous; R3 (per-room tool and undo scoping, group selection) is the
 largest piece and should get its own plan once R1 has shown how much of `main.gd` has to move.
 
 ## Immediate next steps
 
 1. Run the R0 clip on a headset or PCVR with 1, 4 and 8 rooms and a real assembly; record GPU ms (Settings > Display already shows it).
 2. If it is too slow, spike the stencil variant behind the same registry API (nothing above the shader changes).
-3. Start R1 once the cost is known to be acceptable.
+3. Try R1 on a headset: open a sub-assembly from the Assembly Tree, walk round the room, close it; report what feels wrong (size, distance,
+   wall visibility) before R2 builds on it.

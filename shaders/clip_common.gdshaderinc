@@ -5,7 +5,7 @@
 //      of the plane), so zooming a sketch right in does not fill the room with the part. It applies only to materials that ask for it with
 //      the per-material `window_clip` switch (the design table's copy of the part, its edge lines and its overlays), never to the arena's parts.
 //   3. ROOM boxes (scripts/room/room_registry.gd, docs/assembly-rooms-scope.md): finite oriented boxes that each hold their own assembly. A material says
-//      which room it belongs to with the per-material `room_slot`: a slot >= 0 means "I live in that room: show me only inside its box", -1 means "I am
+//      which room it belongs to with the per-instance `room_slot` (set on the MeshInstance3D, scripts/room/room_clip.gd): a slot >= 0 means "I live in that room: show me only inside its box", -1 means "I am
 //      the world: hide me inside every room's box", and the default -2 means "ignore rooms" (the design table's copy, overlays that have not been told).
 //      The boxes arrive as one small float texture (`room_clip_tex`, one row per room) so the number of rooms is not baked into the shader;
 //      `room_clip_count` is the number of rows in use (0: rooms off, and the test below costs one comparison).
@@ -26,7 +26,7 @@ global uniform int room_clip_count;
 global uniform sampler2D room_clip_tex; // RGBA float, 4 texels per room (row = slot): three rows of the world -> room-local 3x4 matrix (xyz = basis row, w = translation), then the half extents (xyz); a negative half extent = no room in this slot
 
 uniform bool window_clip = false;
-uniform int room_slot = -2; // see above: >= 0 a room's content, -1 the world, -2 ignore rooms
+instance uniform int room_slot = -2; // see above: >= 0 a room's content, -1 the world, -2 ignore rooms. PER INSTANCE (set_instance_shader_parameter), so a part's faces, its edge lines and its overlays all carry it without each needing their own material
 
 const int ROOM_CLIP_MAX = 16; // rows the texture holds (room_registry.gd's HARD_MAX)
 

@@ -59,6 +59,7 @@ var _settings := preload("res://scripts/app_settings.gd").new() ## project folde
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
+const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
@@ -78,6 +79,7 @@ var _assembly_tree_window: Node
 var _calculator_window: Node
 var _image_viewer_window: Node
 var _browser_window: Node
+var room_manager: Node ## Assembly Rooms: opens a Part in a clipped box of space — see scripts/room/room_manager.gd and docs/assembly-rooms-scope.md
 var design_table: Node ## milestone 2: the design table — see scripts/design_table/design_table.gd
 var _worst_frame_ms := 0.0 ## longest frame since the readout last refreshed: steady ~22 ms = pacing/cap, spikes = hitches
 var _perf_refresh_left := 0.0
@@ -111,6 +113,7 @@ func _ready() -> void:
 	_add_colour_tool()
 	_add_section_tool()
 	_add_view_modes() # after the section tool: its edge shader uses the section clip's global uniforms
+	_add_room_manager() # before the tree window: its rows have a Room button
 	_add_assembly_tree_window()
 	_add_calculator_window()
 	_add_image_viewer_window()
@@ -140,6 +143,7 @@ func _ready() -> void:
 	_measure_tool.configure_backend(backend_url, api_key)
 	_colour_tool.configure_backend(backend_url, api_key)
 	_assembly_tree_window.configure_backend(backend_url, api_key)
+	room_manager.configure_backend(backend_url, api_key)
 	design_table.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
 	_start_xr()
@@ -222,6 +226,24 @@ func app_settings() -> RefCounted:
 
 func save_view_mode(mode: int) -> void:
 	_settings.set_view_render_mode(mode)
+
+
+func _add_room_manager() -> void:
+	RoomRegistry.set_max_rooms(_settings.max_rooms)
+	room_manager = preload("res://scripts/room/room_manager.gd").new()
+	room_manager.name = "RoomManager"
+	add_child(room_manager)
+	room_manager.setup(self, view_modes)
+	room_manager.status.connect(_set_status)
+
+
+func max_rooms() -> int:
+	return RoomRegistry.max_rooms
+
+
+func set_max_rooms(count: int) -> void:
+	_settings.set_max_rooms(count)
+	RoomRegistry.set_max_rooms(count)
 
 
 func _add_assembly_tree_window() -> void:
@@ -1223,6 +1245,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
+	room_manager.on_model_replaced() # rooms hold copies of parts of the model that is about to go
 	command_stack.clear()
 	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()
