@@ -136,6 +136,9 @@ func _ready() -> void:
 	$XROrigin3D/RightController.colour_tool = _colour_tool
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
+	_apply_group_deadzone()
+	$XROrigin3D/LeftController.group_message.connect(_set_status)
+	$XROrigin3D/RightController.group_message.connect(_set_status)
 	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
@@ -256,6 +259,22 @@ func room_glass() -> bool:
 func set_room_glass(on: bool) -> void:
 	_settings.set_room_glass(on)
 	room_manager.set_glass(on)
+
+
+const GROUP_DEADZONES := [0.0, 0.02, 0.04] ## metres, by AppSettings.group_deadzone
+
+func group_deadzone_level() -> int:
+	return _settings.group_deadzone
+
+
+func set_group_deadzone(level: int) -> void:
+	_settings.set_group_deadzone(level)
+	_apply_group_deadzone()
+
+
+func _apply_group_deadzone() -> void:
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.group_deadzone = GROUP_DEADZONES[clampi(_settings.group_deadzone, 0, 2)]
 
 
 func max_rooms() -> int:
@@ -1342,6 +1361,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	# Which of these are grounded / mated (for is_locked()/constrained motion).
 	# Fire and forget: it's a couple of GETs, and nothing in the scene waits on it.
 	_mates_tool.refresh_state(_resolved_part_id)
+	room_manager.index_world() # which sub-assembly each part is in (fire and forget; until it lands a grip takes single parts)
 	view_modes.apply_all() # the saved view mode (edges / wireframe) for the parts that were just loaded
 	mark_clean() # what is loaded is the baseline: nothing to lose yet
 	restore_stale_mates()

@@ -116,12 +116,21 @@ func reload(glb_bytes: PackedByteArray) -> bool:
 		return false
 	MeshIdentity.tag_scene(gltf_state, scene)
 	var was_interactive := interactive
+	var origins := {} # where each part was when the room opened, kept across the reload so the world preview can tell what the edit changed
+	for p in parts:
+		if is_instance_valid(p) and p.has_meta("room_orig"):
+			origins["%s|%s" % [p.get_meta("owner_part_id", ""), p.get_meta("occurrence_id", "")]] = p.get_meta("room_orig")
 	set_interactive(false) # takes the old parts out of the grab group and frees their colliders
 	for old in content_root.get_children():
 		content_root.remove_child(old)
 		old.queue_free()
 	parts.clear()
 	_adopt(scene)
+	for p in parts: # (a part that is new since the room opened has no entry: it is "added")
+		p.remove_meta("room_orig")
+		var key := "%s|%s" % [p.get_meta("owner_part_id", ""), p.get_meta("occurrence_id", "")]
+		if origins.has(key):
+			p.set_meta("room_orig", origins[key])
 	if volume.slot >= 0:
 		for p in parts:
 			RoomClip.assign(p, volume.slot)
@@ -138,6 +147,7 @@ func _adopt(scene: Node) -> void:
 			parts.append(node)
 			node.add_to_group("room_parts")
 			node.set_meta("room_id", get_instance_id())
+			node.set_meta("room_orig", (node as Node3D).transform) # (the pose it opened at: what a world preview measures the edit against)
 
 
 func owner_part_ids() -> Dictionary:

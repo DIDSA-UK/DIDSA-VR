@@ -20,6 +20,7 @@ var mesh_quality := 0.5
 var mesh_tier := ""
 var mesh_include_hidden := false
 
+var _name_cache: Dictionary = {} ## Part id -> its name
 var _occurrence_cache: Dictionary = {} ## owner Part id -> Array of OccurrenceResponse dictionaries, until that Part changes
 
 
@@ -36,6 +37,16 @@ func occurrences_of(owner_part_id: String, fresh: bool = false) -> Array:
 	if r["ok"]:
 		_occurrence_cache[owner_part_id] = rows
 	return rows
+
+
+func part_name(part_id: String) -> String:
+	## The Part's own name (cached); its id if the backend won't say.
+	if _name_cache.has(part_id):
+		return _name_cache[part_id]
+	var r: Dictionary = await api.request(HTTPClient.METHOD_GET, "/document/parts/%s" % part_id, null)
+	var name_ := str((r["json"] as Dictionary).get("name", "")) if r["ok"] and r["json"] is Dictionary else ""
+	_name_cache[part_id] = name_ if name_ != "" else part_id
+	return _name_cache[part_id]
 
 
 func forget(owner_part_id: String) -> void:

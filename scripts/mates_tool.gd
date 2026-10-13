@@ -102,6 +102,8 @@ var _ghost: Node3D = null ## the preview: a see-through copy of the driven part,
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
 var _busy := false
+var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
+var _group_persist: Dictionary = {}
 var _current_owner_part_id := "" ## the ACTIVE root: the one the Mates page lists and creates mates on (the world's loaded root)
 var _other_states: Dictionary = {} ## owner Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every OTHER root whose parts can be moved and saved: each open Assembly Room's Part (load_owner_state)
 
@@ -677,6 +679,58 @@ func persist_pose(part: Node3D) -> void:
 	entry["owner"] = owner_of(part)
 	if not entry["running"]:
 		_persist_loop(occ, entry)
+
+
+# --- groups (a sub-assembly moved as one: group_set.gd) ---
+
+func group_state(owner_part_id: String, occurrence_id: String) -> String:
+	## Whether a move of the top-level occurrence `occurrence_id` of `owner_part_id` can be saved: "ok"; "grounded" (it is fixed); "mated" (a Mate names it, and
+	## a mated sub-assembly can't be steered as a unit yet); or "unsaved" (no backend, or a root this tool doesn't manage).
+	var state := occurrence_state(owner_part_id)
+	if state.is_empty() or occurrence_id == "" or backend_url.is_empty() or api_key.is_empty():
+		return "unsaved"
+	if bool(state.get("occurrences", {}).get(occurrence_id, {}).get("fixed", false)):
+		return "grounded"
+	if bool(state.get("mated", {}).get(occurrence_id, false)):
+		return "mated"
+	return "ok"
+
+
+func group_pose(owner_part_id: String, occurrence_id: String) -> Variant:
+	## The occurrence's stored pose (a Transform3D, in the frame its node sits in), read from the backend unless this tool wrote or read it already.
+	## null if it could not be read. A coroutine.
+	var key := "%s|%s" % [owner_part_id, occurrence_id]
+	if _group_poses.has(key):
+		return _group_poses[key]
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner_part_id, null)
+	if not result["ok"] or not (result["json"] is Array):
+		return null
+	for row in result["json"]:
+		if str(row.get("id", "")) == occurrence_id:
+			_group_poses[key] = json_to_pose(row.get("transform", {}))
+			return _group_poses[key]
+	return null
+
+
+func persist_group_pose(owner_part_id: String, occurrence_id: String, pose: Transform3D) -> void:
+	## Saves a sub-assembly occurrence's pose (fire and forget, latest wins, like persist_pose).
+	var key := "%s|%s" % [owner_part_id, occurrence_id]
+	_group_poses[key] = pose
+	var entry: Dictionary = _group_persist.get_or_add(key, {"pose": null, "running": false})
+	entry["pose"] = pose_to_json(pose)
+	if not entry["running"]:
+		_group_persist_loop(owner_part_id, occurrence_id, entry)
+
+
+func _group_persist_loop(owner_part_id: String, occurrence_id: String, entry: Dictionary) -> void:
+	entry["running"] = true
+	while entry["pose"] != null:
+		var pose: Dictionary = entry["pose"]
+		entry["pose"] = null
+		var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, occurrence_id], {"transform": pose})
+		if not result["ok"]:
+			_report("Couldn't save a sub-assembly move to the backend: %s" % _friendly_error(result))
+	entry["running"] = false
 
 
 func persist_path(part: Node3D) -> String:

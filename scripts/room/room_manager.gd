@@ -10,11 +10,13 @@ extends Node
 
 signal rooms_changed
 signal status(text: String)
+signal preview_changed(room) ## a room's world preview changed mode or availability (the console button follows)
 signal delete_state_changed ## the Delete-selected button's text changed (armed, disarmed): every button showing it follows
 
 const BackendSession := preload("res://scripts/backend_session.gd")
 const Room := preload("res://scripts/room/room.gd")
 const RoomVolume := preload("res://scripts/room/room_volume.gd")
+const GroupIndex := preload("res://scripts/group_index.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 const RoomPlacement := preload("res://scripts/room/room_placement.gd")
@@ -23,6 +25,7 @@ const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const DropCue := preload("res://scripts/room/drop_cue.gd")
 const RoomGhost := preload("res://scripts/room/room_ghost.gd")
 const RoomConsole := preload("res://scripts/room/room_console.gd")
+const WorldPreview := preload("res://scripts/room/world_preview.gd")
 
 const PLACE_CONFIRM := "trigger_click" ## placing a room: the right trigger drops it where the laser meets the floor,
 const PLACE_CANCEL := "by_button" ## B / Y gives up
@@ -44,6 +47,10 @@ var glass := true ## the see-through wall look for new and open rooms (Settings 
 var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
 var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
 var _cued: Dictionary = {} ## hand -> the part it carries that currently shows the drop cue
+var previews: Dictionary = {} ## room instance id -> its WorldPreview
+var preview_live := true ## the previews follow the rooms' parts as they move (Settings: Auto-update world preview)
+var preview_pulse := false ## the previews breathe (Settings: Pulse world preview)
+var _away_from: Variant = null ## the user's position before "To world" flew them to a placement (a Transform3D), or null
 var _placing: Dictionary = {} ## while a room is being placed: part_id, label, seed_owner, seed_occurrence, token, hand, ghost, size, bytes, spot (Transform3D or null), confirmed
 var _place_token := 0
 var _steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES, as the tablet last set it
@@ -193,6 +200,142 @@ func delete_occurrence(owner_part_id: String, occurrence_id: String, label: Stri
 	return result
 
 
+func index_world() -> void:
+	## Works out which sub-assembly each of the world's parts sits in (group_index.gd), so a grip or the laser can take a whole one. A coroutine; the parts
+	## carry nothing until it lands, and then behave exactly as before for any it couldn't place.
+	var root: String = _main.current_root_part_id() if _main != null else ""
+	var e := edit_api()
+	if root == "" or e == null:
+		return
+	await GroupIndex.index(e, root, RoomRegistry.world_parts(get_tree()))
+
+
+func index_room(room: Node) -> void:
+	var e := edit_api()
+	if e == null or not is_instance_valid(room):
+		return
+	await GroupIndex.index(e, room.part_id, room.parts)
+
+
+# --- world preview (world_preview.gd) ---
+
+func preview_of(room: Node) -> Node:
+	## The room's world preview, made on first use.
+	var key := room.get_instance_id()
+	if not previews.has(key) or not is_instance_valid(previews[key]):
+		var wp := WorldPreview.new()
+		wp.live = preview_live
+		wp.pulse = preview_pulse
+		add_child(wp)
+		wp.setup(room, mates_tool())
+		previews[key] = wp
+	return previews[key]
+
+
+func set_preview_mode(room: Node, mode: int) -> bool:
+	## Hidden / Ghost / Preview of the room's world copy. A coroutine: the room's and the world's parts must know their place in the tree first. False, with a
+	## message, if there is no placement in the world to show it at (a room opened on something that is not an instance there).
+	if not is_instance_valid(room):
+		return false
+	var wp := preview_of(room)
+	if mode != WorldPreview.Mode.HIDDEN:
+		await _ensure_indexed(room)
+		if not is_instance_valid(room):
+			return false
+		wp.rebuild(_world_parts())
+		if not wp.available():
+			status.emit("Nothing to show: %s isn't placed in the world copy that is open." % room.label)
+			preview_changed.emit(room)
+			return false
+	var ok: bool = wp.set_mode(mode)
+	preview_changed.emit(room)
+	return ok
+
+
+func cycle_preview(room: Node) -> void:
+	var wp := preview_of(room)
+	await set_preview_mode(room, (int(wp.mode) + 1) % 3)
+	if is_instance_valid(room) and not wp.available() and wp.mode != WorldPreview.Mode.HIDDEN:
+		wp.set_mode(WorldPreview.Mode.HIDDEN)
+
+
+func push_preview(room: Node) -> void:
+	## "Push to world": the preview shows the room's parts as they are now (and, with auto-update off, only as they are now).
+	var wp := preview_of(room)
+	if wp.mode != WorldPreview.Mode.PREVIEW:
+		await set_preview_mode(room, WorldPreview.Mode.PREVIEW)
+	if is_instance_valid(room):
+		wp.push()
+		status.emit("Pushed %d changed part%s to the world preview." % [wp.changed_count(), "" if wp.changed_count() == 1 else "s"])
+		preview_changed.emit(room)
+
+
+func set_preview_live(on: bool) -> void:
+	preview_live = on
+	for wp in previews.values():
+		if is_instance_valid(wp):
+			wp.live = on
+
+
+func set_preview_pulse(on: bool) -> void:
+	preview_pulse = on
+	for wp in previews.values():
+		if is_instance_valid(wp):
+			wp.pulse = on
+			wp.rebuild(_world_parts())
+
+
+func _ensure_indexed(room: Node) -> void:
+	var tagged := false
+	for n in _world_parts():
+		if n.has_meta("group_path"):
+			tagged = true
+			break
+	if not tagged:
+		await index_world()
+	var room_tagged: bool = is_instance_valid(room) and not room.parts.is_empty() and room.parts[0].has_meta("group_path")
+	if not room_tagged:
+		await index_room(room)
+
+
+func _rebuild_previews() -> void:
+	## After the world's or a room's parts were replaced: the placements are found again for every preview that is showing something.
+	for key in previews.keys():
+		var wp = previews[key]
+		if is_instance_valid(wp) and wp.mode != WorldPreview.Mode.HIDDEN and is_instance_valid(wp.room):
+			wp.rebuild(_world_parts())
+			if not wp.available():
+				wp.set_mode(WorldPreview.Mode.HIDDEN)
+			preview_changed.emit(wp.room)
+
+
+func fly_to_world(room: Node) -> bool:
+	## Takes the user to the room's world placement (the nearest one), standing back from it, and back to where they were on a second press.
+	var origin: Node3D = _main.get_node_or_null("XROrigin3D") if _main != null else null
+	var wp := preview_of(room)
+	if origin == null or not wp.available():
+		return false
+	if _away_from != null:
+		origin.global_transform = _away_from
+		_away_from = null
+		preview_changed.emit(room)
+		return true
+	var target: Vector3 = wp.instances[wp.nearest_instance(room.global_position)]["centre"]
+	var eye := _eye()
+	var away := eye - target
+	away.y = 0.0
+	away = away.normalized() if away.length() > 0.01 else Vector3(0, 0, 1)
+	var stand: Vector3 = target + away * 2.0
+	_away_from = origin.global_transform
+	origin.global_position += Vector3(stand.x - eye.x, 0.0, stand.z - eye.z)
+	preview_changed.emit(room)
+	return true
+
+
+func is_away() -> bool:
+	return _away_from != null
+
+
 func refresh_room(room: Node) -> bool:
 	## Re-reads the room's Part from the backend and swaps the room's content for it (scale and position kept), then re-reads its state for the mates tool.
 	if not is_instance_valid(room):
@@ -212,6 +355,8 @@ func refresh_room(room: Node) -> bool:
 	if _view_modes != null and is_instance_valid(room):
 		for p in room.parts:
 			_view_modes.apply_to(p)
+	await index_room(room)
+	_rebuild_previews()
 	return true
 
 
@@ -533,6 +678,7 @@ func _ready_room(room: Node, part_id: String, label: String) -> void:
 			status.emit("Room for %s is open, but its mates and saved poses could not be read: parts move but are not saved." % label)
 	if is_instance_valid(room) and rooms.has(room):
 		activate(room)
+		index_room(room)
 
 
 func activate(room: Node) -> void:
@@ -661,6 +807,7 @@ func close_room(room: Node) -> void:
 		return
 	_forget_room(room)
 	_restore_seed(room)
+	_drop_preview(room)
 	var stale: bool = room.members_changed
 	rooms.erase(room)
 	room.close()
@@ -670,11 +817,20 @@ func close_room(room: Node) -> void:
 		_main.reload_world_model() # parts were added or deleted in it: the world's own copies of this Part are out of date
 
 
+func _drop_preview(room: Node) -> void:
+	var key := room.get_instance_id()
+	if previews.has(key):
+		if is_instance_valid(previews[key]):
+			previews[key].queue_free()
+		previews.erase(key)
+
+
 func close_all() -> void:
 	for room in rooms.duplicate():
 		if is_instance_valid(room):
 			_forget_room(room)
 			_restore_seed(room)
+			_drop_preview(room)
 			room.close()
 	rooms.clear()
 	rooms_changed.emit()
@@ -695,6 +851,9 @@ func reseed_rooms() -> void:
 		if is_instance_valid(r):
 			_seed_hidden.erase(r.get_instance_id())
 			_hide_seed(r)
+	if not previews.is_empty():
+		await index_world()
+		_rebuild_previews()
 
 
 func set_glass(on: bool) -> void:

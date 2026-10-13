@@ -38,6 +38,10 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const LaserPick := preload("res://scripts/laser_pick.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const GroupIndex := preload("res://scripts/group_index.gd") ## which sub-assembly a part sits in (a grip or the laser can take the whole of one)
+const GroupSet := preload("res://scripts/group_set.gd")
+const GroupCues := preload("res://scripts/group_cues.gd")
+const GroupBreadcrumb := preload("res://scripts/group_breadcrumb.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which spots of which parts a room's clip has cut away: neither the laser nor a grip may take them
 
 @export var grab_action: String = "grip_click"
@@ -56,7 +60,11 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which sp
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
+signal group_message(text: String) ## something to tell the user about choosing / moving a sub-assembly (main.gd shows it)
 signal wheel_chord_started() ## trigger + grip pressed together on a hand with wheel_enabled: tool_wheel.gd opens the wheel
+
+@export var group_deadzone := 0.02 ## metres of hand travel after a grip on a part inside a sub-assembly before it follows the hand (0 = off): time to choose what to take
+const CRUMB_HOLD_MS := 450 ## the laser trigger held this long on a part in a sub-assembly opens the assembly-level breadcrumb
 
 var held_node: Node3D = null
 var selected_node: Node3D = null
@@ -75,6 +83,14 @@ var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + gr
 var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
 
+var _latch: Dictionary = {} ## a grip waiting out its dead zone: {target, levels, level, at, nodes}
+var _held_group = null ## the GroupSet this hand carries (held_node is its anchor), or null
+var _sel_group = null ## the GroupSet the laser has selected (selected_node is its anchor), or null
+var _sel_level: Dictionary = {}
+var _crumb = null ## the open laser breadcrumb
+var _crumb_levels: Array = []
+var _crumb_press: Dictionary = {} ## the trigger press that may turn into a breadcrumb: {ms, node, point}
+var _select_down := false
 var _wheel_press_ms := {} ## action name -> Time.get_ticks_msec() of its last press, for wheel chord detection
 var _laser: MeshInstance3D
 var _laser_mesh: CylinderMesh
@@ -184,6 +200,10 @@ func _physics_process(delta: float) -> void:
 	_update_laser_visual()
 	if section_tool:
 		section_tool.update_held(self, delta, steadiness > 0)
+	_update_latch()
+	_update_crumb()
+	if _sel_group != null:
+		_sel_group.follow() # last frame's thumbstick / nudge moved the anchor: the rest of the group goes with it
 	if held_node != null:
 		_update_held_part(delta)
 	if _nudge_carried_panel(delta):
@@ -292,6 +312,7 @@ func reset_interaction() -> void:
 	## pointing at a part that's about to disappear.
 	_try_release()
 	_clear_selection()
+	_close_crumb()
 	_set_grab_hover(null)
 	_set_aim_hover(null, Vector3.ZERO)
 
@@ -339,8 +360,12 @@ func _on_button_pressed(action_name: String) -> void:
 		if parts_enabled or (section_tool and section_tool.active):
 			_try_grab()
 	elif action_name == select_action:
+		if not _latch.is_empty():
+			_cycle_latch() # (a grip is waiting out its dead zone: the trigger widens what it will take - one level up each click)
+			return
 		if has_meta("ui_hover") and get_meta("ui_hover"):
 			return # laser is over the wrist tablet or popup keyboard: the click is for them, not a part.
+		_select_down = true
 		if mates_tool_active:
 			_try_pick_mate_entity()
 		elif measure_tool_active:
@@ -352,11 +377,15 @@ func _on_button_pressed(action_name: String) -> void:
 			_try_shoot_colour()
 		elif parts_enabled and laser_select_enabled:
 			_try_select()
+			_arm_crumb()
 
 
 func _on_button_released(action_name: String) -> void:
 	if action_name == grab_action:
 		_try_release()
+	elif action_name == select_action:
+		_select_down = false
+		_finish_crumb()
 	if wheel_is_open():
 		return
 
@@ -380,7 +409,243 @@ func _try_grab() -> void:
 		return
 	if target:
 		_set_grab_hover(null)
+		if _sel_group != null and _sel_group.members.has(target):
+			_sel_group.follow()
+			_finish_group_move(_sel_group) # (whatever the thumbstick did to it so far is its own undo step)
+			_sel_group.reset_starts()
+			_begin_group_hold(target, _sel_level) # (the group you selected with the laser: no choosing to do)
+			return
+		if group_deadzone > 0.0 and GroupIndex.has_groups(target):
+			_begin_latch(target)
+			return
 		_begin_hold(target, target.global_transform)
+
+
+# --- sub-assemblies: choosing what a grip or the laser takes (group_index.gd, group_set.gd) ---
+
+func _scope_nodes() -> Array:
+	return get_tree().get_nodes_in_group("grabbable_parts")
+
+
+func _scene_root() -> Node:
+	return get_tree().current_scene if get_tree().current_scene != null else get_tree().root
+
+
+func _begin_latch(target: Node3D) -> void:
+	## A grip on a part inside a sub-assembly: nothing moves yet. A faint sphere marks the dead zone, brackets show what a drag would take (the part), and
+	## each trigger click widens that one level. Moving the hand out of the sphere takes it.
+	var levels := GroupIndex.levels(target, _scope_nodes())
+	if levels.size() <= 1:
+		_begin_hold(target, target.global_transform) # nothing wider to choose
+		return
+	_latch = {"target": target, "levels": levels, "level": 0, "at": global_position, "nodes": [], "cues": []}
+	var sphere := GroupCues.sphere(group_deadzone)
+	_scene_root().add_child(sphere)
+	sphere.global_position = global_position
+	_latch["nodes"].append(sphere)
+	_show_latch_level()
+	trigger_haptic_pulse("haptic", 0.0, 0.25, 0.04, 0.0)
+
+
+func _show_latch_level() -> void:
+	GroupCues.clear(_latch["cues"])
+	_latch["cues"] = []
+	var levels: Array = _latch["levels"]
+	var level: Dictionary = levels[_latch["level"]]
+	var box := GroupIndex.union_aabb(level["members"])
+	var brackets := GroupCues.brackets(box.grow(0.004))
+	_scene_root().add_child(brackets)
+	var text := GroupIndex.breadcrumb(levels, _latch["level"])
+	var cap := GroupCues.caption(text, box.get_center() + Vector3(0.0, box.size.y * 0.5 + 0.07, 0.0))
+	_scene_root().add_child(cap)
+	_latch["cues"] = [brackets, cap]
+
+
+func _cycle_latch() -> void:
+	var levels: Array = _latch["levels"]
+	_latch["level"] = (int(_latch["level"]) + 1) % levels.size()
+	_show_latch_level()
+	trigger_haptic_pulse("haptic", 0.0, 0.35, 0.05, 0.0)
+	group_message.emit(GroupIndex.breadcrumb(levels, _latch["level"]))
+
+
+func _end_latch() -> void:
+	if _latch.is_empty():
+		return
+	GroupCues.clear(_latch.get("nodes", []))
+	GroupCues.clear(_latch.get("cues", []))
+	_latch = {}
+
+
+func _update_latch() -> void:
+	if _latch.is_empty():
+		return
+	if not is_instance_valid(_latch["target"]):
+		_end_latch()
+		return
+	if global_position.distance_to(_latch["at"]) > group_deadzone:
+		_commit_latch()
+
+
+func _commit_latch() -> void:
+	## The hand left the dead zone: take what the trigger chose.
+	var levels: Array = _latch["levels"]
+	var level: Dictionary = levels[_latch["level"]]
+	var target: Node3D = _latch["target"]
+	_end_latch()
+	if int(level["depth"]) == 0:
+		_begin_hold(target, target.global_transform)
+		return
+	_begin_group_hold(target, level)
+
+
+func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
+	var gs := GroupSet.new(target, level)
+	var refusal := _group_refusal(gs)
+	if refusal != "":
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		group_message.emit(refusal)
+		return
+	_held_group = gs
+	gs.set_flag("held", true)
+	_begin_hold(target, target.global_transform)
+	trigger_haptic_pulse("haptic", 0.0, 0.5, 0.06, 0.0)
+	group_message.emit("Holding %s (%d parts)" % [gs.label, gs.members.size()])
+
+
+func _group_refusal(gs) -> String:
+	## Why this sub-assembly can't be moved now ("" if it can). Only a top-level one is saved, so only its grounding and mates matter.
+	if gs.depth == 1 and mates_tool != null:
+		match mates_tool.group_state(gs.root_part_id, gs.occurrence_id()):
+			"grounded":
+				return "%s is grounded (fixed): unground it to move it." % gs.label
+			"mated":
+				return "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % gs.label
+	return ""
+
+
+func _finish_group_move(gs) -> void:
+	## A carried or selected group was put down. Out of its room (or into another): back where it was. Otherwise ONE undo step moves every member, and a
+	## top-level sub-assembly's new pose is saved on its occurrence (a deeper one moves on screen only, as a part nested in a sub-assembly always has).
+	if gs == null or not is_instance_valid(gs.anchor):
+		return
+	if RoomRegistry.stray_reason(gs.anchor) != "":
+		gs.restore()
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		group_message.emit("%s put back: a sub-assembly can't leave or enter a room that way." % gs.label)
+		return
+	if not gs.moved() or command_stack == null:
+		return
+	var starts: Dictionary = gs.starts.duplicate()
+	var finals: Dictionary = gs.finals()
+	var net: Transform3D = gs.net_delta() # (taken now: the group may be re-based while the pose below is read)
+	var parent := gs.anchor.get_parent() as Node3D
+	var pg: Transform3D = parent.global_transform if parent != null else Transform3D.IDENTITY
+	var occ: String = gs.occurrence_id()
+	var owner: String = gs.root_part_id
+	var save: bool = occ != "" and mates_tool != null and mates_tool.group_state(owner, occ) == "ok"
+	var old_pose: Variant = null
+	var new_pose: Variant = null
+	if save:
+		old_pose = await mates_tool.group_pose(owner, occ)
+		if old_pose != null:
+			new_pose = (pg.affine_inverse() * net * pg) * (old_pose as Transform3D)
+		else:
+			save = false
+	var tool = mates_tool
+	command_stack.push("move %s" % gs.label,
+		func() -> void:
+			GroupSet.apply(starts)
+			if save and tool != null:
+				tool.persist_group_pose(owner, occ, old_pose),
+		func() -> void:
+			GroupSet.apply(finals)
+			if save and tool != null:
+				tool.persist_group_pose(owner, occ, new_pose),
+		save)
+	if save:
+		mates_tool.persist_group_pose(owner, occ, new_pose)
+	elif gs.depth > 1:
+		group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
+
+
+func _arm_crumb() -> void:
+	## The trigger has just selected a part. Held on, it opens the breadcrumb of assembly levels at the spot the ray hit.
+	_crumb_press = {}
+	if selected_node == null or _sel_group != null or not GroupIndex.has_groups(selected_node):
+		return
+	_crumb_press = {"ms": Time.get_ticks_msec(), "node": selected_node, "point": selected_node.global_transform * _pivot_local}
+
+
+func _update_crumb() -> void:
+	if _crumb != null:
+		_crumb.update_aim(global_position, -global_transform.basis.z)
+		return
+	if _crumb_press.is_empty():
+		return
+	if not _select_down or not is_instance_valid(_crumb_press["node"]) or selected_node != _crumb_press["node"]:
+		_crumb_press = {}
+		return
+	if Time.get_ticks_msec() - int(_crumb_press["ms"]) >= CRUMB_HOLD_MS:
+		_open_crumb()
+
+
+func _open_crumb() -> void:
+	var node: Node3D = _crumb_press["node"]
+	_crumb_levels = GroupIndex.levels(node, _scope_nodes())
+	if _crumb_levels.size() <= 1:
+		_crumb_press = {}
+		return
+	var texts: Array = []
+	for l in _crumb_levels:
+		texts.append(str(l["label"]) + ("" if int(l["depth"]) == 0 else "  (%d)" % (l["members"] as Array).size()))
+	_crumb = GroupBreadcrumb.new()
+	_scene_root().add_child(_crumb)
+	var head := _camera.global_position if _camera != null else global_position
+	_crumb.open(texts, _crumb_press["point"], head, 0)
+	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+
+
+func _finish_crumb() -> void:
+	## The trigger came up: a level under the laser is selected as a group (the part itself, or no row, keeps what the press selected).
+	if _crumb == null:
+		_crumb_press = {}
+		return
+	var index: int = _crumb.hovered
+	var levels := _crumb_levels
+	var point: Vector3 = _crumb_press.get("point", global_position)
+	var node = _crumb_press.get("node")
+	_close_crumb()
+	if index > 0 and index < levels.size() and is_instance_valid(node) and selected_node == node:
+		select_group_level(node, levels[index], point)
+
+
+func _close_crumb() -> void:
+	_crumb_press = {}
+	_crumb_levels = []
+	if _crumb != null:
+		if is_instance_valid(_crumb):
+			if _crumb.get_parent() != null:
+				_crumb.get_parent().remove_child(_crumb)
+			_crumb.queue_free()
+		_crumb = null
+
+
+func select_group_level(node: Node3D, level: Dictionary, point: Vector3) -> void:
+	## Selects a sub-assembly (the level's members) with `node` as its anchor: all of it lights up, the thumbstick turns it and A / B push it as one, and a
+	## grip on any of its parts carries all of it.
+	_clear_selection()
+	if int(level["depth"]) == 0 or (level["members"] as Array).size() <= 1:
+		_set_selection(node, point)
+		return
+	_set_selection(node, point)
+	_sel_level = level
+	_sel_group = GroupSet.new(node, level)
+	for m in _sel_group.members:
+		if is_instance_valid(m):
+			m.set_meta("selected", true)
+			m.material_overlay = _select_material
+	group_message.emit("Selected %s (%d parts)" % [_sel_group.label, _sel_group.members.size()])
 
 
 func _try_grab_table() -> bool:
@@ -574,12 +839,24 @@ func _try_release() -> void:
 			return # let go of the part on the design table: it stays there or goes back to the arena (design_table.gd)
 	if section_tool and section_tool.release(self):
 		return
+	if not _latch.is_empty():
+		_end_latch() # let go inside the dead zone: nothing was taken, nothing moved, nothing to undo
+		return
 	if held_node == null:
 		return
 
 	var part := held_node
 	part.set_meta("held", false)
 	held_node = null
+	if _held_group != null:
+		var gs = _held_group
+		_held_group = null
+		gs.set_flag("held", false)
+		gs.follow()
+		_finish_group_move(gs)
+		if _sel_group != null:
+			_sel_group.reset_starts() # (the grip's move is its own undo step: selecting it later must not record it again)
+		return
 	if mates_tool and mates_tool.end_drag(part):
 		return # constrained part: mates_tool.gd finishes the last solve and records the undo step
 	for table in get_tree().get_nodes_in_group("design_tables"):
@@ -596,12 +873,14 @@ func _update_held_part(delta: float) -> void:
 	## tremor doesn't reach the part while a deliberate move still does.
 	var filtered_pos := global_position if steadiness == 0 else _grab_filter.filter(global_position, delta)
 	var desired := Transform3D(global_transform.basis, filtered_pos) * _grab_offset
-	if mates_tool and mates_tool.is_constrained(held_node):
+	if _held_group == null and mates_tool and mates_tool.is_constrained(held_node):
 		# Enforced mates: the part slides along what they allow (a live solve on
 		# the backend, mates_tool.gd) instead of following the hand freely.
 		held_node.global_transform = mates_tool.constrain_drag(held_node, desired)
 	else:
 		held_node.global_transform = desired
+	if _held_group != null:
+		_held_group.follow()
 
 
 func _push_move_command(part: Node3D, before: Transform3D) -> void:
@@ -821,6 +1100,18 @@ func _set_selection(node: Node3D, pivot_point: Vector3) -> void:
 
 
 func _clear_selection() -> void:
+	if selected_node and _sel_group != null:
+		var gs = _sel_group
+		_sel_group = null
+		_sel_level = {}
+		selected_node = null
+		for m in gs.members:
+			if is_instance_valid(m):
+				m.set_meta("selected", false)
+				m.material_overlay = null
+		gs.follow()
+		_finish_group_move(gs)
+		return
 	if selected_node:
 		var part := selected_node
 		part.set_meta("selected", false)
