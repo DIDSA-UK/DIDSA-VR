@@ -135,6 +135,40 @@ The room is a world within a world: grab to move, two-hand to turn and scale, A/
 - **Nested sub-sub-assembly parts** inside a room are not managed (not saved), exactly like nested parts in the world today.
 - Wall dragging, grab handle, scale control, glass look, tabs, console: still to do (next).
 
+## Drop-to-add and delete: what the backend gives us (checked live)
+
+Looked up in DIDSA-CAD (`app/document/router.py`) and then run against a local backend (`tests/data/probe_add_occurrence.py`, fixture
+`tests/data/rooms_sub_assembly.didsa`). **No new backend work is needed**, and the VR client already uses the same route
+(`design_table/new_document.gd`, `add_part`).
+
+| Need | Route | Verified behaviour |
+|---|---|---|
+| Add an existing Part (a copy) to a room | `POST /document/parts/{room_part}/occurrences` body `{id, resolved_part_id, name_override, transform}` (the id is **client-made**, e.g. `occ_` + 16 random bytes hex) | 201. Works on any Part, not only the root. The new leaf appears in the room Part's `assembly-mesh.glb` **and in the world's** (shared definition, confirmed live). `fixed`, `hidden`, `color` optional (default free, shown, no colour). |
+| Add a Part from a **file** (Files tab) | `POST /document/parts/{room_part}/add-component` `{component, name_override}` | 200 on a sub-assembly Part. Creates the occurrence (free, since the Part already has others). Place it afterwards with a `PATCH` of its transform. Refused (422) if the file's root Part is the room's own. |
+| Delete a part (the seed, or an added copy) | `DELETE /document/parts/{owner_part}/occurrences/{occ}` | 204. **Cascades**: removes any Mate naming that occurrence and any ComponentPattern using it. |
+| Undo a delete | `POST` the occurrence back with its old `id` and full data (the flat app does exactly this) | The occurrence returns; the cascaded mates do **not** (so warn first). |
+
+Things the server does **not** protect against, so the client must:
+
+- **Cycles**: adding S into S (or a Part that contains S) returns 201. The mesh walker skips ancestors, so nothing crashes, but the document is wrong.
+  The client checks before adding: the dropped Part must not be the room's Part, nor contain it anywhere in its subtree (walk `GET .../occurrences`).
+- **Unknown Part id**: returns 201 with an *unresolved* occurrence (silently invisible). The client resolves the id first.
+- **Duplicate id**: 409, so a retry must reuse the id only to restore the same occurrence.
+
+### Design (not built yet)
+
+1. **Which Part is being copied**: a world node carries its owner Part and occurrence id, not the Part it shows; read the owner's
+   `GET .../occurrences` row for `resolved_part_id` (cached).
+2. **Pose**: the dropped node's pose in the room's content frame (`content_root` inverse, rotation and translation only, the room's scale is a
+   display scale and is dropped), in millimetres, exactly like a moved part's saved pose.
+3. **After the POST**: re-fetch the room Part's glb and swap the room's content in place (keeping the room's scale and position), re-read the
+   Part's state (`load_owner_state`). The carried original goes back to where it was picked up (it is a copy).
+4. **Undo/redo**: `DELETE` and re-`POST` with the same id; one entry on the shared stack.
+5. **The world's instances of S are now stale** (the hidden seed has no copy of the new part): on closing a room whose membership changed, reload
+   the world model keeping the world's pose and the document's dirty flag. (The R4 Preview feature will show them live.)
+6. **Delete**: Assembly Tree row and the selected part, two-press confirm, naming how many mates will go with it; undo re-POSTs the occurrence.
+7. **From the Files tab**: "Add" goes to the room you are standing in; later, the thumbnail drag from the scope document uses the same call.
+
 ## Earlier R2 to R5 notes
 
 
