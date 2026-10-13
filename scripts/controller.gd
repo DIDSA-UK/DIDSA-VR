@@ -596,9 +596,10 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 	if stray != "":
 		# A room's part put down outside its room, or a world part left inside a room: back to where it was picked up (the walls are the edge of its
 		# world). The move was never recorded or saved, so there is nothing to undo.
+		var dropped := part.global_transform
 		part.global_transform = before
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
-		get_tree().call_group("room_listeners", "on_part_refused", part, stray)
+		get_tree().call_group("room_listeners", "on_part_refused", part, stray, dropped) # (a drop INTO a room becomes a copy added to it: room_manager.gd)
 		return
 	if command_stack == null:
 		return

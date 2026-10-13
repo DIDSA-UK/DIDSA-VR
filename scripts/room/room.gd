@@ -29,6 +29,7 @@ var content_scale: float: ## metres per backend unit (mm) at the room's current 
 		return content_root.scale.x if content_root != null else 0.001
 var two_hand: Node ## the TwoHandModel moving / turning / scaling this room's content (room_manager.gd makes it); null until the room is interactive
 var interactive := false
+var members_changed := false ## parts were added to or deleted from this room's Part: the world's own copies of it are out of date until the world is reloaded
 
 var _walls: MeshInstance3D
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
@@ -82,15 +83,46 @@ func build(glb_bytes: PackedByteArray, box_xform: Transform3D, full_size: Vector
 	content_root = Node3D.new()
 	content_root.name = "Content"
 	add_child(content_root)
+	_adopt(scene)
+	_bounds = content_bounds(content_root)
+	set_content_scale(fit_scale(_bounds, full_size))
+	return true
+
+
+func reload(glb_bytes: PackedByteArray) -> bool:
+	## Swaps the content for a fresh copy of the Part's mesh (after parts were added or deleted), keeping the room's scale and where the content sits. The
+	## old parts go (anything holding one must let go first: room_manager.gd does); the new ones are tagged, under the clip, and touchable if the room is.
+	var gltf_document := GLTFDocument.new()
+	var gltf_state := GLTFState.new()
+	if gltf_document.append_from_buffer(glb_bytes, "", gltf_state) != OK:
+		return false
+	var scene := gltf_document.generate_scene(gltf_state)
+	if scene == null:
+		return false
+	MeshIdentity.tag_scene(gltf_state, scene)
+	var was_interactive := interactive
+	set_interactive(false) # takes the old parts out of the grab group and frees their colliders
+	for old in content_root.get_children():
+		content_root.remove_child(old)
+		old.queue_free()
+	parts.clear()
+	_adopt(scene)
+	if volume.slot >= 0:
+		for p in parts:
+			RoomClip.assign(p, volume.slot)
+	if was_interactive:
+		set_interactive(true)
+	return true
+
+
+func _adopt(scene: Node) -> void:
+	## Puts a parsed scene under content_root and records its meshes as this room's parts.
 	content_root.add_child(scene)
 	for node in _descendants(scene) + [scene]:
 		if node is MeshInstance3D:
 			parts.append(node)
 			node.add_to_group("room_parts")
 			node.set_meta("room_id", get_instance_id())
-	_bounds = content_bounds(content_root)
-	set_content_scale(fit_scale(_bounds, full_size))
-	return true
 
 
 func owner_part_ids() -> Dictionary:

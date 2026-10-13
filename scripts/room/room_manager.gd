@@ -18,6 +18,8 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 const RoomPlacement := preload("res://scripts/room/room_placement.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd")
+const RoomEdit := preload("res://scripts/room/room_edit.gd")
+const DropCue := preload("res://scripts/room/drop_cue.gd")
 
 const ROOM_MIN_MULTIPLE := 0.01 ## a room's content may be scaled between these multiples of real life (the world's are 0.1 to 50): a 10 mm part fits a 3 m room at about 200x
 const ROOM_MAX_MULTIPLE := 2000.0
@@ -31,6 +33,9 @@ var _api_key := ""
 var _opening: Dictionary = {} ## part_id -> true while its mesh is being fetched
 var _seed_hidden: Dictionary = {} ## room instance id -> Array of world nodes this room hid
 var _was_active := false
+var edit: RefCounted ## room_edit.gd: adding and deleting parts (made on first use from the design table's CAD helper; tests set a fake)
+var _busy_edit := false ## one membership change at a time (each ends in a refresh of the room)
+var _cued: Dictionary = {} ## hand -> the part it carries that currently shows the drop cue
 var _steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES, as the tablet last set it
 
 
@@ -47,9 +52,228 @@ func mates_tool() -> Node:
 	return _main.get("_mates_tool") if _main != null else null
 
 
-func on_part_refused(_part: Node3D, reason: String) -> void:
-	status.emit("That part went back: a room's parts stay in the room." if reason == "left_room" else "That part went back: it can't be left inside a room (adding it to the room is not built yet).")
+func on_part_refused(part: Node3D, reason: String, dropped: Transform3D = Transform3D.IDENTITY) -> void:
+	## controller.gd sent a stray part back. A room's part let go outside its room stays a refusal; a part let go INSIDE a room (the world's, or another
+	## room's) was dropped there to be added: it is copied into that room's assembly (the original has gone back to where it was picked up).
+	if reason != "entered_room":
+		status.emit("That part went back: a room's parts stay in the room.")
+		return
+	var centre: Vector3 = dropped * (part as MeshInstance3D).get_aabb().get_center() if part is MeshInstance3D else dropped.origin
+	var room := room_for_slot(RoomRegistry.room_at(centre))
+	if room == null or not room.interactive:
+		status.emit("That part went back: the room isn't ready yet (its parts are still loading).")
+		return
+	add_to_room(room, part, dropped)
 
+
+func room_for_slot(slot: int) -> Node:
+	for r in rooms:
+		if is_instance_valid(r) and r.volume.slot == slot:
+			return r
+	return null
+
+
+func edit_api() -> RefCounted:
+	## The room editor, made on first use; the mesh settings follow the app's own (quality, tier, hidden parts).
+	if edit == null and _main != null and _main.get("design_table") != null:
+		edit = RoomEdit.new(_main.design_table.api)
+	if edit != null and _main != null and _main.get("quality") != null:
+		edit.mesh_quality = _main.quality
+		edit.mesh_tier = _main.tier
+		edit.mesh_include_hidden = _main.include_hidden
+	return edit
+
+
+func add_to_room(room: Node, node: Node3D, dropped: Transform3D) -> bool:
+	## Drop-to-add: a new occurrence of the part `node` shows is put in the room's Part at the pose it was let go at, the room's mesh is reloaded, and it is
+	## one undo step. The source stays where it was (a copy; delete the seed afterwards if you want a move).
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return false
+	var e := edit_api()
+	if e == null:
+		status.emit("Adding to a room needs the backend.")
+		return false
+	_busy_edit = true
+	status.emit("Adding it to the room...")
+	var result: Dictionary = await e.add_copy(room.part_id, node, dropped, room.content_root, "")
+	if not result["ok"]:
+		_busy_edit = false
+		status.emit(str(result["error"]))
+		return false
+	var snapshot := await _snapshot_of(room.part_id, str(result["occurrence_id"]))
+	await refresh_room(room)
+	_mark_room_changed(room)
+	_busy_edit = false
+	_mark_dirty()
+	status.emit("Added to the room. (A copy: the original is where it was; delete it if you meant to move it.)")
+	_push_undo("add to room", room.part_id, str(result["occurrence_id"]), snapshot, true)
+	return true
+
+
+func add_file_to_room(room: Node, path: String) -> bool:
+	## The Files tab's Add while standing in a room: the file's Part becomes a new occurrence in the room's Part (at its origin; move it from there).
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return false
+	var e := edit_api()
+	var text := FileAccess.get_file_as_string(path)
+	if e == null or text == "" or JSON.parse_string(text) == null:
+		status.emit("Couldn't read %s as a native file." % path.get_file())
+		return false
+	_busy_edit = true
+	status.emit("Adding %s to the room..." % path.get_file())
+	var pose := {"translation": [0.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}
+	var result: Dictionary = await e.add_file(room.part_id, text, pose, path.get_file().get_basename())
+	if not result["ok"]:
+		_busy_edit = false
+		status.emit(str(result["error"]))
+		return false
+	var snapshot := await _snapshot_of(room.part_id, str(result["occurrence_id"]))
+	await refresh_room(room)
+	_mark_room_changed(room)
+	_busy_edit = false
+	_mark_dirty()
+	status.emit("Added %s to the room." % path.get_file() if str(result["error"]) == "" else str(result["error"]))
+	_push_undo("add %s" % path.get_file(), room.part_id, str(result["occurrence_id"]), snapshot, true)
+	return true
+
+
+func delete_occurrence(owner_part_id: String, occurrence_id: String, label: String) -> Dictionary:
+	## Deletes a placed part from its owner Part (cascading its Mates, which the answer counts) and refreshes whatever shows it: the room for that Part, or
+	## the world. One undo step puts it back (not the Mates). Returns the editor's answer.
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return {"ok": false}
+	var e := edit_api()
+	if e == null:
+		status.emit("Deleting needs the backend.")
+		return {"ok": false}
+	_busy_edit = true
+	var result: Dictionary = await e.delete_occurrence(owner_part_id, occurrence_id)
+	if not result["ok"]:
+		_busy_edit = false
+		status.emit(str(result["error"]))
+		return result
+	await _refresh_for_owner(owner_part_id)
+	_busy_edit = false
+	_mark_dirty()
+	var mates := int(result["mates_removed"])
+	status.emit("Deleted %s%s." % [label, "" if mates == 0 else " and %d mate%s that used it" % [mates, "" if mates == 1 else "s"]])
+	_push_undo("delete %s" % label, owner_part_id, occurrence_id, result["snapshot"], false)
+	return result
+
+
+func refresh_room(room: Node) -> bool:
+	## Re-reads the room's Part from the backend and swaps the room's content for it (scale and position kept), then re-reads its state for the mates tool.
+	if not is_instance_valid(room):
+		return false
+	var e := edit_api()
+	var bytes: PackedByteArray = await e.fetch_part_glb(room.part_id)
+	if not is_instance_valid(room):
+		return false
+	if bytes.is_empty():
+		status.emit("Couldn't refresh the room from the backend.")
+		return false
+	_release_hands_from(room)
+	room.reload(bytes)
+	var mates := mates_tool()
+	if mates != null:
+		await mates.load_owner_state(room.part_id)
+	if _view_modes != null and is_instance_valid(room):
+		for p in room.parts:
+			_view_modes.apply_to(p)
+	return true
+
+
+func _refresh_for_owner(owner_part_id: String) -> void:
+	## Something changed under this Part: its room (if open) is reloaded and marked, otherwise the world, which shows it, is.
+	var room := room_for_part(owner_part_id)
+	if room != null:
+		await refresh_room(room)
+		_mark_room_changed(room)
+	elif _main != null and _main.has_method("reload_world_model"):
+		await _main.reload_world_model()
+
+
+func _mark_room_changed(room) -> void: # (untyped: a room closed meanwhile is a freed object, which a typed argument would reject)
+	## The room's assembly changed. If the room was closed while that was being refreshed it can't carry the mark, so the world is reloaded now instead
+	## (closing it earlier did not know the change was coming).
+	if is_instance_valid(room):
+		room.members_changed = true
+	elif _main != null and _main.has_method("reload_world_model"):
+		_main.reload_world_model()
+
+
+func _snapshot_of(owner_part_id: String, occurrence_id: String) -> Dictionary:
+	var e := edit_api()
+	for row in await e.occurrences_of(owner_part_id, true):
+		if str(row.get("id", "")) == occurrence_id:
+			return (row as Dictionary).duplicate(true)
+	return {}
+
+
+func _push_undo(label: String, owner_part_id: String, occurrence_id: String, snapshot: Dictionary, was_add: bool) -> void:
+	## One step on the shared undo stack. Undoing an add deletes it again; undoing a delete puts it back with everything it had (not its Mates).
+	var stack = _main.get("command_stack") if _main != null else null
+	if stack == null:
+		return
+	var undo_it := func() -> void: _replay(owner_part_id, occurrence_id, snapshot, not was_add)
+	var redo_it := func() -> void: _replay(owner_part_id, occurrence_id, snapshot, was_add)
+	stack.push(label, undo_it, redo_it, true)
+
+
+func _replay(owner_part_id: String, occurrence_id: String, snapshot: Dictionary, put_back: bool) -> void:
+	var e := edit_api()
+	if e == null or snapshot.is_empty():
+		return
+	if put_back:
+		var r: Dictionary = await e.restore_occurrence(owner_part_id, snapshot)
+		if not r["ok"]:
+			status.emit(str(r["error"]))
+			return
+	else:
+		await e.remove_added(owner_part_id, occurrence_id)
+	await _refresh_for_owner(owner_part_id)
+	_mark_dirty()
+
+
+func _mark_dirty() -> void:
+	if _main != null and _main.has_method("mark_dirty"):
+		_main.mark_dirty()
+	if _main != null and _main.has_method("refresh_assembly_tree"):
+		_main.refresh_assembly_tree() # the tree window's list is out of date
+
+
+func _release_hands_from(room: Node) -> void:
+	for hand_name in ["XROrigin3D/LeftController", "XROrigin3D/RightController"]:
+		var hand = _main.get_node_or_null(hand_name) if _main != null else null
+		if hand != null and (room.parts.has(hand.held_node) or room.parts.has(hand.selected_node)):
+			hand.reset_interaction()
+
+
+func _update_drop_cues() -> void:
+	## While a hand carries a part whose middle is inside a room that can take it (and is not the room it already belongs to), that part shows the corner
+	## brackets in the room's colour: letting go will add it there.
+	for hand_name in ["XROrigin3D/LeftController", "XROrigin3D/RightController"]:
+		var hand = _main.get_node_or_null(hand_name) if _main != null else null
+		if hand == null:
+			continue
+		var held = hand.held_node
+		var previous = _cued.get(hand)
+		if previous != null and previous != held:
+			DropCue.hide_on(previous)
+			_cued.erase(hand)
+		if held == null or not (held is MeshInstance3D) or RoomRegistry.rooms.is_empty():
+			continue
+		var target := RoomRegistry.room_at(RoomRegistry.part_centre(held))
+		var own := RoomRegistry.slot_of(held) if RoomRegistry.is_room_part(held) else -1
+		var room := room_for_slot(target) if target != -1 and target != own else null
+		if room != null and room.interactive:
+			DropCue.show_on(held, room.colour)
+			_cued[hand] = held
+		else:
+			DropCue.hide_on(held)
 
 func configure_backend(url: String, key: String) -> void:
 	_backend_url = url
@@ -85,6 +309,10 @@ func open_room(part_id: String, label: String, seed_owner_part_id: String = "", 
 	if _backend_url == "" or _api_key == "":
 		status.emit("No backend configured: rooms open a Part from the backend.")
 		return null
+	var waited := 0
+	while _main != null and _main.get("_load_busy") == true and waited < 900:
+		await get_tree().process_frame # the world is being re-read (a room was just closed after changes): its seed nodes are about to be replaced
+		waited += 1
 	_opening[part_id] = true
 	rooms_changed.emit()
 	status.emit("Opening a room for %s..." % label)
@@ -206,10 +434,13 @@ func close_room(room: Node) -> void:
 		return
 	_forget_room(room)
 	_restore_seed(room)
+	var stale: bool = room.members_changed
 	rooms.erase(room)
 	room.close()
 	status.emit("Closed the room for %s." % room.label)
 	rooms_changed.emit()
+	if stale and _main != null and _main.has_method("reload_world_model"):
+		_main.reload_world_model() # parts were added or deleted in it: the world's own copies of this Part are out of date
 
 
 func close_all() -> void:
@@ -222,13 +453,25 @@ func close_all() -> void:
 	rooms_changed.emit()
 
 
-func on_model_replaced() -> void:
-	## main.gd is about to swap the world's model: the nodes a room hid are going away with it, and a room's seed no longer exists.
+func on_model_replaced(keep_rooms: bool = false) -> void:
+	## main.gd is about to swap the world's model. Normally (a different file is opening) every room closes: its Part may not exist in the new model. When
+	## the SAME document is merely being re-read (parts were added or deleted, main.reload_world_model) the rooms stay, and reseed_rooms() hides their
+	## new world copies afterwards: closing one room must not close the others.
 	_seed_hidden.clear()
-	close_all()
+	if not keep_rooms:
+		close_all()
+
+
+func reseed_rooms() -> void:
+	## After the world's model was re-read: the nodes each open room had hidden were replaced, so hide the new copies.
+	for r in rooms:
+		if is_instance_valid(r):
+			_seed_hidden.erase(r.get_instance_id())
+			_hide_seed(r)
 
 
 func _process(_delta: float) -> void:
+	_update_drop_cues()
 	if RoomRegistry.rooms.is_empty():
 		if _was_active:
 			_was_active = false
@@ -243,15 +486,11 @@ func _process(_delta: float) -> void:
 
 
 func _forget_room(room: Node) -> void:
-	## The mates tool stops managing the room's Part. Anything still held from the room is let go of first by closing (set_interactive(false) takes the parts
-	## out of the grab group).
+	## The mates tool stops managing the room's Part, and anything still held from the room is let go of.
 	var mates := mates_tool()
 	if mates != null:
 		mates.drop_owner_state(room.part_id)
-	for hand_name in ["XROrigin3D/LeftController", "XROrigin3D/RightController"]:
-		var hand = _main.get_node_or_null(hand_name) if _main != null else null
-		if hand != null and (room.parts.has(hand.held_node) or room.parts.has(hand.selected_node)):
-			hand.reset_interaction()
+	_release_hands_from(room)
 
 
 func _world_parts() -> Array:

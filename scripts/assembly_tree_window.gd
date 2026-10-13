@@ -38,6 +38,11 @@ var _status_label: Label
 var _rows_box: VBoxContainer
 
 const INDENT_PX := 24.0
+const DELETE_CONFIRM_MS := 4000 ## how long a first press on Delete waits for its second
+
+var _delete_armed := "" ## the occurrence whose Delete has been pressed once
+var _delete_armed_until_ms := 0
+var _delete_mates := 0 ## how many Mates deleting it would take with it (read when it was armed)
 
 
 func setup_tree(left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node) -> void:
@@ -302,6 +307,44 @@ func _add_row_actions(line: HBoxContainer, row: Dictionary, _is_expandable: bool
 	button.pressed.connect(func() -> void:
 		manager.toggle_room(action["part_id"], action["label"], action["parent_part_id"], action["occurrence_id"]))
 	line.add_child(button)
+	var occ := str(row["id"])
+	var armed := _delete_armed == occ and Time.get_ticks_msec() < _delete_armed_until_ms
+	var delete_button := Button.new()
+	delete_button.text = delete_label(armed, _delete_mates)
+	delete_button.custom_minimum_size = Vector2(0, 0)
+	delete_button.add_theme_font_size_override("font_size", tokens.font_small)
+	delete_button.pressed.connect(_on_delete_pressed.bind(row))
+	line.add_child(delete_button)
+
+
+static func delete_label(armed: bool, mates: int) -> String:
+	## Delete asks twice: the first press turns the button into "Sure?" (naming the Mates that would go with the part), the second does it.
+	if not armed:
+		return "Delete"
+	return "Sure?" if mates == 0 else "Sure? (%d mate%s)" % [mates, "" if mates == 1 else "s"]
+
+
+func _on_delete_pressed(row: Dictionary) -> void:
+	var occ := str(row.get("id", ""))
+	var owner := str(row.get("parent_part_id", ""))
+	if occ == "" or owner == "" or _main == null or _main.get("room_manager") == null:
+		return
+	var now := Time.get_ticks_msec()
+	if _delete_armed == occ and now < _delete_armed_until_ms:
+		_delete_armed = ""
+		_delete_mates = 0
+		await _main.room_manager.delete_occurrence(owner, occ, str(row.get("name", "that part")))
+		_stale = true
+		_rebuild_rows()
+		return
+	_delete_armed = occ
+	_delete_armed_until_ms = now + DELETE_CONFIRM_MS
+	_delete_mates = 0
+	_rebuild_rows()
+	var e = _main.room_manager.edit_api()
+	if e != null:
+		_delete_mates = await e.mates_naming(owner, occ)
+		_rebuild_rows()
 
 
 func _list_occurrences(part_id: String) -> Dictionary:

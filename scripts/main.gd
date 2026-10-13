@@ -1001,6 +1001,10 @@ func _open_native_file_impl(path: String) -> void:
 
 
 func add_component_file(path: String) -> void:
+	var room: Node = room_manager.focus_room()
+	if room != null:
+		await room_manager.add_file_to_room(room, path) # standing in an Assembly Room: the file is added to THAT room's assembly
+		return
 	if not _claim_load("Add"):
 		return
 	await _add_component_file_impl(path)
@@ -1060,6 +1064,42 @@ func _add_component_file_impl(path: String) -> void:
 		return
 	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
+
+
+var _reloading_world := false ## reload_world_model() is swapping the same document's model: open Assembly Rooms stay open
+
+
+func reload_world_model(dirty: bool = true) -> bool:
+	## Fetches the loaded root's mesh again and shows it, keeping where the user has put the world (position, turn, scale). For when the document
+	## changed under the world without the world doing it (parts added to or deleted from a sub-assembly in a room, a delete from the tree): the
+	## world's own copies are out of date. What it costs: the undo history (the parts it pointed at are rebuilt), and any open room (its hidden copy of
+	## the world is rebuilt too). The unsaved-changes flag is raised if `dirty`.
+	if backend_url.is_empty() or api_key.is_empty() or _resolved_part_id.is_empty():
+		return false
+	if not _claim_load("reload"):
+		return false
+	var pose := assembly_root.transform
+	var req := HTTPRequest.new()
+	add_child(req)
+	var url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()]
+	if tier != "":
+		url += "&tier=%s" % tier
+	var result: Array = await _get_mesh_result(req, url)
+	req.queue_free()
+	var shown := false
+	if result[0] == HTTPRequest.RESULT_SUCCESS and int(result[1]) == 200:
+		_reloading_world = true
+		shown = _show_model(result[3], "", spawn_scale)
+		_reloading_world = false
+		if shown:
+			assembly_root.transform = pose
+			room_manager.reseed_rooms()
+	else:
+		_set_status("Couldn't refresh the world after the change: %s" % _http_error_text(int(result[1]), int(result[0]), result[3]))
+	_load_busy = false
+	if shown and dirty:
+		mark_dirty()
+	return shown
 
 
 func load_glb_file(path: String) -> void:
@@ -1246,7 +1286,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
-	room_manager.on_model_replaced() # rooms hold copies of parts of the model that is about to go
+	room_manager.on_model_replaced(_reloading_world) # rooms hold copies of parts of the model that is about to go (unless it is only being re-read)
 	command_stack.clear()
 	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()

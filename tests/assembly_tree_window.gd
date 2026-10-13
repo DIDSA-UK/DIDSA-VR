@@ -51,6 +51,9 @@ func _initialize() -> void:
 	print("SMOKE a row with nothing behind it has none: ", AssemblyTreeWindow.room_action({"id": "occ-2", "name": "x", "resolved_part_id": ""}, manager).is_empty())
 	print("SMOKE no room manager (an old scene, a test) means no button and no error: ", AssemblyTreeWindow.room_action(occurrence_row, null).is_empty())
 
+	# Delete asks twice, and the second ask names the Mates that would go with the part
+	print("SMOKE Delete reads Delete until pressed once, then Sure? (naming the Mates that would go): ", AssemblyTreeWindow.delete_label(false, 3) == "Delete" and AssemblyTreeWindow.delete_label(true, 0) == "Sure?" and AssemblyTreeWindow.delete_label(true, 1) == "Sure? (1 mate)" and AssemblyTreeWindow.delete_label(true, 3) == "Sure? (3 mates)")
+
 	quit()
 
 

@@ -129,6 +129,8 @@ func _initialize() -> void:
 	var sub_t: Array = root_occs[0]["transform"]["translation"]
 	print("SMOKE ...and S's own placement in the world is untouched (still 300 mm along x): ", root_occs.size() == 1 and absf(float(sub_t[0]) - 300.0) < 0.001 and absf(float(sub_t[1])) < 0.001)
 
+	var moved_local: Vector3 = target.transform.origin # (read now: later reloads of the room replace its part nodes)
+
 	# --- a colour set on a room part is saved on its occurrence
 	var colour_result: Dictionary = await main._colour_tool.set_color(target, "#cc3322")
 	var after_colour = await _get_json("/parts/%s/occurrences" % s_id)
@@ -149,8 +151,58 @@ func _initialize() -> void:
 	print("SMOKE grounding a room part is saved on its occurrence, and the room's state follows: ", fixed_now == (not was_fixed) and main._mates_tool.is_fixed(target) == fixed_now)
 	await main._mates_tool.toggle_fixed(target) # and back
 
+	# --- drop-to-add against the real backend: a copy of one leaf, let go inside the room, is a new occurrence in S, in S's mesh and (shared definition) the world's
+	var leaf_defs := {}
+	for occ in after_fix:
+		leaf_defs[occ["id"]] = occ["resolved_part_id"]
+	var source_node: MeshInstance3D = room.parts[0]
+	var source_definition: String = leaf_defs[str(source_node.get_meta("occurrence_id"))]
+	var members_before: int = room.parts.size()
+	var dropped := Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.001), room.global_position + Vector3(0.4, -0.3, 0.2))
+	var added: bool = await manager.add_to_room(room, source_node, dropped)
+	var s_after_add = await _get_json("/parts/%s/occurrences" % s_id)
+	var new_occ := {}
+	for occ in s_after_add:
+		if not leaf_defs.has(occ["id"]):
+			new_occ = occ
+	print("SMOKE letting a copy go inside the room adds a new occurrence of the same Part to S in the backend: ", added and not new_occ.is_empty() and new_occ["resolved_part_id"] == source_definition and s_after_add.size() == leaf_defs.size() + 1)
+	var wanted: Dictionary = preload("res://scripts/room/room_edit.gd").pose_in_room(dropped, room.content_root)
+	var got_t: Array = new_occ["transform"]["translation"]
+	var want_t: Array = wanted["translation"]
+	print("SMOKE ...at the pose it was let go at, in millimetres (", snappedf(got_t[0], 0.1), ", ", snappedf(got_t[1], 0.1), ", ", snappedf(got_t[2], 0.1), "): ", absf(got_t[0] - want_t[0]) < 0.01 and absf(got_t[1] - want_t[1]) < 0.01 and absf(got_t[2] - want_t[2]) < 0.01)
+	print("SMOKE ...and the room now shows it (one part more, read back from the backend's own mesh): ", room.parts.size() == members_before + 1 and room.members_changed)
+	var cycle_result: Dictionary = await manager.edit_api().add_copy(s_id, _fake_node("", ""), dropped, room.content_root, "")
+	var self_node := _fake_node(root_id, sub_occurrence_id) # the node that shows S itself (S's placement under the root)
+	var into_itself: Dictionary = await manager.edit_api().add_copy(s_id, self_node, dropped, room.content_root, "")
+	var s_still = await _get_json("/parts/%s/occurrences" % s_id)
+	print("SMOKE adding S to S is refused (the real server would accept it): ", not into_itself["ok"] and into_itself["error"].contains("can't hold itself") and s_still.size() == leaf_defs.size() + 1)
+	print("SMOKE ...and an occurrence with no source Part is refused too: ", not cycle_result["ok"])
+
+	# --- undo the add, redo it, then delete the added part (and undo that), all against the real backend
+	main.command_stack.undo()
+	await _wait_for(func() -> bool: return room.parts.size() == members_before and not manager._busy_edit)
+	var s_undone = await _get_json("/parts/%s/occurrences" % s_id)
+	print("SMOKE undo of the add removes it from the backend and from the room: ", s_undone.size() == leaf_defs.size() and room.parts.size() == members_before)
+	main.command_stack.redo()
+	await _wait_for(func() -> bool: return room.parts.size() == members_before + 1 and not manager._busy_edit)
+	var s_redone = await _get_json("/parts/%s/occurrences" % s_id)
+	print("SMOKE redo puts the same occurrence back (same id): ", s_redone.size() == leaf_defs.size() + 1 and s_redone.any(func(o): return o["id"] == new_occ["id"]))
+	var deleted: Dictionary = await manager.delete_occurrence(s_id, str(new_occ["id"]), "Copy")
+	var s_deleted = await _get_json("/parts/%s/occurrences" % s_id)
+	print("SMOKE deleting the added part removes it from the backend and the room: ", deleted["ok"] and s_deleted.size() == leaf_defs.size() and room.parts.size() == members_before)
+	main.command_stack.undo()
+	await _wait_for(func() -> bool: return room.parts.size() == members_before + 1 and not manager._busy_edit)
+	var s_restored = await _get_json("/parts/%s/occurrences" % s_id)
+	var restored_row := {}
+	for o in s_restored:
+		if o["id"] == new_occ["id"]:
+			restored_row = o
+	print("SMOKE undoing the delete puts it back with everything it had (id, Part, pose): ", not restored_row.is_empty() and restored_row["resolved_part_id"] == source_definition and absf(restored_row["transform"]["translation"][0] - want_t[0]) < 0.01)
+	main.command_stack.undo() # the add again: leaves S as it was found
+	await _wait_for(func() -> bool: return not manager._busy_edit)
+	await _wait_for(func() -> bool: return room.parts.size() == members_before)
+
 	# --- close and reopen: the moved part is where it was left
-	var moved_local: Vector3 = target.transform.origin
 	manager.close_room(room)
 	await process_frame
 	print("SMOKE closing the room brings the world's copy back and frees the box: ", world_leaves.all(func(n): return n.visible) and RoomRegistry.room_count() == 0 and manager.rooms.is_empty())
@@ -163,6 +215,15 @@ func _initialize() -> void:
 	print("SMOKE reopened, the moved part is where it was left (the backend's stored pose, read back through a fresh mesh): ", again_part != null and again_part.transform.origin.distance_to(moved_local) < 0.5)
 	manager.close_all()
 	quit()
+
+
+func _fake_node(owner: String, occurrence: String) -> MeshInstance3D:
+	## A bare node carrying only the backend identity a placed part has (owner Part, occurrence): what room_edit.gd reads to find which Part it shows.
+	var n := MeshInstance3D.new()
+	n.set_meta("owner_part_id", owner)
+	n.set_meta("occurrence_id", occurrence)
+	root.add_child(n)
+	return n
 
 
 func _stored_differs(list: Array, occ_id: String, start_mm: Vector3, out: Dictionary) -> bool:

@@ -104,7 +104,10 @@ static func stray_reason(part: Node3D) -> String:
 	var slot := slot_of(part)
 	var centre := part_centre(part)
 	if is_room_part(part) and slot >= 0:
-		return "" if slot < rooms.size() and rooms[slot] != null and rooms[slot].contains(centre) else "left_room"
+		if slot < rooms.size() and rooms[slot] != null and rooms[slot].contains(centre):
+			return ""
+		var other := room_at(centre)
+		return "entered_room" if other != -1 and other != slot else "left_room" # put down inside ANOTHER room: a copy for that room (room_manager.gd)
 	return "entered_room" if room_at(centre) != -1 else ""
 
 

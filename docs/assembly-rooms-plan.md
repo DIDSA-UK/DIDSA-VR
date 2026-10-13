@@ -155,19 +155,28 @@ Things the server does **not** protect against, so the client must:
 - **Unknown Part id**: returns 201 with an *unresolved* occurrence (silently invisible). The client resolves the id first.
 - **Duplicate id**: 409, so a retry must reuse the id only to restore the same occurrence.
 
-### Design (not built yet)
+### Built (headless- and live-backend-confirmed; not on a headset)
 
-1. **Which Part is being copied**: a world node carries its owner Part and occurrence id, not the Part it shows; read the owner's
-   `GET .../occurrences` row for `resolved_part_id` (cached).
-2. **Pose**: the dropped node's pose in the room's content frame (`content_root` inverse, rotation and translation only, the room's scale is a
-   display scale and is dropped), in millimetres, exactly like a moved part's saved pose.
-3. **After the POST**: re-fetch the room Part's glb and swap the room's content in place (keeping the room's scale and position), re-read the
-   Part's state (`load_owner_state`). The carried original goes back to where it was picked up (it is a copy).
-4. **Undo/redo**: `DELETE` and re-`POST` with the same id; one entry on the shared stack.
-5. **The world's instances of S are now stale** (the hidden seed has no copy of the new part): on closing a room whose membership changed, reload
-   the world model keeping the world's pose and the document's dirty flag. (The R4 Preview feature will show them live.)
-6. **Delete**: Assembly Tree row and the selected part, two-press confirm, naming how many mates will go with it; undo re-POSTs the occurrence.
-7. **From the Files tab**: "Add" goes to the room you are standing in; later, the thumbnail drag from the scope document uses the same call.
+| Piece | Where | What it does |
+|---|---|---|
+| Drop-to-add | `controller.gd` (hands the dropped pose to the room listeners), `room_manager.gd` `on_part_refused` / `add_to_room`, `room_edit.gd` | A part let go inside a room that can take it is **copied** into that room's assembly: a new occurrence of the Part it shows, at the pose it was let go at (the room's millimetres, the carried part's scale dropped), then the room reloads its mesh from the backend. The original goes back to where it was picked up. Works from the world, and from one room into another. One undo step (undo deletes it again, redo puts back the same occurrence). |
+| Guards | `room_edit.gd` `check_addable` | A Part into itself or into anything nested inside what it contains, or a node with no source Part, is refused with a reason before any call (the server would accept it). A room whose Part state is still loading refuses with a message. |
+| Drop cue | `drop_cue.gd`, `room_manager.gd` `_update_drop_cues` | Corner brackets on the carried part's bounding box, in the target room's colour, while its middle is inside a room that can take it; gone when it leaves or is let go. |
+| Delete | `room_manager.gd` `delete_occurrence`, Assembly Tree row **Delete** | Two presses; the second names how many Mates go with the part. Removes the occurrence (and its Mates, server-side), refreshes the room for that Part or the world, marks the document dirty. One undo step re-posts it with its old id and everything it had (not the Mates). |
+| Files tab Add | `main.gd` `add_component_file` | Standing in a room, the file is added to **that room's** assembly (at the Part's origin) instead of the world's. |
+| Stale world | `main.gd` `reload_world_model`, `room_manager.gd` | Closing a room whose assembly changed re-reads the world (it keeps the world's position, turn and scale, and the unsaved flag; it clears the undo history). **Other rooms stay open** and get their new world copies hidden; opening a room waits for a re-read in flight. |
+
+Found by the live test and fixed: closing a changed room started an async world re-read whose "model replaced" step closed whichever room
+was opened next (and every other open room). Also fixed: a room closed while a membership refresh was in flight now still triggers the world re-read.
+
+### Known gaps
+
+- **Cut/paste move** is a copy plus Delete (two steps, by design: "copy sounds right, delete the seed if required").
+- **A drop lands the copy at the pose it was let go at**, free (not mated, not grounded); there is no snap.
+- **Undo history is lost whenever the world is re-read** (closing a changed room, deleting from the world's tree). Undo steps made inside a room before it is closed survive until then.
+- **The Delete button is on Assembly Tree rows only**; there is no "delete the selected part" on the wrist tablet or tool wheel yet.
+- **Nested occurrences** (a part inside a sub-sub-assembly shown in the world's tree) can be deleted from the tree; copying one into a room copies the Part it shows, placed at the drop pose.
+- **Thumbnail drag from the Files list** (the payload system) is not built; the add path it will use is the same `add_file` call.
 
 ## Earlier R2 to R5 notes
 

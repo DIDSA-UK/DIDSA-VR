@@ -129,7 +129,7 @@ func _initialize() -> void:
 	left.global_position = room.global_position
 	await physics_frame
 	left._try_release()
-	print("SMOKE a world part put down inside a room goes back (adding it to the room is the later drop-to-add flow): ", world_part.global_transform.is_equal_approx(world_start) and messages.size() > 0 and messages.back().contains("inside a room"))
+	print("SMOKE a world part put down inside a room goes back to where it was picked up (the drop becomes a copy added to the room: tests/room_drop.gd; here there is no backend to add with, so it only says so): ", world_part.global_transform.is_equal_approx(world_start) and messages.size() > 0 and messages.back().contains("needs the backend"))
 	left.global_position = world_part.global_position
 	left._try_grab()
 	left.global_position += Vector3(0.0, 0.5, 0.0)
