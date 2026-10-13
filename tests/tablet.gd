@@ -168,7 +168,7 @@ func _initialize() -> void:
 	# --- one active tool at a time
 	await open_category("assemble")
 	print("SMOKE opening a category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assemble" and ui.selected_tool_id == "mates" and tab.manager.active_id == "" and not r.mates_tool_active)
-	print("SMOKE a category with one tool shows no chip strip: ", not ui._strip_scroll.visible)
+	print("SMOKE a category with two tools (Mates, Rooms) shows the chip strip: ", ui._strip_scroll.visible)
 	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE the header switch turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)

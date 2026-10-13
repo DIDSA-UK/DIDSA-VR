@@ -120,6 +120,9 @@ func register(reg) -> void:
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
+	reg.add_tool("assemble", "rooms", "Rooms", "assembly", _build_rooms_page, {
+		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
+
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
 	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
 		"caption": "hands · speed",
@@ -509,6 +512,50 @@ func _refresh_environment_status() -> void:
 
 
 # --- Assembly: Mates ----------------------------------------------------------------
+
+func _build_rooms_page() -> Control:
+	var page := _page(8)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 6)
+	page.add_child(list)
+	var rm = _main.room_manager if _main and _main.get("room_manager") else null
+	if rm == null:
+		list.add_child(_hint("Rooms are not available."))
+		return page
+	var fill := func() -> void:
+		for c in list.get_children():
+			list.remove_child(c)
+			c.queue_free()
+		if rm.rooms.is_empty():
+			list.add_child(_hint("No rooms open. Press Room on an Assembly Tree row."))
+		for r in rm.rooms:
+			var room = r
+			var row := _row()
+			var name_l := Label.new()
+			name_l.text = "%s  %s" % [room.label, room.scale_text()]
+			name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			name_l.clip_text = true
+			row.add_child(name_l)
+			row.add_child(_button("Restore" if room.minimised else "Minimise", func() -> void:
+				if room.minimised:
+					rm.restore_room(room)
+				else:
+					rm.minimise_room(room)
+				rm.rooms_changed.emit()))
+			row.add_child(_button("Close", func() -> void: rm.close_room(room)))
+			list.add_child(row)
+	fill.call()
+	rm.rooms_changed.connect(fill)
+	page.tree_exiting.connect(func() -> void:
+		if rm.rooms_changed.is_connected(fill):
+			rm.rooms_changed.disconnect(fill))
+	var del := _button(rm.delete_selected_label(), func() -> void: rm.delete_selected_press())
+	rm.delete_state_changed.connect(func() -> void:
+		if is_instance_valid(del):
+			del.text = rm.delete_selected_label())
+	page.add_child(del)
+	return page
+
 
 func _build_mates_page() -> Control:
 	var page := _page(8)

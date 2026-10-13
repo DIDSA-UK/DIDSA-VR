@@ -150,7 +150,7 @@ Corrects the scope note: "grid spacing follows room scale (600 mm at 1:1 becomes
 
 ### Known gaps (R3)
 
-- **No tab list or minimise yet** (the "Rooms" tile on the wrist tablet and the snow-globe minimise). Rooms are closed from the console or the tree button.
+- **Minimise / restore and the Rooms page are in** (tablet: Assemble > Rooms lists rooms with Minimise/Restore/Close and a shared two-press Delete-selected). A minimised room is a 0.4 m globe hovering at 0.9 m, untouchable; restore needs its old space free. Not tried on a headset: whether 0.4 m / 0.9 m reads well, and the Rooms page layout on the real tablet.
 - **One console panel per room** (each a small SubViewport): fine at the default cap of 4, to be measured on a headset.
 - **No two-hand squeeze** (grip two opposite corners to resize), no tilting or lifting a room off the floor, and no way to change one dimension by itself except dragging along an edge (there are no face handles).
 - **No clip modes** (hide / ghost / preview of the world's copy): the world's copy is hidden while the room is open. Preview is R4.

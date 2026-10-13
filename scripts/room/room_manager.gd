@@ -10,6 +10,7 @@ extends Node
 
 signal rooms_changed
 signal status(text: String)
+signal delete_state_changed ## the Delete-selected button's text changed (armed, disarmed): every button showing it follows
 
 const BackendSession := preload("res://scripts/backend_session.gd")
 const Room := preload("res://scripts/room/room.gd")
@@ -73,6 +74,25 @@ func on_part_refused(part: Node3D, reason: String, dropped: Transform3D = Transf
 		status.emit("That part went back: the room isn't ready yet (its parts are still loading).")
 		return
 	add_to_room(room, part, dropped)
+
+
+func minimise_room(room: Node) -> void:
+	if not is_instance_valid(room) or room.minimised:
+		return
+	_release_hands_from(room)
+	room.minimise()
+	status.emit("%s minimised: restore it from the Rooms page." % room.label)
+	rooms_changed.emit()
+
+
+func restore_room(room: Node) -> void:
+	if not is_instance_valid(room) or not room.minimised:
+		return
+	if room.restore():
+		status.emit("%s restored." % room.label)
+	else:
+		status.emit("Can't restore %s: another room is in its space. Close or move that room first." % room.label)
+	rooms_changed.emit()
 
 
 func room_for_slot(slot: int) -> Node:
@@ -203,6 +223,49 @@ func _refresh_for_owner(owner_part_id: String) -> void:
 		_mark_room_changed(room)
 	elif _main != null and _main.has_method("reload_world_model"):
 		await _main.reload_world_model()
+
+
+var _delete_armed := ""
+var _delete_armed_until_ms := 0
+var _delete_text := ""
+const DELETE_CONFIRM_MS := 4000
+
+
+func delete_selected_label() -> String:
+	## The text of every "Delete selected part" button: that, or "Sure? Delete X (N mates)" for a few seconds after the first press.
+	if _delete_armed != "" and Time.get_ticks_msec() < _delete_armed_until_ms:
+		return _delete_text
+	return "Delete selected part"
+
+
+func delete_selected_press() -> Dictionary:
+	## One press of "Delete selected part" (the console's and the tablet's): the first arms it for a few seconds, naming the part and the Mates that would go,
+	## the second deletes it. {status: none / unavailable / armed / deleted / failed, message}. The buttons read delete_selected_label() when
+	## delete_state_changed fires.
+	var part: Node3D = _main.current_selected_part() if _main != null and _main.has_method("current_selected_part") else null
+	if part == null:
+		return {"status": "none", "message": "Select a part first (point at it and pull the trigger)."}
+	var owner := str(part.get_meta("owner_part_id", ""))
+	var occ := str(part.get_meta("occurrence_id", ""))
+	if owner == "" or occ == "":
+		return {"status": "unavailable", "message": "That part can't be deleted (it is the assembly's own content)."}
+	var now := Time.get_ticks_msec()
+	if _delete_armed == occ and now < _delete_armed_until_ms:
+		_delete_armed = ""
+		delete_state_changed.emit()
+		var result: Dictionary = await delete_occurrence(owner, occ, str(part.name))
+		return {"status": "deleted" if result.get("ok", false) else "failed", "message": ""}
+	_delete_armed = occ
+	_delete_armed_until_ms = now + DELETE_CONFIRM_MS
+	_delete_text = "Sure? Delete %s" % str(part.name)
+	delete_state_changed.emit()
+	var e := edit_api()
+	if e != null:
+		var mates: int = await e.mates_naming(owner, occ)
+		if _delete_armed == occ:
+			_delete_text = "Sure? Delete %s%s" % [str(part.name), "" if mates == 0 else " (%d mate%s)" % [mates, "" if mates == 1 else "s"]]
+			delete_state_changed.emit()
+	return {"status": "armed", "message": ""}
 
 
 func _mark_room_changed(room) -> void: # (untyped: a room closed meanwhile is a freed object, which a typed argument would reject)

@@ -33,6 +33,11 @@ var content_scale: float: ## metres per backend unit (mm) at the room's current 
 		return content_root.scale.x if content_root != null else 0.001
 var two_hand: Node ## the TwoHandModel moving / turning / scaling this room's content (room_manager.gd makes it); null until the room is interactive
 var interactive := false
+const MINI_SIZE_M := 0.4 ## a minimised room's longest side
+const MINI_HOVER_M := 0.9 ## and how high its underside hovers (about waist height)
+
+var minimised := false
+var _restore := {} ## what a minimised room goes back to: its box, content pose and whether it was interactive
 var members_changed := false ## parts were added to or deleted from this room's Part: the world's own copies of it are out of date until the world is reloaded
 
 var glass := true ## the see-through walls with the soft edge glow and the grid near your hands; off = the thin wireframe only
@@ -211,6 +216,56 @@ func _build_walls() -> void:
 	handles.name = "Handles"
 	add_child(handles)
 	handles.setup(self)
+
+
+func minimise() -> bool:
+	## The whole room (walls and content, uniformly, about its middle) shrunk to a small glass cube hovering at waist height where it stood: a world in
+	## miniature that takes no space and can be looked at. Nothing in it can be touched, its handles and console are put away. restore() brings it back exactly.
+	if minimised:
+		return false
+	_restore = {"xform": volume.xform, "half": volume.half, "content": content_root.global_transform, "interactive": interactive}
+	var factor := MINI_SIZE_M / (2.0 * maxf(volume.half.x, maxf(volume.half.y, volume.half.z)))
+	var old_centre: Vector3 = volume.xform.origin
+	var new_half: Vector3 = volume.half * factor
+	var new_centre := Vector3(old_centre.x, MINI_HOVER_M + new_half.y, old_centre.z)
+	var t: Transform3D = content_root.global_transform
+	var content_after := Transform3D(t.basis * factor, new_centre + (t.origin - old_centre) * factor)
+	set_interactive(false)
+	volume.xform = Transform3D(volume.xform.basis, new_centre)
+	volume.half = new_half
+	transform = Transform3D(volume.xform.basis, volume.xform.origin)
+	content_root.global_transform = content_after
+	apply_volume()
+	if handles != null:
+		handles.set_enabled(false)
+	if console != null:
+		console.close()
+	minimised = true
+	RoomRegistry.push()
+	return true
+
+
+func restore() -> bool:
+	## Back to the box, the content's pose and the touchability it had. False (and still minimised) if another room now occupies that space.
+	if not minimised:
+		return false
+	var box := RoomVolume.make(_restore["xform"], (_restore["half"] as Vector3) * 2.0)
+	if RoomRegistry.would_overlap(box, volume):
+		return false
+	volume.xform = _restore["xform"]
+	volume.half = _restore["half"]
+	transform = Transform3D(volume.xform.basis, volume.xform.origin)
+	content_root.global_transform = _restore["content"]
+	apply_volume()
+	if handles != null:
+		handles.set_enabled(true)
+	if console != null:
+		console.open()
+	minimised = false
+	set_interactive(bool(_restore["interactive"]))
+	_restore = {}
+	RoomRegistry.push()
+	return true
 
 
 func refit(metres_per_unit: float) -> void:

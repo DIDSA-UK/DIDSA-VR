@@ -25,6 +25,7 @@ const CORNERS := [0, 1, 2, 3, 4, 5, 6, 7]
 const MOVE := 99 ## the "corner" number of the move bar
 
 var room: Node3D
+var enabled := true ## off while the room is minimised: the handles are not there to take
 var _handles: Dictionary = {} ## corner (or MOVE) -> MeshInstance3D
 var _material: StandardMaterial3D
 var _held := {} ## {hand, corner, grab_xform, grab_half, grab_point | grab_hand, grab_yaw} while a handle is held; empty otherwise
@@ -169,7 +170,7 @@ func candidate_for(hand: Node3D) -> int:
 
 func try_grab(hand: Node3D) -> bool:
 	## A grip: takes the handle this hand is at (or aiming at). True if it did, so the grip is not also a part grab or a whole-room move.
-	if is_held() or room == null or not is_instance_valid(room):
+	if not enabled or is_held() or room == null or not is_instance_valid(room):
 		return false
 	var handle := candidate_for(hand)
 	if handle == -1:
@@ -219,8 +220,19 @@ func update_drag() -> void:
 		room.set_box(new_xform, result["half"])
 
 
+func set_enabled(on: bool) -> void:
+	enabled = on
+	if not on:
+		for h in _handles:
+			(_handles[h] as Node3D).visible = false
+	else:
+		(_handles[MOVE] as Node3D).visible = true
+
+
 func update_visibility(hand_positions: Array) -> void:
 	## The corner nearest each hand shows when the hand is within reach of the room's corners (and the held one stays); the move bar always shows.
+	if not enabled:
+		return
 	var shown := {}
 	if is_held() and _held["corner"] != MOVE:
 		shown[_held["corner"]] = true

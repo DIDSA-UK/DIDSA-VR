@@ -17,15 +17,10 @@ var _scale_label: Label
 var _uses_label: Label
 var _note_label: Label
 var _delete_button: Button
-var _delete_armed := ""
-var _delete_armed_until_ms := 0
-var _delete_mates := 0
 var _refresh_left := 0.0
 var _pedestal: MeshInstance3D
 var _pedestal_ring: MeshInstance3D
 var _uses_asked_for := -1
-
-const DELETE_CONFIRM_MS := 4000
 
 
 func setup_console(p_room: Node3D, p_manager: Node, main: Node, left: XRController3D, right: XRController3D, camera: XRCamera3D) -> void:
@@ -65,6 +60,7 @@ func _build_content() -> Control:
 	_delete_button = Button.new()
 	_delete_button.text = "Delete selected part"
 	_delete_button.pressed.connect(_on_delete_pressed)
+	manager.delete_state_changed.connect(_sync_delete_label)
 	box.add_child(_delete_button)
 	_note_label = Label.new()
 	_note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -138,39 +134,21 @@ func _reset_walls() -> void:
 
 
 func _on_delete_pressed() -> void:
-	var part: Node3D = _main.current_selected_part() if _main != null and _main.has_method("current_selected_part") else null
-	if part == null:
-		_note_label.text = "Select a part first (point at it and pull the trigger)."
-		return
-	var owner := str(part.get_meta("owner_part_id", ""))
-	var occ := str(part.get_meta("occurrence_id", ""))
-	if owner == "" or occ == "":
-		_note_label.text = "That part can't be deleted (it is the assembly's own content)."
-		return
-	var now := Time.get_ticks_msec()
-	if _delete_armed == occ and now < _delete_armed_until_ms:
-		_delete_armed = ""
-		_delete_button.text = "Delete selected part"
-		await manager.delete_occurrence(owner, occ, str(part.name))
-		return
-	_delete_armed = occ
-	_delete_armed_until_ms = now + DELETE_CONFIRM_MS
-	_delete_mates = 0
-	_delete_button.text = "Sure? Delete %s" % str(part.name)
-	var e = manager.edit_api()
-	if e != null:
-		_delete_mates = await e.mates_naming(owner, occ)
-		if _delete_armed == occ:
-			_delete_button.text = "Sure? Delete %s%s" % [str(part.name), "" if _delete_mates == 0 else " (%d mate%s)" % [_delete_mates, "" if _delete_mates == 1 else "s"]]
+	var result: Dictionary = await manager.delete_selected_press()
+	if str(result.get("message", "")) != "":
+		_note_label.text = str(result["message"])
+
+
+func _sync_delete_label() -> void:
+	if _delete_button != null:
+		_delete_button.text = manager.delete_selected_label()
 
 
 func _refresh_labels() -> void:
 	if _scale_label == null or room == null or not is_instance_valid(room):
 		return
 	_scale_label.text = "Scale %s  ·  %s" % [room.scale_text(), room.grid_text()]
-	if _delete_armed != "" and Time.get_ticks_msec() >= _delete_armed_until_ms:
-		_delete_armed = ""
-		_delete_button.text = "Delete selected part"
+	_sync_delete_label()
 
 
 func _refresh_uses() -> void:
