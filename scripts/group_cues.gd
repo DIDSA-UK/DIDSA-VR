@@ -56,9 +56,9 @@ static func caption(text: String, world_pos: Vector3) -> Label3D:
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.no_depth_test = true
 	l.fixed_size = false
-	l.pixel_size = 0.0007
+	l.pixel_size = 0.0012
 	l.font_size = 40
-	l.outline_size = 10
+	l.outline_size = 12
 	l.modulate = Color(0.9, 0.98, 1.0)
 	l.outline_modulate = Color(0.02, 0.06, 0.1, 0.95)
 	l.render_priority = 10
