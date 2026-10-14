@@ -1,7 +1,7 @@
 # Changelog
 
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
-"Verified" means headless, software-render or real-backend tests unless a headset is named. See `docs/status.md` for the current verification state.
+"Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
 ## Unreleased (`main`, 14 Oct)
 
@@ -9,7 +9,7 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 - **Sub-assembly selection**: grip latch with a dead zone, trigger cycling, laser breadcrumb, group moves saved on the sub-assembly occurrence (#43).
 - **World preview** for rooms and the design table: Hidden / Ghost / Preview, push, tether, fly to world (R4, #43). Group drop copies a sub-assembly into a room.
 - Docs: phone/Cardboard observer client idea added to the vision brief (#44).
-- Project renamed from "DIDSA VR Spike" to "DIDSA VR"; docs and README restructured.
+- Project renamed from "DIDSA VR Spike" to "DIDSA Design Tools VR" (a placeholder name); docs and README restructured.
 
 ## 13 Oct: Assembly Rooms R0-R3 (#42)
 

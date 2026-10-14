@@ -1,4 +1,4 @@
-# DIDSA VR documentation
+# DIDSA Design Tools VR documentation
 
 Start with [`status.md`](status.md) (what is built, what is verified, what is open). The top-level [`../README.md`](../README.md) covers setup and controls.
 

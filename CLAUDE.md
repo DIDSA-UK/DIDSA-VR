@@ -1,4 +1,6 @@
-# DIDSA VR: working notes
+# DIDSA Design Tools VR: working notes
+
+(The name is a placeholder. The repo and the docs still say DIDSA-VR / DIDSA VR in places.)
 
 Godot 4.7 (Mobile renderer, OpenXR) VR client for DIDSA-CAD. GDScript only; no addons and no `godot-xr-tools` (deliberate).
 The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo is a client of its REST API.
@@ -36,7 +38,7 @@ CI pins Godot 4.7.2 (`.github/workflows`). The renderer is `mobile`; physics run
 - Never commit `secrets.cfg`, `export_presets.cfg` or anything under `models/` (git-ignored).
 - Backend native units are millimetres; Godot reads glTF as metres (`spawn_scale` 0.001).
 - The server does not stop cycles or unknown Part ids when adding occurrences; the client must.
-- Say what you could not verify. Headless tests cannot judge feel, fake a real grip press, or render for real. Do not write "works on the headset" unless the owner reported it.
+- Say what you could not verify. Headless tests cannot judge feel, fake a real grip press, or render for real. Testing on the headset is ongoing and informal, so the repo does not record which features have been checked by hand: do not write "works on the headset" unless the owner says so.
 - Adding a test file: add it to `tests/run_all.sh` and a row in `tests/README.md`; live-backend tests also go in `tests/e2e_ci_list.txt`.
 
 ## Naming

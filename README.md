@@ -1,4 +1,6 @@
-# DIDSA VR
+# DIDSA Design Tools VR
+
+> The name is a placeholder; the repository is still `DIDSA-VR`.
 
 Build, assemble and model parametric CAD in VR. A Godot 4 / OpenXR client for [DIDSA-CAD](https://github.com/DIDSA-UK/DIDSA-CAD):
 everything you author here is stored by the DIDSA-CAD backend and opens in the flat app, and the other way round.
@@ -11,17 +13,16 @@ Runs on a Quest (standalone, sideloaded), on a PC headset (PCVR), or as a flat 3
 
 ## Status at a glance
 
-Almost everything is verified by headless tests, software renders and (where noted) a real backend. **Very little has been felt on a headset, and nothing has been measured on Quest hardware.**
-The full matrix, with dates, is in [`docs/status.md`](docs/status.md).
+Every feature is covered by headless tests, software renders and (where noted) a real backend. **Testing on a headset is ongoing and informal, so this README does not claim which features have been checked by hand**, and nothing has been measured on Quest hardware yet. The matrix, with dates, is in [`docs/status.md`](docs/status.md).
 
 | Area | State |
 |---|---|
-| View and manipulate (grip, laser, whole-model move/turn/scale, steadiness, undo/redo, walk/turn/teleport) | Built; PCVR-tested |
-| Assembly tools: Mates, Colours, Sections, Measure | Built; real backend; PCVR bug rounds done |
+| View and manipulate (grip, laser, whole-model move/turn/scale, steadiness, undo/redo, walk/turn/teleport) | Built |
+| Assembly tools: Mates, Colours, Sections, Measure | Built; real backend |
 | Floating windows: Tree, Browser (and PDF), Calculator, Images | Built; browser relay verified end to end |
-| **Assembly Rooms**: clipped, resizable workspaces on a sub-assembly | Built; real backend; not yet on a headset |
-| **Design table**: sketch, constrain and feature a single part | Built; real backend; first headset session done |
-| Wrist tablet, tool wheel, themes | Built; tablet signed off on PCVR |
+| **Assembly Rooms**: clipped, resizable workspaces on a sub-assembly | Built; real backend |
+| **Design table**: sketch, constrain and feature a single part | Built; real backend |
+| Wrist tablet, tool wheel, themes | Built |
 | Multiplayer / observer client | Not built (idea in the vision brief) |
 
 Tests at the last recorded run: 2512 headless checks, 42 render tests, live-backend rooms test 23/23, all passing.
@@ -127,7 +128,7 @@ api_key="your-BROWSER_RELAY_API_KEY"
 1. **Editor, Manage Export Templates**: install templates matching your Godot version.
 2. **Project, Export, Add, Android**; set your Android SDK path on first use. Under **Xr Features**: `Xr Mode` = `OpenXR`; `Hand Tracking` = off (controllers only).
 3. Export a debug APK, then `adb install -r path/to/exported.apk`.
-4. Launch **DIDSA VR** from the headset's Unknown Sources list. (Renamed from "DIDSA VR Spike"; export presets are git-ignored, so check your local preset's name and package ID.)
+4. Launch **DIDSA Design Tools VR** from the headset's Unknown Sources list. (Renamed from "DIDSA VR Spike", and the name is a placeholder; export presets are git-ignored, so check your local preset's name and package ID.)
 5. Standalone passthrough also needs the OpenXR Vendors plugin, which is not included.
 
 ## Testing
@@ -144,7 +145,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 
 ## Known limitations
 
-- **No Quest-hardware measurements** (load time, frame rate, Quest 2), and rooms, the tool wheel and the Phase 7 design-table options have not been felt on a headset.
+- **No Quest-hardware measurements** yet (load time, frame rate, Quest 2). Headset testing is ongoing and informal.
 - **Cleartext HTTP on Android** (see Configuration).
 - **Server does not stop cycles or unknown Part ids** when adding occurrences; the client refuses them.
 - **Multi-file assemblies**: occurrences pointing at other files via `external_ref` with no stamped `resolved_part_id` do not auto-resolve on open. Open/Add one file at a time from the Files page.
