@@ -144,7 +144,7 @@ func _initialize() -> void:
 	var ui = tab.ui
 	print("SMOKE eleven home tiles sit in a 6 x 2 grid: ", ui._home_grid.get_child_count() == 11 and ui._home_grid.columns == 6 and tab.registry.category_rows() == 2)
 	print("SMOKE the tablet opens on the home screen, no tool selected: ", ui.selected_category_id == "" and ui._home_view.visible and not ui._tool_view.visible and not ui._back_button.visible)
-	print("SMOKE the tiles are the categories, in order, with no windows page: ", tab.registry.categories().map(func(c): return c.id) == ["design", "assemble", "rooms", "view", "inspect", "files", "tree", "calculator", "images", "browser", "settings"])
+	print("SMOKE the tiles are the categories, in order, with no windows page: ", tab.registry.categories().map(func(c): return c.id) == ["design", "rooms", "assemble", "view", "inspect", "files", "tree", "calculator", "images", "browser", "settings"])
 	print("SMOKE the tablet is 0.40 x 0.26 m at the same text density as before: ", tab.panel_size == Vector2(0.40, 0.26) and absf(tab.viewport_size.x / tab.panel_size.x - 2667.0) < 2.0)
 	print("SMOKE no side panel for a tool with no list: ", not tab._side_open and not tab._side_pivot.visible)
 

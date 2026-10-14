@@ -309,6 +309,7 @@ func _make_tile(label: String, caption: String, icon_name: String, accent: Color
 	caption_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	caption_label.custom_minimum_size = Vector2(0, ceilf(tokens.font_tiny * 3.4)) # two lines tall for every tile, so the icons and names line up whether it wraps or not
 	caption_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	caption_label.visible = caption != "" # (a tile with nothing to say centres its icon and name)
 	box.add_child(caption_label)
 	_style_tile(b, accent)
 	_tiles.append({"button": b, "icon": icon, "caption": caption_label, "accent": accent, "category_id": category_id, "tool_id": tool_id})
@@ -351,6 +352,7 @@ func _refresh_tile_captions() -> void:
 		var text := str(cat.caption.call())
 		if label.text != text:
 			label.text = text
+			label.visible = text != ""
 			changed = true
 	if changed:
 		activity.emit()

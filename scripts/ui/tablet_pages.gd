@@ -114,15 +114,15 @@ func register(reg) -> void:
 	reg.add_category("design", "Design", "design", ACCENT_DESIGN, {
 		"subtitle": "sketch · extrude", "action": _on_design_tile, "caption": _design_caption})
 
+	reg.add_category("rooms", "Rooms", "room", ACCENT_ASSEMBLY, {"subtitle": "assembly rooms"})
+	reg.add_tool("rooms", "rooms", "Rooms", "room", _build_rooms_page, {
+		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
+
 	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
 	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
-
-	reg.add_category("rooms", "Rooms", "room", ACCENT_ASSEMBLY, {"subtitle": "assembly rooms"})
-	reg.add_tool("rooms", "rooms", "Rooms", "room", _build_rooms_page, {
-		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
 
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
 	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
@@ -169,12 +169,12 @@ func register(reg) -> void:
 		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
 
 	# Each floating window is its own tile: tap to open it (Image Viewer and Browser: tap again for another).
-	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("tree")})
-	reg.add_category("calculator", "Calculator", "calculator", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("calculator")})
-	reg.add_category("images", "Images", "image", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("image")})
-	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("browser")})
+	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("tree")})
+	reg.add_category("calculator", "Calculator", "calculator", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("calculator")})
+	reg.add_category("images", "Images", "image", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("image")})
+	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("browser")})
 
-	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"subtitle": "set & forget", "hub": true})
+	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"hub": true})
 	reg.add_tool("settings", "set_movement", "Movement", "movement", _build_settings_movement, {
 		"caption": "steadiness", "help": "How much a held part or the model is steadied against hand shake."})
 	reg.add_tool("settings", "set_display", "Display", "eye_shaded", _build_settings_display, {
