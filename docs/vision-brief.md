@@ -22,6 +22,7 @@ The goal is device-agnostic, but Quest has the market, so Quest comes first and 
 | Quest 2, 3, 3S (standalone) | Primary target | Sideloaded APK; limited compute, so the headset only displays and interacts |
 | PCVR | Heavy models | Same client and native files, or a sibling app on the same engine |
 | Pico, Steam Frame, Galaxy | Later | Reachable if the client stays on OpenXR |
+| Android phone + Cardboard viewer | Later, observer only | View-only client for design reviews; needs multiplayer first (see "Phone observer" below) |
 | Apple | Later, separate effort | Different platform; do not design around it yet |
 
 Models must be imported over a network from storage the user already has, so the network path matters as much as the headset.
@@ -128,6 +129,26 @@ Multi-user comes in two stages.
 
 **Stage 2, live presence.** Seeing each other's edits live needs a backend with separate session and document, persistence, a push channel and per-user identity. That is a separate backend project, scoped on its own.
 
+### Phone observer (idea, recorded 14 Oct 2026; not scoped or started)
+
+An Android APK that lets someone with only a phone and a Google Cardboard-style viewer sit in on a design review while a person with a proper HMD stays in control. The phone user sees the shared environment, the assembly and the other participants' avatars, but does not edit.
+
+**Prerequisite: multiplayer.** Nothing here can start until stage 2 (live presence) exists. As of this note the repo has no networking or session-sync code, so the observer is a consumer of that work, not a driver of it. The observer should shape the multiplayer design in two ways only: participants need a role (editor or observer), and the session should send state a view-only client can render without any editing code.
+
+**Shape of the client**
+- Same Godot project, a separate Android export with OpenXR switched off. Cardboard phones have no OpenXR runtime and no tracked controllers.
+- Head orientation from the phone's gyroscope, side-by-side stereo with lens distortion. Godot has no built-in Cardboard support, so this is a small custom camera rig (two SubViewports plus a distortion shader) or a community add-on. No positional tracking, so the observer moves with the gamepad or stays put.
+- Input from a Bluetooth gamepad, which Godot supports on Android natively. Limited interaction only: move, point a laser, and perhaps highlight, ping or toggle part visibility locally. No edits are sent, which avoids conflict resolution and keeps authority with the HMD user.
+- Reuses the view layer (glb scene, environments, avatars). Does not need the grab, mates, design-table or other controller-driven code.
+
+**Open questions**
+- Mid-range phones must hold about 60 fps in stereo; whether real assemblies and the current shaders and MSAA allow that is unknown. May need LOD or simplified materials for this build.
+- How much of `main.gd` mixes rendering with Quest input, and so how cleanly a shared view layer can be split out.
+- Whether the observer can have a small local-only toolset (hide parts, section, measure) or stays purely a viewer.
+- A WebXR export is an alternative delivery route (no APK, runs in a phone browser); worth comparing once multiplayer exists.
+
+**Roadmap placement.** After stage 2 live presence, and after Quest hardening has settled which parts of the client are view-only. Treat it as a candidate milestone 6 once those two are done.
+
 Environments wanted: aircraft hangar, warehouse, open paved area, laboratory, clean room. Whether open-source versions exist is an open research question.
 
 ## Milestones
@@ -166,5 +187,6 @@ Not needed for milestone 1; revisit once the viewport works.
 - Easel drawing pushed into the AI modelling tool.
 - Voice-described parts by microphone.
 - Multiplayer with per-user design tables and crates.
+- Android + Cardboard observer client for design reviews, with optional Bluetooth gamepad (needs multiplayer first; see "Phone observer").
 - Environment library: hangar, warehouse, paved area, laboratory, clean room.
 - Apple, Pico, Steam Frame and Galaxy builds.
