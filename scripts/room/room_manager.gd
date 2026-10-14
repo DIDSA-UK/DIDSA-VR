@@ -148,6 +148,44 @@ func add_to_room(room: Node, node: Node3D, dropped: Transform3D) -> bool:
 	return true
 
 
+func on_group_refused(info: Dictionary, reason: String) -> void:
+	## controller.gd sent a stray sub-assembly (a GroupSet) back. One let go INSIDE a room (from the world or another room) is copied into that room's
+	## assembly, as a single part is: a new occurrence of the sub-assembly's Part, placed where its origin landed. Out of its own room it just stays refused.
+	if reason != "entered_room":
+		status.emit("%s went back: a room's parts stay in the room." % info["label"])
+		return
+	var room := room_for_slot(RoomRegistry.room_at(info["centre"]))
+	if room == null or not room.interactive:
+		status.emit("%s went back: the room isn't ready yet (its parts are still loading)." % info["label"])
+		return
+	add_group_to_room(room, info)
+
+
+func add_group_to_room(room: Node, info: Dictionary) -> bool:
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return false
+	var e := edit_api()
+	if e == null:
+		status.emit("Adding to a room needs the backend.")
+		return false
+	_busy_edit = true
+	status.emit("Adding %s to the room..." % info["label"])
+	var result: Dictionary = await e.add_group(room.part_id, info, room.content_root)
+	if not result["ok"]:
+		_busy_edit = false
+		status.emit(str(result["error"]))
+		return false
+	var snapshot := await _snapshot_of(room.part_id, str(result["occurrence_id"]))
+	await refresh_room(room)
+	_mark_room_changed(room)
+	_busy_edit = false
+	_mark_dirty()
+	status.emit("Added %s to the room. (A copy: the original is where it was; delete it if you meant to move it.)" % info["label"])
+	_push_undo("add %s to room" % info["label"], room.part_id, str(result["occurrence_id"]), snapshot, true)
+	return true
+
+
 func add_file_to_room(room: Node, path: String) -> bool:
 	## The Files tab's Add while standing in a room: the file's Part becomes a new occurrence in the room's Part (at its origin; move it from there).
 	if _busy_edit:

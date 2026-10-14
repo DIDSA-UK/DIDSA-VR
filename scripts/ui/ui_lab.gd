@@ -17,7 +17,7 @@ extends Control
 ## and Settings open a screen of tiles; Inspect opens a chip strip); Back; the status chips
 ## (Mates / Measure / Sections / Shoot hide are mode tools: only one is ever ON, see
 ## tool_manager.gd); the tool header switch and "?"; Undo/Redo and a long press on Undo for
-## History; the gear (jumps to Settings). The home grid holds up to 10 tiles (5 x 2).
+## History; the gear (jumps to Settings). The home grid holds up to 12 tiles (6 x 2).
 
 const TabletRegistry := preload("res://scripts/ui/tablet_registry.gd")
 const ToolManager := preload("res://scripts/ui/tool_manager.gd")

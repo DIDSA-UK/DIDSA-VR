@@ -36,8 +36,8 @@ extends RefCounted
 
 signal changed
 
-const MAX_CATEGORIES := 10 ## the home screen's tile grid is 5 columns x 2 rows
-const GRID_COLUMNS := 5
+const MAX_CATEGORIES := 12 ## the home screen's tile grid is 6 columns x 2 rows
+const GRID_COLUMNS := 6
 
 
 class ToolDef extends RefCounted:

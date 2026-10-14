@@ -529,10 +529,15 @@ func _finish_group_move(gs) -> void:
 	## top-level sub-assembly's new pose is saved on its occurrence (a deeper one moves on screen only, as a part nested in a sub-assembly always has).
 	if gs == null or not is_instance_valid(gs.anchor):
 		return
-	if RoomRegistry.stray_reason(gs.anchor) != "":
+	var stray := RoomRegistry.stray_reason(gs.anchor)
+	if stray != "":
+		var dropped: Transform3D = gs.anchor.global_transform
+		var centre := GroupIndex.union_aabb(gs.members).get_center()
+		var info := {"root": gs.root_part_id, "path": GroupIndex.path_of(gs.anchor), "parts": gs.anchor.get_meta("group_parts", []), "depth": gs.depth,
+			"anchor_pose": dropped, "label": gs.label, "centre": centre}
 		gs.restore()
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
-		group_message.emit("%s put back: a sub-assembly can't leave or enter a room that way." % gs.label)
+		get_tree().call_group("room_listeners", "on_group_refused", info, stray) # (let go INSIDE a room: a copy of the sub-assembly is added to it - room_manager.gd)
 		return
 	if not gs.moved() or command_stack == null:
 		return

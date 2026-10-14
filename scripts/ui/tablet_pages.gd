@@ -107,7 +107,7 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 
 
 func register(reg) -> void:
-	## One category = one tile on the home screen, in the order the tiles appear (5 x 2):
+	## One category = one tile on the home screen, in the order the tiles appear (6 x 2):
 	## Design | Assemble | View | Inspect | Files   /   Tree | Calculator | Images | Browser | Settings.
 	## Design and the four window tiles are "action" tiles (they act straight from Home);
 	## View and Settings are hubs (a screen of tiles first); the rest open a tool view.
@@ -120,7 +120,8 @@ func register(reg) -> void:
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
-	reg.add_tool("assemble", "rooms", "Rooms", "assembly", _build_rooms_page, {
+	reg.add_category("rooms", "Rooms", "room", ACCENT_ASSEMBLY, {"subtitle": "assembly rooms"})
+	reg.add_tool("rooms", "rooms", "Rooms", "room", _build_rooms_page, {
 		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
 
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})

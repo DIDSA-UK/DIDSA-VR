@@ -82,6 +82,45 @@ func contains_part(container_id: String, target_id: String) -> bool:
 	return false
 
 
+func file_conflict(container_id: String, file_text: String) -> String:
+	## "" if the native file may be added to the Part `container_id`, else why not. The server only refuses a file whose ROOT is the container; it merges the
+	## file's Parts into the document by id, so a file that contains the container anywhere (or a Part the document already has that does) would put the
+	## container inside itself. Followed here through the file's own placements and the document's.
+	var parsed = JSON.parse_string(file_text)
+	if not (parsed is Dictionary) or not (parsed.get("document") is Dictionary):
+		return "That isn't a native DIDSA file."
+	var document: Dictionary = parsed["document"]
+	var file_parts: Dictionary = {}
+	var first_id := ""
+	for p in document.get("parts", []):
+		if p is Dictionary:
+			var kids: Array = []
+			for occ in p.get("occurrences", []):
+				if occ is Dictionary and occ.get("resolved_part_id") != null and str(occ["resolved_part_id"]) != "":
+					kids.append(str(occ["resolved_part_id"]))
+			file_parts[str(p.get("id", ""))] = kids
+			if first_id == "":
+				first_id = str(p.get("id", ""))
+	var root_id := str(document.get("root_part_id", "")) if str(document.get("root_part_id", "")) != "" else first_id
+	if root_id == "":
+		return "That file has no Parts."
+	var seen := {}
+	var queue: Array = [root_id]
+	while not queue.is_empty():
+		var current: String = queue.pop_back()
+		if current == container_id:
+			return "Can't add that file here: it contains this assembly (a Part can't hold itself)."
+		if seen.has(current):
+			continue
+		seen[current] = true
+		for kid in file_parts.get(current, []):
+			queue.append(kid)
+		for row in await occurrences_of(current): # (a Part the document already has keeps its own placements when the file's copy is merged in by id)
+			if row.get("resolved_part_id") != null and str(row["resolved_part_id"]) != "":
+				queue.append(str(row["resolved_part_id"]))
+	return ""
+
+
 func instance_count(root_part_id: String, target_part_id: String) -> int:
 	## How many times `target_part_id` is placed in the assembly under `root_part_id`, counting every path to it (a bolt in a bracket that is placed three
 	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them.
@@ -132,6 +171,43 @@ func add_copy(room_part_id: String, node: Node, world_pose: Transform3D, content
 	return {"ok": true, "error": "", "occurrence_id": occurrence_id, "definition_id": definition, "pose": pose}
 
 
+func chain_below(root_part_id: String, parts: Array, path: Array, depth: int) -> Transform3D:
+	## The pose, in the sub-assembly's own frame, of the occurrence a group member stands for: the product of the placements below the group (path elements
+	## `depth` onward; each one is an occurrence of the Part the previous element resolves to). The group's own frame in the world is then the member's world
+	## pose times the inverse of this. (Millimetres, like every stored pose.)
+	var result := Transform3D.IDENTITY
+	for i in range(depth, path.size()):
+		var owner := root_part_id if i == 0 else str(parts[i - 1])
+		for row in await occurrences_of(owner):
+			if str(row.get("id", "")) == str(path[i]):
+				result = result * MatesTool.json_to_pose(row.get("transform", {}))
+				break
+	return result
+
+
+func add_group(room_part_id: String, info: Dictionary, content_root: Node3D) -> Dictionary:
+	## A new occurrence, in the room's Part, of the sub-assembly a dropped group stands for (a Part: it brings everything inside it), placed where the group's
+	## own origin landed. `info`: {root, path, parts, depth, anchor_pose, label}. {ok, error, occurrence_id, definition_id, pose}.
+	var depth := int(info["depth"])
+	var parts: Array = info["parts"]
+	var definition := str(parts[depth - 1]) if depth >= 1 and depth <= parts.size() else ""
+	var refusal := await check_addable(room_part_id, definition)
+	if refusal != "":
+		return {"ok": false, "error": refusal, "occurrence_id": "", "definition_id": definition, "pose": {}}
+	var below := await chain_below(str(info["root"]), parts, info["path"], depth)
+	var group_world: Transform3D = (info["anchor_pose"] as Transform3D) * below.affine_inverse()
+	var pose := pose_in_room(group_world, content_root)
+	var occurrence_id := NewDocument.new_occurrence_id()
+	var label := str(info.get("label", ""))
+	var placed: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/occurrences" % room_part_id, {
+		"id": occurrence_id, "resolved_part_id": definition, "name_override": label if label != "" else null, "transform": pose,
+	})
+	if not placed["ok"]:
+		return {"ok": false, "error": "Couldn't add it: %s" % str(placed["error"]), "occurrence_id": "", "definition_id": definition, "pose": pose}
+	forget(room_part_id)
+	return {"ok": true, "error": "", "occurrence_id": occurrence_id, "definition_id": definition, "pose": pose}
+
+
 static func pose_in_room(world_pose: Transform3D, content_root: Node3D) -> Dictionary:
 	## `world_pose` as the backend stores a placement in the room's Part: its rotation and its position in the room's own millimetres. The room's scale
 	## is a display scale and is dropped (a Part dropped into a 20:1 room is still its real size).
@@ -141,6 +217,9 @@ static func pose_in_room(world_pose: Transform3D, content_root: Node3D) -> Dicti
 
 func add_file(room_part_id: String, file_text: String, pose: Dictionary, name_override: String = "") -> Dictionary:
 	## A native file's Part as a new occurrence in the room's Part (the file's own text is sent as it is: its integers stay integers), then placed at `pose`.
+	var refusal := await file_conflict(room_part_id, file_text)
+	if refusal != "":
+		return {"ok": false, "error": refusal, "occurrence_id": ""}
 	var body := '{"component": %s}' % file_text
 	var added: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/add-component" % room_part_id, body)
 	if not added["ok"] or not (added["json"] is Dictionary) or str((added["json"] as Dictionary).get("occurrence_id", "")) == "":

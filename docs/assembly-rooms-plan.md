@@ -214,7 +214,7 @@ them). **Verified against a real backend** (`e2e_groups.gd`, a sub-assembly plac
 | Laser | The trigger selects the part as before; **held for 0.45 s** it opens a breadcrumb at the hit point. Swing the laser over a row and let go to select that level as a group; letting go off the panel keeps the part. |
 | Group | One anchor (the part taken); the rest follow its every change, so the thumbstick turns and A/B push a selected group about the anchor's pivot. A grip on any part of a selected group carries all of it with no choosing. |
 | Saving | A top-level sub-assembly (a placement in the loaded root or in a room's Part) saves ONE pose on its own occurrence (`PATCH .../occurrences/{id}`), in the backend's millimetres (live: 100.0 mm for a 0.1 m move), as one undo step; undo/redo re-save. Grounded or mated sub-assemblies are refused with a message. A group nested deeper moves on screen only, as a nested part always has. |
-| Strays | A group let go out of (or into) a room goes back; it is not copied into a room (a single part still is). |
+| Strays | A group let go out of its room goes back. One let go INSIDE a room (from the world or another room) is **copied in**, as a single part is: a new occurrence of the sub-assembly's Part (everything inside it comes too), placed where the group's own origin landed (its pose is the dropped member's pose times the inverse of the placements below the group). Refused, with a message, if that room's Part is the sub-assembly or sits inside it. One undo step. |
 
 **World preview** (`room/world_preview.gd`, `design_table/table_preview.gd`, `shaders/world_preview.gdshader`). Per room: **Hidden / Ghost / Preview**, a
 Push button, auto-update (Settings), an optional pulse (Settings), a tether line and **To world / Back** (flies the user to the nearest placement and
@@ -232,12 +232,14 @@ zero on every face and the "ghost" came out nearly opaque. The shader now uses `
 
 - **Not tried on a headset**: dead-zone size, trigger-hold time (0.45 s), breadcrumb size and distance, preview colours, tether, fly distance (2 m).
 - **Deeper groups are not saved** (see above); a mated sub-assembly can't be moved as a unit yet (it needs the solver to treat the group as one body).
-- **A group is not copied into a room** by dropping it (a single part is); it goes back.
+- **Adding a file into a room or the world is now guarded** (`room_edit.gd file_conflict`): the server only refuses a file whose ROOT is the target (its add-component merges Parts by id, so a file containing the target deeper down, or a Part the document already has that does, would create a loop); the client follows the file's own placements and the document's and refuses with the same message as the drop path. Not probed against a live server (the guard is conservative either way).
 - **The Assembly Tree can't select a sub-assembly row as a group yet** (the laser breadcrumb is the way); a row still reports "no geometry of its own".
 - **Preview needs the world copy's parts placed in the tree**: a pattern-derived copy (no occurrence id) is not matched, so a Part used only that way shows no preview. Rooms opened on something that is not placed in the open world say so.
 - **The preview shows the room's poses and meshes as loaded**: a feature edit that re-tessellates a room part shows on the next room refresh, not mid-edit.
 - **The table's world button is on the wrist tablet** (Assemble > Rooms), not on the table's own panel.
 - Per-room selection scoping of the tablet's Mates page / Measure is still world-only.
+
+**Home screen**: **Rooms** is now a tile of its own (an Assembly Room cube icon, between Assemble and View), holding the Rooms page (rooms list with Minimise / Restore / Close, the table part's world button, Delete selected). The grid is 6 x 2 (12 tiles max, 11 used); Assemble is back to Mates alone.
 
 ## Earlier R2 to R5 notes
 

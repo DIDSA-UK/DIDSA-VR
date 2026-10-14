@@ -7,7 +7,7 @@ extends Control
 ## tool manager (tool_manager.gd).
 ##
 ## Screens (selected_category_id / hub_open say which one is showing):
-##   Home        every registry category as a tile (5 x 2). A tile either does its thing
+##   Home        every registry category as a tile (6 x 2). A tile either does its thing
 ##               straight away (an "action" category: the window tiles, Design) or opens...
 ##   Hub         a screen of tiles, one per tool, for a category registered with hub: true
 ##               (View, Settings). Tap a tile to open that tool's page; Back returns here.

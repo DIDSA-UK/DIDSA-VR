@@ -1092,6 +1092,12 @@ func _add_component_file_impl(path: String) -> void:
 	var parsed = _read_native_json(path)
 	if parsed == null:
 		return
+	var e = room_manager.edit_api()
+	if e != null:
+		var refusal: String = await e.file_conflict(_resolved_part_id, FileAccess.get_file_as_string(path)) # (the server only checks the file's root; see room_edit.gd)
+		if refusal != "":
+			_set_status(refusal)
+			return
 
 	var req := HTTPRequest.new()
 	add_child(req)
