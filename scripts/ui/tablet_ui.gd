@@ -287,6 +287,8 @@ func _make_tile(label: String, caption: String, icon_name: String, accent: Color
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_theme_constant_override("separation", 4)
+	box.offset_left = 10 # (room either side, so a long caption wraps to a second line instead of touching the frame)
+	box.offset_right = -10
 	b.add_child(box)
 	var icon := TextureRect.new()
 	icon.texture = UiIcons.texture(icon_name, 64)
@@ -304,6 +306,8 @@ func _make_tile(label: String, caption: String, icon_name: String, accent: Color
 	caption_label.theme_type_variation = &"LabelSmall"
 	caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	caption_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	caption_label.custom_minimum_size = Vector2(0, ceilf(tokens.font_tiny * 3.4)) # two lines tall for every tile, so the icons and names line up whether it wraps or not
 	caption_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(caption_label)
 	_style_tile(b, accent)
