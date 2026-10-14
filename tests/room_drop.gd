@@ -180,6 +180,66 @@ func _initialize() -> void:
 	var cross: Dictionary = fake.last(HTTPClient.METHOD_POST, "/parts/S/occurrences")
 	print("SMOKE a part carried out of room T and let go inside room S is copied into S (the Part T's part shows: C): ", held_ok and cross["body"]["resolved_part_id"] == "C" and room_s.parts.size() == 3 + 0 and room_t.parts.size() == 1)
 
+	# --- a whole sub-assembly carried into a room is copied there, as a single part is
+	var g1: MeshInstance3D = helper.world_node(main, "S", "k1")
+	var g2: MeshInstance3D = helper.world_node(main, "S", "k2")
+	(g1.mesh as BoxMesh).size = Vector3(0.1, 0.1, 0.1)
+	(g2.mesh as BoxMesh).size = Vector3(0.1, 0.1, 0.1)
+	g1.position = Vector3(9.0, 1.0, -6.0)
+	g2.position = Vector3(9.3, 1.0, -6.0)
+	for pair in [[g1, "k1"], [g2, "k2"]]:
+		var gn: MeshInstance3D = pair[0]
+		gn.set_meta("group_path", ["s1", pair[1]])
+		gn.set_meta("group_parts", ["S", "K"])
+		gn.set_meta("group_names", ["Drive", "Bracket"])
+		gn.set_meta("group_root", "R")
+		gn.create_trimesh_collision()
+	hand.group_deadzone = 0.02
+	messages.clear()
+	var posts_t: int = fake.count(HTTPClient.METHOD_POST, "/parts/T/occurrences")
+	fake.glb = glb_of(["t1", "NEWG"], "T")
+	hand.global_position = g1.global_position
+	hand._try_grab()
+	hand._on_button_pressed("trigger_click") # widen: the bracket, then the whole drive
+	hand.global_position += Vector3(0.05, 0.0, 0.0) # out of the dead zone: it takes the drive
+	await physics_frame
+	await physics_frame
+	hand.global_position = room_t.global_position + Vector3(0.0, 0.0, 0.2)
+	await physics_frame
+	await physics_frame
+	var holding_group: bool = hand._held_group != null and hand._held_group.members.size() == 2
+	var g1_final := g1.global_transform
+	hand._try_release()
+	await settle()
+	var group_post: Dictionary = fake.last(HTTPClient.METHOD_POST, "/parts/T/occurrences")
+	print("SMOKE a sub-assembly carried into a room and let go there adds a new occurrence of its Part (S) to that room: ", holding_group and fake.count(HTTPClient.METHOD_POST, "/parts/T/occurrences") == posts_t + 1 and group_post["body"]["resolved_part_id"] == "S")
+	print("SMOKE ...at the pose its own origin landed at, in the room's millimetres: ", (func() -> bool:
+		var expected := RoomEdit.pose_in_room(g1_final, room_t.content_root)
+		var a: Array = group_post["body"]["transform"]["translation"]
+		var b: Array = expected["translation"]
+		return absf(a[0] - b[0]) < 0.01 and absf(a[1] - b[1]) < 0.01 and absf(a[2] - b[2]) < 0.01).call())
+	print("SMOKE ...the original is back where it was (a copy), the room reloaded and shows the new part, with a message: ", g1.global_position.is_equal_approx(Vector3(9.0, 1.0, -6.0)) and g2.global_position.is_equal_approx(Vector3(9.3, 1.0, -6.0)) and room_t.parts.size() == 2 and messages.any(func(m): return m.contains("Added Drive")))
+	fake.glb = glb_of(["t1"], "T")
+	stack.undo()
+	await settle()
+	print("SMOKE ...and it is one undo step, which removes the added occurrence: ", fake.count(HTTPClient.METHOD_DELETE, "/occurrences/" + str(group_post["body"]["id"])) == 1 and room_t.parts.size() == 1)
+
+	# the same drive carried into the room that IS the drive: refused
+	messages.clear()
+	var posts_s: int = fake.count(HTTPClient.METHOD_POST, "/parts/S/occurrences")
+	hand.global_position = g1.global_position
+	hand._try_grab()
+	hand._on_button_pressed("trigger_click")
+	hand.global_position += Vector3(0.05, 0.0, 0.0)
+	await physics_frame
+	await physics_frame
+	hand.global_position = room_s.global_position + Vector3(0.0, 0.0, 0.2)
+	await physics_frame
+	await physics_frame
+	hand._try_release()
+	await settle()
+	print("SMOKE a sub-assembly carried into the room of that same sub-assembly is refused, nothing is posted, and it goes back: ", fake.count(HTTPClient.METHOD_POST, "/parts/S/occurrences") == posts_s and messages.any(func(m): return m.contains("can't hold itself")) and g1.global_position.is_equal_approx(Vector3(9.0, 1.0, -6.0)))
+
 	# --- delete
 	messages.clear()
 	var world_reloads: int = main.world_reloads

@@ -140,11 +140,11 @@ func _initialize() -> void:
 	print("SMOKE an immediate second pull is ignored (settle window): ", modes_before == [th.enabled, origin.enabled, l.parts_enabled] and not tab.surface.pressed)
 	await create_timer(0.5).timeout
 
-	# --- layout: the home screen, ten tiles in 5 x 2
+	# --- layout: the home screen, eleven tiles in 6 x 2
 	var ui = tab.ui
-	print("SMOKE ten home tiles sit in a 5 x 2 grid: ", ui._home_grid.get_child_count() == 10 and ui._home_grid.columns == 5 and tab.registry.category_rows() == 2)
+	print("SMOKE eleven home tiles sit in a 6 x 2 grid: ", ui._home_grid.get_child_count() == 11 and ui._home_grid.columns == 6 and tab.registry.category_rows() == 2)
 	print("SMOKE the tablet opens on the home screen, no tool selected: ", ui.selected_category_id == "" and ui._home_view.visible and not ui._tool_view.visible and not ui._back_button.visible)
-	print("SMOKE the tiles are the categories, in order, with no windows page: ", tab.registry.categories().map(func(c): return c.id) == ["design", "assemble", "view", "inspect", "files", "tree", "calculator", "images", "browser", "settings"])
+	print("SMOKE the tiles are the categories, in order, with no windows page: ", tab.registry.categories().map(func(c): return c.id) == ["design", "rooms", "assemble", "view", "inspect", "files", "tree", "calculator", "images", "browser", "settings"])
 	print("SMOKE the tablet is 0.40 x 0.26 m at the same text density as before: ", tab.panel_size == Vector2(0.40, 0.26) and absf(tab.viewport_size.x / tab.panel_size.x - 2667.0) < 2.0)
 	print("SMOKE no side panel for a tool with no list: ", not tab._side_open and not tab._side_pivot.visible)
 
@@ -165,10 +165,14 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b): return b.text.begins_with("User movement")))
 	print("SMOKE ...and back on: ", origin.enabled == true)
 
+	# --- the Rooms tile
+	await open_category("rooms")
+	print("SMOKE the Rooms tile opens the Rooms page (no mode tool switched on): the table part's world button and the Delete-selected button: ", ui.selected_category_id == "rooms" and ui.selected_tool_id == "rooms" and tab.manager.active_id == "" and find_button(func(b): return b.text.begins_with("Table part, in the world") or b.text.begins_with("Put a part")) != null and find_button(func(b): return b.text.begins_with("Delete")) != null)
+
 	# --- one active tool at a time
 	await open_category("assemble")
 	print("SMOKE opening a category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assemble" and ui.selected_tool_id == "mates" and tab.manager.active_id == "" and not r.mates_tool_active)
-	print("SMOKE a category with two tools (Mates, Rooms) shows the chip strip: ", ui._strip_scroll.visible)
+	print("SMOKE a category with one tool shows no chip strip: ", not ui._strip_scroll.visible)
 	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE the header switch turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)

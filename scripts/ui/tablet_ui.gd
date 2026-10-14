@@ -7,7 +7,7 @@ extends Control
 ## tool manager (tool_manager.gd).
 ##
 ## Screens (selected_category_id / hub_open say which one is showing):
-##   Home        every registry category as a tile (5 x 2). A tile either does its thing
+##   Home        every registry category as a tile (6 x 2). A tile either does its thing
 ##               straight away (an "action" category: the window tiles, Design) or opens...
 ##   Hub         a screen of tiles, one per tool, for a category registered with hub: true
 ##               (View, Settings). Tap a tile to open that tool's page; Back returns here.
@@ -287,6 +287,8 @@ func _make_tile(label: String, caption: String, icon_name: String, accent: Color
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_theme_constant_override("separation", 4)
+	box.offset_left = 10 # (room either side, so a long caption wraps to a second line instead of touching the frame)
+	box.offset_right = -10
 	b.add_child(box)
 	var icon := TextureRect.new()
 	icon.texture = UiIcons.texture(icon_name, 64)
@@ -304,7 +306,10 @@ func _make_tile(label: String, caption: String, icon_name: String, accent: Color
 	caption_label.theme_type_variation = &"LabelSmall"
 	caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	caption_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	caption_label.custom_minimum_size = Vector2(0, ceilf(tokens.font_tiny * 3.4)) # two lines tall for every tile, so the icons and names line up whether it wraps or not
 	caption_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	caption_label.visible = caption != "" # (a tile with nothing to say centres its icon and name)
 	box.add_child(caption_label)
 	_style_tile(b, accent)
 	_tiles.append({"button": b, "icon": icon, "caption": caption_label, "accent": accent, "category_id": category_id, "tool_id": tool_id})
@@ -347,6 +352,7 @@ func _refresh_tile_captions() -> void:
 		var text := str(cat.caption.call())
 		if label.text != text:
 			label.text = text
+			label.visible = text != ""
 			changed = true
 	if changed:
 		activity.emit()

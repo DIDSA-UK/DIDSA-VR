@@ -29,3 +29,4 @@ e2e_options_small
 e2e_plane_types
 e2e_sketch_methods
 e2e_rooms
+e2e_groups

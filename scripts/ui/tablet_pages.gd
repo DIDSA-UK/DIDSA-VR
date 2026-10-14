@@ -107,21 +107,22 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 
 
 func register(reg) -> void:
-	## One category = one tile on the home screen, in the order the tiles appear (5 x 2):
+	## One category = one tile on the home screen, in the order the tiles appear (6 x 2):
 	## Design | Assemble | View | Inspect | Files   /   Tree | Calculator | Images | Browser | Settings.
 	## Design and the four window tiles are "action" tiles (they act straight from Home);
 	## View and Settings are hubs (a screen of tiles first); the rest open a tool view.
 	reg.add_category("design", "Design", "design", ACCENT_DESIGN, {
 		"subtitle": "sketch · extrude", "action": _on_design_tile, "caption": _design_caption})
 
+	reg.add_category("rooms", "Rooms", "room", ACCENT_ASSEMBLY, {"subtitle": "assembly rooms"})
+	reg.add_tool("rooms", "rooms", "Rooms", "room", _build_rooms_page, {
+		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
+
 	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
 	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
-
-	reg.add_tool("assemble", "rooms", "Rooms", "assembly", _build_rooms_page, {
-		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
 
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
 	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
@@ -168,12 +169,12 @@ func register(reg) -> void:
 		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
 
 	# Each floating window is its own tile: tap to open it (Image Viewer and Browser: tap again for another).
-	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("tree")})
-	reg.add_category("calculator", "Calculator", "calculator", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("calculator")})
-	reg.add_category("images", "Images", "image", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("image")})
-	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "window", "action": _open_window.bind("browser")})
+	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("tree")})
+	reg.add_category("calculator", "Calculator", "calculator", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("calculator")})
+	reg.add_category("images", "Images", "image", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("image")})
+	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("browser")})
 
-	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"subtitle": "set & forget", "hub": true})
+	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"hub": true})
 	reg.add_tool("settings", "set_movement", "Movement", "movement", _build_settings_movement, {
 		"caption": "steadiness", "help": "How much a held part or the model is steadied against hand shake."})
 	reg.add_tool("settings", "set_display", "Display", "eye_shaded", _build_settings_display, {
@@ -549,6 +550,14 @@ func _build_rooms_page() -> Control:
 	page.tree_exiting.connect(func() -> void:
 		if rm.rooms_changed.is_connected(fill):
 			rm.rooms_changed.disconnect(fill))
+	var table = _main.design_table if _main.get("design_table") != null else null
+	if table != null and table.world_preview != null:
+		var world_button := _button("Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)], func() -> void: pass)
+		world_button.pressed.connect(func() -> void:
+			if table.world_preview.available():
+				table.world_preview.cycle()
+			world_button.text = "Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)] if table.world_preview.available() else "Put a part on the design table first")
+		page.add_child(world_button)
 	var del := _button(rm.delete_selected_label(), func() -> void: rm.delete_selected_press())
 	rm.delete_state_changed.connect(func() -> void:
 		if is_instance_valid(del):
@@ -1053,6 +1062,7 @@ func _build_settings_display() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
+	page.add_child(_choice_row("Sub-assembly grip dead zone", ["Off", "Small (2 cm)", "Medium (4 cm)"], _main.group_deadzone_level(), func(i: int) -> void: _main.set_group_deadzone(i)))
 	var room_limits := [1, 2, 3, 4, 6, 8]
 	page.add_child(_choice_row("Max rooms", ["1", "2", "3", "4", "6", "8"], maxi(room_limits.find(_main.max_rooms()), 3), func(i: int) -> void: _main.set_max_rooms(room_limits[i])))
 	return page
@@ -1063,6 +1073,8 @@ func _build_settings_appearance() -> Control:
 	page.add_child(_choice_row("Theme", UiThemes.ORDER, maxi(UiThemes.ORDER.find(_main.ui_theme()), 0), func(i: int) -> void: _main.set_ui_theme(UiThemes.ORDER[i])))
 	page.add_child(_mode_toggle("Shader effects", func(on: bool) -> void: _main.set_fx_enabled(on), _main.fx_enabled()))
 	page.add_child(_mode_toggle("Glass room walls", func(on: bool) -> void: _main.set_room_glass(on), _main.room_glass()))
+	page.add_child(_mode_toggle("Auto-update world preview", func(on: bool) -> void: _main.set_world_preview_auto(on), _main.world_preview_auto()))
+	page.add_child(_mode_toggle("Pulse world preview", func(on: bool) -> void: _main.set_world_preview_pulse(on), _main.world_preview_pulse()))
 	page.add_child(_mode_toggle("Room console pedestal", func(on: bool) -> void: _main.set_room_pedestal(on), _main.room_pedestal()))
 	return page
 

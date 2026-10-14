@@ -3,7 +3,8 @@ extends "res://scripts/diegetic_panel.gd"
 ## the usual window handle at its lower edge (grip it to carry the console somewhere comfortable) and a ghostly pedestal from its foot down to the floor,
 ## purely so it doesn't look like it is hanging in nothing. It is a child of its room, so carrying the room carries the console with it.
 ##   scale: 1:1 / Fit / half / double (undoable, about the room's middle)  ·  walls: fit to contents / back to the 3 m cube  ·  "used N times" (editing a Part
-##   changes every placement of it)  ·  delete the selected part (two presses, naming the Mates that would go)  ·  close the room.
+##   changes every placement of it)  ·  the world copy: Hidden / Ghost / Preview, Push, fly to it (world_preview.gd)  ·  delete the selected part (two presses,
+##   naming the Mates that would go)  ·  close the room.
 ## The logic is room_actions.gd and room_manager.gd; this is only the buttons.
 
 const RoomActions := preload("res://scripts/room/room_actions.gd")
@@ -16,6 +17,9 @@ var pedestal_enabled := true
 var _scale_label: Label
 var _uses_label: Label
 var _note_label: Label
+var _world_button: Button
+var _push_button: Button
+var _fly_button: Button
 var _delete_button: Button
 var _refresh_left := 0.0
 var _pedestal: MeshInstance3D
@@ -28,8 +32,8 @@ func setup_console(p_room: Node3D, p_manager: Node, main: Node, left: XRControll
 	manager = p_manager
 	_main = main
 	panel_title = room.label
-	panel_size = Vector2(0.30, 0.40)
-	viewport_size = Vector2i(480, 640)
+	panel_size = Vector2(0.30, 0.46)
+	viewport_size = Vector2i(480, 736)
 	super.setup(left, right, camera)
 	set_title(room.label)
 	_build_pedestal()
@@ -57,6 +61,15 @@ func _build_content() -> Control:
 	_uses_label = Label.new()
 	_uses_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_uses_label)
+	var world_row := HBoxContainer.new()
+	world_row.add_theme_constant_override("separation", 6)
+	_world_button = _make_button("World: Hidden", func() -> void: _on_world_pressed())
+	_push_button = _make_button("Push", func() -> void: _on_push_pressed())
+	_fly_button = _make_button("To world", func() -> void: _on_fly_pressed())
+	for b in [_world_button, _push_button, _fly_button]:
+		world_row.add_child(b)
+	box.add_child(world_row)
+	manager.preview_changed.connect(_on_preview_changed)
 	_delete_button = Button.new()
 	_delete_button.text = "Delete selected part"
 	_delete_button.pressed.connect(_on_delete_pressed)
@@ -71,6 +84,44 @@ func _build_content() -> Control:
 	close_button.pressed.connect(func() -> void: manager.close_room(room))
 	box.add_child(close_button)
 	return box
+
+
+func _make_button(text: String, callback: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.pressed.connect(callback)
+	return b
+
+
+func _on_world_pressed() -> void:
+	await manager.cycle_preview(room)
+	_on_preview_changed(room)
+	if _note_label != null and manager.preview_message != "":
+		_note_label.text = manager.preview_message
+
+
+func _on_push_pressed() -> void:
+	await manager.push_preview(room)
+	if _note_label != null and manager.preview_message != "":
+		_note_label.text = manager.preview_message
+
+
+func _on_fly_pressed() -> void:
+	if not manager.fly_to_world(room) and _note_label != null:
+		_note_label.text = "The world copy isn't shown yet: press World first."
+
+
+func _on_preview_changed(changed_room) -> void:
+	if changed_room != room or _world_button == null or not is_instance_valid(room):
+		return
+	var wp: Node = manager.preview_of(room)
+	_world_button.text = "World: %s" % wp.MODE_NAMES[int(wp.mode)]
+	_fly_button.text = "Back" if manager.is_away() else "To world"
+	_push_button.disabled = wp.mode != wp.Mode.PREVIEW
+	_fly_button.disabled = not wp.available()
+	if _note_label != null and wp.warning != "":
+		_note_label.text = wp.warning
 
 
 func _row(items: Array) -> HBoxContainer:

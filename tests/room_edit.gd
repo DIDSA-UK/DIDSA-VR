@@ -81,6 +81,20 @@ func _initialize() -> void:
 	print("SMOKE a file is sent to add-component as its own text, unchanged: ", from_file["ok"] and add_call["body"] is String and (add_call["body"] as String).contains(file_text))
 	print("SMOKE ...and the new occurrence is then placed (and named): ", patch_call["path"].ends_with(from_file["occurrence_id"]) and patch_call["body"]["transform"]["translation"][2] == 3.0 and patch_call["body"]["name_override"] == "Plate")
 
+	# --- a file that would put the assembly inside itself
+	var calls_before := api.count(HTTPClient.METHOD_POST, "/add-component")
+	var own_root := '{"schema_version": 1, "document": {"root_part_id": "S", "parts": [{"id": "S", "occurrences": []}]}}'
+	var holds_it := '{"schema_version": 1, "document": {"root_part_id": "F", "parts": [{"id": "F", "occurrences": [{"id": "o1", "resolved_part_id": "G"}]}, {"id": "G", "occurrences": [{"id": "o2", "resolved_part_id": "S"}]}]}}'
+	var via_document := '{"schema_version": 1, "document": {"root_part_id": "F", "parts": [{"id": "F", "occurrences": [{"id": "o1", "resolved_part_id": "R"}]}]}}'
+	var unrelated := '{"schema_version": 1, "document": {"root_part_id": "Q", "parts": [{"id": "Q", "occurrences": [{"id": "o1", "resolved_part_id": "Z"}]}, {"id": "Z", "occurrences": []}]}}'
+	print("SMOKE a file whose root is the assembly itself is refused: ", (await e.file_conflict("S", own_root)).contains("can't hold itself") or (await e.file_conflict("S", own_root)).contains("Can't add"))
+	print("SMOKE ...so is one that holds it deeper down (the server would accept it): ", (await e.file_conflict("S", holds_it)) != "")
+	print("SMOKE ...and one that holds a Part the document already has that contains it: ", (await e.file_conflict("S", via_document)) != "")
+	print("SMOKE ...an unrelated file is allowed: ", (await e.file_conflict("S", unrelated)) == "")
+	print("SMOKE ...something that isn't a native file is refused: ", (await e.file_conflict("S", "[1, 2]")).contains("native"))
+	var refused: Dictionary = await e.add_file("S", holds_it, {"translation": [0.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0})
+	print("SMOKE adding such a file makes no call to the backend and says why: ", not refused["ok"] and refused["error"].contains("itself") and api.count(HTTPClient.METHOD_POST, "/add-component") == calls_before)
+
 	# --- delete and restore
 	var gone: Dictionary = await e.delete_occurrence("S", "k1")
 	print("SMOKE deleting a part snapshots it and counts the Mates that go with it: ", gone["ok"] and gone["snapshot"]["id"] == "k1" and gone["snapshot"]["resolved_part_id"] == "K" and gone["mates_removed"] == 1)

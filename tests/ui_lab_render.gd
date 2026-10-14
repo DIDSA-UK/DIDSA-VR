@@ -46,7 +46,7 @@ func _initialize() -> void:
 	var undo_dis: Button = _find(tablet, func(n): return n is Button and n.disabled)
 	print("SMOKE the lab built the real shell from the theme resource: ", tokens != null and lab.theme != null and tablet != null)
 	print("SMOKE the lab opens on the home screen: ", tablet.selected_category_id == "" and tablet._home_view.visible and not tablet._back_button.visible)
-	print("SMOKE ten tiles in a 5 x 2 grid: ", tablet._home_grid.get_child_count() == 10 and tablet._home_grid.columns == 5)
+	print("SMOKE ten tiles in a 6 x 2 grid: ", tablet._home_grid.get_child_count() == 10 and tablet._home_grid.columns == 6)
 	var p_tile := img.get_pixelv(Vector2i(view_tile.get_global_rect().position) + Vector2i(40, 40))
 	var p_panel := img.get_pixelv(Vector2i(30, 30))
 	print("SMOKE ...tiles are drawn (a tile's inside differs from the panel's): ", not p_tile.is_equal_approx(p_panel))
@@ -75,7 +75,7 @@ func _initialize() -> void:
 	# Assemble > Mates (mode tool with a list) via the real tile / header path.
 	tablet.home_tile("assemble").pressed.emit()
 	await process_frame
-	print("SMOKE a category with two tools (Mates, Rooms) shows the chip strip: ", tablet._strip_scroll.visible)
+	print("SMOKE a category with one tool shows no chip strip: ", not tablet._strip_scroll.visible)
 	tablet.select_tool("mates", true)
 	await process_frame
 	await process_frame

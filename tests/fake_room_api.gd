@@ -4,6 +4,7 @@ extends RefCounted
 
 var occurrences: Dictionary = {} ## owner Part id -> Array of OccurrenceResponse-shaped dictionaries
 var mates: Dictionary = {} ## owner Part id -> Array of {references: [{occurrence_id}, ...]}
+var names: Dictionary = {} ## Part id -> its name (GET /document/parts/{id})
 var calls: Array = [] ## [{method, path, body}] in order
 var glb := PackedByteArray() ## what fetch_bytes returns for any mesh path
 var glb_by_part: Dictionary = {} ## Part id -> bytes, when a test needs different meshes
@@ -37,6 +38,8 @@ func request(method: int, path: String, body = null) -> Dictionary:
 	var parts := path.trim_prefix("/document/parts/").split("/")
 	var owner := parts[0]
 	var tail := "/".join(parts.slice(1))
+	if method == HTTPClient.METHOD_GET and tail == "" and names.has(owner):
+		return _ok({"id": owner, "name": names[owner]})
 	if method == HTTPClient.METHOD_GET and tail == "occurrences":
 		return _ok(occurrences.get(owner, []).duplicate(true))
 	if method == HTTPClient.METHOD_GET and tail == "mates":

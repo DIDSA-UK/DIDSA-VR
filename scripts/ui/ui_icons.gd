@@ -22,6 +22,7 @@ const _ICONS := {
 	# categories
 	"view": '<path d="M4 24C10 13 38 13 44 24C38 35 10 35 4 24Z"/><circle cx="24" cy="24" r="5"/>',
 	"assembly": '<rect x="6" y="15" width="22" height="22" rx="2"/><rect x="20" y="9" width="22" height="22" rx="2"/>',
+	"room": '<path d="M24 5L41 14.5V33.5L24 43L7 33.5V14.5Z"/><path d="M7 14.5L24 24L41 14.5"/><path d="M24 24V43" stroke-dasharray="3 3"/>',
 	"windows": '<rect x="5" y="9" width="38" height="30" rx="3"/><path d="M5 19H43"/>',
 	"files": '<path d="M5 13a2 2 0 0 1 2-2H18L23 17H41a2 2 0 0 1 2 2V37a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z"/>',
 	# home screen tiles (new)
