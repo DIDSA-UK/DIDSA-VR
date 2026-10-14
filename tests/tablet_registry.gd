@@ -36,10 +36,10 @@ func _initialize() -> void:
 	print("SMOKE a duplicate tool id is refused (even in another category): ", reg.add_tool("view", "mates", "Dup", "x", builder) == null)
 	print("SMOKE a tool for an unknown category is refused: ", reg.add_tool("ghost", "t", "T", "x", builder) == null)
 
-	print("SMOKE five categories still need one row: ", _fill(reg, 5) and reg.category_rows() == 1)
-	print("SMOKE a sixth category makes a second row: ", _fill(reg, 6) and reg.category_rows() == 2)
-	print("SMOKE ten categories fit two rows: ", _fill(reg, 10) and reg.category_rows() == 2 and reg.categories().size() == 10)
-	print("SMOKE an eleventh category is refused: ", reg.add_category("c11", "Eleven", "x", Color.WHITE) == null and reg.categories().size() == 10)
+	print("SMOKE six categories still need one row (the grid is six wide): ", _fill(reg, 6) and reg.category_rows() == 1)
+	print("SMOKE a seventh category makes a second row: ", _fill(reg, 7) and reg.category_rows() == 2)
+	print("SMOKE twelve categories fit two rows: ", _fill(reg, 12) and reg.category_rows() == 2 and reg.categories().size() == 12)
+	print("SMOKE a thirteenth category is refused: ", reg.add_category("c13", "Thirteen", "x", Color.WHITE) == null and reg.categories().size() == 12)
 
 	# Home-tile options: a plain category, a hub, and an action tile with a live caption.
 	var reg2 = Registry.new()

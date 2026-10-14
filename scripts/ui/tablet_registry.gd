@@ -176,6 +176,6 @@ func mode_tools() -> Array[ToolDef]:
 
 
 func category_rows() -> int:
-	## Rows of the home tile grid actually needed: one while there are five or
-	## fewer categories (no empty slots drawn), two from the sixth on.
+	## Rows of the home tile grid actually needed: one while there are six or
+	## fewer categories (no empty slots drawn), two from the seventh on.
 	return maxi(1, ceili(float(_categories.size()) / float(GRID_COLUMNS)))
