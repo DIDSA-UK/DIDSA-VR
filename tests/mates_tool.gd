@@ -123,6 +123,19 @@ func _initialize() -> void:
 	# --- atomic create/edit query
 	print("SMOKE atomic query names the movement and the driven occurrence: ", MatesTool.atomic_query("auto", "occ b") == "solve=auto&occurrence_id=occ%20b")
 
+	# --- branch search (Phase 2b): the preview's branch_changes are named, confirmed without `from`, and sent only with Create
+	var known_mates := [{"id": "m1", "type": "distance"}, {"id": "m2", "type": "angle"}]
+	var flip := {"mate_id": "m1", "field": "secondary_flip", "from": false, "to": true}
+	var one_notice := MatesTool.branch_notice([flip], [], [], known_mates)
+	print("SMOKE branch notice names the one earlier mate that moves: ", one_notice.contains("Distance mate") and one_notice.contains("Create applies it"))
+	var two_notice := MatesTool.branch_notice([flip, {"mate_id": "m1", "field": "alignment", "from": "aligned", "to": "anti_aligned"}, {"mate_id": "m2", "field": "secondary_flip", "from": true, "to": false}], [], [], known_mates)
+	print("SMOKE branch notice counts each mate once: ", two_notice.contains("2 earlier mates") and two_notice.contains("Distance mate, Angle mate"))
+	print("SMOKE branch notice for a user-set mate in the way and for a conflict: ", MatesTool.branch_notice([], ["m1"], [], known_mates).contains("you set") and MatesTool.branch_notice([], [], ["m2"], known_mates).contains("conflicts"))
+	print("SMOKE branch notice is empty with nothing to say and falls back to a mate: ", MatesTool.branch_notice([], [], [], known_mates) == "" and MatesTool.branch_notice([flip], [], [], []).contains("a mate"))
+	var confirmed: Array = MatesTool.confirmed_changes([flip])
+	print("SMOKE confirmed changes drop `from`: ", confirmed == [{"mate_id": "m1", "field": "secondary_flip", "to": true}])
+	print("SMOKE the create payload carries no branch_changes unless confirming one: ", not tool.build_create_payload().has("branch_changes") and not tool.build_create_payload(true).has("branch_changes"))
+
 	for n in [root_content, untagged, part_a, other_assembly, part_b, part_c]:
 		n.free()
 	tool.free()

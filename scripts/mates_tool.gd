@@ -107,6 +107,9 @@ var _picks: Array[Dictionary] = []
 var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
+var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
+var _branch_notice := "" ## the sentence telling the user so (branch_notice())
+var _pending_edit: Dictionary = {} ## "mate_id|fields" -> the branch changes an edit was refused for; repeating that exact edit confirms them
 var _busy := false
 var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
 var _group_persist: Dictionary = {}
@@ -136,6 +139,8 @@ func set_active(on: bool) -> void:
 func clear_picks() -> void:
 	_picks.clear()
 	_status = ""
+	_branch_changes = []
+	_branch_notice = ""
 	request_preview() # two picks are gone, so the ghost goes with them
 	picks_changed.emit()
 
@@ -153,6 +158,8 @@ func status_text() -> String:
 		1:
 			return "Pick a face, edge or corner on the second part."
 		_:
+			if _branch_notice != "":
+				return _branch_notice
 			if preview_visible():
 				return "Preview shown in blue. If it faces the wrong way press Flip, then Create."
 			return "Ready — choose a mate type and Create."
@@ -271,6 +278,42 @@ static func preview_members(preview: Dictionary, driven_id: String) -> Array:
 	return []
 
 
+static func branch_notice(changes: Array, blocked_by: Array, conflicting: Array, mates: Array) -> String:
+	## Pure — the sentence for a preview that needs earlier mates on their other branch (`branch_changes`), or cannot get there
+	## (`blocked_by`: mates the user set, `conflicting`: a genuine conflict). "" when there is nothing to say.
+	var describe := func(ids: Array) -> String:
+		var labels: Array[String] = []
+		for id in ids:
+			var label := "a mate"
+			for mate in mates:
+				if mate is Dictionary and str(mate.get("id", "")) == str(id):
+					label = "%s mate" % str(mate.get("type", "")).capitalize()
+			labels.append(label)
+		return ", ".join(labels)
+	if not changes.is_empty():
+		var ids: Array = []
+		for c in changes:
+			if c is Dictionary and not ids.has(str(c.get("mate_id", ""))):
+				ids.append(str(c.get("mate_id", "")))
+		if ids.size() == 1:
+			return "To fit, an earlier mate (%s) moves to its other side or orientation. Create applies it." % describe.call(ids)
+		return "To fit, %d earlier mates (%s) move to their other side or orientation. Create applies them." % [ids.size(), describe.call(ids)]
+	if not blocked_by.is_empty():
+		return "A mate you set to one side or orientation stands in the way (%s). Change it to allow this mate." % describe.call(blocked_by)
+	if not conflicting.is_empty():
+		return "This mate conflicts with an earlier mate (%s)." % describe.call(conflicting)
+	return ""
+
+
+static func confirmed_changes(changes: Array) -> Array:
+	## Pure — the confirmed form of the preview's `branch_changes` (the backend's BranchChangeRequest: no `from`).
+	var out := []
+	for c in changes:
+		if c is Dictionary:
+			out.append({"mate_id": c.get("mate_id", ""), "field": c.get("field", ""), "to": c.get("to")})
+	return out
+
+
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
@@ -279,6 +322,12 @@ func _run_preview(seq: int) -> void:
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
 	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
+	_branch_changes = []
+	_branch_notice = ""
+	if result["ok"] and json is Dictionary:
+		var found = json.get("branch_changes", [])
+		_branch_changes = found if found is Array else []
+		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
 	_clear_ghost()
 	for member in members:
 		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
@@ -328,9 +377,10 @@ func can_create() -> bool:
 	return _picks.size() == 2 and not _busy
 
 
-func build_create_payload() -> Dictionary:
+func build_create_payload(with_branch_changes := false) -> Dictionary:
 	## Pure — the exact POST /parts/{owner_part_id}/mates body MateCreate
-	## expects (DIDSA-CAD's app.document.schemas.MateCreate).
+	## expects (DIDSA-CAD's app.document.schemas.MateCreate). `with_branch_changes` adds the earlier mates the preview showed on their
+	## other branch (what Create confirms); the preview request itself never carries them.
 	var references := []
 	for p in _picks:
 		references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
@@ -340,6 +390,8 @@ func build_create_payload() -> Dictionary:
 	}
 	if mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
+	if with_branch_changes and not _branch_changes.is_empty():
+		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload
 
 
@@ -366,7 +418,7 @@ func create_mate() -> Dictionary:
 	var path := "/parts/%s/mates" % owner_part_id
 	if atomic:
 		path += "?" + atomic_query(movement_param(), driven_occurrence_id)
-	var result := await _api_request(HTTPClient.METHOD_POST, path, build_create_payload())
+	var result := await _api_request(HTTPClient.METHOD_POST, path, build_create_payload(atomic))
 	_busy = false
 	if not result["ok"]:
 		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
@@ -436,9 +488,20 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 	var path := "/parts/%s/mates/%s" % [owner_part_id, mate_id]
 	if atomic:
 		path += "?" + atomic_query(movement_param(), driven_id)
-	var result := await _api_request(HTTPClient.METHOD_PATCH, path, fields)
+	# An edit refused because earlier mates must change branch is confirmed by repeating it (there is no live preview for an edit
+	# here): the refusal said what moves, and the same edit again sends exactly that.
+	var edit_key := "%s|%s" % [mate_id, JSON.stringify(fields)]
+	var body := fields
+	if atomic and _pending_edit.has(edit_key):
+		body = fields.duplicate()
+		body["branch_changes"] = confirmed_changes(_pending_edit[edit_key])
+	var result := await _api_request(HTTPClient.METHOD_PATCH, path, body)
 	_busy = false
+	_pending_edit.erase(edit_key)
 	if not result["ok"]:
+		var detail = result["json"].get("detail") if result.get("json") is Dictionary else null
+		if detail is Dictionary and str(detail.get("type", "")) == "branch_change_needed" and detail.get("branch_changes") is Array:
+			_pending_edit[edit_key] = detail["branch_changes"]
 		return {"ok": false, "error": _friendly_error(result)}
 	document_changed.emit()
 	if atomic:
@@ -685,6 +748,13 @@ func _friendly_error(result: Dictionary) -> String:
 				return "that part is grounded (fixed)"
 			"mate_solve_did_not_converge":
 				return "the mates can't all be satisfied from there (over-constrained or conflicting)"
+			"branch_change_needed":
+				var changes: Array = detail.get("branch_changes", []) if detail.get("branch_changes") is Array else []
+				return "%s Do the same again to confirm." % branch_notice(changes, [], [], mates).replace(" Create applies it.", "").replace(" Create applies them.", "")
+			"mate_blocked_by_user_branch":
+				return branch_notice([], detail.get("blocked_by", []) if detail.get("blocked_by") is Array else [], [], mates)
+			"mate_conflict":
+				return branch_notice([], [], detail.get("conflicting", []) if detail.get("conflicting") is Array else [], mates)
 			"unsupported_mate_geometry":
 				return "this mate type needs %s" % str(detail.get("needed", "different geometry"))
 		return str(detail.get("type", detail))
