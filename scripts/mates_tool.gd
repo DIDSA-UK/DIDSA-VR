@@ -355,6 +355,18 @@ static func secondary_flip_label(type: String) -> String:
 	return "Flip"
 
 
+static func alignment_title(type: String) -> String:
+	## Pure — what the `alignment` control is called: the direction a lid swings about its hinge for an ANGLE, else the orientation.
+	return "Swing" if type == "angle" else "Orientation"
+
+
+static func alignment_label(type: String, alignment: String) -> String:
+	## Pure — the value of the `alignment` control for a mate of `type`: "+" / "-" for an ANGLE's swing, Aligned / Anti-aligned otherwise.
+	if type == "angle":
+		return "+" if alignment == "aligned" else "-"
+	return "Aligned" if alignment == "aligned" else "Anti-aligned"
+
+
 static func effective_alignment(controls: Array, chosen: String, resolved: Dictionary) -> String:
 	## Pure — the orientation the ghost shows: "" when the geometry has no alignment control.
 	if not controls.has("alignment"):
@@ -438,7 +450,7 @@ func branch_text() -> String:
 	var parts: Array[String] = []
 	var alignment := shown_alignment()
 	if alignment != "":
-		parts.append("%s%s" % ["Aligned" if alignment == "aligned" else "Anti-aligned", " (auto)" if mate_alignment == "" else ""])
+		parts.append("%s%s" % [alignment_label(mate_type, alignment), " (auto)" if mate_alignment == "" else ""])
 	var flip := shown_secondary_flip()
 	if flip >= 0:
 		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip == 1 else "off", " (auto)" if mate_secondary_flip < 0 else ""])

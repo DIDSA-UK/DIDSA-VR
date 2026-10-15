@@ -26,7 +26,7 @@ const ACCEPT_RESIDUAL := 1e-6
 const ACCEPT_DISTANCE := 0.5 ## of max(L, hand distance from the start pose)
 const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the headset (Dart: 8)
 const MAX_ROWS := 64
-const MODEL_VERSION := 2 ## 2: branch-specific residuals (alignment / side / perp per mate)
+const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
 const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
 
 const _TYPES := ["coincident", "concentric", "parallel", "angle", "distance"]
@@ -84,7 +84,7 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 
 static func _parse_side(j: Dictionary) -> Dictionary:
 	var geo := {}
-	for name in ["point", "axis_origin", "direction", "perp"]:
+	for name in ["point", "axis_origin", "direction", "perp", "hinge_direction"]:
 		if j.has(name) and j[name] != null:
 			geo[name] = _floats(j[name])
 	if j.has("plane") and j["plane"] != null:
@@ -275,10 +275,19 @@ func _evaluate(poses: Array):
 				return null
 			var target := fposmod(absf(float(mate["value"])), 360.0)
 			target = minf(target, 360.0 - target)
-			var dd := _dot(_unit(d["direction"]), _unit(f["direction"]))
+			var nd := _unit(d["direction"])
+			var nf := _unit(f["direction"])
+			var dd := _dot(nd, nf)
 			res.append(dd[0] - cos(deg_to_rad(target)))
 			if _jac:
 				jac.append(dd[1])
+			var hinge = d["hinge_direction"] if d.has("hinge_direction") else (f["hinge_direction"] if f.has("hinge_direction") else null)
+			if hinge != null and sin(deg_to_rad(target)) >= 1e-6:
+				# About a hinge: the sine of the signed swing is +-sin(target) (`alignment`) - zero only on the named way.
+				var sw := _dot(_cross(nd, nf), _unit(hinge))
+				res.append(sw[0] - s * sin(deg_to_rad(target)))
+				if _jac:
+					jac.append(sw[1])
 		elif type == "distance":
 			if mate["value"] == null:
 				return null

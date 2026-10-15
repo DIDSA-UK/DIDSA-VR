@@ -153,6 +153,7 @@ func _initialize() -> void:
 	print("SMOKE Next solution steps, wraps, starts at the nearest when nothing matches, and needs two: ",
 		MatesTool.next_alternative(alts, "anti_aligned", 1)["secondary_flip"] == false and MatesTool.next_alternative(alts, "aligned", 1)["alignment"] == "anti_aligned" and
 		MatesTool.next_alternative(alts, "aligned", 0)["secondary_flip"] == true and MatesTool.next_alternative([alts[0]], "anti_aligned", 1).is_empty() and MatesTool.next_alternative([], "", -1).is_empty())
+	print("SMOKE an ANGLE's alignment is the swing direction (+ / -), everything else Aligned / Anti-aligned: ", MatesTool.alignment_title("angle") == "Swing" and MatesTool.alignment_label("angle", "aligned") == "+" and MatesTool.alignment_label("angle", "anti_aligned") == "-" and MatesTool.alignment_title("distance") == "Orientation" and MatesTool.alignment_label("distance", "anti_aligned") == "Anti-aligned")
 	tool.reset_branch_choice()
 	tool.mate_type = "distance"
 	tool.branch_controls = both

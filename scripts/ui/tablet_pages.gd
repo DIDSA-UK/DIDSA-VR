@@ -694,7 +694,7 @@ func _refresh_mates_branch_controls() -> void:
 	_mates_branch_label.text = text
 	_mates_branch_label.visible = text != ""
 	_mates_alignment_button.visible = tool.branch_controls.has("alignment")
-	_mates_alignment_button.text = "Orientation: %s" % ("Aligned" if tool.shown_alignment() == "aligned" else "Anti-aligned")
+	_mates_alignment_button.text = "%s: %s" % [_MatesTool.alignment_title(tool.mate_type), _MatesTool.alignment_label(tool.mate_type, tool.shown_alignment())]
 	_mates_flip_button.visible = tool.branch_controls.has("secondary_flip")
 	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.shown_secondary_flip() == 1 else "off"]
 	var steps: int = tool.branch_alternatives.size()
@@ -747,7 +747,7 @@ func _mates_rows() -> Array:
 		var secondary = mate.get("secondary_flip")
 		var notes := []
 		if alignment != null:
-			notes.append("aligned" if str(alignment) == "aligned" else "anti-aligned")
+			notes.append(("swing %s" % _MatesTool.alignment_label(type_str, str(alignment))) if type_str == "angle" else ("aligned" if str(alignment) == "aligned" else "anti-aligned"))
 		if secondary != null:
 			notes.append("%s %s" % [_MatesTool.secondary_flip_label(type_str).to_lower(), "on" if bool(secondary) else "off"])
 		if type_str == "concentric":
@@ -755,7 +755,7 @@ func _mates_rows() -> Array:
 		# Only the branch fields this mate's geometry uses are set on it (the backend leaves the others null): one action for each.
 		var actions := []
 		if alignment != null:
-			actions.append({"label": "Flip orientation", "callback": _on_edit_mate.bind(mate_id, {"alignment": "anti_aligned" if str(alignment) == "aligned" else "aligned"})})
+			actions.append({"label": "Flip swing" if type_str == "angle" else "Flip orientation", "callback": _on_edit_mate.bind(mate_id, {"alignment": "anti_aligned" if str(alignment) == "aligned" else "aligned"})})
 		if secondary != null:
 			actions.append({"label": _MatesTool.secondary_flip_label(type_str), "callback": _on_edit_mate.bind(mate_id, {"secondary_flip": not bool(secondary)})})
 		if type_str == "concentric":
