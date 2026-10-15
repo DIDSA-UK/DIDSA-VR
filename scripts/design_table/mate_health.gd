@@ -194,5 +194,6 @@ static func remake_plan(mates: Array, drift: Array, baseline: Array, nodes: Arra
 					moved += 1
 		if all_found and moved > 0:
 			out.append({"mate_id": mate_id, "type": str(mate.get("type", "")), "value": mate.get("value"), "flipped": bool(mate.get("flipped", false)),
-				"allow_rotation": bool(mate.get("allow_rotation", true)), "references": references, "moved": moved})
+				"allow_rotation": bool(mate.get("allow_rotation", true)), "references": references, "moved": moved,
+				"alignment": mate.get("alignment"), "secondary_flip": mate.get("secondary_flip")})
 	return out

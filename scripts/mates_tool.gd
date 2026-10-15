@@ -72,18 +72,31 @@ var command_stack = null ## set via setup(); shared undo/redo history
 var mate_type := "coincident":
 	set(v):
 		mate_type = v
+		reset_branch_choice() # a choice made for another kind of mate means nothing here
 		request_preview()
 var mate_value := 0.0:
 	set(v):
 		mate_value = v
 		request_preview()
-var mate_flipped := false:
+## The branch the user picked ("Closest" = not picked: the backend resolves it and the preview says which): "" or "aligned" /
+## "anti_aligned", and -1 (auto) / 0 / 1 for the DISTANCE side, locked-CONCENTRIC half-turn or ANGLE supplement. Which of them mean
+## anything for the picked geometry is the backend's call (`branch_controls`, from the preview).
+var mate_alignment: String:
+	get:
+		return _alignment_choice
 	set(v):
-		mate_flipped = v
+		_alignment_choice = v
+		request_preview()
+var mate_secondary_flip: int:
+	get:
+		return _flip_choice
+	set(v):
+		_flip_choice = v
 		request_preview()
 var mate_allow_rotation := true:
 	set(v):
 		mate_allow_rotation = v
+		reset_branch_choice()
 		request_preview()
 ## Mirrors the flat client's "Minimal movement" (MatePanel): move only the mated part when that is enough and let connected parts follow only
 ## when it is not (the backend's `auto` movement mode); off lets the whole connected group move (`group`). Preview, Create and Edit all use it.
@@ -107,6 +120,11 @@ var _picks: Array[Dictionary] = []
 var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
+var _alignment_choice := ""
+var _flip_choice := -1
+var branch_controls: Array = [] ## the preview's `controls`: the branch fields ("alignment", "secondary_flip") this geometry has
+var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the ghost shows
+var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
 var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
 var _branch_notice := "" ## the sentence telling the user so (branch_notice())
 var _pending_edit: Dictionary = {} ## "mate_id|fields" -> the branch changes an edit was refused for; repeating that exact edit confirms them
@@ -141,6 +159,10 @@ func clear_picks() -> void:
 	_status = ""
 	_branch_changes = []
 	_branch_notice = ""
+	branch_controls = []
+	branch_resolved = {}
+	branch_alternatives = []
+	reset_branch_choice()
 	request_preview() # two picks are gone, so the ghost goes with them
 	picks_changed.emit()
 
@@ -161,7 +183,7 @@ func status_text() -> String:
 			if _branch_notice != "":
 				return _branch_notice
 			if preview_visible():
-				return "Preview shown in blue. If it faces the wrong way press Flip, then Create."
+				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			return "Ready — choose a mate type and Create."
 	return ""
 
@@ -216,6 +238,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"kind": kind,
 	})
 	_status = ""
+	reset_branch_choice() # another face means another set of roots
 	request_preview()
 	picks_changed.emit()
 
@@ -314,6 +337,117 @@ static func confirmed_changes(changes: Array) -> Array:
 	return out
 
 
+func reset_branch_choice() -> void:
+	## Back to Closest, without re-running the preview (the caller does).
+	_alignment_choice = ""
+	_flip_choice = -1
+
+
+static func secondary_flip_label(type: String) -> String:
+	## Pure — what the secondary flag means for a mate of `type`.
+	match type:
+		"distance":
+			return "Flip side"
+		"concentric":
+			return "Flip spin"
+		"angle":
+			return "Supplement"
+	return "Flip"
+
+
+static func effective_alignment(controls: Array, chosen: String, resolved: Dictionary) -> String:
+	## Pure — the orientation the ghost shows: "" when the geometry has no alignment control.
+	if not controls.has("alignment"):
+		return ""
+	return chosen if chosen != "" else str(resolved.get("alignment", "") if resolved.get("alignment") != null else "")
+
+
+static func effective_secondary_flip(controls: Array, chosen: int, resolved: Dictionary) -> int:
+	## Pure — the secondary flag the ghost shows (0 / 1), or -1 when the geometry has no such control.
+	if not controls.has("secondary_flip"):
+		return -1
+	if chosen >= 0:
+		return chosen
+	return 1 if resolved.get("secondary_flip") == true else 0
+
+
+static func alternative_index(alternatives: Array, alignment: String, flip: int) -> int:
+	## Pure — where the placement being shown sits among `alternatives` (-1 if it matches none).
+	for i in alternatives.size():
+		var alt = alternatives[i]
+		if not alt is Dictionary:
+			continue
+		var alt_alignment := str(alt.get("alignment", "")) if alt.get("alignment") != null else ""
+		var alt_flip := -1 if alt.get("secondary_flip") == null else (1 if alt.get("secondary_flip") == true else 0)
+		if alt_alignment == alignment and alt_flip == flip:
+			return i
+	return -1
+
+
+static func next_alternative(alternatives: Array, alignment: String, flip: int) -> Dictionary:
+	## Pure — "Next solution": the alternative after the one being shown (wrapping), the nearest one when none matches, {} when
+	## there are fewer than two to step through.
+	if alternatives.size() < 2:
+		return {}
+	var current := alternative_index(alternatives, alignment, flip)
+	var next = alternatives[0 if current < 0 else (current + 1) % alternatives.size()]
+	return next if next is Dictionary else {}
+
+
+func shown_alignment() -> String:
+	return effective_alignment(branch_controls, mate_alignment, branch_resolved)
+
+
+func shown_secondary_flip() -> int:
+	return effective_secondary_flip(branch_controls, mate_secondary_flip, branch_resolved)
+
+
+func toggle_alignment() -> void:
+	var shown := shown_alignment()
+	if shown != "":
+		mate_alignment = "anti_aligned" if shown == "aligned" else "aligned"
+
+
+func toggle_secondary_flip() -> void:
+	var shown := shown_secondary_flip()
+	if shown >= 0:
+		mate_secondary_flip = 0 if shown == 1 else 1
+
+
+func flip_mate() -> void:
+	## The wheel's single "Flip": turns the ghost round - the orientation if the geometry has one, else the side / spin / supplement.
+	if branch_controls.has("alignment"):
+		toggle_alignment()
+	elif branch_controls.has("secondary_flip"):
+		toggle_secondary_flip()
+
+
+func next_solution() -> bool:
+	## Steps to the next converging placement of this mate (`branch_alternatives`), naming its branch explicitly. False if there is none.
+	var next := next_alternative(branch_alternatives, shown_alignment(), shown_secondary_flip())
+	if next.is_empty():
+		return false
+	_alignment_choice = str(next.get("alignment", "")) if next.get("alignment") != null else ""
+	_flip_choice = -1 if next.get("secondary_flip") == null else (1 if next.get("secondary_flip") == true else 0)
+	request_preview() # one preview for both fields
+	return true
+
+
+func branch_text() -> String:
+	## One line for the tablet: the orientation / flip as shown, "(auto)" while not picked, and where Next solution is.
+	var parts: Array[String] = []
+	var alignment := shown_alignment()
+	if alignment != "":
+		parts.append("%s%s" % ["Aligned" if alignment == "aligned" else "Anti-aligned", " (auto)" if mate_alignment == "" else ""])
+	var flip := shown_secondary_flip()
+	if flip >= 0:
+		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip == 1 else "off", " (auto)" if mate_secondary_flip < 0 else ""])
+	if branch_alternatives.size() > 1:
+		var index := alternative_index(branch_alternatives, alignment, flip)
+		parts.append("solution %s of %d" % [str(index + 1) if index >= 0 else "-", branch_alternatives.size()])
+	return " · ".join(parts)
+
+
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
@@ -324,7 +458,13 @@ func _run_preview(seq: int) -> void:
 	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
 	_branch_changes = []
 	_branch_notice = ""
+	branch_controls = []
+	branch_resolved = {}
+	branch_alternatives = []
 	if result["ok"] and json is Dictionary:
+		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
+		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
+		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
 		var found = json.get("branch_changes", [])
 		_branch_changes = found if found is Array else []
 		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
@@ -386,8 +526,13 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 		references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
 	var payload := {
 		"type": mate_type, "references": references,
-		"flipped": mate_flipped, "allow_rotation": mate_allow_rotation,
+		"allow_rotation": mate_allow_rotation,
 	}
+	# The branch is named only when the user picked it; left out, the backend resolves it (Closest) and the preview says which.
+	if mate_alignment != "":
+		payload["alignment"] = mate_alignment
+	if mate_secondary_flip >= 0:
+		payload["secondary_flip"] = mate_secondary_flip == 1
 	if mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
 	if with_branch_changes and not _branch_changes.is_empty():

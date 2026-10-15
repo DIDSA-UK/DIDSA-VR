@@ -1272,6 +1272,11 @@ func remake_mates() -> void:
 		var body := {"type": entry["type"], "references": entry["references"], "flipped": entry["flipped"], "allow_rotation": entry["allow_rotation"]}
 		if entry["value"] != null:
 			body["value"] = entry["value"]
+		# The remade mate stands for the same branch (orientation / side) as the one it replaces, not whichever is nearest.
+		if entry.get("alignment") != null:
+			body["alignment"] = entry["alignment"]
+		if entry.get("secondary_flip") != null:
+			body["secondary_flip"] = entry["secondary_flip"]
 		var created: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/mates" % owner_id, body)
 		if created["ok"]:
 			await api.request(HTTPClient.METHOD_DELETE, "/document/parts/%s/mates/%s" % [owner_id, entry["mate_id"]], null)

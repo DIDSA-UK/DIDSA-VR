@@ -74,7 +74,6 @@ func _initialize() -> void:
 	var driven_part: Node3D = candidates[1]
 	var before_transform := driven_part.global_transform
 	mates_tool.mate_type = "coincident"
-	mates_tool.mate_flipped = false
 	var owner_part_id: String = mates_tool._picks[0]["owner_part_id"]
 
 	var create_result: Dictionary = await mates_tool.create_mate()

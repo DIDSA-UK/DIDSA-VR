@@ -274,7 +274,8 @@ func _apply_mate_value(text: String, type: String, unit: String) -> void:
 
 
 func _flip_mate() -> void:
-	_mates.mate_flipped = not _mates.mate_flipped
+	## Turns the preview round: the orientation if the picked geometry has one, else the side / spin / supplement (tablet: Next solution).
+	_mates.flip_mate()
 
 
 func _create_mate() -> void:
