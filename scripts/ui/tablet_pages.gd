@@ -601,6 +601,18 @@ func _build_mates_page() -> Control:
 			_mates_tool.mate_allow_rotation = on
 	)
 	toggles.add_child(allow_rot)
+	var min_move := Button.new()
+	min_move.text = "Minimal movement"
+	min_move.tooltip_text = "On: move only the mated part when that is enough, and let connected parts follow only when it is not. Off: connected parts may always follow."
+	min_move.toggle_mode = true
+	min_move.button_pressed = true
+	min_move.custom_minimum_size = Vector2(0, 56)
+	min_move.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	min_move.toggled.connect(func(on: bool) -> void:
+		if _mates_tool:
+			_mates_tool.mate_minimal_movement = on
+	)
+	toggles.add_child(min_move)
 
 	var value_row := _row()
 	page.add_child(value_row)

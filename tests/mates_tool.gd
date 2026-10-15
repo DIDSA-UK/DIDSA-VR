@@ -105,6 +105,24 @@ func _initialize() -> void:
 	tool.try_pick(part_a, 1)
 	print("SMOKE try_pick no-ops while inactive: ", tool.picked_labels().is_empty())
 
+	# --- movement mode: Minimal movement (default) is the backend's `auto`, off is `group` (the flat client's _mateMovement)
+	print("SMOKE minimal movement is on by default and means auto: ", tool.mate_minimal_movement and tool.movement_param() == "auto")
+	tool.mate_minimal_movement = false
+	print("SMOKE minimal movement off means group: ", tool.movement_param() == "group")
+	tool.mate_minimal_movement = true
+
+	# --- preview members: every part the preview moves (driven first), or just the driven one from an older backend's `transform`
+	var pose_a := {"translation": [1.0, 2.0, 3.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}
+	var pose_b := {"translation": [9.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}
+	var grouped: Array = MatesTool.preview_members({"converged": true, "transform": pose_a, "members": [{"occurrence_id": "occ-b", "transform": pose_a}, {"occurrence_id": "occ-c", "transform": pose_b}]}, "occ-b")
+	print("SMOKE preview lists the driven part and the follower: ", grouped.size() == 2 and grouped[0]["occurrence_id"] == "occ-b" and grouped[1]["occurrence_id"] == "occ-c" and grouped[1]["transform"] == pose_b)
+	var legacy: Array = MatesTool.preview_members({"converged": true, "transform": pose_a}, "occ-b")
+	print("SMOKE preview without members falls back to the driven part: ", legacy.size() == 1 and legacy[0]["occurrence_id"] == "occ-b" and legacy[0]["transform"] == pose_a)
+	print("SMOKE an unconverged preview moves nothing: ", MatesTool.preview_members({"converged": false, "transform": null, "members": []}, "occ-b").is_empty())
+
+	# --- atomic create/edit query
+	print("SMOKE atomic query names the movement and the driven occurrence: ", MatesTool.atomic_query("auto", "occ b") == "solve=auto&occurrence_id=occ%20b")
+
 	for n in [root_content, untagged, part_a, other_assembly, part_b, part_c]:
 		n.free()
 	tool.free()

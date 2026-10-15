@@ -85,6 +85,12 @@ var mate_allow_rotation := true:
 	set(v):
 		mate_allow_rotation = v
 		request_preview()
+## Mirrors the flat client's "Minimal movement" (MatePanel): move only the mated part when that is enough and let connected parts follow only
+## when it is not (the backend's `auto` movement mode); off lets the whole connected group move (`group`). Preview, Create and Edit all use it.
+var mate_minimal_movement := true:
+	set(v):
+		mate_minimal_movement = v
+		request_preview()
 var relaxed := false
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
@@ -98,7 +104,7 @@ var _persist: Dictionary = {} ## occurrence_id -> {"pose": Dictionary|null, "run
 const GHOST_COLOUR := Color(0.31, 0.77, 1.0, 0.40)
 
 var _picks: Array[Dictionary] = []
-var _ghost: Node3D = null ## the preview: a see-through copy of the driven part, where the mate would put it
+var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
 var _busy := false
@@ -147,7 +153,7 @@ func status_text() -> String:
 		1:
 			return "Pick a face, edge or corner on the second part."
 		_:
-			if _ghost != null:
+			if preview_visible():
 				return "Preview shown in blue. If it faces the wrong way press Flip, then Create."
 			return "Ready — choose a mate type and Create."
 	return ""
@@ -227,7 +233,15 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 # --- Preview: a ghost of the part where the mate would put it --------------------------
 
 func preview_visible() -> bool:
-	return _ghost != null and is_instance_valid(_ghost)
+	for ghost in _ghosts:
+		if is_instance_valid(ghost):
+			return true
+	return false
+
+
+func movement_param() -> String:
+	## The backend's `movement` query value for `mate_minimal_movement` (the flat client's `_mateMovement`).
+	return "auto" if mate_minimal_movement else "group"
 
 
 func request_preview() -> void:
@@ -240,24 +254,41 @@ func request_preview() -> void:
 	_run_preview(_preview_seq)
 
 
+static func preview_members(preview: Dictionary, driven_id: String) -> Array:
+	## Pure — [{occurrence_id, transform}] a converged preview moves: the backend's `members` (the driven part first, then every follower that
+	## changed), or - for a backend that predates the field - just the driven part from `transform`. Empty when it did not converge.
+	if not bool(preview.get("converged", false)):
+		return []
+	var members = preview.get("members")
+	if members is Array and not (members as Array).is_empty():
+		var out := []
+		for m in members:
+			if m is Dictionary and m.get("transform") is Dictionary:
+				out.append({"occurrence_id": str(m.get("occurrence_id", "")), "transform": m["transform"]})
+		return out
+	if preview.get("transform") is Dictionary:
+		return [{"occurrence_id": driven_id, "transform": preview["transform"]}]
+	return []
+
+
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
-	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve" % [owner_part_id, driven_id], build_create_payload())
+	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], build_create_payload())
 	if seq != _preview_seq or _picks.size() != 2:
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
-	var part := _find_loaded_part(owner_part_id, driven_id)
-	if not result["ok"] or not (json is Dictionary) or not bool(json.get("converged", false)) or not (json.get("transform") is Dictionary) or part == null:
-		_clear_ghost() # "no ghost to show yet": a value still to be typed, geometry this type can't use, or a grounded part
-		picks_changed.emit()
-		return
-	_show_ghost(part, json_to_pose(json["transform"]))
+	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
+	_clear_ghost()
+	for member in members:
+		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
+		if part != null:
+			_show_ghost(part, json_to_pose(member["transform"]))
+	# "No ghost to show yet" (nothing added above): a value still to be typed, geometry this type can't use, or a grounded part.
 	picks_changed.emit()
 
 
 func _show_ghost(part: Node3D, pose: Transform3D) -> void:
-	_clear_ghost()
 	if part.get_parent() == null:
 		return
 	var ghost := Node3D.new()
@@ -270,7 +301,7 @@ func _show_ghost(part: Node3D, pose: Transform3D) -> void:
 	_add_ghost_meshes(part, Transform3D.IDENTITY, ghost, material)
 	part.get_parent().add_child(ghost)
 	ghost.transform = pose # same frame as the part itself (see _apply_solved_transform)
-	_ghost = ghost
+	_ghosts.append(ghost)
 
 
 func _add_ghost_meshes(node: Node3D, xf: Transform3D, ghost: Node3D, material: Material) -> void:
@@ -287,9 +318,10 @@ func _add_ghost_meshes(node: Node3D, xf: Transform3D, ghost: Node3D, material: M
 
 
 func _clear_ghost() -> void:
-	if _ghost != null and is_instance_valid(_ghost):
-		_ghost.queue_free()
-	_ghost = null
+	for ghost in _ghosts:
+		if is_instance_valid(ghost):
+			ghost.queue_free()
+	_ghosts.clear()
 
 
 func can_create() -> bool:
@@ -313,25 +345,44 @@ func build_create_payload() -> Dictionary:
 
 func create_mate() -> Dictionary:
 	## Returns {"ok":, "error":}. By convention the 2nd pick is the driven
-	## occurrence solve_for_occurrence snaps into place afterward (unless
-	## `relaxed`) — matching the flat app's own create-then-solve pairing.
+	## occurrence (_choose_driven). Unless `relaxed`, creating is ATOMIC: the backend runs the same solve
+	## the ghost showed and stores the mate together with every moved part's pose only if it converges
+	## (`POST .../mates?solve=...`), so a refused mate is never left behind. The driven part's current pose
+	## is saved first - the solver starts from the stored pose, so without that it would solve from
+	## wherever the part used to be. Relaxed, or with the driven part grounded, only the mate is stored.
 	if not can_create():
 		return {"ok": false, "error": "Pick two entities first."}
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_occurrence_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var driven_fixed := bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_occurrence_id, {}).get("fixed", false))
+	var atomic := not relaxed and not driven_fixed
 	_busy = true
-	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/mates" % owner_part_id, build_create_payload())
+	var part := _find_loaded_part(owner_part_id, driven_occurrence_id)
+	if atomic and part != null:
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_occurrence_id], {"transform": pose_to_json(_local_pose(part))})
+		if not patched["ok"]:
+			_busy = false
+			return {"ok": false, "error": _friendly_error(patched)}
+	var path := "/parts/%s/mates" % owner_part_id
+	if atomic:
+		path += "?" + atomic_query(movement_param(), driven_occurrence_id)
+	var result := await _api_request(HTTPClient.METHOD_POST, path, build_create_payload())
 	_busy = false
 	if not result["ok"]:
-		return {"ok": false, "error": result["error"]}
+		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
 	clear_picks()
 	document_changed.emit()
+	if atomic:
+		await _adopt_backend_poses(owner_part_id, "mate %s" % (str(part.name) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
-	if not relaxed:
-		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_occurrence_id)
-		if not solved["ok"]:
-			_report("Mate created, but couldn't be applied: %s" % solved["error"])
+	if not relaxed and driven_fixed:
+		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
 	return {"ok": true, "error": ""}
+
+
+static func atomic_query(movement: String, occurrence_id: String) -> String:
+	## Pure — the `solve` / `occurrence_id` query of an atomic create or edit (see create_mate).
+	return "solve=%s&occurrence_id=%s" % [movement, occurrence_id.uri_encode()]
 
 
 func refresh_mates(owner_part_id: String) -> void:
@@ -361,26 +412,40 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 
 func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> Dictionary:
 	## Edits a mate after it was made: any of value / flipped / allow_rotation / suppressed (what the backend's
-	## PATCH accepts; the type and the two faces are never edited, make a new mate for those). Unless mates are
-	## relaxed, the driven part is solved again so the change shows at once (one undo entry, like Create's).
+	## PATCH accepts; the type and the two faces are never edited, make a new mate for those). Unless mates
+	## are relaxed, the edit is ATOMIC like Create's: the driven part is solved with the edit and both are stored
+	## together (one undo entry), or - if the edited mate cannot be met - the mate keeps its old values.
 	if fields.is_empty():
 		return {"ok": true, "error": ""}
-	_busy = true
-	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/mates/%s" % [owner_part_id, mate_id], fields)
-	_busy = false
-	if not result["ok"]:
-		return {"ok": false, "error": _friendly_error(result)}
-	document_changed.emit()
-	await refresh_mates(owner_part_id)
 	var refs: Array = []
 	for mate in mates:
 		if str(mate.get("id", "")) == mate_id:
 			refs = mate.get("references", [])
-	if not relaxed and refs.size() == 2:
-		var driven_id := _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
-		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_id)
-		if not solved["ok"]:
-			return {"ok": false, "error": "Mate changed, but couldn't be applied: %s" % solved["error"]}
+	var driven_id := ""
+	if refs.size() == 2:
+		driven_id = _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
+	var driven_fixed := driven_id != "" and bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_id, {}).get("fixed", false))
+	var atomic := not relaxed and driven_id != "" and not driven_fixed
+	_busy = true
+	var part := _find_loaded_part(owner_part_id, driven_id) if atomic else null
+	if part != null:
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_id], {"transform": pose_to_json(_local_pose(part))})
+		if not patched["ok"]:
+			_busy = false
+			return {"ok": false, "error": _friendly_error(patched)}
+	var path := "/parts/%s/mates/%s" % [owner_part_id, mate_id]
+	if atomic:
+		path += "?" + atomic_query(movement_param(), driven_id)
+	var result := await _api_request(HTTPClient.METHOD_PATCH, path, fields)
+	_busy = false
+	if not result["ok"]:
+		return {"ok": false, "error": _friendly_error(result)}
+	document_changed.emit()
+	if atomic:
+		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (str(part.name) if part != null else driven_id))
+	await refresh_mates(owner_part_id)
+	if not relaxed and driven_fixed:
+		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	return {"ok": true, "error": ""}
 
 

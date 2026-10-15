@@ -309,7 +309,11 @@ func _initialize() -> void:
 	mt.try_pick(B, _tri_of_face(B, fb))
 	mt.mate_type = "distance"
 	mt.mate_value = 25.0
+	# Created RELAXED (stored, not solved): a normal create is atomic now and the backend refuses a mate that cannot be met, but this
+	# scene needs the over-constrained group to exist so the drag / commit behaviour under it can be checked.
+	mt.set_relaxed(true)
 	var conflict: Dictionary = await mt.create_mate()
+	mt.set_relaxed(false)
 	print("calibration — conflicting mate created: ", conflict, " / tablet says: ", mt.status_text())
 	await _settle_writes()
 	var a_before := await _backend_translation(A)
