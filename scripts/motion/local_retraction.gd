@@ -7,7 +7,8 @@ extends RefCounted
 ## (`frame()`), otherwise the projector's poses are shown — never worse than the projection.
 ##
 ## Mirrors client/lib/motion/local_retraction.dart line for line (and backend app/document/constraint_model.py); the SAME golden
-## vectors (kind `local_retract`) gate all three. Poses are {"t": [x,y,z], "r": [9 floats row-major]} like se3.gd.
+## vectors (kind `local_retract`) gate all three. Every residual is zero ONLY on the branch its mate names (`alignment` /
+## `side` / `perp`, +1 or -1 per mate in the model; absent or 0 reads as +1): docs/mate-solution-choice-plan.md. Poses are {"t": [x,y,z], "r": [9 floats row-major]} like se3.gd.
 ##
 ## COST: GDScript is much slower than Dart; the plan limits this port to small groups (LOCAL_MAX_MEMBERS = 3) until it has been
 ## measured on the headset (tests/bench_local_retraction.gd).
@@ -25,7 +26,8 @@ const ACCEPT_RESIDUAL := 1e-6
 const ACCEPT_DISTANCE := 0.5 ## of max(L, hand distance from the start pose)
 const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the headset (Dart: 8)
 const MAX_ROWS := 64
-const MODEL_VERSION := 1
+const MODEL_VERSION := 2 ## 2: branch-specific residuals (alignment / side / perp per mate)
+const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
 
 const _TYPES := ["coincident", "concentric", "parallel", "angle", "distance"]
 
@@ -63,6 +65,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 			"type": type,
 			"value": raw.get("value"),
 			"allow_rotation": bool(raw.get("allow_rotation", true)),
+			"alignment": _sign(raw.get("alignment")),
+			"side": _sign(raw.get("side")),
+			"perp": _sign(raw.get("perp")),
 			"a": a,
 			"b": b,
 		})
@@ -93,6 +98,10 @@ static func _parse_side(j: Dictionary) -> Dictionary:
 		side["fr"] = fr
 		side["ft"] = _floats(j["frozen"]["t"])
 	return side
+
+
+static func _sign(v) -> float:
+	return -1.0 if (v is float or v is int) and float(v) < 0.0 else 1.0
 
 
 static func _floats(a) -> Array:
@@ -193,6 +202,21 @@ func _cross(a: Array, b: Array) -> Array:
 	return [Se3.cross(av, bv), d]
 
 
+func _scale(a: Array, c: float) -> Array:
+	var d := PackedFloat64Array()
+	if _jac:
+		var ad: PackedFloat64Array = a[1]
+		d.resize(3 * n)
+		for i in 3 * n:
+			d[i] = ad[i] * c
+	return [[a[0][0] * c, a[0][1] * c, a[0][2] * c], d]
+
+
+## `a - s b`: zero only when `a` points the way `s b` does (the alignment branch).
+func _add_direction(res: PackedFloat64Array, jac: Array, a: Array, b: Array, s: float) -> void:
+	_add_v(res, jac, _sub(a, _scale(b, s)))
+
+
 func _unit(a: Array) -> Array:
 	var av: Array = a[0]
 	var nn := Se3.norm3(av)
@@ -218,10 +242,11 @@ func _evaluate(poses: Array):
 		var d := _geo(mate["a"], poses)
 		var f := _geo(mate["b"], poses)
 		var type: String = mate["type"]
+		var s: float = mate["alignment"]
 		if type == "coincident":
 			if d.has("porigin") and f.has("porigin"):
 				_add_s(res, jac, _dot(_sub(d["porigin"], f["porigin"]), f["pnormal"]))
-				_add_v(res, jac, _cross(d["pnormal"], f["pnormal"]))
+				_add_direction(res, jac, d["pnormal"], f["pnormal"], s)
 			elif d.has("porigin"):
 				if not f.has("point"):
 					return null
@@ -237,14 +262,14 @@ func _evaluate(poses: Array):
 		elif type == "concentric":
 			if not (d.has("direction") and f.has("direction") and d.has("axis_origin") and f.has("axis_origin")):
 				return null
-			_add_v(res, jac, _cross(d["direction"], f["direction"]))
+			_add_direction(res, jac, d["direction"], f["direction"], s)
 			_add_v(res, jac, _cross(_sub(d["axis_origin"], f["axis_origin"]), f["direction"]))
 			if not mate["allow_rotation"] and d.has("perp") and f.has("perp"):
-				_add_v(res, jac, _cross(d["perp"], f["perp"]))
+				_add_direction(res, jac, d["perp"], f["perp"], mate["perp"])
 		elif type == "parallel":
 			if not (d.has("direction") and f.has("direction")):
 				return null
-			_add_v(res, jac, _cross(d["direction"], f["direction"]))
+			_add_direction(res, jac, d["direction"], f["direction"], s)
 		elif type == "angle":
 			if not (d.has("direction") and f.has("direction")) or mate["value"] == null:
 				return null
@@ -257,27 +282,22 @@ func _evaluate(poses: Array):
 		elif type == "distance":
 			if mate["value"] == null:
 				return null
-			var tsq := float(mate["value"]) * float(mate["value"])
+			var dist := absf(float(mate["value"]))
+			var signed_target: float = float(mate["side"]) * dist
 			if d.has("porigin") and f.has("porigin"):
-				_add_sq(res, jac, _dot(_sub(d["porigin"], f["porigin"]), f["pnormal"]), tsq)
-				_add_v(res, jac, _cross(d["pnormal"], f["pnormal"]))
+				_add_signed(res, jac, _dot(_sub(d["porigin"], f["porigin"]), f["pnormal"]), signed_target)
+				_add_direction(res, jac, d["pnormal"], f["pnormal"], s)
 			elif d.has("porigin"):
-				_add_sq(res, jac, _dot(_sub(f["point"], d["porigin"]), d["pnormal"]), tsq)
+				_add_signed(res, jac, _dot(_sub(f["point"], d["porigin"]), d["pnormal"]), signed_target)
 			elif f.has("porigin"):
-				_add_sq(res, jac, _dot(_sub(d["point"], f["porigin"]), f["pnormal"]), tsq)
+				_add_signed(res, jac, _dot(_sub(d["point"], f["porigin"]), f["pnormal"]), signed_target)
 			elif d.has("axis_origin") and f.has("axis_origin"):
 				var p := _cross(_sub(d["axis_origin"], f["axis_origin"]), f["direction"])
-				var pp := _dot(p, p)
-				res.append(pp[0] - tsq)
-				if _jac:
-					jac.append(pp[1])
-				_add_v(res, jac, _cross(d["direction"], f["direction"]))
+				_add_scaled(res, jac, _dot(p, p), dist)
+				_add_direction(res, jac, d["direction"], f["direction"], s)
 			else:
 				var off := _sub(d["point"], f["point"])
-				var oo := _dot(off, off)
-				res.append(oo[0] - tsq)
-				if _jac:
-					jac.append(oo[1])
+				_add_scaled(res, jac, _dot(off, off), dist)
 	return [res, jac]
 
 
@@ -287,15 +307,24 @@ func _add_s(res: PackedFloat64Array, jac: Array, s: Array) -> void:
 		jac.append(s[1])
 
 
-func _add_sq(res: PackedFloat64Array, jac: Array, s: Array, tsq: float) -> void:
-	res.append(s[0] * s[0] - tsq)
+## A signed separation against its target on the chosen side, `sep - side * d`: linear, one Newton step from either side.
+func _add_signed(res: PackedFloat64Array, jac: Array, sg: Array, target: float) -> void:
+	res.append(sg[0] - target)
+	if _jac:
+		jac.append(sg[1])
+
+
+## A squared form scaled to mm, `(x^2 - d^2) / (2 max(d, floor))`.
+func _add_scaled(res: PackedFloat64Array, jac: Array, sq: Array, dist: float) -> void:
+	var scale := 2.0 * maxf(dist, DISTANCE_FLOOR)
+	res.append((sq[0] - dist * dist) / scale)
 	if not _jac:
 		return
-	var d: PackedFloat64Array = s[1]
+	var d: PackedFloat64Array = sq[1]
 	var out := PackedFloat64Array()
 	out.resize(n)
 	for c in n:
-		out[c] = 2.0 * s[0] * d[c]
+		out[c] = d[c] / scale
 	jac.append(out)
 
 

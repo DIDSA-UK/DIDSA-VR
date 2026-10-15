@@ -127,14 +127,16 @@ func _initialize() -> void:
 	var base: Dictionary = (cases[0]["input"]["model"] as Dictionary).duplicate(true)
 	var ok_parse := Local.try_parse(base) != null
 	var bad_version: Dictionary = base.duplicate(true)
-	bad_version["version"] = 2
+	bad_version["version"] = Local.MODEL_VERSION + 1
+	var old_version: Dictionary = base.duplicate(true)
+	old_version["version"] = 1 # the pre-branch model (sign-agnostic residuals) is not evaluated
 	var bad_type: Dictionary = base.duplicate(true)
 	bad_type["mates"][0]["type"] = "gear"
 	var missing: Dictionary = base.duplicate(true)
 	missing["mates"][0]["a"].erase("axis_origin")
 	var bad_member: Dictionary = base.duplicate(true)
 	bad_member["mates"][0]["a"]["member"] = 5
-	var parse_rules: bool = ok_parse and Local.try_parse(null) == null and Local.try_parse(bad_version) == null and Local.try_parse(bad_type) == null \
+	var parse_rules: bool = ok_parse and Local.try_parse(null) == null and Local.try_parse(bad_version) == null and Local.try_parse(old_version) == null and Local.try_parse(bad_type) == null \
 		and Local.try_parse(missing) == null and Local.try_parse(bad_member) == null and Local.try_parse(base, 0) == null
 	print("SMOKE model parsing rules (valid parses; null/version/type/missing field/member/too many -> null): ", parse_rules)
 	if not parse_rules:
