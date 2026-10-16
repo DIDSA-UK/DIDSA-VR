@@ -1,5 +1,5 @@
 extends Node3D
-## Engine-choice spike: imports a saved DIDSA-CAD assembly file straight
+## Main scene: imports a saved DIDSA-CAD assembly file straight
 ## into the backend's "default" session, then downloads the resulting
 ## GET /document/parts/{part_id}/assembly-mesh.glb node-instanced glTF and
 ## drops it into the world so it can be grabbed with controller.gd.
@@ -771,7 +771,7 @@ func _load_secrets() -> void:
 		return
 	var config := ConfigFile.new()
 	if config.load(secrets_file_path) != OK:
-		push_warning("DIDSA VR spike: couldn't parse %s" % secrets_file_path)
+		push_warning("DIDSA VR: couldn't parse %s" % secrets_file_path)
 		return
 	backend_url = config.get_value("backend", "url", backend_url)
 	api_key = config.get_value("backend", "api_key", api_key)
@@ -789,9 +789,9 @@ func _start_xr() -> void:
 		# at about half rate (the classic Godot XR "stuck at 45-50 fps" trap).
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 		Engine.max_fps = 0
-		print("DIDSA VR spike: OpenXR initialised, headset active.")
+		print("DIDSA VR: OpenXR initialised, headset active.")
 	else:
-		push_warning("DIDSA VR spike: OpenXR not initialised — running as a flat desktop preview. On Quest this should initialise automatically; on desktop it's expected unless a PCVR runtime (e.g. Virtual Desktop) is actively streaming to a headset right now.")
+		push_warning("DIDSA VR: OpenXR not initialised — running as a flat desktop preview. On Quest this should initialise automatically; on desktop it's expected unless a PCVR runtime (e.g. Virtual Desktop) is actively streaming to a headset right now.")
 		_spawn_desktop_camera()
 
 
@@ -862,7 +862,7 @@ func _on_import_completed(result: int, response_code: int, _headers: PackedStrin
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		_load_busy = false
 		_set_status("Import failed: %s" % _http_error_text(response_code, result, body))
-		push_error("DIDSA VR spike: /import/native failed: result=%d code=%d body=%s" % [result, response_code, body.get_string_from_utf8()])
+		push_error("DIDSA VR: /import/native failed: result=%d code=%d body=%s" % [result, response_code, body.get_string_from_utf8()])
 		return
 
 	_set_status("Imported. Fetching assembly mesh...")
@@ -887,7 +887,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 	_load_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		_set_status("Mesh load failed: %s" % _http_error_text(response_code, result, body))
-		push_error("DIDSA VR spike: assembly-mesh.glb fetch failed: result=%d code=%d" % [result, response_code])
+		push_error("DIDSA VR: assembly-mesh.glb fetch failed: result=%d code=%d" % [result, response_code])
 		return
 
 	_parse_started_ms = Time.get_ticks_msec()
@@ -900,7 +900,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 	_load_summary = "load: import %d ms, download %d ms (%d KB), parse %d ms" % [
 		import_ms, download_ms, int(body.size() / 1024.0), Time.get_ticks_msec() - _parse_started_ms
 	]
-	print("DIDSA VR spike: ", _load_summary)
+	print("DIDSA VR: ", _load_summary)
 	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % _part_count)
 
 
@@ -1179,7 +1179,7 @@ func load_glb_file(path: String) -> void:
 	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
 		return
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
-	print("DIDSA VR spike: ", _load_summary)
+	print("DIDSA VR: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
 
 
@@ -1264,7 +1264,7 @@ func _import_external_file_impl(path: String, source_format: String) -> void:
 	if not _show_model(mesh_body, "", spawn_scale): # backend units are mm regardless of the source format — spawn_scale, not local_glb_scale
 		return
 	_load_summary = "load: %s (%s, via backend), %d KB, %d ms" % [path.get_file(), source_format, int(mesh_body.size() / 1024.0), Time.get_ticks_msec() - started_ms]
-	print("DIDSA VR spike: ", _load_summary)
+	print("DIDSA VR: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
 
 
@@ -1321,7 +1321,7 @@ func _parse_import_response(result: Array, step_description: String, req: HTTPRe
 	var body: PackedByteArray = result[3]
 	if result_code != HTTPRequest.RESULT_SUCCESS or (response_code != 200 and response_code != 201):
 		_set_status("Couldn't %s: %s" % [step_description, _http_error_text(response_code, result_code, body)])
-		push_error("DIDSA VR spike: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
+		push_error("DIDSA VR: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
 		req.queue_free()
 		return null
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
@@ -1340,7 +1340,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	var parse_error := gltf_document.append_from_buffer(glb_bytes, base_path, gltf_state)
 	if parse_error != OK:
 		_set_status("glTF parse failed (error %d)" % parse_error)
-		push_error("DIDSA VR spike: glTF parse failed: %d" % parse_error)
+		push_error("DIDSA VR: glTF parse failed: %d" % parse_error)
 		return false
 
 	var scene := gltf_document.generate_scene(gltf_state)
@@ -1767,5 +1767,5 @@ func _all_descendants(root: Node) -> Array[Node]:
 
 
 func _set_status(text: String) -> void:
-	print("DIDSA VR spike: ", text)
+	print("DIDSA VR: ", text)
 	status_text = text

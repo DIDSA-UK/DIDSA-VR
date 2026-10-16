@@ -8,7 +8,7 @@ fail=0
 # Tests that change settings (a resized table is remembered, the view mode, the theme...) write to their own file, never the real one, and each
 # run starts from defaults. (Running a single test by hand without this variable uses the real settings file.)
 export DIDSA_SETTINGS_PATH="user://settings_test.cfg"
-reset_settings() { rm -f "$HOME/.local/share/godot/app_userdata/DIDSA VR Spike/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR Spike/settings_test.cfg" 2>/dev/null; }
+reset_settings() { rm -f "$HOME/.local/share/godot/app_userdata/DIDSA Design Tools VR/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA Design Tools VR/settings_test.cfg" "$HOME/.local/share/godot/app_userdata/DIDSA VR/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR/settings_test.cfg" "$HOME/.local/share/godot/app_userdata/DIDSA VR Spike/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR Spike/settings_test.cfg" 2>/dev/null; } # "DIDSA VR Spike" and "DIDSA VR" are the pre-rename folders
 reset_settings
 
 echo "== parse check"
