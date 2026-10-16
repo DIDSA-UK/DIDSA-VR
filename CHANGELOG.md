@@ -5,6 +5,7 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 
 ## Unreleased (`main`, 14 Oct)
 
+- **Mates: choosing the solution** (mate plan Phases 1-4, #46; backend in DIDSA-CAD #300): a ghost for every moved part, atomic create/edit, a mate's Aligned/Anti-aligned and side stored on the mate, a confirm step when a new mate needs an earlier mate's other branch, Flip / Next solution controls on the tablet, the hinge swing sense (constraint model v3 in `local_retraction.gd`), and a guard against negative or non-numeric mate values. Not ghosted: sub-assembly leaves. Next solution has no wheel wedge.
 - **Rooms tile** on the tablet home screen, which is now a 6 x 2 grid; Rooms sits before Assemble (#43).
 - **Sub-assembly selection**: grip latch with a dead zone, trigger cycling, laser breadcrumb, group moves saved on the sub-assembly occurrence (#43).
 - **World preview** for rooms and the design table: Hidden / Ghost / Preview, push, tether, fly to world (R4, #43). Group drop copies a sub-assembly into a room.
