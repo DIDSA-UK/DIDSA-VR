@@ -72,18 +72,37 @@ var command_stack = null ## set via setup(); shared undo/redo history
 var mate_type := "coincident":
 	set(v):
 		mate_type = v
+		reset_branch_choice() # a choice made for another kind of mate means nothing here
 		request_preview()
 var mate_value := 0.0:
 	set(v):
 		mate_value = v
 		request_preview()
-var mate_flipped := false:
+## The branch the user picked ("Closest" = not picked: the backend resolves it and the preview says which): "" or "aligned" /
+## "anti_aligned", and -1 (auto) / 0 / 1 for the DISTANCE side, locked-CONCENTRIC half-turn or ANGLE supplement. Which of them mean
+## anything for the picked geometry is the backend's call (`branch_controls`, from the preview).
+var mate_alignment: String:
+	get:
+		return _alignment_choice
 	set(v):
-		mate_flipped = v
+		_alignment_choice = v
+		request_preview()
+var mate_secondary_flip: int:
+	get:
+		return _flip_choice
+	set(v):
+		_flip_choice = v
 		request_preview()
 var mate_allow_rotation := true:
 	set(v):
 		mate_allow_rotation = v
+		reset_branch_choice()
+		request_preview()
+## Mirrors the flat client's "Minimal movement" (MatePanel): move only the mated part when that is enough and let connected parts follow only
+## when it is not (the backend's `auto` movement mode); off lets the whole connected group move (`group`). Preview, Create and Edit all use it.
+var mate_minimal_movement := true:
+	set(v):
+		mate_minimal_movement = v
 		request_preview()
 var relaxed := false
 
@@ -98,9 +117,17 @@ var _persist: Dictionary = {} ## occurrence_id -> {"pose": Dictionary|null, "run
 const GHOST_COLOUR := Color(0.31, 0.77, 1.0, 0.40)
 
 var _picks: Array[Dictionary] = []
-var _ghost: Node3D = null ## the preview: a see-through copy of the driven part, where the mate would put it
+var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
+var _alignment_choice := ""
+var _flip_choice := -1
+var branch_controls: Array = [] ## the preview's `controls`: the branch fields ("alignment", "secondary_flip") this geometry has
+var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the ghost shows
+var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
+var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
+var _branch_notice := "" ## the sentence telling the user so (branch_notice())
+var _pending_edit: Dictionary = {} ## "mate_id|fields" -> the branch changes an edit was refused for; repeating that exact edit confirms them
 var _busy := false
 var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
 var _group_persist: Dictionary = {}
@@ -130,6 +157,12 @@ func set_active(on: bool) -> void:
 func clear_picks() -> void:
 	_picks.clear()
 	_status = ""
+	_branch_changes = []
+	_branch_notice = ""
+	branch_controls = []
+	branch_resolved = {}
+	branch_alternatives = []
+	reset_branch_choice()
 	request_preview() # two picks are gone, so the ghost goes with them
 	picks_changed.emit()
 
@@ -147,8 +180,10 @@ func status_text() -> String:
 		1:
 			return "Pick a face, edge or corner on the second part."
 		_:
-			if _ghost != null:
-				return "Preview shown in blue. If it faces the wrong way press Flip, then Create."
+			if _branch_notice != "":
+				return _branch_notice
+			if preview_visible():
+				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			return "Ready — choose a mate type and Create."
 	return ""
 
@@ -203,6 +238,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"kind": kind,
 	})
 	_status = ""
+	reset_branch_choice() # another face means another set of roots
 	request_preview()
 	picks_changed.emit()
 
@@ -227,7 +263,15 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 # --- Preview: a ghost of the part where the mate would put it --------------------------
 
 func preview_visible() -> bool:
-	return _ghost != null and is_instance_valid(_ghost)
+	for ghost in _ghosts:
+		if is_instance_valid(ghost):
+			return true
+	return false
+
+
+func movement_param() -> String:
+	## The backend's `movement` query value for `mate_minimal_movement` (the flat client's `_mateMovement`).
+	return "auto" if mate_minimal_movement else "group"
 
 
 func request_preview() -> void:
@@ -240,24 +284,224 @@ func request_preview() -> void:
 	_run_preview(_preview_seq)
 
 
+static func preview_members(preview: Dictionary, driven_id: String) -> Array:
+	## Pure — [{occurrence_id, transform}] a converged preview moves: the backend's `members` (the driven part first, then every follower that
+	## changed), or - for a backend that predates the field - just the driven part from `transform`. Empty when it did not converge.
+	if not bool(preview.get("converged", false)):
+		return []
+	var members = preview.get("members")
+	if members is Array and not (members as Array).is_empty():
+		var out := []
+		for m in members:
+			if m is Dictionary and m.get("transform") is Dictionary:
+				out.append({"occurrence_id": str(m.get("occurrence_id", "")), "transform": m["transform"]})
+		return out
+	if preview.get("transform") is Dictionary:
+		return [{"occurrence_id": driven_id, "transform": preview["transform"]}]
+	return []
+
+
+static func branch_notice(changes: Array, blocked_by: Array, conflicting: Array, mates: Array) -> String:
+	## Pure — the sentence for a preview that needs earlier mates on their other branch (`branch_changes`), or cannot get there
+	## (`blocked_by`: mates the user set, `conflicting`: a genuine conflict). "" when there is nothing to say.
+	var describe := func(ids: Array) -> String:
+		var labels: Array[String] = []
+		for id in ids:
+			var label := "a mate"
+			for mate in mates:
+				if mate is Dictionary and str(mate.get("id", "")) == str(id):
+					label = "%s mate" % str(mate.get("type", "")).capitalize()
+			labels.append(label)
+		return ", ".join(labels)
+	if not changes.is_empty():
+		var ids: Array = []
+		for c in changes:
+			if c is Dictionary and not ids.has(str(c.get("mate_id", ""))):
+				ids.append(str(c.get("mate_id", "")))
+		if ids.size() == 1:
+			return "To fit, an earlier mate (%s) moves to its other side or orientation. Create applies it." % describe.call(ids)
+		return "To fit, %d earlier mates (%s) move to their other side or orientation. Create applies them." % [ids.size(), describe.call(ids)]
+	if not blocked_by.is_empty():
+		return "A mate you set to one side or orientation stands in the way (%s). Change it to allow this mate." % describe.call(blocked_by)
+	if not conflicting.is_empty():
+		return "This mate conflicts with an earlier mate (%s)." % describe.call(conflicting)
+	return ""
+
+
+static func confirmed_changes(changes: Array) -> Array:
+	## Pure — the confirmed form of the preview's `branch_changes` (the backend's BranchChangeRequest: no `from`).
+	var out := []
+	for c in changes:
+		if c is Dictionary:
+			out.append({"mate_id": c.get("mate_id", ""), "field": c.get("field", ""), "to": c.get("to")})
+	return out
+
+
+func reset_branch_choice() -> void:
+	## Back to Closest, without re-running the preview (the caller does).
+	_alignment_choice = ""
+	_flip_choice = -1
+
+
+static func secondary_flip_label(type: String) -> String:
+	## Pure — what the secondary flag means for a mate of `type`.
+	match type:
+		"distance":
+			return "Flip side"
+		"concentric":
+			return "Flip spin"
+		"angle":
+			return "Supplement"
+	return "Flip"
+
+
+static func parse_value(type: String, text: String) -> Dictionary:
+	## Pure — a typed mate value: {"ok", "value", "error"}. Not a number is refused, and so is a negative DISTANCE (the side of a distance
+	## is the Flip side control; the backend refuses a negative one, which used to leave the ghost blank with no word why). An angle may be negative.
+	var trimmed := text.strip_edges()
+	if not trimmed.is_valid_float():
+		return {"ok": false, "value": 0.0, "error": "\"%s\" is not a number" % trimmed}
+	var value := trimmed.to_float()
+	if type == "distance" and value < 0.0:
+		return {"ok": false, "value": 0.0, "error": "A distance can't be negative - use Flip side"}
+	return {"ok": true, "value": value, "error": ""}
+
+
+static func alignment_title(type: String) -> String:
+	## Pure — what the `alignment` control is called: the direction a lid swings about its hinge for an ANGLE, else the orientation.
+	return "Swing" if type == "angle" else "Orientation"
+
+
+static func alignment_label(type: String, alignment: String) -> String:
+	## Pure — the value of the `alignment` control for a mate of `type`: "+" / "-" for an ANGLE's swing, Aligned / Anti-aligned otherwise.
+	if type == "angle":
+		return "+" if alignment == "aligned" else "-"
+	return "Aligned" if alignment == "aligned" else "Anti-aligned"
+
+
+static func effective_alignment(controls: Array, chosen: String, resolved: Dictionary) -> String:
+	## Pure — the orientation the ghost shows: "" when the geometry has no alignment control.
+	if not controls.has("alignment"):
+		return ""
+	return chosen if chosen != "" else str(resolved.get("alignment", "") if resolved.get("alignment") != null else "")
+
+
+static func effective_secondary_flip(controls: Array, chosen: int, resolved: Dictionary) -> int:
+	## Pure — the secondary flag the ghost shows (0 / 1), or -1 when the geometry has no such control.
+	if not controls.has("secondary_flip"):
+		return -1
+	if chosen >= 0:
+		return chosen
+	return 1 if resolved.get("secondary_flip") == true else 0
+
+
+static func alternative_index(alternatives: Array, alignment: String, flip: int) -> int:
+	## Pure — where the placement being shown sits among `alternatives` (-1 if it matches none).
+	for i in alternatives.size():
+		var alt = alternatives[i]
+		if not alt is Dictionary:
+			continue
+		var alt_alignment := str(alt.get("alignment", "")) if alt.get("alignment") != null else ""
+		var alt_flip := -1 if alt.get("secondary_flip") == null else (1 if alt.get("secondary_flip") == true else 0)
+		if alt_alignment == alignment and alt_flip == flip:
+			return i
+	return -1
+
+
+static func next_alternative(alternatives: Array, alignment: String, flip: int) -> Dictionary:
+	## Pure — "Next solution": the alternative after the one being shown (wrapping), the nearest one when none matches, {} when
+	## there are fewer than two to step through.
+	if alternatives.size() < 2:
+		return {}
+	var current := alternative_index(alternatives, alignment, flip)
+	var next = alternatives[0 if current < 0 else (current + 1) % alternatives.size()]
+	return next if next is Dictionary else {}
+
+
+func shown_alignment() -> String:
+	return effective_alignment(branch_controls, mate_alignment, branch_resolved)
+
+
+func shown_secondary_flip() -> int:
+	return effective_secondary_flip(branch_controls, mate_secondary_flip, branch_resolved)
+
+
+func toggle_alignment() -> void:
+	var shown := shown_alignment()
+	if shown != "":
+		mate_alignment = "anti_aligned" if shown == "aligned" else "aligned"
+
+
+func toggle_secondary_flip() -> void:
+	var shown := shown_secondary_flip()
+	if shown >= 0:
+		mate_secondary_flip = 0 if shown == 1 else 1
+
+
+func flip_mate() -> void:
+	## The wheel's single "Flip": turns the ghost round - the orientation if the geometry has one, else the side / spin / supplement.
+	if branch_controls.has("alignment"):
+		toggle_alignment()
+	elif branch_controls.has("secondary_flip"):
+		toggle_secondary_flip()
+
+
+func next_solution() -> bool:
+	## Steps to the next converging placement of this mate (`branch_alternatives`), naming its branch explicitly. False if there is none.
+	var next := next_alternative(branch_alternatives, shown_alignment(), shown_secondary_flip())
+	if next.is_empty():
+		return false
+	_alignment_choice = str(next.get("alignment", "")) if next.get("alignment") != null else ""
+	_flip_choice = -1 if next.get("secondary_flip") == null else (1 if next.get("secondary_flip") == true else 0)
+	request_preview() # one preview for both fields
+	return true
+
+
+func branch_text() -> String:
+	## One line for the tablet: the orientation / flip as shown, "(auto)" while not picked, and where Next solution is.
+	var parts: Array[String] = []
+	var alignment := shown_alignment()
+	if alignment != "":
+		parts.append("%s%s" % [alignment_label(mate_type, alignment), " (auto)" if mate_alignment == "" else ""])
+	var flip := shown_secondary_flip()
+	if flip >= 0:
+		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip == 1 else "off", " (auto)" if mate_secondary_flip < 0 else ""])
+	if branch_alternatives.size() > 1:
+		var index := alternative_index(branch_alternatives, alignment, flip)
+		parts.append("solution %s of %d" % [str(index + 1) if index >= 0 else "-", branch_alternatives.size()])
+	return " · ".join(parts)
+
+
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
-	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve" % [owner_part_id, driven_id], build_create_payload())
+	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], build_create_payload())
 	if seq != _preview_seq or _picks.size() != 2:
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
-	var part := _find_loaded_part(owner_part_id, driven_id)
-	if not result["ok"] or not (json is Dictionary) or not bool(json.get("converged", false)) or not (json.get("transform") is Dictionary) or part == null:
-		_clear_ghost() # "no ghost to show yet": a value still to be typed, geometry this type can't use, or a grounded part
-		picks_changed.emit()
-		return
-	_show_ghost(part, json_to_pose(json["transform"]))
+	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
+	_branch_changes = []
+	_branch_notice = ""
+	branch_controls = []
+	branch_resolved = {}
+	branch_alternatives = []
+	if result["ok"] and json is Dictionary:
+		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
+		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
+		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
+		var found = json.get("branch_changes", [])
+		_branch_changes = found if found is Array else []
+		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
+	_clear_ghost()
+	for member in members:
+		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
+		if part != null:
+			_show_ghost(part, json_to_pose(member["transform"]))
+	# "No ghost to show yet" (nothing added above): a value still to be typed, geometry this type can't use, or a grounded part.
 	picks_changed.emit()
 
 
 func _show_ghost(part: Node3D, pose: Transform3D) -> void:
-	_clear_ghost()
 	if part.get_parent() == null:
 		return
 	var ghost := Node3D.new()
@@ -270,7 +514,7 @@ func _show_ghost(part: Node3D, pose: Transform3D) -> void:
 	_add_ghost_meshes(part, Transform3D.IDENTITY, ghost, material)
 	part.get_parent().add_child(ghost)
 	ghost.transform = pose # same frame as the part itself (see _apply_solved_transform)
-	_ghost = ghost
+	_ghosts.append(ghost)
 
 
 func _add_ghost_meshes(node: Node3D, xf: Transform3D, ghost: Node3D, material: Material) -> void:
@@ -287,51 +531,79 @@ func _add_ghost_meshes(node: Node3D, xf: Transform3D, ghost: Node3D, material: M
 
 
 func _clear_ghost() -> void:
-	if _ghost != null and is_instance_valid(_ghost):
-		_ghost.queue_free()
-	_ghost = null
+	for ghost in _ghosts:
+		if is_instance_valid(ghost):
+			ghost.queue_free()
+	_ghosts.clear()
 
 
 func can_create() -> bool:
 	return _picks.size() == 2 and not _busy
 
 
-func build_create_payload() -> Dictionary:
+func build_create_payload(with_branch_changes := false) -> Dictionary:
 	## Pure — the exact POST /parts/{owner_part_id}/mates body MateCreate
-	## expects (DIDSA-CAD's app.document.schemas.MateCreate).
+	## expects (DIDSA-CAD's app.document.schemas.MateCreate). `with_branch_changes` adds the earlier mates the preview showed on their
+	## other branch (what Create confirms); the preview request itself never carries them.
 	var references := []
 	for p in _picks:
 		references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
 	var payload := {
 		"type": mate_type, "references": references,
-		"flipped": mate_flipped, "allow_rotation": mate_allow_rotation,
+		"allow_rotation": mate_allow_rotation,
 	}
+	# The branch is named only when the user picked it; left out, the backend resolves it (Closest) and the preview says which.
+	if mate_alignment != "":
+		payload["alignment"] = mate_alignment
+	if mate_secondary_flip >= 0:
+		payload["secondary_flip"] = mate_secondary_flip == 1
 	if mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
+	if with_branch_changes and not _branch_changes.is_empty():
+		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload
 
 
 func create_mate() -> Dictionary:
 	## Returns {"ok":, "error":}. By convention the 2nd pick is the driven
-	## occurrence solve_for_occurrence snaps into place afterward (unless
-	## `relaxed`) — matching the flat app's own create-then-solve pairing.
+	## occurrence (_choose_driven). Unless `relaxed`, creating is ATOMIC: the backend runs the same solve
+	## the ghost showed and stores the mate together with every moved part's pose only if it converges
+	## (`POST .../mates?solve=...`), so a refused mate is never left behind. The driven part's current pose
+	## is saved first - the solver starts from the stored pose, so without that it would solve from
+	## wherever the part used to be. Relaxed, or with the driven part grounded, only the mate is stored.
 	if not can_create():
 		return {"ok": false, "error": "Pick two entities first."}
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_occurrence_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var driven_fixed := bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_occurrence_id, {}).get("fixed", false))
+	var atomic := not relaxed and not driven_fixed
 	_busy = true
-	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/mates" % owner_part_id, build_create_payload())
+	var part := _find_loaded_part(owner_part_id, driven_occurrence_id)
+	if atomic and part != null:
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_occurrence_id], {"transform": pose_to_json(_local_pose(part))})
+		if not patched["ok"]:
+			_busy = false
+			return {"ok": false, "error": _friendly_error(patched)}
+	var path := "/parts/%s/mates" % owner_part_id
+	if atomic:
+		path += "?" + atomic_query(movement_param(), driven_occurrence_id)
+	var result := await _api_request(HTTPClient.METHOD_POST, path, build_create_payload(atomic))
 	_busy = false
 	if not result["ok"]:
-		return {"ok": false, "error": result["error"]}
+		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
 	clear_picks()
 	document_changed.emit()
+	if atomic:
+		await _adopt_backend_poses(owner_part_id, "mate %s" % (str(part.name) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
-	if not relaxed:
-		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_occurrence_id)
-		if not solved["ok"]:
-			_report("Mate created, but couldn't be applied: %s" % solved["error"])
+	if not relaxed and driven_fixed:
+		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
 	return {"ok": true, "error": ""}
+
+
+static func atomic_query(movement: String, occurrence_id: String) -> String:
+	## Pure — the `solve` / `occurrence_id` query of an atomic create or edit (see create_mate).
+	return "solve=%s&occurrence_id=%s" % [movement, occurrence_id.uri_encode()]
 
 
 func refresh_mates(owner_part_id: String) -> void:
@@ -361,26 +633,51 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 
 func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> Dictionary:
 	## Edits a mate after it was made: any of value / flipped / allow_rotation / suppressed (what the backend's
-	## PATCH accepts; the type and the two faces are never edited, make a new mate for those). Unless mates are
-	## relaxed, the driven part is solved again so the change shows at once (one undo entry, like Create's).
+	## PATCH accepts; the type and the two faces are never edited, make a new mate for those). Unless mates
+	## are relaxed, the edit is ATOMIC like Create's: the driven part is solved with the edit and both are stored
+	## together (one undo entry), or - if the edited mate cannot be met - the mate keeps its old values.
 	if fields.is_empty():
 		return {"ok": true, "error": ""}
-	_busy = true
-	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/mates/%s" % [owner_part_id, mate_id], fields)
-	_busy = false
-	if not result["ok"]:
-		return {"ok": false, "error": _friendly_error(result)}
-	document_changed.emit()
-	await refresh_mates(owner_part_id)
 	var refs: Array = []
 	for mate in mates:
 		if str(mate.get("id", "")) == mate_id:
 			refs = mate.get("references", [])
-	if not relaxed and refs.size() == 2:
-		var driven_id := _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
-		var solved: Dictionary = await solve_occurrence(owner_part_id, driven_id)
-		if not solved["ok"]:
-			return {"ok": false, "error": "Mate changed, but couldn't be applied: %s" % solved["error"]}
+	var driven_id := ""
+	if refs.size() == 2:
+		driven_id = _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
+	var driven_fixed := driven_id != "" and bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_id, {}).get("fixed", false))
+	var atomic := not relaxed and driven_id != "" and not driven_fixed
+	_busy = true
+	var part := _find_loaded_part(owner_part_id, driven_id) if atomic else null
+	if part != null:
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_id], {"transform": pose_to_json(_local_pose(part))})
+		if not patched["ok"]:
+			_busy = false
+			return {"ok": false, "error": _friendly_error(patched)}
+	var path := "/parts/%s/mates/%s" % [owner_part_id, mate_id]
+	if atomic:
+		path += "?" + atomic_query(movement_param(), driven_id)
+	# An edit refused because earlier mates must change branch is confirmed by repeating it (there is no live preview for an edit
+	# here): the refusal said what moves, and the same edit again sends exactly that.
+	var edit_key := "%s|%s" % [mate_id, JSON.stringify(fields)]
+	var body := fields
+	if atomic and _pending_edit.has(edit_key):
+		body = fields.duplicate()
+		body["branch_changes"] = confirmed_changes(_pending_edit[edit_key])
+	var result := await _api_request(HTTPClient.METHOD_PATCH, path, body)
+	_busy = false
+	_pending_edit.erase(edit_key)
+	if not result["ok"]:
+		var detail = result["json"].get("detail") if result.get("json") is Dictionary else null
+		if detail is Dictionary and str(detail.get("type", "")) == "branch_change_needed" and detail.get("branch_changes") is Array:
+			_pending_edit[edit_key] = detail["branch_changes"]
+		return {"ok": false, "error": _friendly_error(result)}
+	document_changed.emit()
+	if atomic:
+		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (str(part.name) if part != null else driven_id))
+	await refresh_mates(owner_part_id)
+	if not relaxed and driven_fixed:
+		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	return {"ok": true, "error": ""}
 
 
@@ -620,6 +917,13 @@ func _friendly_error(result: Dictionary) -> String:
 				return "that part is grounded (fixed)"
 			"mate_solve_did_not_converge":
 				return "the mates can't all be satisfied from there (over-constrained or conflicting)"
+			"branch_change_needed":
+				var changes: Array = detail.get("branch_changes", []) if detail.get("branch_changes") is Array else []
+				return "%s Do the same again to confirm." % branch_notice(changes, [], [], mates).replace(" Create applies it.", "").replace(" Create applies them.", "")
+			"mate_blocked_by_user_branch":
+				return branch_notice([], detail.get("blocked_by", []) if detail.get("blocked_by") is Array else [], [], mates)
+			"mate_conflict":
+				return branch_notice([], [], detail.get("conflicting", []) if detail.get("conflicting") is Array else [], mates)
 			"unsupported_mate_geometry":
 				return "this mate type needs %s" % str(detail.get("needed", "different geometry"))
 		return str(detail.get("type", detail))

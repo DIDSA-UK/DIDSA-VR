@@ -22,6 +22,7 @@ signal toast(text: String, kind: String)
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
+const _MatesTool := preload("res://scripts/mates_tool.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
@@ -67,6 +68,10 @@ var _speed_slider: HSlider
 var _mates_picks_label: Label
 var _mates_value_label: Label
 var _mates_create_button: Button
+var _mates_branch_label: Label ## which orientation / side the preview shows, and where Next solution is (MatesTool.branch_text)
+var _mates_alignment_button: Button
+var _mates_flip_button: Button
+var _mates_next_button: Button
 var _mates_relax_button: Button
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
@@ -202,6 +207,7 @@ func refresh() -> void:
 		var labels: Array = _mates_tool.picked_labels()
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
+		_refresh_mates_branch_controls()
 	if _new_assembly_button and _new_assembly_armed_until_ms > 0 and Time.get_ticks_msec() > _new_assembly_armed_until_ms:
 		_disarm_new_assembly()
 	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
@@ -580,16 +586,6 @@ func _build_mates_page() -> Control:
 	))
 	var toggles := _row()
 	page.add_child(toggles)
-	var flip := Button.new()
-	flip.text = "Flip"
-	flip.toggle_mode = true
-	flip.custom_minimum_size = Vector2(0, 56)
-	flip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flip.toggled.connect(func(on: bool) -> void:
-		if _mates_tool:
-			_mates_tool.mate_flipped = on
-	)
-	toggles.add_child(flip)
 	var allow_rot := Button.new()
 	allow_rot.text = "Allow rotation"
 	allow_rot.toggle_mode = true
@@ -601,6 +597,37 @@ func _build_mates_page() -> Control:
 			_mates_tool.mate_allow_rotation = on
 	)
 	toggles.add_child(allow_rot)
+	var min_move := Button.new()
+	min_move.text = "Minimal movement"
+	min_move.tooltip_text = "On: move only the mated part when that is enough, and let connected parts follow only when it is not. Off: connected parts may always follow."
+	min_move.toggle_mode = true
+	min_move.button_pressed = true
+	min_move.custom_minimum_size = Vector2(0, 56)
+	min_move.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	min_move.toggled.connect(func(on: bool) -> void:
+		if _mates_tool:
+			_mates_tool.mate_minimal_movement = on
+	)
+	toggles.add_child(min_move)
+
+	# Which orientation / side the preview shows - only the controls the picked geometry has (the backend's `controls`), shown by
+	# _refresh_mates_branch_controls. Left alone, the backend picks the nearest ("auto"); a press names the branch.
+	_mates_branch_label = _hint("")
+	_mates_branch_label.visible = false
+	page.add_child(_mates_branch_label)
+	var branch_row := _row()
+	page.add_child(branch_row)
+	_mates_alignment_button = _branch_button("Orientation", func() -> void:
+		if _mates_tool:
+			_mates_tool.toggle_alignment())
+	_mates_flip_button = _branch_button("Flip", func() -> void:
+		if _mates_tool:
+			_mates_tool.toggle_secondary_flip())
+	_mates_next_button = _branch_button("Next solution", func() -> void:
+		if _mates_tool:
+			_mates_tool.next_solution())
+	for b in [_mates_alignment_button, _mates_flip_button, _mates_next_button]:
+		branch_row.add_child(b)
 
 	var value_row := _row()
 	page.add_child(value_row)
@@ -648,6 +675,34 @@ func _build_mates_page() -> Control:
 	return page
 
 
+func _branch_button(text: String, on_press: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.visible = false
+	button.custom_minimum_size = Vector2(0, 56)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.pressed.connect(on_press)
+	return button
+
+
+func _refresh_mates_branch_controls() -> void:
+	## Shows exactly the branch controls the latest preview named, with their current values; Next solution only with two or more.
+	if _mates_branch_label == null or _mates_tool == null:
+		return
+	var tool = _mates_tool
+	var text: String = tool.branch_text()
+	_mates_branch_label.text = text
+	_mates_branch_label.visible = text != ""
+	_mates_alignment_button.visible = tool.branch_controls.has("alignment")
+	_mates_alignment_button.text = "%s: %s" % [_MatesTool.alignment_title(tool.mate_type), _MatesTool.alignment_label(tool.mate_type, tool.shown_alignment())]
+	_mates_flip_button.visible = tool.branch_controls.has("secondary_flip")
+	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.shown_secondary_flip() == 1 else "off"]
+	var steps: int = tool.branch_alternatives.size()
+	_mates_next_button.visible = steps > 1
+	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
+	_mates_next_button.text = "Next solution (%d of %d)" % [index + 1, steps] if index >= 0 else "Next solution (%d)" % steps
+
+
 func _on_mates_selected() -> void:
 	var owner_part_id: String = _main.current_root_part_id() if _main else ""
 	if _mates_tool and owner_part_id != "":
@@ -663,7 +718,11 @@ func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
 		return
 	_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value), func(text: String) -> void:
-		_mates_tool.mate_value = text.to_float()
+		var parsed: Dictionary = _MatesTool.parse_value(_mates_tool.mate_type, text)
+		if not parsed["ok"]:
+			toast.emit(str(parsed["error"]), "error")
+			return
+		_mates_tool.mate_value = float(parsed["value"])
 		_mates_value_label.text = "Value: %s (distance mm / angle deg)" % _trim_mate_value(_mates_tool.mate_value)
 	)
 
@@ -687,14 +746,22 @@ func _mates_rows() -> Array:
 		var type_label: String = type_str.capitalize()
 		var has_value: bool = mate.get("value") != null
 		var mate_id := str(mate.get("id", ""))
-		var flipped := bool(mate.get("flipped", false))
 		var free_spin := bool(mate.get("allow_rotation", true))
+		var alignment = mate.get("alignment")
+		var secondary = mate.get("secondary_flip")
 		var notes := []
-		if flipped:
-			notes.append("flipped")
+		if alignment != null:
+			notes.append(("swing %s" % _MatesTool.alignment_label(type_str, str(alignment))) if type_str == "angle" else ("aligned" if str(alignment) == "aligned" else "anti-aligned"))
+		if secondary != null:
+			notes.append("%s %s" % [_MatesTool.secondary_flip_label(type_str).to_lower(), "on" if bool(secondary) else "off"])
 		if type_str == "concentric":
 			notes.append("free to spin" if free_spin else "rotation locked")
-		var actions := [{"label": "Flip", "callback": _on_edit_mate.bind(mate_id, {"flipped": not flipped})}]
+		# Only the branch fields this mate's geometry uses are set on it (the backend leaves the others null): one action for each.
+		var actions := []
+		if alignment != null:
+			actions.append({"label": "Flip swing" if type_str == "angle" else "Flip orientation", "callback": _on_edit_mate.bind(mate_id, {"alignment": "anti_aligned" if str(alignment) == "aligned" else "aligned"})})
+		if secondary != null:
+			actions.append({"label": _MatesTool.secondary_flip_label(type_str), "callback": _on_edit_mate.bind(mate_id, {"secondary_flip": not bool(secondary)})})
 		if type_str == "concentric":
 			actions.append({"label": "Lock rotation" if free_spin else "Free rotation", "callback": _on_edit_mate.bind(mate_id, {"allow_rotation": not free_spin})})
 		if type_str in ["distance", "angle"]:
@@ -722,7 +789,15 @@ func _on_edit_mate_value(mate_id: String, current) -> void:
 	if _mates_tool == null or _main == null:
 		return
 	_main.open_keyboard_for(_trim_mate_value(current if current != null else 0.0), func(text: String) -> void:
-		_on_edit_mate(mate_id, {"value": text.to_float()})
+		var type_str := ""
+		for mate in _mates_tool.mates:
+			if str(mate.get("id", "")) == mate_id:
+				type_str = str(mate.get("type", ""))
+		var parsed: Dictionary = _MatesTool.parse_value(type_str, text)
+		if not parsed["ok"]:
+			toast.emit(str(parsed["error"]), "error")
+			return
+		_on_edit_mate(mate_id, {"value": float(parsed["value"])})
 	)
 
 
