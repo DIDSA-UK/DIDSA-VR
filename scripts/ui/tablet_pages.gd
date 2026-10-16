@@ -23,7 +23,7 @@ const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
 	{"name": "Yellow", "hex": "#f1c40f"}, {"name": "Green", "hex": "#2ecc71"},
@@ -759,7 +759,9 @@ func _mates_rows() -> Array:
 		for ref in mate.get("references", []):
 			if ref is Dictionary and ref.get("midplane") != null:
 				is_width_mate = true
-		var type_label: String = "Width" if is_width_mate else type_str.capitalize()
+		var refs_list: Array = mate.get("references", [])
+		var is_symmetric_mate: bool = refs_list.size() == 2 and refs_list[0] is Dictionary and refs_list[0].get("midplane") != null and refs_list[1] is Dictionary and refs_list[1].get("midplane") == null
+		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else type_str.capitalize())
 		var has_value: bool = mate.get("value") != null
 		var mate_id := str(mate.get("id", ""))
 		var free_spin := bool(mate.get("allow_rotation", true))

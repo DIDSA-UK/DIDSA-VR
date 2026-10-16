@@ -61,11 +61,16 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width"]
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric"]
 ## The UI-only mate type of a Width mate (docs/width-mate-plan.md in DIDSA-CAD): four faces - the gap's two, then the two of the part(s) to
 ## centre in it - sent as a plain coincident (centred) or distance (offset from the centre) mate whose two references are mid-planes.
 ## Nothing is created for the mid-plane: it is worked out by the backend on every solve and never drawn.
 const WIDTH_TYPE := "width"
+## The UI-only mate type of a Symmetric mate (W5): two faces on two parts that mirror each other about a plane (a left and a right bracket
+## either side of a centre part). Three picks - face 1, face 2, a face of the mirror plane (a third part). Sent as a plain coincident mate of
+## [midplane(face 1, face 2), the mirror plane's face]: two faces mirror each other about P exactly when the plane midway between them is P,
+## so no new mate type or reference exists. Faces only (points and axes would need a three-reference mate; not built).
+const SYMMETRIC_TYPE := "symmetric"
 
 var active := false ## wrist tablet's "Mates tool" toggle
 var backend_url := ""
@@ -75,7 +80,7 @@ var command_stack = null ## set via setup(); shared undo/redo history
 ## What the mate being set up will be. Changing any of them re-runs the preview (a ghost of the part where the mate would put it).
 var mate_type := "coincident":
 	set(v):
-		var crosses := (v == WIDTH_TYPE) != (mate_type == WIDTH_TYPE)
+		var crosses := (v in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type) or (mate_type in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type)
 		mate_type = v
 		if crosses and not _picks.is_empty():
 			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
@@ -192,9 +197,30 @@ func is_width() -> bool:
 	return mate_type == WIDTH_TYPE
 
 
+func is_symmetric() -> bool:
+	return mate_type == SYMMETRIC_TYPE
+
+
+func is_multi() -> bool:
+	## A Width or Symmetric mate: picked as several faces rather than two entities.
+	return is_width() or is_symmetric()
+
+
 func pick_target() -> int:
-	## How many picks the mate being set up needs: 4 faces for a Width mate, else 2 entities.
-	return 4 if is_width() else 2
+	## How many picks the mate being set up needs: 4 faces for a Width mate, 3 for a Symmetric one, else 2 entities.
+	return 4 if is_width() else (3 if is_symmetric() else 2)
+
+
+static func symmetric_progress_text(count: int) -> String:
+	## Pure - what to pick next for a Symmetric mate that has `count` faces so far ("N of 3").
+	match count:
+		0:
+			return "Symmetric 1 of 3: pick the first face to mirror."
+		1:
+			return "Symmetric 2 of 3: pick the second face to mirror (on another part)."
+		2:
+			return "Symmetric 3 of 3: pick a face of the mirror plane (on a third part)."
+	return "Symmetric 3 of 3: all three faces picked."
 
 
 static func width_progress_text(count: int) -> String:
@@ -227,11 +253,11 @@ func back_pick() -> void:
 func status_text() -> String:
 	if _status != "":
 		return _status
-	if is_width():
+	if is_multi():
 		if _width_error != "":
 			return _width_error
-		if _picks.size() < 4:
-			return width_progress_text(_picks.size())
+		if _picks.size() < pick_target():
+			return symmetric_progress_text(_picks.size()) if is_symmetric() else width_progress_text(_picks.size())
 	match _picks.size():
 		0:
 			return "Pick a face, edge or corner on the first part."
@@ -253,8 +279,8 @@ func picked_entities() -> Array:
 		var p: Dictionary = _picks[i]
 		var entity: Dictionary = (p.get("entity", {}) as Dictionary).duplicate()
 		entity["part"] = p.get("part")
-		if is_width():
-			entity["colour_slot"] = int(i / 2.0) # the gap's two faces in one colour, the part to centre's in the other
+		if is_multi():
+			entity["colour_slot"] = int(i / 2.0) # Width: the gap's two faces in one colour, the part to centre's in the other; Symmetric: the mirrored pair, then the mirror plane
 		if not entity.has("face_index"):
 			entity["face_index"] = p.get("face_index", -1)
 		out.append(entity)
@@ -282,10 +308,10 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		kind = str(entity["kind"])
 		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
 	var rejection := _validate_pick(occ_ref, subshape)
-	if rejection == "" and is_width() and _width_error != "":
+	if rejection == "" and is_multi() and _width_error != "":
 		rejection = "The last two faces are not parallel: press Undo pick first."
-	if rejection == "" and is_width() and kind != "face":
-		rejection = "A Width mate is made from faces."
+	if rejection == "" and is_multi() and kind != "face":
+		rejection = "A Symmetric mate is made from faces." if is_symmetric() else "A Width mate is made from faces."
 	if rejection == "" and not TopologyPick.is_mateable(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)):
 		rejection = "A mate can only use a plane, a cylinder, a straight or circular edge, or a corner - this surface is none of those."
 	if rejection != "":
@@ -305,14 +331,14 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	_status = ""
 	_width_error = ""
 	reset_branch_choice() # another face means another set of roots
-	if is_width() and (_picks.size() == 2 or _picks.size() == 4):
+	if is_multi() and (_picks.size() == 2 or (is_width() and _picks.size() == 4)):
 		_check_width_pair(_picks[_picks.size() - 2], _picks[_picks.size() - 1])
 	else:
 		request_preview()
 	picks_changed.emit()
 
 
-static func width_rejection(picks: Array, occ_ref: Dictionary, subshape: Dictionary) -> String:
+static func width_rejection(picks: Array, occ_ref: Dictionary, subshape: Dictionary, symmetric := false) -> String:
 	## Pure - why `subshape` (on `occ_ref`) cannot be the next face of a Width mate that has `picks`, or "". Either pair may be made of two
 	## parts (two loose bars; a plate of two parts); the part(s) to centre just must not be a part of the gap.
 	if not picks.is_empty() and picks[0]["owner_part_id"] != occ_ref["owner_part_id"]:
@@ -320,7 +346,11 @@ static func width_rejection(picks: Array, occ_ref: Dictionary, subshape: Diction
 	for p in picks:
 		if p["occurrence_id"] == occ_ref["occurrence_id"] and (p["subshape_ref"] as Dictionary) == subshape:
 			return "That face is already picked."
+	if symmetric and picks.size() == 1 and picks[0]["occurrence_id"] == occ_ref["occurrence_id"]:
+		return "The two mirrored faces must be on different parts."
 	if picks.size() >= 2 and (picks[0]["occurrence_id"] == occ_ref["occurrence_id"] or picks[1]["occurrence_id"] == occ_ref["occurrence_id"]):
+		if symmetric:
+			return "The mirror plane must be a face of a different part from the two faces being mirrored."
 		return "The part to centre must be a different part from the gap."
 	return ""
 
@@ -333,8 +363,8 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 		return "Can't mate the assembly's own root content — pick a placed part."
 	if subshape.is_empty():
 		return "This part has no face identity yet (not loaded from the backend)."
-	if is_width():
-		return width_rejection(_picks, occ_ref, subshape)
+	if is_multi():
+		return width_rejection(_picks, occ_ref, subshape, is_symmetric())
 	if not _picks.is_empty():
 		var first: Dictionary = _picks[0]
 		if first["owner_part_id"] != occ_ref["owner_part_id"]:
@@ -381,7 +411,7 @@ func _check_width_pair(first: Dictionary, second: Dictionary) -> void:
 		{"occurrence_id": second["occurrence_id"], "subshape_ref": second["subshape_ref"]},
 	]
 	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/measure" % str(first["owner_part_id"]), {"refs": refs})
-	if seq != _width_seq or not is_width():
+	if seq != _width_seq or not is_multi():
 		return # the picks changed while the answer was on its way
 	var json = result.get("json")
 	if result["ok"] and json is Dictionary and json.get("faces_parallel") == false:
@@ -655,13 +685,15 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 	## expects (DIDSA-CAD's app.document.schemas.MateCreate). `with_branch_changes` adds the earlier mates the preview showed on their
 	## other branch (what Create confirms); the preview request itself never carries them.
 	var references := []
-	if is_width():
+	if is_symmetric():
+		references = symmetric_references(_picks)
+	elif is_width():
 		references = width_references(_picks)
 	else:
 		for p in _picks:
 			references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
 	var payload := {
-		"type": width_wire_type(width_offset) if is_width() else mate_type, "references": references,
+		"type": width_wire_type(width_offset) if is_width() else ("coincident" if is_symmetric() else mate_type), "references": references,
 		"allow_rotation": mate_allow_rotation,
 	}
 	# The branch is named only when the user picked it; left out, the backend resolves it (Closest) and the preview says which.
@@ -672,6 +704,8 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 	if is_width():
 		if width_wire_type(width_offset) == "distance":
 			payload["value"] = width_offset
+	elif is_symmetric():
+		pass # a plain coincident mate: no value
 	elif mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
 	if with_branch_changes and not _branch_changes.is_empty():
@@ -682,6 +716,12 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 static func width_wire_type(offset: float) -> String:
 	## Pure - a centred Width is a coincident mate; with an offset from the centre it is a distance.
 	return "distance" if offset > 0.0 else "coincident"
+
+
+static func symmetric_references(picks: Array) -> Array:
+	## Pure - the two references of three picked faces: [the mid-plane of faces 1 and 2, the mirror plane's face as an ordinary reference].
+	var pair: Dictionary = width_references([picks[0], picks[1], picks[1], picks[1]])[0]
+	return [pair, {"occurrence_id": picks[2]["occurrence_id"], "subshape_ref": picks[2]["subshape_ref"]}]
 
 
 static func width_references(picks: Array) -> Array:
@@ -701,14 +741,14 @@ static func width_references(picks: Array) -> Array:
 func _driven_for_picks() -> String:
 	## The occurrence a solve moves: the second pick by convention; for a Width mate the part(s) to centre before the gap's, skipping grounded ones
 	## (the backend's own order).
-	if not is_width():
+	if not is_multi():
 		return _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
-	var order := [2, 3, 0, 1]
+	var order := [0, 1, 2] if is_symmetric() else [2, 3, 0, 1]
 	for i in order:
 		var occ: String = _picks[i]["occurrence_id"]
 		if not bool(occurrences.get(occ, {}).get("fixed", false)):
 			return occ
-	return _picks[2]["occurrence_id"]
+	return _picks[0]["occurrence_id"] if is_symmetric() else _picks[2]["occurrence_id"]
 
 
 func create_mate() -> Dictionary:
@@ -719,7 +759,7 @@ func create_mate() -> Dictionary:
 	## is saved first - the solver starts from the stored pose, so without that it would solve from
 	## wherever the part used to be. Relaxed, or with the driven part grounded, only the mate is stored.
 	if not can_create():
-		return {"ok": false, "error": "Pick the four faces first." if is_width() else "Pick two entities first."}
+		return {"ok": false, "error": ("Pick the three faces first." if is_symmetric() else "Pick the four faces first.") if is_multi() else "Pick two entities first."}
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_occurrence_id: String = _driven_for_picks()
 	var driven_fixed := bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_occurrence_id, {}).get("fixed", false))

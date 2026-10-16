@@ -88,11 +88,11 @@ func _initialize() -> void:
 	var type_index := mate_ids.find("mate_type")
 	var type_angle := Vector2(sin(TAU * type_index / float(mate_ids.size())), cos(TAU * type_index / float(mate_ids.size())))
 	_move(type_angle * 0.24)
-	print("SMOKE travelling out towards the Type wedge opens the type ring: ", _ids(wheel.current_entries()) == ["type_coincident", "type_concentric", "type_parallel", "type_distance", "type_angle", "type_width"])
+	print("SMOKE travelling out towards the Type wedge opens the type ring: ", _ids(wheel.current_entries()) == ["type_coincident", "type_concentric", "type_parallel", "type_distance", "type_angle", "type_width", "type_symmetric"])
 	anchor = r.global_position # the new ring is centred where the hand is now
 	_move(Vector2(0.0, 0.0))
 	print("SMOKE the sub-wheel is centred where the hand is: ", wheel.hovered_index() == -1)
-	var conc := Vector2(sin(TAU * 1.0 / 6.0), cos(TAU * 1.0 / 6.0))
+	var conc := Vector2(sin(TAU * 1.0 / 7.0), cos(TAU * 1.0 / 7.0))
 	_move(conc * 0.12)
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")

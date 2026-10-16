@@ -145,6 +145,42 @@ func _initialize() -> void:
 	print("SMOKE an edge or corner is refused for a Width mate: ", tool.picked_labels().is_empty() and tool.status_text() == "A Width mate is made from faces.")
 	tool.free()
 
+	# --- Symmetric: two faces mirrored about a plane (3 picks), sent as a coincident mate of [midplane(face 1, face 2), the mirror plane's face]
+	var sym := MatesTool.new()
+	sym.set_active(true)
+	sym.mate_type = "symmetric"
+	var s_left := _tagged_part("root", "left", "bl", [0, 1, 2], "Left")
+	var s_right := _tagged_part("root", "right", "br", [0, 1, 2], "Right")
+	var s_centre := _tagged_part("root", "centre", "bc", [0, 1, 2], "Centre")
+	print("SMOKE Symmetric needs three picks and starts with its own status: ", sym.is_symmetric() and sym.is_multi() and not sym.is_width() and sym.pick_target() == 3 and sym.status_text().begins_with("Symmetric 1 of 3"))
+	sym.try_pick(s_left, 1)
+	sym.try_pick(s_left, 2)
+	print("SMOKE the two mirrored faces must be on different parts: ", sym.picked_labels() == ["Left"] and sym.status_text() == "The two mirrored faces must be on different parts.")
+	sym.try_pick(s_right, 0)
+	print("SMOKE status asks for the mirror plane: ", sym.status_text().begins_with("Symmetric 3 of 3"))
+	sym.try_pick(s_right, 2)
+	print("SMOKE the mirror plane cannot be a face of the mirrored parts: ", sym.picked_labels().size() == 2 and sym.status_text().begins_with("The mirror plane must be a face of a different part"))
+	sym.try_pick(s_centre, 1)
+	print("SMOKE three faces on three parts are ready: ", sym.picked_labels() == ["Left", "Right", "Centre"] and sym.can_create())
+	sym.try_pick(s_centre, 2)
+	print("SMOKE a fourth pick is ignored: ", sym.picked_labels().size() == 3)
+	var sym_payload: Dictionary = sym.build_create_payload()
+	var sref: Array = sym_payload["references"]
+	print("SMOKE Symmetric is a plain coincident mate with no value: ", sym_payload["type"] == "coincident" and not sym_payload.has("value") and sref.size() == 2)
+	print("SMOKE its first reference is the mid-plane of the two mirrored faces, the second is the mirror plane's face: ", sref[0]["occurrence_id"] == "left" and sref[0]["midplane"]["b_occurrence_id"] == "right" and sref[1] == {"occurrence_id": "centre", "subshape_ref": {"body_id": "bc", "shape_type": "face", "index": 1}})
+	print("SMOKE a mirrored part is driven, not the mirror plane's part: ", sym._driven_for_picks() == "left")
+	sym.occurrences = {"left": {"fixed": true}}
+	print("SMOKE ...and the next one when the first is grounded: ", sym._driven_for_picks() == "right")
+	var sym_slots := []
+	for e in sym.picked_entities():
+		sym_slots.append(int(e["colour_slot"]))
+	print("SMOKE the mirrored pair lights in one colour, the mirror plane in the other: ", sym_slots == [0, 0, 1])
+	sym.mate_type = "width"
+	print("SMOKE switching between Symmetric and Width starts the picks over: ", sym.picked_labels().is_empty() and sym.pick_target() == 4)
+	sym.free()
+	for n in [s_left, s_right, s_centre]:
+		n.free()
+
 	# --- the progress text
 	var texts := []
 	for n in 5:
