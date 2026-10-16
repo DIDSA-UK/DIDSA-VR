@@ -36,7 +36,7 @@ any other local model.
 
 ## `motion_vectors.json` — golden vectors for the free-motion projector
 
-A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (111 cases, tolerance 1e-9; constraint-model version 3),
+A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (128 cases, tolerance 1e-9; constraint-model versions 3 and 4),
 the normative test data for `scripts/motion/*.gd` (and for the Dart port in
 DIDSA-CAD `client/lib/motion/`). `tests/motion_vectors.gd` runs every kind in it.
 Do not edit it here: regenerate it in DIDSA-CAD (`python tools/motion_vectors/generate.py`)
@@ -51,7 +51,8 @@ and copy it over.
 - Re-copied for DIDSA-CAD's mate-branch model (`docs/mate-solution-choice-plan.md`, Phase 2): constraint-model version 2, 13 new `local_retract` cases (31 now) for the
   branch-specific residuals; the 18 older ones were re-expressed with the branch of their mates.
 - Re-copied for an ANGLE about a hinge (`docs/mate-solution-choice-plan.md`): constraint-model version 3 (`hinge_direction` on a side, one more ANGLE row), 4 new `local_retract` cases (35 now).
-- sha256 `e4094a59fa00c7d682f05bea7095831be08843da9b4448e9e0a017afea50cff5`.
+- Re-copied for constraint model v4 (a side's `pair`, Width / Symmetric over moving parts), DIDSA-CAD branch `claude/constraint-model-v4` at `d6b303c` (PR #303): 17 new `local-width-*` cases (52 `local_retract`), `local_pair_model_version` constant.
+- sha256 `2f5e96a699d3bb0cf9e3cddb23debc3dc37d486c37946368b31a3c19c611bcf0`.
 - `tests/motion_vectors.gd` FAILS if a DIDSA-CAD checkout is reachable (`DIDSA_CAD_DIR`,
   else `../DIDSA-CAD`) and its `docs/motion/vectors.json` differs from this copy, so a
   regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.
