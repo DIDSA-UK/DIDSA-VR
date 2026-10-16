@@ -4,7 +4,7 @@ Short, current status. Read this first, then the doc for whatever you are touchi
 The full chronological build log (every round, bug found, and decision since September 2026) is
 [`status-history/status-log.md`](status-history/status-log.md); search it by heading.
 
-**Last reviewed:** 2026-10-14 (name: "DIDSA Design Tools VR", a placeholder), at `main` after PR #44. **Engine:** Godot 4.7.2, Mobile renderer, OpenXR.
+**Last reviewed:** 2026-10-16 (name: "DIDSA Design Tools VR", a placeholder), at `main` after PR #44. **Engine:** Godot 4.7.2, Mobile renderer, OpenXR.
 **Update this file whenever a capability changes state, a verification gap closes, or the test counts move.**
 
 ## The one thing to know
@@ -20,7 +20,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 | Locomotion: walk, snap-turn, teleport, travel-speed slider | Yes | n/a | |
 | Wrist tablet (6 x 2 home grid), popup keyboards, themes and shader effects | Yes | n/a | [`wrist-tablet-redesign-plan.md`](wrist-tablet-redesign-plan.md) |
 | Tool wheel (radial quick access, Paint, tool tips on the wrist) | Yes | n/a | |
-| Assembly tools: Mates (face/edge/corner), Colours, Sections, Measure | Yes | Yes | Mates keep their chosen branch (aligned/anti-aligned, side, hinge swing) with Flip / Next solution on the tablet; no live ghost when editing a mate, no sub-assembly leaf ghosts, no e2e scene for the hinge or the new buttons. Constrained drag: GDScript solver ruled out on headset, see [`local-retraction-benchmark.md`](local-retraction-benchmark.md) |
+| Assembly tools: Mates (face/edge/corner), Colours, Sections, Measure | Yes | Yes (Width: backend tested in DIDSA-CAD; not run here against a live backend) | **Symmetric mate** (2 faces mirrored about a third part's face; faces only, no points/axes) and **Width mate** (4 faces, 2-4 parts), both as types on the tablet and the wheel's type ring: headless-tested only (`tests/width_mate.gd`); no headset run, no e2e scene; on the wheel the faces are picked with the laser as usual, the Clear wedge becomes **Undo pick** for these types, Width asks for its offset on the keyboard and the greyed hints count the faces (still tablet-only: Next solution, Allow rotation, Minimal movement); a Width mate with moving parts on a side has no local retraction in the live drag (the backend sends no constraint model). Mates keep their chosen branch (aligned/anti-aligned, side, hinge swing) with Flip / Next solution on the tablet; no live ghost when editing a mate, no sub-assembly leaf ghosts, no e2e scene for the hinge or the new buttons. Constrained drag: GDScript solver ruled out on headset, see [`local-retraction-benchmark.md`](local-retraction-benchmark.md) |
 | Floating windows: Tree, Browser (+PDF), Calculator, Images | Yes | Yes (browser relay end to end) | "DIDSA-CAD as a flat window" not attempted |
 | **Assembly Rooms** (clipped, resizable sub-assembly workspaces) | Yes (R0-R4) | Yes (`tests/e2e_rooms.gd`, 23 checks) | [`assembly-rooms-scope.md`](assembly-rooms-scope.md), [`assembly-rooms-plan.md`](assembly-rooms-plan.md) |
 | Sub-assembly selection, group moves, world preview (Hidden/Ghost/Preview) | Yes | Not confirmed; see the rooms plan | PR #43; headless and render tests |

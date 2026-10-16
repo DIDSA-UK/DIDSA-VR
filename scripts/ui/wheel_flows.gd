@@ -16,13 +16,15 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
 	"parallel": "Faces / edges run alongside",
 	"distance": "A set gap (you type it)",
 	"angle": "A set angle (you type it)",
+	"width": "Centre between two faces (4 picks)",
+	"symmetric": "Mirror two faces about a plane (3 picks)",
 }
 
 var tokens: Resource
@@ -85,7 +87,7 @@ func prompt_text() -> String:
 	match _manager.active_id:
 		"mates":
 			var type_label: String = MATE_TYPE_LABELS.get(_mates.mate_type, _mates.mate_type)
-			return "Mates · %s\n%s\nWheel: Create · Flip · Clear · type" % [type_label, _mates.status_text()]
+			return "Mates · %s\n%s\nWheel: Create · Flip · %s · type" % [type_label, _mates.status_text(), "Undo pick" if _mates.is_multi() else "Clear"]
 		"measure":
 			var line: String = _measure.status_text()
 			if not _measure.result.is_empty():
@@ -244,13 +246,30 @@ func _summon_table() -> void:
 func _mates_entries() -> Array:
 	## The bottom 60 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand
 	## would drill into it on the way to the pill): Flip and Clear picks are the two wedges below.
+	var need := _mates_pick_hint()
+	# A Width mate has four picks and a Symmetric one three, so "start again" is a heavy undo: that wedge takes back the LAST pick instead
+	# (undo a few times to clear; the ring cannot grow a sixth wedge - the bottom 60 degrees are the Clear pill's).
+	var picks_entry: Dictionary
+	if _mates.is_multi():
+		picks_entry = _action("mate_undo", "Undo pick", "undo", Color(0.96, 0.69, 0.25), "Take back the last face", _mates.back_pick, not _mates.picked_labels().is_empty(), false, "Nothing picked yet")
+	else:
+		picks_entry = _action("mate_clear", "Clear picks", "clear_picks", Color(0.96, 0.69, 0.25), "Start again", _mates.clear_picks)
 	return [
-		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, "Pick two faces first"),
+		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, need),
 		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
-		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, "Pick two faces first"),
-		_action("mate_clear", "Clear picks", "clear_picks", Color(0.96, 0.69, 0.25), "Start again", _mates.clear_picks),
+		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, need),
+		picks_entry,
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 	]
+
+
+func _mates_pick_hint() -> String:
+	## Why Create / Flip are greyed: how many picks the current mate type needs.
+	if _mates.is_width():
+		return "Pick the four faces first"
+	if _mates.is_symmetric():
+		return "Pick the three faces first"
+	return "Pick two faces first"
 
 
 func _mate_type_entries() -> Array:
@@ -265,7 +284,19 @@ func _set_mate_type(type: String) -> void:
 	if type == "distance" or type == "angle":
 		var unit := "mm" if type == "distance" else "degrees"
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
+	elif type == "width":
+		# The optional offset from the centre (0 = centred exactly); the tablet's Set value button does the same.
+		_main.open_keyboard_for(("%.3f" % _mates.width_offset).rstrip("0").rstrip("."), _apply_width_offset, {"title": "Width offset from centre (mm, 0 = centred)"})
 	refresh_prompt()
+
+
+func _apply_width_offset(text: String) -> void:
+	var parsed: Dictionary = _mates.parse_value("distance", text) # never negative: the side is the Flip control
+	if not parsed["ok"]:
+		say(str(parsed["error"]), 4.0)
+		return
+	_mates.width_offset = float(parsed["value"])
+	say("Width centred" if _mates.width_offset == 0.0 else "Width offset %s mm" % text)
 
 
 func _apply_mate_value(text: String, type: String, unit: String) -> void:

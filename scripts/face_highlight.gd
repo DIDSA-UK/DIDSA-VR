@@ -18,7 +18,7 @@ const RoomClip := preload("res://scripts/room/room_clip.gd")
 ## is rejected anyway.
 
 const HOVER_COLOUR := Color(1.0, 0.93, 0.45, 0.55)
-const PICK_COLOURS: Array[Color] = [Color(0.25, 0.85, 1.0, 0.55), Color(1.0, 0.62, 0.22, 0.55)]
+const PICK_COLOURS: Array[Color] = [Color(0.25, 0.85, 1.0, 0.55), Color(1.0, 0.62, 0.22, 0.55)] ## the two-pick tools; a Width mate's four picks use them by pair (see `colour_slot`)
 const ClipShader := preload("res://shaders/highlight_clip.gdshader")
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
@@ -89,7 +89,11 @@ func set_picks(entries: Array) -> void:
 	for p in _picks:
 		_free_node(p)
 	_picks.clear()
-	for i in mini(entries.size(), PICK_COLOURS.size()):
+	for i in entries.size():
+		# `colour_slot` (a Width mate's picks: 0, 0, 1, 1 - one colour per pair) says which pick colour an entry takes; the default is its order.
+		var slot := int(entries[i].get("colour_slot", i))
+		if slot >= PICK_COLOURS.size():
+			continue
 		var part = entries[i].get("part")
 		if part == null or not is_instance_valid(part):
 			continue
@@ -97,7 +101,7 @@ func set_picks(entries: Array) -> void:
 		var key := str(entity.get("key", ""))
 		if key == "":
 			continue
-		var node := _build_entity_node(part, entity, _pick_materials[i], 1.0)
+		var node := _build_entity_node(part, entity, _pick_materials[slot], 1.0)
 		if node != null:
 			_picks.append({"part": part, "key": key, "node": node})
 

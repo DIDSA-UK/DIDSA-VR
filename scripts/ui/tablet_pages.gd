@@ -23,7 +23,7 @@ const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
 const COLOUR_SWATCHES: Array[Dictionary] = [
 	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
 	{"name": "Yellow", "hex": "#f1c40f"}, {"name": "Green", "hex": "#2ecc71"},
@@ -576,9 +576,15 @@ func _build_mates_page() -> Control:
 	var page := _page(8)
 	_mates_picks_label = _hint("")
 	page.add_child(_mates_picks_label)
-	page.add_child(_button("Clear picks", func() -> void:
+	var pick_buttons := _row()
+	page.add_child(pick_buttons)
+	pick_buttons.add_child(_button("Clear picks", func() -> void:
 		if _mates_tool:
 			_mates_tool.clear_picks()
+	))
+	pick_buttons.add_child(_button("Undo pick", func() -> void:
+		if _mates_tool:
+			_mates_tool.back_pick()
 	))
 	page.add_child(_choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
 		if _mates_tool:
@@ -632,7 +638,7 @@ func _build_mates_page() -> Control:
 	var value_row := _row()
 	page.add_child(value_row)
 	_mates_value_label = Label.new()
-	_mates_value_label.text = "Value: 0 (distance mm / angle deg)"
+	_mates_value_label.text = "Value: 0 (distance mm / angle deg; Width: offset from centre)"
 	_mates_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_mates_value_label.clip_text = true
 	value_row.add_child(_mates_value_label)
@@ -717,10 +723,16 @@ func _mates_status() -> String:
 func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
 		return
-	_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value), func(text: String) -> void:
-		var parsed: Dictionary = _MatesTool.parse_value(_mates_tool.mate_type, text)
+	_main.open_keyboard_for(_trim_mate_value(_mates_tool.width_offset if _mates_tool.is_width() else _mates_tool.mate_value), func(text: String) -> void:
+		# A Width mate's value is its offset from the centre: a distance (never negative; empty / 0 = centred exactly).
+		var is_width: bool = _mates_tool.is_width()
+		var parsed: Dictionary = _MatesTool.parse_value("distance" if is_width else _mates_tool.mate_type, text)
 		if not parsed["ok"]:
 			toast.emit(str(parsed["error"]), "error")
+			return
+		if is_width:
+			_mates_tool.width_offset = float(parsed["value"])
+			_mates_value_label.text = "Offset from centre: %s mm (0 = centred)" % _trim_mate_value(_mates_tool.width_offset)
 			return
 		_mates_tool.mate_value = float(parsed["value"])
 		_mates_value_label.text = "Value: %s (distance mm / angle deg)" % _trim_mate_value(_mates_tool.mate_value)
@@ -743,7 +755,13 @@ func _mates_rows() -> Array:
 		return rows
 	for mate in _mates_tool.mates:
 		var type_str := str(mate.get("type", "?"))
-		var type_label: String = type_str.capitalize()
+		var is_width_mate := false
+		for ref in mate.get("references", []):
+			if ref is Dictionary and ref.get("midplane") != null:
+				is_width_mate = true
+		var refs_list: Array = mate.get("references", [])
+		var is_symmetric_mate: bool = refs_list.size() == 2 and refs_list[0] is Dictionary and refs_list[0].get("midplane") != null and refs_list[1] is Dictionary and refs_list[1].get("midplane") == null
+		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else type_str.capitalize())
 		var has_value: bool = mate.get("value") != null
 		var mate_id := str(mate.get("id", ""))
 		var free_spin := bool(mate.get("allow_rotation", true))
