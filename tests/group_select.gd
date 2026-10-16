@@ -276,8 +276,9 @@ func _initialize() -> void:
 
 	# the breadcrumb under the laser
 	hand.select_group_level(kb[0], levels[0], kb[0].global_position)
+	# the press is faked as held for a second: a literal 0 is only "held" once the engine has run 450 ms, which a fast CI runner has not
 	hand._select_down = true
-	hand._crumb_press = {"ms": Time.get_ticks_msec() - 1000, "node": kb[0], "point": kb[0].global_position} # pressed a second ago: "ms": 0 was only past CRUMB_HOLD_MS once the process had been up that long, so a fast runner failed
+	hand._crumb_press = {"ms": Time.get_ticks_msec() - 1000, "node": kb[0], "point": kb[0].global_position}
 	await tick()
 	print("SMOKE holding the trigger on a selected part in a sub-assembly opens the breadcrumb, part first: ", hand._crumb != null and hand._crumb.labels.size() == 2 and hand._crumb.labels[0] == "Bolt")
 	var panel: Node3D = hand._crumb
@@ -291,7 +292,7 @@ func _initialize() -> void:
 	hand._clear_selection()
 	hand.select_group_level(kb[0], levels[0], kb[0].global_position)
 	hand._select_down = true
-	hand._crumb_press = {"ms": Time.get_ticks_msec() - 1000, "node": kb[0], "point": kb[0].global_position} # pressed a second ago: "ms": 0 was only past CRUMB_HOLD_MS once the process had been up that long, so a fast runner failed
+	hand._crumb_press = {"ms": Time.get_ticks_msec() - 1000, "node": kb[0], "point": kb[0].global_position}
 	await tick()
 	hand.global_transform = Transform3D(Basis.looking_at(-normal, Vector3.UP), row1 + Vector3(5, 0, 0) + normal * 1.0)
 	await tick()

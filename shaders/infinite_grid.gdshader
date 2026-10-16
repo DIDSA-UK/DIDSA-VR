@@ -1,7 +1,7 @@
 shader_type spatial;
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, diffuse_lambert, specular_disabled;
 
-// Replaces the old opaque floor plane from the engine-choice spike: thin
+// Replaces the old opaque floor plane from the first prototype: thin
 // white grid lines on an otherwise fully transparent plane, so a part that
 // drops below floor level (y < 0) stays visible instead of being hidden
 // behind solid geometry. depth_draw_never above is deliberate, not an
