@@ -98,6 +98,35 @@ func _initialize() -> void:
 	wheel._on_released("grip_click")
 	print("SMOKE releasing on Concentric sets the mate type: ", main._mates_tool.mate_type == "concentric")
 
+	# --- Width / Symmetric on the wheel: Undo pick takes the Clear wedge's place, the hints count the picks, Width asks for its offset
+	var mt = main._mates_tool
+	mt.mate_type = "width"
+	var width_entries: Array = flows.entries()
+	var width_ids: Array = _ids(width_entries)
+	print("SMOKE with a Width mate the Clear wedge becomes Undo pick (same five wedges): ", width_ids == ["mate_create", "mate_type", "mate_flip", "mate_undo", "all_tools"])
+	print("SMOKE Create and Flip say how many faces are still needed (four for Width): ", width_entries[0]["hint_disabled"] == "Pick the four faces first" and width_entries[2]["hint_disabled"] == "Pick the four faces first")
+	print("SMOKE Undo pick is greyed until something is picked: ", not bool(width_entries[3]["enabled"]) and width_entries[3]["hint_disabled"] == "Nothing picked yet")
+	print("SMOKE the prompt names Undo pick for a Width mate: ", flows.prompt_text().contains("Undo pick") and flows.prompt_text().contains("Width 1 of 4"))
+	var wpart_a := Node3D.new()
+	wpart_a.set_meta("owner_part_id", "root"); wpart_a.set_meta("occurrence_id", "oa"); wpart_a.set_meta("face_ids", [0, 1]); wpart_a.set_meta("body_ids", ["ba", "ba"])
+	mt.try_pick(wpart_a, 0)
+	width_entries = flows.entries()
+	print("SMOKE after a pick Undo pick is live and takes the pick back: ", bool(width_entries[3]["enabled"]) and mt.picked_labels().size() == 1)
+	width_entries[3]["run"].call()
+	print("SMOKE ...running it empties the picks: ", mt.picked_labels().is_empty())
+	flows._apply_width_offset("4.5")
+	print("SMOKE the offset typed on the wheel's keyboard is the Width offset: ", is_equal_approx(mt.width_offset, 4.5))
+	flows._apply_width_offset("-2")
+	print("SMOKE a negative offset is refused and changes nothing: ", is_equal_approx(mt.width_offset, 4.5))
+	mt.width_offset = 0.0
+	mt.mate_type = "symmetric"
+	var sym_entries: Array = flows.entries()
+	print("SMOKE with a Symmetric mate the hints say three faces: ", sym_entries[0]["hint_disabled"] == "Pick the three faces first" and _ids(sym_entries)[3] == "mate_undo")
+	mt.mate_type = "concentric"
+	print("SMOKE a two-pick type has its Clear picks wedge back: ", _ids(flows.entries()) == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"] and flows.entries()[0]["hint_disabled"] == "Pick two faces first")
+	wpart_a.free()
+	flows._toast_text = "" # the offset lines above spoke a toast; the checks below start from a quiet prompt
+
 	# --- the centre cancels, and "All tools" brings the root ring
 	anchor = Vector3(0.3, 1.0, -0.3)
 	_open_at_anchor()
