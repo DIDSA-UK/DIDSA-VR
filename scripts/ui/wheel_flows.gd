@@ -16,13 +16,14 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
 	"parallel": "Faces / edges run alongside",
 	"distance": "A set gap (you type it)",
 	"angle": "A set angle (you type it)",
+	"width": "Centre between two faces (4 picks)",
 }
 
 var tokens: Resource

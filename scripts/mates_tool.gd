@@ -61,7 +61,11 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle"]
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width"]
+## The UI-only mate type of a Width mate (docs/width-mate-plan.md in DIDSA-CAD): four faces - the gap's two, then the two of the part(s) to
+## centre in it - sent as a plain coincident (centred) or distance (offset from the centre) mate whose two references are mid-planes.
+## Nothing is created for the mid-plane: it is worked out by the backend on every solve and never drawn.
+const WIDTH_TYPE := "width"
 
 var active := false ## wrist tablet's "Mates tool" toggle
 var backend_url := ""
@@ -71,8 +75,17 @@ var command_stack = null ## set via setup(); shared undo/redo history
 ## What the mate being set up will be. Changing any of them re-runs the preview (a ghost of the part where the mate would put it).
 var mate_type := "coincident":
 	set(v):
+		var crosses := (v == WIDTH_TYPE) != (mate_type == WIDTH_TYPE)
 		mate_type = v
+		if crosses and not _picks.is_empty():
+			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
+			return
 		reset_branch_choice() # a choice made for another kind of mate means nothing here
+		request_preview()
+## A Width mate's offset from the centre (mm, never negative: the side is the Flip side control); 0 = centred exactly.
+var width_offset := 0.0:
+	set(v):
+		width_offset = v
 		request_preview()
 var mate_value := 0.0:
 	set(v):
@@ -117,6 +130,8 @@ var _persist: Dictionary = {} ## occurrence_id -> {"pose": Dictionary|null, "run
 const GHOST_COLOUR := Color(0.31, 0.77, 1.0, 0.40)
 
 var _picks: Array[Dictionary] = []
+var _width_error := "" ## a Width pair whose two faces are not parallel (checked as soon as the pair is complete), else ""
+var _width_seq := 0
 var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
@@ -157,6 +172,8 @@ func set_active(on: bool) -> void:
 func clear_picks() -> void:
 	_picks.clear()
 	_status = ""
+	_width_error = ""
+	_width_seq += 1
 	_branch_changes = []
 	_branch_notice = ""
 	branch_controls = []
@@ -171,9 +188,50 @@ func _exit_tree() -> void:
 	_clear_ghost()
 
 
+func is_width() -> bool:
+	return mate_type == WIDTH_TYPE
+
+
+func pick_target() -> int:
+	## How many picks the mate being set up needs: 4 faces for a Width mate, else 2 entities.
+	return 4 if is_width() else 2
+
+
+static func width_progress_text(count: int) -> String:
+	## Pure - what to pick next for a Width mate that has `count` faces so far ("N of 4").
+	match count:
+		0:
+			return "Width 1 of 4: pick the first face of the gap."
+		1:
+			return "Width 2 of 4: pick the second face of the gap (same part or another)."
+		2:
+			return "Width 3 of 4: pick the first face of the part to centre."
+		3:
+			return "Width 4 of 4: pick the second face of the part to centre."
+	return "Width 4 of 4: all four faces picked."
+
+
+func back_pick() -> void:
+	## Takes back the last pick (a Width mate has four, so Clear alone is a heavy undo).
+	if _picks.is_empty():
+		return
+	_picks.pop_back()
+	_status = ""
+	_width_error = ""
+	_width_seq += 1
+	reset_branch_choice()
+	request_preview()
+	picks_changed.emit()
+
+
 func status_text() -> String:
 	if _status != "":
 		return _status
+	if is_width():
+		if _width_error != "":
+			return _width_error
+		if _picks.size() < 4:
+			return width_progress_text(_picks.size())
 	match _picks.size():
 		0:
 			return "Pick a face, edge or corner on the first part."
@@ -191,9 +249,12 @@ func status_text() -> String:
 func picked_entities() -> Array:
 	## [{part, kind, body_id, index, face_index, key}] for face_highlight.gd, in pick order (a face, edge or vertex).
 	var out := []
-	for p in _picks:
+	for i in _picks.size():
+		var p: Dictionary = _picks[i]
 		var entity: Dictionary = (p.get("entity", {}) as Dictionary).duplicate()
 		entity["part"] = p.get("part")
+		if is_width():
+			entity["colour_slot"] = int(i / 2.0) # the gap's two faces in one colour, the part to centre's in the other
 		if not entity.has("face_index"):
 			entity["face_index"] = p.get("face_index", -1)
 		out.append(entity)
@@ -211,7 +272,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	## Called by controller.gd's trigger handler while the tool is active.
 	## Always sets status and emits picks_changed, even on rejection, so the
 	## wrist tablet can show *why* a pick didn't count.
-	if not active or _picks.size() >= 2:
+	if not active or _picks.size() >= pick_target():
 		return
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
 	var subshape := MeshIdentity.subshape_ref_for_hit(part, face_index)
@@ -221,6 +282,10 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		kind = str(entity["kind"])
 		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
 	var rejection := _validate_pick(occ_ref, subshape)
+	if rejection == "" and is_width() and _width_error != "":
+		rejection = "The last two faces are not parallel: press Undo pick first."
+	if rejection == "" and is_width() and kind != "face":
+		rejection = "A Width mate is made from faces."
 	if rejection == "" and not TopologyPick.is_mateable(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)):
 		rejection = "A mate can only use a plane, a cylinder, a straight or circular edge, or a corner - this surface is none of those."
 	if rejection != "":
@@ -238,9 +303,26 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"kind": kind,
 	})
 	_status = ""
+	_width_error = ""
 	reset_branch_choice() # another face means another set of roots
-	request_preview()
+	if is_width() and (_picks.size() == 2 or _picks.size() == 4):
+		_check_width_pair(_picks[_picks.size() - 2], _picks[_picks.size() - 1])
+	else:
+		request_preview()
 	picks_changed.emit()
+
+
+static func width_rejection(picks: Array, occ_ref: Dictionary, subshape: Dictionary) -> String:
+	## Pure - why `subshape` (on `occ_ref`) cannot be the next face of a Width mate that has `picks`, or "". Either pair may be made of two
+	## parts (two loose bars; a plate of two parts); the part(s) to centre just must not be a part of the gap.
+	if not picks.is_empty() and picks[0]["owner_part_id"] != occ_ref["owner_part_id"]:
+		return "All the parts must belong to the same assembly."
+	for p in picks:
+		if p["occurrence_id"] == occ_ref["occurrence_id"] and (p["subshape_ref"] as Dictionary) == subshape:
+			return "That face is already picked."
+	if picks.size() >= 2 and (picks[0]["occurrence_id"] == occ_ref["occurrence_id"] or picks[1]["occurrence_id"] == occ_ref["occurrence_id"]):
+		return "The part to centre must be a different part from the gap."
+	return ""
 
 
 func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
@@ -251,6 +333,8 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 		return "Can't mate the assembly's own root content — pick a placed part."
 	if subshape.is_empty():
 		return "This part has no face identity yet (not loaded from the backend)."
+	if is_width():
+		return width_rejection(_picks, occ_ref, subshape)
 	if not _picks.is_empty():
 		var first: Dictionary = _picks[0]
 		if first["owner_part_id"] != occ_ref["owner_part_id"]:
@@ -278,10 +362,35 @@ func request_preview() -> void:
 	## Re-runs the dry run for the mate as it is set up now (the backend's preview-mate-solve: same body as
 	## Create, nothing stored, nothing moved). With fewer than two picks, or no backend, the ghost is removed.
 	_preview_seq += 1
-	if not active or _picks.size() != 2 or backend_url == "" or not is_inside_tree():
+	if not active or _picks.size() != pick_target() or _width_error != "" or backend_url == "" or not is_inside_tree():
 		_clear_ghost()
 		return
 	_run_preview(_preview_seq)
+
+
+func _check_width_pair(first: Dictionary, second: Dictionary) -> void:
+	## The moment a pair of a Width mate is complete: are its two faces parallel? (The backend's Measure answers `faces_parallel`.) A pair that is
+	## not says so and stops the preview; the next pick change re-checks. Without a backend there is nothing to ask, so the pair stands.
+	_width_seq += 1
+	var seq := _width_seq
+	if backend_url == "" or not is_inside_tree():
+		request_preview()
+		return
+	var refs := [
+		{"occurrence_id": first["occurrence_id"], "subshape_ref": first["subshape_ref"]},
+		{"occurrence_id": second["occurrence_id"], "subshape_ref": second["subshape_ref"]},
+	]
+	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/measure" % str(first["owner_part_id"]), {"refs": refs})
+	if seq != _width_seq or not is_width():
+		return # the picks changed while the answer was on its way
+	var json = result.get("json")
+	if result["ok"] and json is Dictionary and json.get("faces_parallel") == false:
+		_width_error = "These two faces are not parallel - a Width mate needs a pair of parallel faces. Press Undo pick and choose another."
+		_clear_ghost()
+		picks_changed.emit()
+		return
+	request_preview()
+	picks_changed.emit()
 
 
 static func preview_members(preview: Dictionary, driven_id: String) -> Array:
@@ -474,9 +583,9 @@ func branch_text() -> String:
 
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
-	var driven_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var driven_id: String = _driven_for_picks()
 	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], build_create_payload())
-	if seq != _preview_seq or _picks.size() != 2:
+	if seq != _preview_seq or _picks.size() != pick_target():
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
 	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
@@ -538,7 +647,7 @@ func _clear_ghost() -> void:
 
 
 func can_create() -> bool:
-	return _picks.size() == 2 and not _busy
+	return _picks.size() == pick_target() and _width_error == "" and not _busy
 
 
 func build_create_payload(with_branch_changes := false) -> Dictionary:
@@ -546,10 +655,13 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 	## expects (DIDSA-CAD's app.document.schemas.MateCreate). `with_branch_changes` adds the earlier mates the preview showed on their
 	## other branch (what Create confirms); the preview request itself never carries them.
 	var references := []
-	for p in _picks:
-		references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
+	if is_width():
+		references = width_references(_picks)
+	else:
+		for p in _picks:
+			references.append({"occurrence_id": p["occurrence_id"], "subshape_ref": p["subshape_ref"]})
 	var payload := {
-		"type": mate_type, "references": references,
+		"type": width_wire_type(width_offset) if is_width() else mate_type, "references": references,
 		"allow_rotation": mate_allow_rotation,
 	}
 	# The branch is named only when the user picked it; left out, the backend resolves it (Closest) and the preview says which.
@@ -557,11 +669,46 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 		payload["alignment"] = mate_alignment
 	if mate_secondary_flip >= 0:
 		payload["secondary_flip"] = mate_secondary_flip == 1
-	if mate_type in ["distance", "angle"]:
+	if is_width():
+		if width_wire_type(width_offset) == "distance":
+			payload["value"] = width_offset
+	elif mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
 	if with_branch_changes and not _branch_changes.is_empty():
 		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload
+
+
+static func width_wire_type(offset: float) -> String:
+	## Pure - a centred Width is a coincident mate; with an offset from the centre it is a distance.
+	return "distance" if offset > 0.0 else "coincident"
+
+
+static func width_references(picks: Array) -> Array:
+	## Pure - the two mid-plane references of four picked faces: the gap first, the part to centre second. Each is {occurrence_id,
+	## midplane: {a, b, b_occurrence_id?}}, `a` / `b` plane refs naming a face; `b_occurrence_id` only when the second face is on another part.
+	var out := []
+	for pair in [[0, 1], [2, 3]]:
+		var a: Dictionary = picks[pair[0]]
+		var b: Dictionary = picks[pair[1]]
+		var midplane := {"a": {"face_ref": a["subshape_ref"]}, "b": {"face_ref": b["subshape_ref"]}}
+		if b["occurrence_id"] != a["occurrence_id"]:
+			midplane["b_occurrence_id"] = b["occurrence_id"]
+		out.append({"occurrence_id": a["occurrence_id"], "midplane": midplane})
+	return out
+
+
+func _driven_for_picks() -> String:
+	## The occurrence a solve moves: the second pick by convention; for a Width mate the part(s) to centre before the gap's, skipping grounded ones
+	## (the backend's own order).
+	if not is_width():
+		return _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var order := [2, 3, 0, 1]
+	for i in order:
+		var occ: String = _picks[i]["occurrence_id"]
+		if not bool(occurrences.get(occ, {}).get("fixed", false)):
+			return occ
+	return _picks[2]["occurrence_id"]
 
 
 func create_mate() -> Dictionary:
@@ -572,9 +719,9 @@ func create_mate() -> Dictionary:
 	## is saved first - the solver starts from the stored pose, so without that it would solve from
 	## wherever the part used to be. Relaxed, or with the driven part grounded, only the mate is stored.
 	if not can_create():
-		return {"ok": false, "error": "Pick two entities first."}
+		return {"ok": false, "error": "Pick the four faces first." if is_width() else "Pick two entities first."}
 	var owner_part_id: String = _picks[0]["owner_part_id"]
-	var driven_occurrence_id: String = _choose_driven(_picks[0]["occurrence_id"], _picks[1]["occurrence_id"])
+	var driven_occurrence_id: String = _driven_for_picks()
 	var driven_fixed := bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_occurrence_id, {}).get("fixed", false))
 	var atomic := not relaxed and not driven_fixed
 	_busy = true
@@ -926,6 +1073,10 @@ func _friendly_error(result: Dictionary) -> String:
 				return branch_notice([], [], detail.get("conflicting", []) if detail.get("conflicting") is Array else [], mates)
 			"unsupported_mate_geometry":
 				return "this mate type needs %s" % str(detail.get("needed", "different geometry"))
+			"faces_not_parallel":
+				return "the two faces of a pair are not parallel"
+			"missing_reference":
+				return "one of the picked faces no longer exists"
 		return str(detail.get("type", detail))
 	if detail != null:
 		return str(detail)

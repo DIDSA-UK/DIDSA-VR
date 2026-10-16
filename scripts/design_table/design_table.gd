@@ -109,6 +109,7 @@ var props ## table_props_window.gd: the active tool's settings, docked at the sl
 var enforce_button ## enforce_button.gd: "Enforce mates", shown where a part with stale mates is put down
 var mate_baseline: Array = [] ## what each mate's faces looked like BEFORE the first edit this session (mate_health.capture)
 var remake_plan: Array = [] ## the mates Enforce turned off that can be remade on the equivalent face (mate_health.gd remake_plan), offered on the button after it
+var mate_unparallel: Array = [] ## Width references whose two faces an edit left not parallel (mate_health.gd unparallel_pairs): [{mate_id, reference}]
 var mate_drift: Dictionary = {} ## mate id -> [references] whose face is no longer the one the mate was made on (mate_health.gd)
 
 var active_tool := ""
@@ -1230,8 +1231,12 @@ func update_mate_drift() -> void:
 		var list: Array = mate_drift.get(str(d["mate_id"]), [])
 		list.append(d)
 		mate_drift[str(d["mate_id"])] = list
+	# A Width mate's two faces that an edit left not parallel are a state of their own (the backend would only say so when it next solves).
+	mate_unparallel = MateHealth.unparallel_pairs(_mates_tool.mates, arena) if _mates_tool != null else []
 	if not mate_drift.is_empty():
 		set_status("%d mate(s) now point at different faces than before the edit." % mate_drift.size())
+	elif not mate_unparallel.is_empty():
+		set_status("%d Width mate(s) have faces that are no longer parallel after the edit." % MateHealth.mate_ids(mate_unparallel).size())
 
 
 func enforce_mates() -> void:

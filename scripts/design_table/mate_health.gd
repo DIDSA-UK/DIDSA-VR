@@ -66,6 +66,59 @@ static func _is_plane(sig: Dictionary) -> bool:
 	return str(sig["kind"]) == "plane" or (str(sig["kind"]) == "" and float(sig["flatness"]) > 0.9999)
 
 
+static func face_refs(ref: Dictionary) -> Array:
+	## Every face a mate reference names, as [{occurrence_id, sub}] where `sub` is the live SubShapeRef dictionary inside `ref` (so a remake can
+	## renumber it in place). One for an ordinary reference; the two faces of a Width (`midplane`) reference - the second on its own
+	## `b_occurrence_id` when it sits on another part.
+	var out: Array = []
+	var occurrence_id := str(ref.get("occurrence_id", ""))
+	var midplane = ref.get("midplane")
+	if midplane is Dictionary:
+		var a = (midplane.get("a", {}) as Dictionary).get("face_ref")
+		var b = (midplane.get("b", {}) as Dictionary).get("face_ref")
+		var b_occurrence = midplane.get("b_occurrence_id")
+		if a is Dictionary:
+			out.append({"occurrence_id": occurrence_id, "sub": a})
+		if b is Dictionary:
+			out.append({"occurrence_id": occurrence_id if b_occurrence == null else str(b_occurrence), "sub": b})
+		return out
+	var sub = ref.get("subshape_ref")
+	if sub is Dictionary:
+		out.append({"occurrence_id": occurrence_id, "sub": sub})
+	return out
+
+
+static func unparallel_pairs(mates: Array, nodes: Array) -> Array:
+	## After an edit: the Width references whose two faces are no longer parallel - a state of its own, not "face lost" and not a failed solve
+	## (the backend says 422 faces_not_parallel only when the mate is next solved). [{mate_id, reference}] for each (reference = its index in the
+	## mate's references). A pair is judged only when both its parts are among `nodes`; a face that is gone is the drift check's business.
+	var by_occurrence := {}
+	for node in nodes:
+		by_occurrence[str(node.get_meta("occurrence_id", ""))] = node
+	var out: Array = []
+	for mate in mates:
+		if bool(mate.get("suppressed", false)):
+			continue
+		var refs: Array = mate.get("references", [])
+		for r in refs.size():
+			var faces := face_refs(refs[r])
+			if refs[r].get("midplane") == null or faces.size() != 2:
+				continue
+			var normals: Array = []
+			for face in faces:
+				var node = by_occurrence.get(str(face["occurrence_id"]))
+				if node == null:
+					break
+				var sig := signature(node, str(face["sub"].get("body_id", "")), int(face["sub"].get("index", -1)))
+				if sig.is_empty():
+					break
+				var basis: Basis = (node as Node3D).global_transform.basis if (node as Node3D).is_inside_tree() else (node as Node3D).transform.basis
+				normals.append(basis * (sig["n"] as Vector3))
+			if normals.size() == 2 and absf((normals[0] as Vector3).normalized().dot((normals[1] as Vector3).normalized())) < NORMAL_COS:
+				out.append({"mate_id": str(mate.get("id", "")), "reference": r})
+	return out
+
+
 static func capture(nodes: Array, mates: Array) -> Array:
 	## Before the edit: [{mate_id, occurrence_id, body_id, index, before}] for every face reference of every mate that lands on one of
 	## `nodes` (the arena nodes that show the part being edited). `mates` is the backend's mate list (mates_tool.mates).
@@ -77,14 +130,15 @@ static func capture(nodes: Array, mates: Array) -> Array:
 		if bool(mate.get("suppressed", false)):
 			continue # it isn't doing anything
 		for ref in mate.get("references", []):
-			var sub = ref.get("subshape_ref")
-			var node = by_occurrence.get(str(ref.get("occurrence_id", "")))
-			if sub == null or node == null or str(sub.get("shape_type", "")) != "face":
-				continue
-			var body_id := str(sub.get("body_id", ""))
-			var index := int(sub.get("index", -1))
-			out.append({"mate_id": str(mate.get("id", "")), "occurrence_id": str(ref.get("occurrence_id", "")), "body_id": body_id, "index": index,
-				"before": signature(node, body_id, index)})
+			for face in face_refs(ref):
+				var sub: Dictionary = face["sub"]
+				var node = by_occurrence.get(str(face["occurrence_id"]))
+				if node == null or str(sub.get("shape_type", "")) != "face":
+					continue
+				var body_id := str(sub.get("body_id", ""))
+				var index := int(sub.get("index", -1))
+				out.append({"mate_id": str(mate.get("id", "")), "occurrence_id": str(face["occurrence_id"]), "body_id": body_id, "index": index,
+					"before": signature(node, body_id, index)})
 	return out
 
 
@@ -188,10 +242,11 @@ static func remake_plan(mates: Array, drift: Array, baseline: Array, nodes: Arra
 				all_found = false
 				break
 			for ref in references:
-				var sub = ref.get("subshape_ref")
-				if sub != null and str(ref.get("occurrence_id", "")) == str(d["occurrence_id"]) and str(sub.get("body_id", "")) == str(d["body_id"]) and int(sub.get("index", -1)) == int(d["index"]):
-					sub["index"] = found
-					moved += 1
+				for face in face_refs(ref):
+					var sub: Dictionary = face["sub"]
+					if str(face["occurrence_id"]) == str(d["occurrence_id"]) and str(sub.get("body_id", "")) == str(d["body_id"]) and int(sub.get("index", -1)) == int(d["index"]):
+						sub["index"] = found
+						moved += 1
 		if all_found and moved > 0:
 			out.append({"mate_id": mate_id, "type": str(mate.get("type", "")), "value": mate.get("value"), "flipped": bool(mate.get("flipped", false)),
 				"allow_rotation": bool(mate.get("allow_rotation", true)), "references": references, "moved": moved,
