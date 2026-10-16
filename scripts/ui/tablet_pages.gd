@@ -718,7 +718,11 @@ func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
 		return
 	_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value), func(text: String) -> void:
-		_mates_tool.mate_value = text.to_float()
+		var parsed: Dictionary = _MatesTool.parse_value(_mates_tool.mate_type, text)
+		if not parsed["ok"]:
+			toast.emit(str(parsed["error"]), "error")
+			return
+		_mates_tool.mate_value = float(parsed["value"])
 		_mates_value_label.text = "Value: %s (distance mm / angle deg)" % _trim_mate_value(_mates_tool.mate_value)
 	)
 
@@ -785,7 +789,15 @@ func _on_edit_mate_value(mate_id: String, current) -> void:
 	if _mates_tool == null or _main == null:
 		return
 	_main.open_keyboard_for(_trim_mate_value(current if current != null else 0.0), func(text: String) -> void:
-		_on_edit_mate(mate_id, {"value": text.to_float()})
+		var type_str := ""
+		for mate in _mates_tool.mates:
+			if str(mate.get("id", "")) == mate_id:
+				type_str = str(mate.get("type", ""))
+		var parsed: Dictionary = _MatesTool.parse_value(type_str, text)
+		if not parsed["ok"]:
+			toast.emit(str(parsed["error"]), "error")
+			return
+		_on_edit_mate(mate_id, {"value": float(parsed["value"])})
 	)
 
 

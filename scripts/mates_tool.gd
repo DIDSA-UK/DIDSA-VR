@@ -355,6 +355,18 @@ static func secondary_flip_label(type: String) -> String:
 	return "Flip"
 
 
+static func parse_value(type: String, text: String) -> Dictionary:
+	## Pure — a typed mate value: {"ok", "value", "error"}. Not a number is refused, and so is a negative DISTANCE (the side of a distance
+	## is the Flip side control; the backend refuses a negative one, which used to leave the ghost blank with no word why). An angle may be negative.
+	var trimmed := text.strip_edges()
+	if not trimmed.is_valid_float():
+		return {"ok": false, "value": 0.0, "error": "\"%s\" is not a number" % trimmed}
+	var value := trimmed.to_float()
+	if type == "distance" and value < 0.0:
+		return {"ok": false, "value": 0.0, "error": "A distance can't be negative - use Flip side"}
+	return {"ok": true, "value": value, "error": ""}
+
+
 static func alignment_title(type: String) -> String:
 	## Pure — what the `alignment` control is called: the direction a lid swings about its hinge for an ANGLE, else the orientation.
 	return "Swing" if type == "angle" else "Orientation"

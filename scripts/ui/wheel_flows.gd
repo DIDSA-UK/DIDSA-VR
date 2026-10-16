@@ -269,7 +269,11 @@ func _set_mate_type(type: String) -> void:
 
 
 func _apply_mate_value(text: String, type: String, unit: String) -> void:
-	_mates.mate_value = text.to_float()
+	var parsed: Dictionary = _mates.parse_value(type, text)
+	if not parsed["ok"]:
+		say(str(parsed["error"]), 4.0)
+		return
+	_mates.mate_value = float(parsed["value"])
 	say("%s %s %s" % [MATE_TYPE_LABELS[type], text, unit])
 
 

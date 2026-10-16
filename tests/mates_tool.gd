@@ -137,6 +137,13 @@ func _initialize() -> void:
 	print("SMOKE confirmed changes drop `from`: ", confirmed == [{"mate_id": "m1", "field": "secondary_flip", "to": true}])
 	print("SMOKE the create payload carries no branch_changes unless confirming one: ", not tool.build_create_payload().has("branch_changes") and not tool.build_create_payload(true).has("branch_changes"))
 
+	# --- typed values: a number, and never a negative distance (the side is Flip side)
+	print("SMOKE a typed distance must be a non-negative number, an angle may be negative: ",
+		MatesTool.parse_value("distance", "12.5")["ok"] and MatesTool.parse_value("distance", "12.5")["value"] == 12.5 and MatesTool.parse_value("distance", " 0 ")["ok"] and
+		not MatesTool.parse_value("distance", "-3")["ok"] and MatesTool.parse_value("distance", "-3")["error"].contains("Flip side") and
+		not MatesTool.parse_value("distance", "abc")["ok"] and not MatesTool.parse_value("distance", "")["ok"] and
+		MatesTool.parse_value("angle", "-30")["ok"] and MatesTool.parse_value("angle", "-30")["value"] == -30.0)
+
 	# --- Phase 3: branch controls from the preview, Next solution, and what is sent
 	var alts := [
 		{"alignment": "anti_aligned", "secondary_flip": true, "members": [], "movement_cost": 1.0},
