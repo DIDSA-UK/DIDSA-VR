@@ -27,6 +27,7 @@ const ACCEPT_DISTANCE := 0.5 ## of max(L, hand distance from the start pose)
 const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the headset (Dart: 8)
 const MAX_ROWS := 64
 const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
+const PAIR_MODEL_VERSION := 4 ## 4 = 3 plus an optional `pair` on a side: the second face of a Width / Symmetric mid-plane over two members (the backend emits 4 only then)
 const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
 
 const _TYPES := ["coincident", "concentric", "parallel", "angle", "distance"]
@@ -44,7 +45,8 @@ var _jac := true ## false = residual-only evaluation (no derivative arithmetic)
 static func try_parse(json, max_members: int = MAX_MEMBERS):
 	if not (json is Dictionary):
 		return null
-	if int(json.get("version", 0)) != MODEL_VERSION:
+	var version := int(json.get("version", 0))
+	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION:
 		return null
 	var ids: Array = json.get("members", [])
 	if ids.is_empty() or ids.size() > max_members:
@@ -59,8 +61,15 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 			return null
 		var a = _parse_side(raw["a"])
 		var b = _parse_side(raw["b"])
+		if a == null or b == null:
+			return null
 		if int(a["member"]) >= ids.size() or int(b["member"]) >= ids.size():
 			return null
+		for side in [a, b]:
+			if side["pair"] != null:
+				# `pair` belongs to version 4 only; a version-3 model carrying one is malformed. Out-of-range member => null.
+				if version == MODEL_VERSION or int(side["pair"]["member"]) >= ids.size():
+					return null
 		model._mates.append({
 			"type": type,
 			"value": raw.get("value"),
@@ -82,7 +91,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	return model
 
 
-static func _parse_side(j: Dictionary) -> Dictionary:
+## A side as {member, geo, fr, ft, pair}; `pair` is null or the same shape holding only `porigin` / `pnormal`. Returns null when
+## a `pair` lacks its plane (a malformed v4 side).
+static func _parse_side(j: Dictionary):
 	var geo := {}
 	for name in ["point", "axis_origin", "direction", "perp", "hinge_direction"]:
 		if j.has(name) and j[name] != null:
@@ -90,14 +101,26 @@ static func _parse_side(j: Dictionary) -> Dictionary:
 	if j.has("plane") and j["plane"] != null:
 		geo["porigin"] = _floats(j["plane"]["origin"])
 		geo["pnormal"] = _floats(j["plane"]["normal"])
-	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null}
+	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null, "pair": null}
+	_parse_frozen(side, j)
+	if j.has("pair") and j["pair"] != null:
+		var pj: Dictionary = j["pair"]
+		if not (pj.get("plane") is Dictionary) or not (pj["plane"].has("origin") and pj["plane"].has("normal")) or not pj.has("member"):
+			return null
+		var pgeo := {"porigin": _floats(pj["plane"]["origin"]), "pnormal": _floats(pj["plane"]["normal"])}
+		var pair := {"member": int(pj["member"]), "geo": pgeo, "fr": null, "ft": null, "pair": null}
+		_parse_frozen(pair, pj)
+		side["pair"] = pair
+	return side
+
+
+static func _parse_frozen(side: Dictionary, j: Dictionary) -> void:
 	if j.has("frozen") and j["frozen"] != null:
 		var fr: Array = []
 		for row in j["frozen"]["r"]:
 			fr.append_array(_floats(row))
 		side["fr"] = fr
 		side["ft"] = _floats(j["frozen"]["t"])
-	return side
 
 
 static func _sign(v) -> float:
@@ -153,6 +176,23 @@ func _geo(side: Dictionary, poses: Array) -> Dictionary:
 	var g := {}
 	for name in side["geo"]:
 		g[name] = _world(side, poses, name)
+	var pair = side["pair"]
+	if pair != null and g.has("porigin"):
+		# Version 4: the plane midway between this face and the pair's (origin = average, normal = this face's own).
+		var other := _world(pair, poses, "porigin")
+		var o: Array = g["porigin"]
+		var mid_v: Array = [(o[0][0] + other[0][0]) / 2.0, (o[0][1] + other[0][1]) / 2.0, (o[0][2] + other[0][2]) / 2.0]
+		var mid_d := PackedFloat64Array()
+		if _jac:
+			var od: PackedFloat64Array = o[1]
+			var pd: PackedFloat64Array = other[1]
+			mid_d.resize(3 * n)
+			for i in 3 * n:
+				mid_d[i] = (od[i] + pd[i]) / 2.0
+		g["porigin"] = [mid_v, mid_d]
+		if g.has("point"):
+			g["point"] = g["porigin"]
+		g["pair_normal"] = _world(pair, poses, "pnormal")
 	return g
 
 
@@ -307,6 +347,10 @@ func _evaluate(poses: Array):
 			else:
 				var off := _sub(d["point"], f["point"])
 				_add_scaled(res, jac, _dot(off, off), dist)
+		for g in [d, f]:
+			# A pair's two faces stay parallel: cross of the unit normals (3 rows, rank 2); side a before side b.
+			if g.has("pair_normal"):
+				_add_v(res, jac, _cross(_unit(g["pnormal"]), _unit(g["pair_normal"])))
 	return [res, jac]
 
 
