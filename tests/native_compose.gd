@@ -52,11 +52,20 @@ func _initialize() -> void:
 	print("SMOKE native extensions are told apart in any case, current first: ", NativeCompose.native_extension("a/Frame.DIDSAPRT") == "DIDSAprt" and NativeCompose.native_extension("x.didsa") == "didsa" and NativeCompose.native_extension("x.didsacad") == "didsacad" and NativeCompose.native_extension("x.step") == "")
 	print("SMOKE the base-name key ignores the extension and the case: ", NativeCompose.base_name_key("Bracket.didsa") == NativeCompose.base_name_key("bracket.DIDSAprt") and NativeCompose.base_name_key("Bracket.didsa") != NativeCompose.base_name_key("Bracket2.didsa"))
 	print("SMOKE whole-number floats are written as integers, others in full: ", NativeCompose.to_json({"a": 0.0, "b": 3.0, "c": 0.25, "d": [1.0, -2.0], "e": null, "f": "x"}) == '{"a":0,"b":3,"c":0.25,"d":[1,-2],"e":null,"f":"x"}')
+	var exact = NativeCompose.parse_exact('{"i": 0, "f": 20.0, "e": 1e-05, "n": -3.50, "s": "a\\"b\\u00e9", "l": [true, false, null, {}], "o": {}}')
+	print("SMOKE parse_exact keeps every number's own text and decodes strings: ", exact is Dictionary and NativeCompose.to_json(exact) == '{"i":0,"f":20.0,"e":1e-05,"n":-3.50,"s":"a\\"b\u00e9","l":[true,false,null,{}],"o":{}}')
+	print("SMOKE ...and refuses text that is not one JSON value: ", NativeCompose.parse_exact('{"a": 1') == null and NativeCompose.parse_exact('[1, 2] x') == null and NativeCompose.parse_exact('') == null)
+	var peg_text := FileAccess.get_file_as_string("res://tests/fixtures/Assy_test_peg_2.DIDSAprt")
+	var peg_again := NativeCompose.to_json(NativeCompose.parse_exact(peg_text))
+	print("SMOKE a real native file goes through unchanged in value AND number type (360.0 stays 360.0): ", JSON.parse_string(peg_again) == JSON.parse_string(peg_text) and peg_again.contains('"angle":360.0') and not peg_text.contains('"angle": 360,'))
 
 	# --- the fixture: Root references Frame_A (written as .DIDSAprt, on disk as .didsa), a bolt in a subfolder (in another case), a missing file,
 	# and a file that refers back to Root. Frame_A references the same bolt again (a diamond: one Part).
 	_write("Frame_A.didsa", _part("frame", [_occ("f-bolt", "sub/Bolt.didsa")]), [{"id": "sk1", "plane": "XY", "entities": [], "count": 2}])
 	_write("sub/bolt.DIDSAprt", _part("bolt", []))
+	var bolt_file := FileAccess.open(DIR.path_join("sub/bolt.DIDSAprt"), FileAccess.WRITE) # written by hand: a whole-number float, as the flat app writes them
+	bolt_file.store_string('{"schema_version": 1, "document": {"id": "doc-bolt", "root_part_id": "bolt", "parts": [{"id": "bolt", "name": "bolt", "features": [{"id": "f1", "depth": 20.0, "count": 3}], "occurrences": [], "mates": []}]}, "sketches": []}')
+	bolt_file.close()
 	_write("Loop.didsa", _part("loop", [_occ("l-root", "Root.didsa")]))
 	_write("Twin.didsa", _part("frame", [])) # a different file reusing Frame_A's Part id (an old Save As copy)
 	var root_path := _write("Root.didsa", _part("root", [
@@ -83,11 +92,14 @@ func _initialize() -> void:
 	print("SMOKE the note for the status line counts them: ", NativeCompose.unresolved_note(composed).begins_with(" 3 referenced files not loaded:"))
 	print("SMOKE sketches from referenced files come along: ", payload["sketches"].size() == 1 and payload["sketches"][0]["id"] == "sk1")
 	var text: String = composed["text"]
+	print("SMOKE a referenced file's numbers keep their type (20.0 stays 20.0, 3 stays 3): ", text.contains('"depth":20.0') and text.contains('"count":3'))
 	print("SMOKE integers stay integers in the composed text: ", text.contains('"schema_version":1,') and text.contains('"translation":[10,0,0]') and text.contains('"count":2') and not text.contains("1.0"))
 
 	var plain := _write("Plain.didsa", _part("plain", []))
 	var passed := NativeCompose.compose(plain)
 	print("SMOKE a file with no references is sent as its own text, untouched: ", passed["ok"] and passed["text"] == FileAccess.get_file_as_string(plain) and passed["unresolved"].is_empty())
+	var bundle := NativeCompose.compose("res://tests/fixtures/assy_save_test.DIDSAprt")
+	print("SMOKE a bundle file (its references already resolved to Parts inside it) is sent as it is, with nothing reported missing: ", bundle["ok"] and bundle["text"] == FileAccess.get_file_as_string("res://tests/fixtures/assy_save_test.DIDSAprt") and (bundle["unresolved"] as Array).is_empty())
 	print("SMOKE a missing root file says so: ", not NativeCompose.compose(DIR.path_join("Nope.didsa"))["ok"])
 	_clean()
 	quit()

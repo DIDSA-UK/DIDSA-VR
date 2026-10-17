@@ -15,9 +15,11 @@ extends RefCounted
 ## reuses another file's Part id is left as it was (the backend skips an unresolved Occurrence) and listed in
 ## `unresolved`, so the caller can say so. The flat app re-mints a clashing id; that is not ported.
 ##
-## Godot's JSON parser reads every number as a float, and JSON.stringify writes 0 back as 0.0, which the backend
-## refuses for its integer fields. So when nothing needs resolving the file's own text is returned untouched, and
-## otherwise to_json() writes whole numbers without a fraction.
+## Numbers are kept exactly as the files wrote them. Godot's JSON parser reads every number as a float, so a round trip
+## through it turns 0 into 0.0 (the backend refuses that for an integer field) or, written back as integers, 20.0 into 20;
+## the backend's add-component then saw the session's copy of a Part differ from the same file and re-minted it as a new
+## Part (found by tests/e2e_bug_report.gd against a real backend). So the composer reads with parse_exact(), which keeps
+## each number's own text, and to_json() writes it back verbatim; with nothing to resolve the file's own text is sent.
 
 const NATIVE_EXTENSIONS: Array[String] = ["didsa", "DIDSAprt", "didsacad"] ## current first (relative_path.dart)
 
@@ -74,11 +76,11 @@ static func compose(root_path: String, search_dirs: Array = []) -> Dictionary:
 		out["error"] = "No such file: %s" % root_path
 		return out
 	var root_text := FileAccess.get_file_as_string(root_path)
-	var root = JSON.parse_string(root_text)
+	var root = parse_exact(root_text)
 	if not (root is Dictionary) or not ((root as Dictionary).get("document") is Dictionary):
 		out["error"] = "Couldn't parse %s as JSON — is it a real exported .didsa/.DIDSAprt file?" % root_path.get_file()
 		return out
-	out["parsed"] = root
+	out["parsed"] = JSON.parse_string(root_text) # (the caller's own copy: ordinary numbers)
 	var document: Dictionary = root["document"]
 	out["root_part_id"] = str(document.get("root_part_id", "")) if document.get("root_part_id") != null else ""
 	var root_parts: Array = document.get("parts", []) if document.get("parts") is Array else []
@@ -138,13 +140,28 @@ static func unresolved_note(composed: Dictionary) -> String:
 
 
 static func _has_external_refs(parts: Array) -> bool:
+	## Does any occurrence still need its file? (A bundle, which already holds the Parts its occurrences name, does not.)
+	var ids := {}
+	for part in parts:
+		if part is Dictionary:
+			ids[str(part.get("id", ""))] = true
 	for part in parts:
 		if not (part is Dictionary):
 			continue
 		for occ in (part.get("occurrences", []) if part.get("occurrences") is Array else []):
-			if occ is Dictionary and occ.get("external_ref") != null and str(occ["external_ref"]) != "":
+			if _needs_file(occ, ids):
 				return true
 	return false
+
+
+static func _needs_file(occ, part_ids: Dictionary) -> bool:
+	## An occurrence with an `external_ref` whose `resolved_part_id` does not already name a Part in the payload. One that does
+	## is resolved (a bundle file, like a flat app "Save all" of everything in one file): its file is not looked for, and a
+	## missing file is not reported.
+	if not (occ is Dictionary) or occ.get("external_ref") == null or str(occ["external_ref"]) == "":
+		return false
+	var resolved = occ.get("resolved_part_id")
+	return resolved == null or str(resolved) == "" or not part_ids.has(str(resolved))
 
 
 static func _add_sketches(state: Dictionary, payload: Dictionary) -> void:
@@ -158,7 +175,7 @@ static func _add_sketches(state: Dictionary, payload: Dictionary) -> void:
 
 static func _resolve_occurrences(state: Dictionary, part: Dictionary, ancestors: Array) -> void:
 	for occ in (part.get("occurrences", []) if part.get("occurrences") is Array else []):
-		if not (occ is Dictionary) or occ.get("external_ref") == null or str(occ["external_ref"]) == "":
+		if not _needs_file(occ, state["part_ids"]):
 			continue
 		var ref := str(occ["external_ref"])
 		var file := find_file(ref, state["bases"])
@@ -180,7 +197,7 @@ static func _resolve_file(state: Dictionary, file: String, ref: String, ancestor
 		return ""
 	if state["by_file"].has(file):
 		return state["by_file"][file] # the same file from two places: one Part
-	var payload = JSON.parse_string(FileAccess.get_file_as_string(file))
+	var payload = parse_exact(FileAccess.get_file_as_string(file))
 	var parts: Array = []
 	if payload is Dictionary and (payload as Dictionary).get("document") is Dictionary and payload["document"].get("parts") is Array:
 		parts = payload["document"]["parts"]
@@ -208,9 +225,11 @@ static func _ref_as_found(ref: String, file: String) -> String:
 
 
 static func to_json(value) -> String:
-	## JSON with whole-number floats written as integers (Godot reads every JSON number as a float; the backend's
-	## integer fields refuse 0.0). Other floats keep full precision.
+	## JSON text. A number read by parse_exact() (a StringName holding its own text) is written back exactly; a float made
+	## here is written as an integer when it is whole (the backend's integer fields refuse 0.0), else in full precision.
 	match typeof(value):
+		TYPE_STRING_NAME:
+			return String(value)
 		TYPE_DICTIONARY:
 			var pieces := PackedStringArray()
 			for key in value:
@@ -228,3 +247,115 @@ static func to_json(value) -> String:
 			return JSON.stringify(f, "", false, true)
 		_:
 			return JSON.stringify(value)
+
+
+static func parse_exact(text: String) -> Variant:
+	## JSON.parse_string(), except that every number comes back as a StringName holding the number's own text ("20.0", "0",
+	## "1e-05"), so to_json() can write it back exactly. null if the text is not one JSON value.
+	var bytes := text.to_utf8_buffer()
+	var at := [0]
+	var value = _read_value(bytes, at)
+	if at[0] < 0:
+		return null
+	_skip_space(bytes, at)
+	return value if at[0] == bytes.size() else null
+
+
+static func _skip_space(b: PackedByteArray, at: Array) -> void:
+	var i: int = at[0]
+	while i < b.size() and (b[i] == 32 or b[i] == 10 or b[i] == 13 or b[i] == 9):
+		i += 1
+	at[0] = i
+
+
+static func _read_value(b: PackedByteArray, at: Array) -> Variant:
+	## at[0] is the read position; set to -1 on a syntax error.
+	_skip_space(b, at)
+	var i: int = at[0]
+	if i >= b.size():
+		at[0] = -1
+		return null
+	var c := b[i]
+	if c == 123: # {
+		var dict := {}
+		at[0] = i + 1
+		_skip_space(b, at)
+		if at[0] < b.size() and b[at[0]] == 125:
+			at[0] += 1
+			return dict
+		while true:
+			_skip_space(b, at)
+			if at[0] >= b.size() or b[at[0]] != 34:
+				at[0] = -1
+				return null
+			var k = _read_string(b, at)
+			_skip_space(b, at)
+			if at[0] < 0 or at[0] >= b.size() or b[at[0]] != 58: # :
+				at[0] = -1
+				return null
+			at[0] += 1
+			dict[k] = _read_value(b, at)
+			if at[0] < 0:
+				return null
+			_skip_space(b, at)
+			if at[0] < b.size() and b[at[0]] == 44: # ,
+				at[0] += 1
+			elif at[0] < b.size() and b[at[0]] == 125:
+				at[0] += 1
+				return dict
+			else:
+				at[0] = -1
+				return null
+	if c == 91: # [
+		var list := []
+		at[0] = i + 1
+		_skip_space(b, at)
+		if at[0] < b.size() and b[at[0]] == 93:
+			at[0] += 1
+			return list
+		while true:
+			list.append(_read_value(b, at))
+			if at[0] < 0:
+				return null
+			_skip_space(b, at)
+			if at[0] < b.size() and b[at[0]] == 44:
+				at[0] += 1
+			elif at[0] < b.size() and b[at[0]] == 93:
+				at[0] += 1
+				return list
+			else:
+				at[0] = -1
+				return null
+	if c == 34:
+		return _read_string(b, at)
+	for word in ["true", "false", "null"]:
+		var w: PackedByteArray = (word as String).to_utf8_buffer()
+		if i + w.size() <= b.size() and b.slice(i, i + w.size()) == w:
+			at[0] = i + w.size()
+			return true if word == "true" else (false if word == "false" else null)
+	var j := i
+	while j < b.size() and ((b[j] >= 48 and b[j] <= 57) or b[j] == 45 or b[j] == 43 or b[j] == 46 or b[j] == 101 or b[j] == 69): # 0-9 - + . e E
+		j += 1
+	if j == i:
+		at[0] = -1
+		return null
+	at[0] = j
+	return StringName(b.slice(i, j).get_string_from_ascii())
+
+
+static func _read_string(b: PackedByteArray, at: Array) -> Variant:
+	var i: int = at[0] + 1
+	var escaped := false
+	while i < b.size() and b[i] != 34:
+		if b[i] == 92: # backslash: the next byte is escaped
+			escaped = true
+			i += 1
+		i += 1
+	if i >= b.size():
+		at[0] = -1
+		return null
+	var start: int = at[0]
+	at[0] = i + 1
+	if escaped:
+		return JSON.parse_string(b.slice(start, i + 1).get_string_from_utf8()) # let Godot decode the escapes
+	return b.slice(start + 1, i).get_string_from_utf8()

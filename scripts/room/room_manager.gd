@@ -902,7 +902,7 @@ func open_from_bytes(bytes: PackedByteArray, part_id: String, label: String, see
 		for p in room.parts:
 			_view_modes.apply_to(p)
 	_was_active = true
-	status.emit("Room open for %s at %s. Close it from the Assembly Tree." % [label, room.scale_text()])
+	status.emit("Room open for %s at %s. Close it from its console or the Rooms tile." % [label, room.scale_text()])
 	rooms_changed.emit()
 	return room
 
