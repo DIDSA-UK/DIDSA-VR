@@ -220,6 +220,9 @@ func _physics_process(delta: float) -> void:
 	if pushing and mates_tool and mates_tool.is_locked(selected_node):
 		mates_tool.notify_locked(selected_node) # grounded by an enforced mate: not movable (throttled message)
 		return
+	if pushing and mates_tool and _sel_group == null and mates_tool.is_nested_locked(selected_node):
+		mates_tool.notify_nested_locked(selected_node) # held by its sub-assembly's mates (throttled message)
+		return
 	# Enforced mates: the increments below are applied to the drag's ACCUMULATED
 	# wish (the displayed pose lags a network round trip behind), then handed to
 	# the live solver, whose answer is what's shown — see mates_tool.gd.
@@ -419,7 +422,7 @@ func _try_grab() -> void:
 		if group_deadzone > 0.0 and GroupIndex.has_groups(target):
 			_begin_latch(target)
 			return
-		_begin_hold(target, target.global_transform)
+		_begin_part_hold(target)
 
 
 # --- sub-assemblies: choosing what a grip or the laser takes (group_index.gd, group_set.gd) ---
@@ -437,7 +440,7 @@ func _begin_latch(target: Node3D) -> void:
 	## each trigger click widens that one level. Moving the hand out of the sphere takes it.
 	var levels := GroupIndex.levels(target, _scope_nodes())
 	if levels.size() <= 1:
-		_begin_hold(target, target.global_transform) # nothing wider to choose
+		_begin_part_hold(target) # nothing wider to choose
 		return
 	_latch = {"target": target, "levels": levels, "level": 0, "at": global_position, "nodes": [], "cues": []}
 	var sphere := GroupCues.sphere(group_deadzone)
@@ -495,9 +498,18 @@ func _commit_latch() -> void:
 	var target: Node3D = _latch["target"]
 	_end_latch()
 	if int(level["depth"]) == 0:
-		_begin_hold(target, target.global_transform)
+		_begin_part_hold(target)
 		return
 	_begin_group_hold(target, level)
+
+
+func _begin_part_hold(target: Node3D) -> void:
+	## A grip that takes the part on its own. A part its sub-assembly's mates hold (with mates enforced) refuses: only the sub-assembly can go.
+	if mates_tool and mates_tool.is_nested_locked(target):
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		mates_tool.notify_nested_locked(target)
+		return
+	_begin_hold(target, target.global_transform)
 
 
 func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
@@ -522,6 +534,11 @@ func _group_refusal(gs) -> String:
 				return "%s is grounded (fixed): unground it to move it." % gs.label
 			"mated":
 				return "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % gs.label
+	if gs.depth > 1 and mates_tool != null and gs.prefix.size() >= gs.depth:
+		# A sub-assembly inside another moves on screen only: one its parent's mates hold would just be pulled off them.
+		var parts: Array = gs.anchor.get_meta("group_parts", [])
+		if parts.size() >= gs.depth - 1 and mates_tool.nested_occurrence_locked(str(parts[gs.depth - 2]), str(gs.prefix[gs.depth - 1])):
+			return "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % gs.label
 	return ""
 
 

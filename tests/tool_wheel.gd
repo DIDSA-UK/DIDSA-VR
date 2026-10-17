@@ -24,8 +24,8 @@ func _open_at_anchor() -> void:
 
 
 func _move(offset: Vector2) -> void:
-	## The hand moves in the wheel's plane: up is world up; "right" is the wheel's own right.
-	r.global_position = anchor + wheel._right * offset.x + Vector3.UP * offset.y
+	## The hand moves in the wheel's plane, along its own right and up (it faces the head, so its up tips back when the hand is low).
+	r.global_position = anchor + wheel._right * offset.x + wheel._up * offset.y
 	wheel._process(0.0)
 
 
@@ -53,6 +53,17 @@ func _initialize() -> void:
 	_open_at_anchor()
 	print("SMOKE the chord opens the ring and sets the hand's wheel_open meta: ", wheel.is_open() and wheel.is_shown() and r.wheel_is_open())
 	print("SMOKE the ring opens centred on the hand, at two thirds of the base size: ", wheel.global_position.is_equal_approx(anchor) and is_equal_approx(wheel.drawn_scale(), 2.0 / 3.0) and wheel.global_transform.basis.get_scale().is_equal_approx(Vector3.ONE * 2.0 / 3.0))
+	var cam: Camera3D = main.get_node("XROrigin3D/XRCamera3D")
+	var faces_eye := func() -> bool:
+		var face: Vector3 = wheel.global_transform.basis.z.normalized()
+		return face.dot((cam.global_position - wheel.global_position).normalized()) > 0.999 and absf(wheel.global_transform.basis.x.normalized().y) < 0.001
+	print("SMOKE the ring faces the head: its face points at the eyes, tipped back as well as turned, its right level: ", faces_eye.call() and absf(wheel.global_transform.basis.z.normalized().y) > 0.05)
+	var cam_was := cam.global_position
+	cam.global_position = cam_was + Vector3(0.4, 0.2, 0.1) # the head moves while the ring is up
+	wheel._process(0.0)
+	print("SMOKE ...and keeps facing it as the head moves: ", faces_eye.call())
+	cam.global_position = cam_was
+	wheel._process(0.0)
 	print("SMOKE while it is open the hand is 'manipulating', so the stick does not turn or walk you: ", r.is_manipulating())
 	print("SMOKE while it is open the grip does not drag the world: ", not main._two_hand._hand_free_ignoring_button(r))
 	print("SMOKE the laser is hidden while the wheel is open: ", (await _laser_hidden()))
@@ -193,7 +204,7 @@ func _initialize() -> void:
 	print("SMOKE a top-level ring has the Clear tool pill, greyed with nothing in the hand: ", wheel.pill_entry().get("id", "") == "clear_tool" and not bool(wheel.pill_entry()["enabled"]))
 	print("SMOKE with the ring up the wrist panel shows the ring's name and how to use it: ", hint.is_showing() and hint.title_text() == "Tools" and "let go" in hint.body_text().to_lower())
 	var hint_top: Vector3 = hint.global_position
-	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and wheel.global_position.y - hint_top.y >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
+	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and (wheel.global_position - hint_top).dot(wheel.global_transform.basis.y.normalized()) >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
 	_move(Vector2(0.0, 0.12))
 	print("SMOKE ...then the tool tip of the tile pointed at: ", hint.title_text() == "Mates" and hint.body_text() == "Mate two parts together")
 	_move(Vector2(0.0, -0.26))

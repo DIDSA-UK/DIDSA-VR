@@ -153,6 +153,9 @@ var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-
 var _group_persist: Dictionary = {}
 var _current_owner_part_id := "" ## the ACTIVE root: the one the Mates page lists and creates mates on (the world's loaded root)
 var _other_states: Dictionary = {} ## owner Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every OTHER root whose parts can be moved and saved: each open Assembly Room's Part (load_owner_state)
+var _nested_states: Dictionary = {} ## sub-assembly Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every Part below the active root (refresh_nested_state)
+var _nested_order: Array = [] ## those Parts, each after every Part below it: the order Enforce all solves them in
+const MAX_NEST_DEPTH := 32
 
 
 func setup(stack) -> void:
@@ -904,12 +907,26 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 
 
 func enforce_all(owner_part_id: String) -> Dictionary:
-	## Solves every non-grounded occurrence any of this Part's own Mates
-	## reference, and reports the outcome on the tablet. Returns {ok, solved, problems}
-	## (ok = every mate was satisfied) and emits enforce_finished with the same.
+	## Re-applies every mate in the loaded assembly, at every level: each sub-assembly's own Mates first, deepest first (a sub-assembly is
+	## settled before the assembly it sits in is solved against it), then this Part's own. Every non-grounded occurrence a Mate moves is solved;
+	## a reference into a sub-assembly (`outer/inner`) solves `outer`, the top-level occurrence it moves. Afterwards every part nested in a
+	## sub-assembly is put back where the stored tree places it (a nested part moved by hand with mates relaxed moved on screen only).
+	## Returns {ok, solved, problems} (ok = every mate was satisfied) and emits enforce_finished with the same.
 	await refresh_state(owner_part_id)
 	var solved := 0
 	var problems: Array[String] = []
+	for pid in _nested_order:
+		var state: Dictionary = _nested_states.get(pid, {})
+		for occ_id in state.get("mated", {}):
+			if bool(state.get("occurrences", {}).get(occ_id, {}).get("fixed", false)):
+				continue
+			_busy = true
+			var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/solve" % [pid, occ_id], null)
+			_busy = false
+			if result["ok"]:
+				solved += 1
+			else:
+				problems.append("in sub-assembly %s: %s" % [await _part_label(pid), _friendly_error(result)])
 	for occ_id in _mated_ids:
 		if bool(occurrences.get(occ_id, {}).get("fixed", false)):
 			continue # grounded: it's the anchor the others are solved against
@@ -918,6 +935,7 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 			solved += 1
 		else:
 			problems.append(result["error"])
+	await _adopt_nested_poses(owner_part_id)
 	if problems.is_empty():
 		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
 	else:
@@ -925,6 +943,52 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 	var outcome := {"ok": problems.is_empty(), "solved": solved, "problems": problems}
 	enforce_finished.emit(outcome)
 	return outcome
+
+
+func _part_label(part_id: String) -> String:
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s" % part_id, null)
+	if result["ok"] and result["json"] is Dictionary and str(result["json"].get("name", "")) != "":
+		return str(result["json"]["name"])
+	return part_id
+
+
+func _adopt_nested_poses(root_part_id: String) -> int:
+	## Puts every world part nested in a sub-assembly (group_index.gd's group_path, two or more levels) where the stored occurrence tree places
+	## it: the chain of its occurrences' transforms, root first (the glb flattens each instance onto its own node, so that chain IS its node's
+	## transform). Covers what a sub-assembly solve moved and what a hand move put out of place on screen. No undo entry: a nested move was
+	## never saved, so there is nothing to go back to. Returns how many nodes moved.
+	var rows_by_part := {}
+	var moved := 0
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if not is_instance_valid(node) or node.has_meta("room_id") or bool(node.get_meta("held", false)):
+			continue
+		if str(node.get_meta("group_root", "")) != root_part_id:
+			continue
+		var path: Array = node.get_meta("group_path", [])
+		var parts: Array = node.get_meta("group_parts", [])
+		if path.size() < 2 or parts.size() != path.size():
+			continue
+		var pose := Transform3D.IDENTITY
+		var ok := true
+		for i in path.size():
+			var pid: String = root_part_id if i == 0 else str(parts[i - 1])
+			if not rows_by_part.has(pid):
+				var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % pid, null)
+				rows_by_part[pid] = result["json"] if result["ok"] and result["json"] is Array else []
+			var row: Variant = null
+			for r in rows_by_part[pid]:
+				if str(r.get("id", "")) == str(path[i]):
+					row = r
+					break
+			if row == null or not (row.get("transform") is Dictionary):
+				ok = false
+				break
+			pose = pose * json_to_pose(row["transform"])
+		if not ok or not is_instance_valid(node) or _local_pose(node).is_equal_approx(pose):
+			continue
+		node.transform = pose
+		moved += 1
+	return moved
 
 
 func set_relaxed(on: bool) -> void:
@@ -949,13 +1013,68 @@ func refresh_state(owner_part_id: String) -> void:
 		for occ in result["json"]:
 			occurrences[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
 	await refresh_mates(owner_part_id)
+	await refresh_nested_state(owner_part_id)
+
+
+func refresh_nested_state(root_part_id: String) -> void:
+	## Reads every sub-assembly below the active root: its occurrences (their `fixed` flags) and its own Mates. A part nested in one is not
+	## managed (its node's transform is root-relative, so a move of it is on screen only and never saved), but while mates are enforced a mated
+	## one must stay where its mates put it (is_nested_locked), and Enforce all solves these Parts' mates too, deepest first (_nested_order).
+	_nested_states.clear()
+	_nested_order.clear()
+	if backend_url.is_empty() or api_key.is_empty() or root_part_id.is_empty():
+		return
+	var rows_by_part := {}
+	await _walk_nested(root_part_id, [root_part_id], rows_by_part)
+	for pid in _nested_order:
+		var occs := {}
+		for row in rows_by_part.get(pid, []):
+			occs[str(row.get("id", ""))] = {"fixed": bool(row.get("fixed", false))}
+		var mated := {}
+		var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % pid, null)
+		if mate_result["ok"] and mate_result["json"] is Array:
+			for mate in mate_result["json"]:
+				if bool(mate.get("suppressed", false)):
+					continue
+				for ref in mate.get("references", []):
+					var top := mate_ref_top(str(ref.get("occurrence_id", "")))
+					if top != "":
+						mated[top] = true
+		_nested_states[pid] = {"occurrences": occs, "mated": mated}
+	mates_changed.emit()
+
+
+func _walk_nested(part_id: String, ancestors: Array, rows_by_part: Dictionary) -> void:
+	## Depth-first over the occurrence tree; a Part goes into _nested_order after every Part below it (so a sub-assembly's own mates are solved
+	## before the mates of the assembly it sits in). A Part already on the path (a cycle) or seen before is not walked again.
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % part_id, null)
+	var rows: Array = result["json"] if result["ok"] and result["json"] is Array else []
+	rows_by_part[part_id] = rows
+	if ancestors.size() > MAX_NEST_DEPTH:
+		return
+	for row in rows:
+		if bool(row.get("suppressed", false)) or row.get("resolved_part_id") == null:
+			continue
+		var child := str(row["resolved_part_id"])
+		if child == "" or ancestors.has(child) or rows_by_part.has(child):
+			continue
+		await _walk_nested(child, ancestors + [child], rows_by_part)
+		_nested_order.append(child)
+
+
+static func mate_ref_top(occurrence_id: String) -> String:
+	## The top-level occurrence a mate reference moves. A reference into a sub-assembly is a `/`-joined path (`outer/inner`); the solver moves
+	## `outer` as a whole (the backend's mate_ref_tops), so that is the occurrence that is mated, and the one Enforce all solves.
+	return occurrence_id.get_slice("/", 0)
 
 
 func _rebuild_mated_ids() -> void:
 	_mated_ids.clear()
 	for mate in mates:
 		for ref in mate.get("references", []):
-			_mated_ids[str(ref.get("occurrence_id", ""))] = true
+			var top := mate_ref_top(str(ref.get("occurrence_id", "")))
+			if top != "":
+				_mated_ids[top] = true
 
 
 func is_managed(part: Node3D) -> bool:
@@ -1016,8 +1135,12 @@ func load_owner_state(owner_part_id: String) -> bool:
 	if mate_result["ok"] and mate_result["json"] is Array:
 		for mate in mate_result["json"]:
 			for ref in mate.get("references", []):
-				mated[str(ref.get("occurrence_id", ""))] = true
+				var top := mate_ref_top(str(ref.get("occurrence_id", "")))
+				if top != "":
+					mated[top] = true
 	set_owner_state(owner_part_id, occs, mated)
+	if _nested_states.has(owner_part_id):
+		_nested_states[owner_part_id] = {"occurrences": occs, "mated": mated} # a room's Part is also a sub-assembly of the world's root: its mates there are the same
 	return true
 
 
@@ -1043,6 +1166,30 @@ func is_constrained(part: Node3D) -> bool:
 	## Mated, free to move, and mates are enforced: its motion is steered by a
 	## live solve (constrain_drag()).
 	return not relaxed and not _mates_dirty(part) and is_managed(part) and is_mated(part) and not is_fixed(part)
+
+
+func is_nested_locked(part: Node3D) -> bool:
+	## A part inside a sub-assembly (one this tool doesn't manage) that its sub-assembly's own Mates move, while mates are enforced: it stays
+	## where they put it. Its move could only ever be on screen (never saved) and would just break those mates. The sub-assembly as a whole
+	## can still be taken (the grip's wider levels); Relax all mates moves the part anyway, and an Assembly Room of that sub-assembly edits it.
+	if not is_instance_valid(part) or _mates_dirty(part) or is_managed(part):
+		return false
+	return nested_occurrence_locked(owner_of(part), _occ_id(part))
+
+
+func nested_occurrence_locked(owner_part_id: String, occurrence_id: String) -> bool:
+	## The occurrence `occurrence_id` of the sub-assembly Part `owner_part_id` is moved by that Part's own Mates, and mates are enforced: neither
+	## the part it places nor (for a sub-assembly inside a sub-assembly) the group it places moves on its own.
+	if relaxed or occurrence_id == "":
+		return false
+	return _nested_states.get(owner_part_id, {}).get("mated", {}).has(occurrence_id)
+
+
+func notify_nested_locked(part: Node3D) -> void:
+	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
+		return
+	_last_locked_notice_ms = Time.get_ticks_msec()
+	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % str(part.name))
 
 
 func _mates_dirty(part: Node3D) -> bool:
@@ -1117,6 +1264,8 @@ func _friendly_error(result: Dictionary) -> String:
 				return "the two faces of a pair are not parallel"
 			"missing_reference":
 				return "one of the picked faces no longer exists"
+			"unresolved_mate_occurrence", "occurrence_not_found":
+				return "a mate names a part that isn't in the assembly (%s): the sub-assembly may have changed since the mate was made" % str(detail.get("occurrence_id", "?"))
 		return str(detail.get("type", detail))
 	if detail != null:
 		return str(detail)

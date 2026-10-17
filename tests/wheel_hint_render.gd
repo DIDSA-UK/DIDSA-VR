@@ -95,7 +95,7 @@ func _open(basis: Basis) -> void:
 
 
 func _move(basis: Basis, offset: Vector2) -> void:
-	_r.global_transform = Transform3D(basis, ANCHOR + _wheel._right * offset.x + Vector3.UP * offset.y)
+	_r.global_transform = Transform3D(basis, ANCHOR + _wheel._right * offset.x + _wheel._up * offset.y)
 	for i in 4:
 		await process_frame
 

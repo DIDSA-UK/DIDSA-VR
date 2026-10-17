@@ -69,6 +69,7 @@ var _title := ""
 var _hover := -1
 var _anchor := Vector3.ZERO
 var _right := Vector3.RIGHT
+var _up := Vector3.UP
 var title_provider: Callable = Callable() ## () -> String: the ring's name above it when nothing is hovered ("Mates" while the Mates tool is on)
 var _wedges: Array[MeshInstance3D] = [] ## each wedge's fill; its border and glow are siblings (_borders, _glows)
 var _borders: Array[MeshInstance3D] = []
@@ -214,17 +215,28 @@ func _set_shown(on: bool) -> void:
 
 
 func _orient_to_user() -> void:
-	## A vertical ring facing the user's head, steered by the head's yaw only (looking down at your hand doesn't tip it).
-	var forward := -_camera.global_transform.basis.z if _camera != null and _camera.is_inside_tree() else Vector3.FORWARD
-	forward.y = 0.0
-	if forward.length() < 0.001:
-		forward = Vector3.FORWARD
-	forward = forward.normalized()
-	_right = forward.cross(Vector3.UP).normalized()
+	## The ring faces the user's eyes: its face points from the ring's centre at the head, tipped back as well as turned (owner's headset
+	## report, 17 Oct: a ring that only followed the head's yaw was seen edge-on with the hand low or out to the side). Its right stays level.
+	## Aimed at where the head IS, not where it looks, so glancing about while the ring is up doesn't swing it (_process re-aims it).
+	var centre := _anchor + Vector3.UP * ring_lift
+	var to_eye := Vector3.ZERO
+	var look := Vector3.FORWARD
+	if _camera != null and _camera.is_inside_tree():
+		to_eye = _camera.global_position - centre
+		look = -_camera.global_transform.basis.z
+	var level := Vector3(to_eye.x, 0.0, to_eye.z)
+	if level.length() < 0.05 * maxf(to_eye.length(), 0.001):
+		level = -Vector3(look.x, 0.0, look.z) # the head straight above the ring: keep its right square to the way you face
+	if level.length() < 0.001:
+		level = Vector3.BACK
+	level = level.normalized()
+	var face := to_eye.normalized() if to_eye.length() > 0.001 else level
+	_right = Vector3.UP.cross(level).normalized()
+	_up = face.cross(_right).normalized()
 
 
 func _basis_for() -> Basis:
-	return Basis(_right, Vector3.UP, _right.cross(Vector3.UP).normalized())
+	return Basis(_right, _up, _right.cross(_up).normalized())
 
 
 func _on_released(action_name: String) -> void:
@@ -279,7 +291,10 @@ func _process(_delta: float) -> void:
 	if _seen_revision != UiThemes.revision:
 		_rebuild() # the theme (or the effects switch) changed while the ring is up: re-skin it in place
 		_update_centre()
-	var offset := Math.project_offset(_hand.global_position, _anchor, _right) / maxf(drawn_scale(), 0.01)
+	_orient_to_user() # keep facing the head as it moves
+	global_transform = Transform3D(_basis_for(), _anchor + Vector3.UP * ring_lift)
+	scale = Vector3.ONE * drawn_scale()
+	var offset := Math.project_offset(_hand.global_position, _anchor, _right, _up) / maxf(drawn_scale(), 0.01)
 	var on_pill := not _pill.is_empty() and Math.in_pill(offset)
 	_update_hover(-1 if on_pill else Math.wedge_for(offset, _entries.size(), dead_zone), on_pill)
 	var shown_len := minf(offset.length(), Math.OUTER_RADIUS * 1.15)

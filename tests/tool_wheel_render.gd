@@ -132,7 +132,7 @@ func _open() -> void:
 
 
 func _move(offset: Vector2) -> void:
-	_r.global_position = _anchor + _wheel._right * offset.x + Vector3.UP * offset.y
+	_r.global_position = _anchor + _wheel._right * offset.x + _wheel._up * offset.y
 	for i in 3:
 		await process_frame
 
