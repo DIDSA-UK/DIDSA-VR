@@ -54,6 +54,12 @@ func _initialize() -> void:
 	tool.picks_changed.emit()
 	labels = node.get_children().filter(func(c: Node) -> bool: return c is Label3D and not c.is_queued_for_deletion())
 	print("SMOKE a new result replaces the old drawing: ", node.items().size() == 1 and node.items()[0]["kind"] == "callout" and labels.size() == 1)
+	print("SMOKE points_moved: same points no, a moved or dropped point yes: ", not Dim.points_moved([a, b], [a, b]) and Dim.points_moved([a, b], [a, b + Vector3(0, 0.01, 0)]) and Dim.points_moved([a, b], [a]))
+	var moved := a + Vector3(0.2, 0.0, 0.1) # the model was turned: the pick's world point moved with it, with no signal from the tool
+	tool.points = [moved]
+	await process_frame
+	await process_frame
+	print("SMOKE the dimension follows the model when it moves (no signal needed): ", node.items().size() == 1 and (node.items()[0]["a"] as Vector3).is_equal_approx(moved))
 	tool.active = false
 	tool.result_changed.emit()
 	print("SMOKE switching the tool off clears the dimensions: ", not node.visible and node.items().is_empty())

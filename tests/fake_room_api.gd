@@ -35,6 +35,12 @@ func last(method: int, fragment: String) -> Dictionary:
 
 func request(method: int, path: String, body = null) -> Dictionary:
 	calls.append({"method": method, "path": path, "body": body})
+	if method == HTTPClient.METHOD_POST and path == "/document/parts": # a new, empty Part (New part, New room)
+		var id := "new-part-%d" % next_added
+		next_added += 1
+		names[id] = str(body.get("name", ""))
+		occurrences[id] = []
+		return _ok({"id": id, "name": names[id]}, 201)
 	var parts := path.trim_prefix("/document/parts/").split("/")
 	var owner := parts[0]
 	var tail := "/".join(parts.slice(1))
@@ -63,13 +69,15 @@ func request(method: int, path: String, body = null) -> Dictionary:
 		var id := "added%d" % next_added
 		next_added += 1
 		var list2: Array = occurrences.get(owner, [])
-		list2.append(row(id, "component-part"))
+		list2.append(row(id, "component-part", list2.is_empty())) # like the backend: the first occurrence put into an empty Part is grounded (fixed)
 		occurrences[owner] = list2
 		return _ok({"document_id": "d", "part_ids": ["component-part"], "occurrence_id": id})
 	if method == HTTPClient.METHOD_PATCH and tail.begins_with("occurrences/"):
 		var occ_id := tail.trim_prefix("occurrences/")
 		for r in occurrences.get(owner, []):
 			if r["id"] == occ_id:
+				if body.has("transform") and bool(body.get("fixed", r.get("fixed", false))):
+					return {"ok": false, "code": 422, "json": null, "error": "occurrence_is_fixed"} # like the backend: a fixed occurrence can't be moved
 				for key in body:
 					r[key] = body[key]
 				return _ok(r)

@@ -52,6 +52,7 @@ func _initialize() -> void:
 	# --- the chord takes the hand
 	_open_at_anchor()
 	print("SMOKE the chord opens the ring and sets the hand's wheel_open meta: ", wheel.is_open() and wheel.is_shown() and r.wheel_is_open())
+	print("SMOKE the ring opens centred on the hand, at two thirds of the base size: ", wheel.global_position.is_equal_approx(anchor) and is_equal_approx(wheel.drawn_scale(), 2.0 / 3.0) and wheel.global_transform.basis.get_scale().is_equal_approx(Vector3.ONE * 2.0 / 3.0))
 	print("SMOKE while it is open the hand is 'manipulating', so the stick does not turn or walk you: ", r.is_manipulating())
 	print("SMOKE while it is open the grip does not drag the world: ", not main._two_hand._hand_free_ignoring_button(r))
 	print("SMOKE the laser is hidden while the wheel is open: ", (await _laser_hidden()))
@@ -158,6 +159,25 @@ func _initialize() -> void:
 	tablet.pages.set_paint_colour("#3498db")
 	print("SMOKE choosing a swatch sets the colour both hands fire: ", r.paint_hex == "#3498db" and l.paint_hex == "#3498db" and tablet.pages.paint_colour() == "#3498db")
 	print("SMOKE the prompt names the colour: ", "#3498db" in flows.prompt_text())
+	# A shot that can't paint says why on the wrist and the status line (it used to be a buzz only). This part is the assembly's own content
+	# (no occurrence id), which has no colour in the backend's model.
+	var target := MeshInstance3D.new()
+	target.name = "RootBody"
+	target.mesh = BoxMesh.new()
+	target.set_meta("owner_part_id", "root")
+	target.set_meta("occurrence_id", "")
+	root.add_child(target)
+	target.create_trimesh_collision()
+	target.add_to_group("grabbable_parts")
+	target.global_position = r.global_position - r.global_transform.basis.z * 1.0
+	await physics_frame
+	await physics_frame
+	r._update_aim_hover()
+	print("SMOKE with Paint on the laser lights the part it would paint: ", r._aim_hover_node == target)
+	await r._try_shoot_colour()
+	print("SMOKE shooting a part that can't take a colour says why (wrist prompt and status): ", flows.prompt_text().begins_with("Couldn't paint RootBody") and str(main.status_text).begins_with("Couldn't paint RootBody"))
+	target.queue_free()
+	flows._toast_text = ""
 	manager.deactivate()
 	print("SMOKE switching it off disarms the trigger: ", not r.paint_active)
 
@@ -172,6 +192,8 @@ func _initialize() -> void:
 	_open_at_anchor()
 	print("SMOKE a top-level ring has the Clear tool pill, greyed with nothing in the hand: ", wheel.pill_entry().get("id", "") == "clear_tool" and not bool(wheel.pill_entry()["enabled"]))
 	print("SMOKE with the ring up the wrist panel shows the ring's name and how to use it: ", hint.is_showing() and hint.title_text() == "Tools" and "let go" in hint.body_text().to_lower())
+	var hint_top: Vector3 = hint.global_position
+	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and wheel.global_position.y - hint_top.y >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
 	_move(Vector2(0.0, 0.12))
 	print("SMOKE ...then the tool tip of the tile pointed at: ", hint.title_text() == "Mates" and hint.body_text() == "Mate two parts together")
 	_move(Vector2(0.0, -0.26))
@@ -180,6 +202,7 @@ func _initialize() -> void:
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
 	print("SMOKE releasing on the greyed pill changes nothing: ", manager.active_id == "")
+	print("SMOKE when the ring goes the panel is back on the wrist: ", not hint.is_docked() and hint.get_parent() == r and hint.position.is_equal_approx(hint.MOUNT))
 	manager.activate("shoot_hide")
 	var hide_prompt: String = flows.prompt_text()
 	print("SMOKE with a tool in hand the wrist panel carries its prompt: ", hint.is_showing() and hint.title_text() == hide_prompt.split("\n")[0])

@@ -229,7 +229,15 @@ func add_file(room_part_id: String, file_text: String, pose: Dictionary, name_ov
 	var patch := {"transform": pose}
 	if name_override != "":
 		patch["name_override"] = name_override
-	var placed: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/occurrences/%s" % [room_part_id, occurrence_id], patch)
+	var occ_path := "/document/parts/%s/occurrences/%s" % [room_part_id, occurrence_id]
+	var placed: Dictionary = await api.request(HTTPClient.METHOD_PATCH, occ_path, patch)
+	if not placed["ok"] and str(placed["error"]).contains("occurrence_is_fixed"):
+		# The first part put into an EMPTY Part (a New room) is grounded by the backend (fixed), and a fixed occurrence refuses a transform. Place it
+		# unfixed in one call, then ground it again: the backend's own grounding stays.
+		patch["fixed"] = false
+		placed = await api.request(HTTPClient.METHOD_PATCH, occ_path, patch)
+		if placed["ok"]:
+			placed = await api.request(HTTPClient.METHOD_PATCH, occ_path, {"fixed": true})
 	if not placed["ok"]:
 		return {"ok": true, "error": "Added, but couldn't place it: %s" % str(placed["error"]), "occurrence_id": occurrence_id}
 	return {"ok": true, "error": "", "occurrence_id": occurrence_id}

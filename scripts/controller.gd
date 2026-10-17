@@ -61,6 +61,7 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which sp
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
 signal group_message(text: String) ## something to tell the user about choosing / moving a sub-assembly (main.gd shows it)
+signal tool_message(text: String) ## what a shot tool did or why it did nothing (main.gd shows it on the status line and the wrist prompt)
 signal wheel_chord_started() ## trigger + grip pressed together on a hand with wheel_enabled: tool_wheel.gd opens the wheel
 
 @export var group_deadzone := 0.02 ## metres of hand travel after a grip on a part inside a sub-assembly before it follows the hand (0 = off): time to choose what to take
@@ -941,7 +942,11 @@ func _try_shoot_colour() -> void:
 	## Paint: the same real ray test as shoot-hide, but the trigger paints the hit part paint_hex.
 	## Undoable: the part's colour before the shot is put back (colour_tool.gd's set_color with the old hex, or
 	## "" to clear back to no override).
-	if colour_tool == null or bool(colour_tool.is_busy()):
+	## A shot that can't paint says why (tool_message): a buzz alone read as "the tool is broken" on the headset.
+	if colour_tool == null:
+		return
+	if bool(colour_tool.is_busy()):
+		tool_message.emit("Paint: still saving the last colour, shoot again in a moment.")
 		return
 	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	var part: Node3D = hit.get("part")
@@ -952,9 +957,11 @@ func _try_shoot_colour() -> void:
 	var result: Dictionary = await colour_tool.set_color(part, hex)
 	if not result.get("ok", false):
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		tool_message.emit("Couldn't paint %s: %s" % [part.name, str(result.get("error", "unknown error"))])
 		return
 	part.set_meta("paint_prev", hex)
 	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+	tool_message.emit("Painted %s %s." % [part.name, hex])
 	if command_stack:
 		command_stack.push("colour %s" % part.name,
 			func() -> void:
@@ -1057,7 +1064,7 @@ func _update_aim_hover() -> void:
 	## select right now, so you know what a trigger pull will pick before
 	## you commit to it.
 	var hit := {}
-	if ((parts_enabled and laser_select_enabled) or hide_tool_active or mates_tool_active or measure_tool_active) and held_node == null:
+	if ((parts_enabled and laser_select_enabled) or hide_tool_active or paint_active or mates_tool_active or measure_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	if face_highlight != null and (mates_tool_active or measure_tool_active):
 		# A pick takes one CAD face (Mates) or face / edge / vertex (Measure), so light up just that, not the

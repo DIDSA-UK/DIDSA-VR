@@ -119,6 +119,23 @@ func _initialize() -> void:
 	print("SMOKE an old warning that ran out does not count: ", not main.confirm_discard("Open x.glb"))
 	main.mark_clean()
 
+	# --- an Open that would lose unsaved changes offers the choice (Files page): discard and open, save first, or cancel
+	var prompts := [0]
+	main.discard_prompt_changed.connect(func() -> void: prompts[0] += 1)
+	main.mark_dirty()
+	parts_before = get_nodes_in_group("grabbable_parts").size()
+	main.load_glb_file(glb_path)
+	await frames(2)
+	print("SMOKE an Open with unsaved changes waits on a choice, naming what it would do: ", main.pending_discard() == "Open real_assembly_mesh.glb" and prompts[0] == 1 and main.status_text.contains("Discard") and get_nodes_in_group("grabbable_parts").size() == parts_before)
+	main.cancel_discard()
+	print("SMOKE Cancel keeps the changes and opens nothing: ", main.pending_discard() == "" and main.document_dirty and main.status_text.begins_with("Kept") and get_nodes_in_group("grabbable_parts").size() == parts_before)
+	main.load_glb_file(glb_path)
+	await frames(2)
+	await main.discard_and_continue()
+	await frames(3)
+	print("SMOKE Discard and open loads the file and the document is clean: ", main.pending_discard() == "" and not main.document_dirty and main.status_text.begins_with("Loaded real_assembly_mesh.glb"))
+	print("SMOKE a clean document never asks: ", main.confirm_discard("Open y.glb", func() -> void: pass) and main.pending_discard() == "")
+
 	# --- stale-mate flags travel with a save
 	var flagged: Node3D = null
 	for node in get_nodes_in_group("grabbable_parts"):

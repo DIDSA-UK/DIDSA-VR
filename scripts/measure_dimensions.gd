@@ -8,13 +8,15 @@ extends Node3D
 ## tests/measure_dimensions.gd checks what gets drawn headless. The node part just turns the items into lines
 ## and billboard labels, rebuilt whenever measure_tool.gd reports a new result or pick. The points come from
 ## measure_tool.picked_points() (where the laser landed, kept in each part's own space so a dimension follows
-## a part that moves).
+## a part that moves). Signals alone don't see a move or turn of the model, so _process() also redraws whenever
+## those points have shifted since the last drawing (points_moved()).
 
 const LABEL_FONT_SIZE := 48
 const LABEL_PIXEL_SIZE := 0.0006 ## metres per label pixel: ~3 cm tall text
 const TICK := 0.02 ## metres: half-length of a linear dimension's end ticks
 const LEADER := 0.14 ## metres: how far a callout's leader runs from the picked point
 const COLOUR := Color(1.0, 0.82, 0.25)
+const MOVE_EPSILON := 0.0005 ## metres: picked points moving less than this don't trigger a redraw
 
 var _tool
 var _camera: Camera3D
@@ -22,6 +24,7 @@ var _items: Array = []
 var _lines: MeshInstance3D
 var _labels: Array[Label3D] = []
 var _line_material: StandardMaterial3D
+var _drawn_points: Array = [] ## the picked world points the current drawing was built from
 
 
 static func format_mm(x: float) -> String:
@@ -49,6 +52,15 @@ static func describe(result: Dictionary, points: Array) -> Array:
 	return items
 
 
+static func points_moved(before: Array, after: Array, epsilon: float = MOVE_EPSILON) -> bool:
+	if before.size() != after.size():
+		return true
+	for i in before.size():
+		if (before[i] as Vector3).distance_to(after[i] as Vector3) > epsilon:
+			return true
+	return false
+
+
 func setup(measure_tool, camera: Camera3D) -> void:
 	_tool = measure_tool
 	_camera = camera
@@ -70,13 +82,22 @@ func items() -> Array:
 	return _items
 
 
+func _process(_delta: float) -> void:
+	# The model was moved, turned or scaled (grip, two-hand, undo): the dimension follows its picked points.
+	if _tool == null or not _tool.active or _items.is_empty():
+		return
+	if points_moved(_drawn_points, _tool.picked_points()):
+		refresh()
+
+
 func refresh() -> void:
 	## Rebuilds the drawing for the tool's current result and picks. Nothing is shown while the tool is off.
 	for l in _labels:
 		l.queue_free()
 	_labels.clear()
 	_lines.mesh = null
-	_items = describe(_tool.result, _tool.picked_points()) if _tool.active else []
+	_drawn_points = _tool.picked_points()
+	_items = describe(_tool.result, _drawn_points) if _tool.active else []
 	visible = not _items.is_empty()
 	if _items.is_empty():
 		return

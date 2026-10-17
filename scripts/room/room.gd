@@ -302,6 +302,23 @@ func move_box(new_xform: Transform3D) -> void:
 	RoomRegistry.push()
 
 
+func full_size() -> Vector3:
+	## The box's size when it is not minimised (what it needs to be put somewhere).
+	return ((_restore["half"] as Vector3) if minimised else volume.half) * 2.0
+
+
+func bring_to(spot: Transform3D) -> bool:
+	## The whole room carried to `spot` (the Rooms page's Bring to me): box, content, handles and console together, the content keeping its place in the
+	## box. A minimised room comes back full size there. False if it could not (restore() refused).
+	if minimised:
+		var old: Transform3D = _restore["xform"]
+		_restore["content"] = spot * old.affine_inverse() * (_restore["content"] as Transform3D)
+		_restore["xform"] = spot
+		return restore()
+	move_box(spot)
+	return true
+
+
 func apply_volume() -> void:
 	## The walls follow the box (after the walls were dragged): the wireframe and the glass are rebuilt for the current half extents.
 	if _walls == null:

@@ -8,6 +8,7 @@ const Room := preload("res://scripts/room/room.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 const RoomManagerTest := preload("res://tests/room_manager.gd")
+const RoomThumbnail := preload("res://scripts/room/room_thumbnail.gd")
 
 var viewport: SubViewport
 
@@ -85,6 +86,21 @@ func _initialize() -> void:
 	for x in [1.35, 1.4, 1.45, 1.5, 1.55]: # the 1 px wall line lands on one of these pixel columns
 		wall_seen = wall_seen or (px(x, 0.0).g > 0.5 and px(x, 0.0).r < 0.6)
 	print("SMOKE the walls are drawn (the room's cyan wireframe shows at its edge): ", wall_seen)
+
+	# the Rooms page's picture of this room (room_thumbnail.gd): rendered off-screen in its own world, without the room's clip
+	var thumbs := RoomThumbnail.new()
+	root.add_child(thumbs)
+	var tex: Texture2D = await thumbs.render(room)
+	var img: Image = tex.get_image() if tex != null else null
+	var lit := 0
+	if img != null:
+		for y in range(0, img.get_height(), 4):
+			for x in range(0, img.get_width(), 4):
+				if img.get_pixel(x, y).r > RoomThumbnail.BACKGROUND.r + 0.15:
+					lit += 1
+	print("SMOKE the room's thumbnail renders its two parts over the background: ", img != null and img.get_size() == Vector2i(RoomThumbnail.SIZE_PX, RoomThumbnail.SIZE_PX) and lit > 40 and absf(img.get_pixel(1, 1).r - RoomThumbnail.BACKGROUND.r) < 0.02 and absf(img.get_pixel(1, 1).b - RoomThumbnail.BACKGROUND.b) < 0.02)
+	print("SMOKE ...and is cached until the room's parts change: ", thumbs.cached(room) == tex and thumbs.get_children().all(func(c): return c.is_queued_for_deletion()))
+	thumbs.queue_free()
 
 	room.close()
 	await frames()

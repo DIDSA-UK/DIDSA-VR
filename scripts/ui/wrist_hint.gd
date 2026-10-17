@@ -1,11 +1,12 @@
 extends Node3D
 ## The hint panel on the right wrist: the tool wheel's tool tips, and the line that says what the trigger does now.
 ##
-## It hangs from the right wrist (its top edge at the wrist, facing you, leaning a little so it reads from above), because
-## the hand is what moves round the wheel: the panel travels with it, always below the ring (the ring is drawn well above the
-## hand, tool_wheel.gd's ring_lift), so it never covers the tile being pointed at. While the wheel is up it names what the hand is pointing
-## at and what that does (or why a greyed wedge cannot be chosen); with a mode tool in hand and the wheel down it says
-## what the trigger will do next (pick the first face, a mate was created...). Hidden when there is nothing to say.
+## It hangs from the right wrist (its top edge at the wrist, facing you, leaning a little so it reads from above). With a mode tool
+## in hand and the wheel down it says what the trigger will do next (pick the first face, a mate was created...). While the wheel is
+## up it names what the hand is pointing at and what that does (or why a greyed wedge cannot be chosen), and it is docked under the
+## ring instead (dock_under()), in the ring's plane below its pill: the ring opens centred on the hand, and a panel hanging off the
+## wrist sat between the eye and the ring, hiding most of the wedges round the one pointed at (tests/wheel_hint_render.gd measured
+## it). Hidden when there is nothing to say.
 ##
 ## Drawn like the tablet's panels from the live theme: a rounded panel in bg_panel with an accent border, the theme font and
 ## text colours, corner radius and border width, rebuilt on a theme change. wheel_flows.gd decides what it says.
@@ -34,6 +35,8 @@ var _accent := Color.WHITE
 var _tone := "normal"
 var _height := MIN_HEIGHT
 var _seen_revision := -1
+var _dock: Node3D = null ## while the wheel's ring is up: the panel sits under it (dock_under), not on the wrist
+var _dock_drop: Callable = Callable() ## () -> metres from the dock's centre down to the panel's top edge
 
 
 func setup(hand: Node3D, p_tokens: Resource) -> void:
@@ -84,7 +87,39 @@ func panel_height() -> float:
 	return _height
 
 
+func dock_under(target: Node3D, drop: Callable) -> void:
+	## Hang the panel by its top edge `drop.call()` metres below `target`'s centre, in its plane and facing the same way (the tool wheel's
+	## ring), until undock(). Followed every frame, so a sub-wheel opening somewhere else takes the panel with it.
+	_dock = target
+	_dock_drop = drop
+	top_level = true
+	_follow_dock()
+
+
+func undock() -> void:
+	## Back on the wrist.
+	_dock = null
+	top_level = false
+	position = MOUNT
+	rotation_degrees = Vector3(-TILT_DEGREES, 0.0, 0.0)
+
+
+func is_docked() -> bool:
+	return _dock != null
+
+
+func _follow_dock() -> void:
+	if not is_instance_valid(_dock):
+		undock()
+		return
+	var basis := _dock.global_transform.basis.orthonormalized()
+	var drop: float = _dock_drop.call() if _dock_drop.is_valid() else 0.0
+	global_transform = Transform3D(basis, _dock.global_position - basis.y * drop + basis.z * 0.004) # a hair towards the user: never z-fights the ring
+
+
 func _process(_delta: float) -> void:
+	if _dock != null:
+		_follow_dock()
 	if visible and _seen_revision != UiThemes.revision:
 		_layout() # the theme changed while it is up: re-skin in place
 
