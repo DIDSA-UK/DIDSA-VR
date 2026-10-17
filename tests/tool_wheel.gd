@@ -192,6 +192,8 @@ func _initialize() -> void:
 	_open_at_anchor()
 	print("SMOKE a top-level ring has the Clear tool pill, greyed with nothing in the hand: ", wheel.pill_entry().get("id", "") == "clear_tool" and not bool(wheel.pill_entry()["enabled"]))
 	print("SMOKE with the ring up the wrist panel shows the ring's name and how to use it: ", hint.is_showing() and hint.title_text() == "Tools" and "let go" in hint.body_text().to_lower())
+	var hint_top: Vector3 = hint.global_position
+	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and wheel.global_position.y - hint_top.y >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
 	_move(Vector2(0.0, 0.12))
 	print("SMOKE ...then the tool tip of the tile pointed at: ", hint.title_text() == "Mates" and hint.body_text() == "Mate two parts together")
 	_move(Vector2(0.0, -0.26))
@@ -200,6 +202,7 @@ func _initialize() -> void:
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
 	print("SMOKE releasing on the greyed pill changes nothing: ", manager.active_id == "")
+	print("SMOKE when the ring goes the panel is back on the wrist: ", not hint.is_docked() and hint.get_parent() == r and hint.position.is_equal_approx(hint.MOUNT))
 	manager.activate("shoot_hide")
 	var hide_prompt: String = flows.prompt_text()
 	print("SMOKE with a tool in hand the wrist panel carries its prompt: ", hint.is_showing() and hint.title_text() == hide_prompt.split("\n")[0])

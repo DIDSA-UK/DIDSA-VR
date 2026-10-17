@@ -129,6 +129,13 @@ func drawn_scale() -> float:
 	return BASE_SCALE * wheel_scale
 
 
+func clear_drop() -> float:
+	## Metres (in the world) from the ring's centre down to just below everything it draws: its outer edge, and the pill when it has
+	## one. Where the wrist hint panel docks while the ring is up (main.gd), so it never covers a wedge.
+	var reach := Math.OUTER_RADIUS + ((Math.PILL_GAP + Math.PILL_DEPTH) if not _pill.is_empty() else 0.0) + Math.PILL_GAP
+	return reach * drawn_scale()
+
+
 func is_open() -> bool:
 	## The chord is held (whether or not the ring is still up).
 	return _held

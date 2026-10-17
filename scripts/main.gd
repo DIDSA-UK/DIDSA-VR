@@ -446,6 +446,12 @@ func _add_tool_wheel() -> void:
 		hand.tool_message.connect(_wheel_flows.say)
 	_tool_wheel.pill_provider = _wheel_flows.pill_entry
 	_tool_wheel.summary_changed.connect(_wheel_flows.on_wheel_summary)
+	_tool_wheel.shown_changed.connect(func(shown: bool) -> void:
+		# While the ring is up the wrist panel sits under it: hanging off the hand (the ring's centre) it covered the wedges round it.
+		if shown:
+			_wheel_flows.hint_panel().dock_under(_tool_wheel, _tool_wheel.clear_drop)
+		else:
+			_wheel_flows.hint_panel().undock())
 	_tool_wheel.shown_changed.connect(_wheel_flows.on_ring_shown)
 	_tool_wheel.set_size(_settings.wheel_size)
 	_tool_wheel.set_enabled(_settings.wheel_enabled)
