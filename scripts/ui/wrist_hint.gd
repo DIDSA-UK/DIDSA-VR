@@ -2,8 +2,8 @@ extends Node3D
 ## The hint panel on the right wrist: the tool wheel's tool tips, and the line that says what the trigger does now.
 ##
 ## It hangs from the right wrist (its top edge at the wrist, facing you, leaning a little so it reads from above), because
-## the hand is what moves round the wheel: the panel travels with it, always below the ring (the ring is drawn well above the
-## hand, tool_wheel.gd's ring_lift), so it never covers the tile being pointed at. While the wheel is up it names what the hand is pointing
+## the hand is what moves round the wheel: the panel travels with it, below and in front of the hand (the ring opens centred
+## on the hand, tool_wheel.gd's ring_lift), so it sits under the tile being pointed at rather than over it. While the wheel is up it names what the hand is pointing
 ## at and what that does (or why a greyed wedge cannot be chosen); with a mode tool in hand and the wheel down it says
 ## what the trigger will do next (pick the first face, a mate was created...). Hidden when there is nothing to say.
 ##

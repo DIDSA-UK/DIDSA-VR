@@ -103,4 +103,39 @@ func _initialize() -> void:
 	var r0: Dictionary = await manager.delete_selected_press()
 	print("SMOKE delete-selected with nothing selected does nothing: ", r0.get("status") in ["none", "unavailable"])
 	print("SMOKE the delete label is a plain Delete selected part when idle: ", manager.delete_selected_label().begins_with("Delete"))
+
+	# --- the Rooms page's Bring to me: the room comes to a clear spot in front of the user, content and all
+	camera.global_position = Vector3(20.0, 1.6, 0.0)
+	camera.global_transform.basis = Basis.looking_at(Vector3(1, 0, 0), Vector3.UP) # facing +x, away from where the room is
+	var box_before: Transform3D = room.volume.xform
+	var probe_before: Vector3 = box_before.affine_inverse() * (room.content_root.global_transform * Vector3(0.1, 0.2, 0.3))
+	print("SMOKE Bring to me moves the room: ", manager.bring_to_me(room) == true)
+	var centre: Vector3 = room.volume.xform.origin
+	print("SMOKE ...in front of the user, a few metres ahead and not where it was: ", centre.x > 20.0 and centre.x < 30.0 and absf(centre.z) < 4.0 and centre.distance_to(box_before.origin) > 5.0)
+	print("SMOKE ...with its content (a content point keeps its place in the box): ", (room.volume.xform.affine_inverse() * (room.content_root.global_transform * Vector3(0.1, 0.2, 0.3))).distance_to(probe_before) < 0.001)
+	print("SMOKE ...and the registry's clip box with it: ", RoomRegistry.rooms[RoomRegistry.rooms.find(room.volume)].xform.origin.is_equal_approx(centre))
+	room.minimise()
+	camera.global_transform.basis = Basis.looking_at(Vector3(-1, 0, 0), Vector3.UP) # turn round
+	print("SMOKE Bring to me on a minimised room brings it back full size in front of you: ", manager.bring_to_me(room) == true and not room.minimised and room.volume.half.is_equal_approx(before_half) and room.volume.xform.origin.x < 20.0)
+	print("SMOKE ...touchable again: ", room.interactive)
+
+	# --- the Rooms page's picture of a room: built from the room's visible parts (headless has no renderer, so no image, and no error)
+	var copy: Node3D = manager.thumbnails.build_copy(room)
+	print("SMOKE the thumbnail copies the room's two parts, without the room's clip material: ", copy != null and copy.get_child_count() == 2 and copy.get_children().all(func(c): return not (c.material_override is ShaderMaterial)))
+	var bounds := Room.content_bounds(copy)
+	var cam_xf: Transform3D = manager.thumbnails.frame(bounds)
+	print("SMOKE the thumbnail camera looks at the middle of the content from outside it: ", (-cam_xf.basis.z).dot((bounds.get_center() - cam_xf.origin).normalized()) > 0.999 and not bounds.has_point(cam_xf.origin))
+	copy.free()
+	var tex = await manager.thumbnail(room)
+	print("SMOKE asking for a thumbnail headless gives none (the tile keeps its icon) without an error: ", tex == null or tex is Texture2D)
+
+	# --- New room: a new empty sub-assembly on the root, opened in a room
+	manager.configure_backend("http://fake", "key")
+	fake.glb = glb # (the backend serves a mesh-less glb for an empty Part; any readable glb will do here)
+	var rooms_before: int = manager.rooms.size()
+	var made: bool = await manager.new_room()
+	var posted: Dictionary = fake.last(HTTPClient.METHOD_POST, "/document/parts/R/occurrences")
+	print("SMOKE New room makes a new Part and places it on the root: ", made and fake.count(HTTPClient.METHOD_POST, "/document/parts") >= 2 and not posted.is_empty() and str(posted["body"]["resolved_part_id"]).begins_with("new-part-"))
+	print("SMOKE ...named as the next sub-assembly: ", str(posted["body"]["name_override"]) == "Sub-assembly 4")
+	print("SMOKE ...and opens a room for it: ", manager.rooms.size() == rooms_before + 1 and manager.rooms[-1].part_id == str(posted["body"]["resolved_part_id"]) and manager.rooms[-1].label == "Sub-assembly 4")
 	quit(0)

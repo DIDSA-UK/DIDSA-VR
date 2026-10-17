@@ -18,6 +18,7 @@ const Room := preload("res://scripts/room/room.gd")
 const RoomVolume := preload("res://scripts/room/room_volume.gd")
 const GroupIndex := preload("res://scripts/group_index.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
+const NativeCompose := preload("res://scripts/native_compose.gd")
 const RoomClip := preload("res://scripts/room/room_clip.gd")
 const RoomPlacement := preload("res://scripts/room/room_placement.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd")
@@ -26,6 +27,8 @@ const DropCue := preload("res://scripts/room/drop_cue.gd")
 const RoomGhost := preload("res://scripts/room/room_ghost.gd")
 const RoomConsole := preload("res://scripts/room/room_console.gd")
 const WorldPreview := preload("res://scripts/room/world_preview.gd")
+const RoomThumbnail := preload("res://scripts/room/room_thumbnail.gd")
+const NewDocument := preload("res://scripts/design_table/new_document.gd")
 
 const PLACE_CONFIRM := "trigger_click" ## placing a room: the right trigger drops it where the laser meets the floor,
 const PLACE_CANCEL := "by_button" ## B / Y gives up
@@ -55,10 +58,70 @@ var _away_from: Variant = null ## the user's position before "To world" flew the
 var _placing: Dictionary = {} ## while a room is being placed: part_id, label, seed_owner, seed_occurrence, token, hand, ghost, size, bytes, spot (Transform3D or null), confirmed
 var _place_token := 0
 var _steadiness := 2 ## index into TwoHandModel.STEADINESS_NAMES, as the tablet last set it
+var thumbnails: Node ## room_thumbnail.gd: each room's picture for the tablet's Rooms page
 
 
 func _ready() -> void:
 	add_to_group("room_listeners") # controller.gd tells us when it sent a stray part back (on_part_refused)
+	thumbnails = RoomThumbnail.new()
+	thumbnails.name = "Thumbnails"
+	add_child(thumbnails)
+
+
+func thumbnail(room: Node) -> Texture2D:
+	## The room's picture for its Rooms page tile (rendered on first ask, cached until its parts change). Null: empty, or nothing renders here.
+	return await thumbnails.render(room) if thumbnails != null else null
+
+
+func new_room() -> bool:
+	## The Rooms page's New room: a new, empty sub-assembly placed on the loaded assembly's root (a new Part and an occurrence of it, the same shape
+	## as the design table's New part), then summoned like any room (aim at the floor, trigger). Carry parts into it, or Files > Add while standing in
+	## it. True once the placement has started.
+	var root: String = _main.current_root_part_id() if _main != null and _main.has_method("current_root_part_id") else ""
+	if root == "":
+		status.emit("Open or start an assembly first (Files): a new room is a sub-assembly inside it.")
+		return false
+	if not RoomRegistry.can_add():
+		status.emit("Room limit reached (%d). Close a room, or raise the limit in Settings > Display." % RoomRegistry.max_rooms)
+		return false
+	var e := edit_api()
+	if e == null or _backend_url == "" or _api_key == "":
+		status.emit("No backend configured: a room holds a Part from the backend.")
+		return false
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return false
+	_busy_edit = true
+	var maker := NewDocument.new(Callable(e.api, "request"))
+	var existing: Array = await e.occurrences_of(root, true)
+	var name := "Sub-assembly %d" % (existing.size() + 1)
+	status.emit("Making %s..." % name)
+	var made: Dictionary = await maker.add_part(root, name, {"translation": [0.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0})
+	_busy_edit = false
+	if not made["ok"]:
+		status.emit("Couldn't make a new room: %s" % str(made["error"]))
+		return false
+	e.forget(root)
+	_mark_dirty()
+	if _main.has_method("refresh_assembly_tree"):
+		_main.refresh_assembly_tree()
+	await begin_placement(str(made["part_id"]), name, root, str(made["occurrence_id"]))
+	return true
+
+
+func bring_to_me(room: Node) -> bool:
+	## The Rooms page's Bring to me: the room (box and content together; a minimised one comes back full size) to a clear spot in front of the user.
+	if not is_instance_valid(room) or not rooms.has(room):
+		return false
+	var size: Vector3 = room.full_size()
+	var others: Array = RoomRegistry.rooms.filter(func(v) -> bool: return v != null and v != room.volume)
+	var spot = RoomPlacement.find_spot(_eye(), _forward(), size, others)
+	if spot == null or not room.bring_to(spot):
+		status.emit("No clear space for %s in front of you. Turn or walk somewhere roomier." % room.label)
+		return false
+	status.emit("Brought %s to you." % room.label)
+	rooms_changed.emit()
+	return true
 
 
 func setup(main: Node, view_modes: Node) -> void:
@@ -192,8 +255,9 @@ func add_file_to_room(room: Node, path: String) -> bool:
 		status.emit("Still working on the last change, try again in a moment.")
 		return false
 	var e := edit_api()
-	var text := FileAccess.get_file_as_string(path)
-	if e == null or text == "" or JSON.parse_string(text) == null:
+	var composed: Dictionary = _main.compose_native(path) if _main != null and _main.has_method("compose_native") else NativeCompose.compose(path) # the files a sub-assembly references come too
+	var text: String = composed["text"]
+	if e == null or not composed["ok"] or text == "":
 		status.emit("Couldn't read %s as a native file." % path.get_file())
 		return false
 	_busy_edit = true
@@ -209,7 +273,7 @@ func add_file_to_room(room: Node, path: String) -> bool:
 	_mark_room_changed(room)
 	_busy_edit = false
 	_mark_dirty()
-	status.emit("Added %s to the room." % path.get_file() if str(result["error"]) == "" else str(result["error"]))
+	status.emit(("Added %s to the room.%s" % [path.get_file(), NativeCompose.unresolved_note(composed)]) if str(result["error"]) == "" else str(result["error"]))
 	_push_undo("add %s" % path.get_file(), room.part_id, str(result["occurrence_id"]), snapshot, true)
 	return true
 
@@ -849,6 +913,8 @@ func close_room(room: Node) -> void:
 	_forget_room(room)
 	_restore_seed(room)
 	_drop_preview(room)
+	if thumbnails != null:
+		thumbnails.forget(room)
 	var stale: bool = room.members_changed
 	rooms.erase(room)
 	room.close()

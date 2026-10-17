@@ -35,6 +35,12 @@ func last(method: int, fragment: String) -> Dictionary:
 
 func request(method: int, path: String, body = null) -> Dictionary:
 	calls.append({"method": method, "path": path, "body": body})
+	if method == HTTPClient.METHOD_POST and path == "/document/parts": # a new, empty Part (New part, New room)
+		var id := "new-part-%d" % next_added
+		next_added += 1
+		names[id] = str(body.get("name", ""))
+		occurrences[id] = []
+		return _ok({"id": id, "name": names[id]}, 201)
 	var parts := path.trim_prefix("/document/parts/").split("/")
 	var owner := parts[0]
 	var tail := "/".join(parts.slice(1))

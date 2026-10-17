@@ -20,6 +20,7 @@ extends RefCounted
 signal toast(text: String, kind: String)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const NativeCompose := preload("res://scripts/native_compose.gd") ## which file names are native files (any extension they have had)
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
@@ -83,8 +84,12 @@ var _info_label: Label
 var _files_count_label: Label
 var _dirty_label: Label ## "Unsaved changes" on the Files page
 var _new_assembly_button: Button
+var _discard_box: VBoxContainer ## Files page: "you have unsaved changes" with Discard / Save first / Cancel, while main.gd has a replace waiting
+var _discard_label: Label
 var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
 const NEW_ASSEMBLY_CONFIRM_MS := 4000
+const ROOM_TILE_COLUMNS := 2 ## the Rooms page's grid of open rooms
+const ROOM_THUMB_HEIGHT := 150 ## tablet pixels
 var _files_cache: Array = [] ## [{path, native, root_id}] — scanned on select/Refresh, never per frame (a project folder may be a network mount)
 
 
@@ -121,7 +126,7 @@ func register(reg) -> void:
 
 	reg.add_category("rooms", "Rooms", "room", ACCENT_ASSEMBLY, {"subtitle": "assembly rooms"})
 	reg.add_tool("rooms", "rooms", "Rooms", "room", _build_rooms_page, {
-		"help": "Assembly Rooms: press Room on an Assembly Tree row to open one. Minimise shrinks a room to a small globe you can keep nearby; Restore puts it back (it needs its old space to be free)."})
+		"help": "Assembly Rooms. New room makes an empty sub-assembly in a room of its own; Room on an Assembly Tree row opens an existing one. Each open room has a tile: Bring to me moves it (and a minimised one comes back full size) in front of you, Close closes it."})
 
 	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
 	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
@@ -452,6 +457,14 @@ func _build_visibility_page() -> Control:
 	page.add_child(_button("Reverse visibility", func() -> void: _main.reverse_visibility()))
 	page.add_child(_button("Isolate selected", func() -> void: _main.isolate_selected()))
 	page.add_child(_hint("To hide parts by pointing at them, use Shoot hide."))
+	var rm = _main.room_manager if _main and _main.get("room_manager") else null
+	if rm != null:
+		page.add_child(_hint("Delete takes the selected part out of the assembly (its mates go too). Two presses; undo puts it back.", true))
+		var del := _button(rm.delete_selected_label(), func() -> void: rm.delete_selected_press())
+		rm.delete_state_changed.connect(func() -> void:
+			if is_instance_valid(del):
+				del.text = rm.delete_selected_label())
+		page.add_child(del)
 	return page
 
 
@@ -521,55 +534,68 @@ func _refresh_environment_status() -> void:
 # --- Assembly: Mates ----------------------------------------------------------------
 
 func _build_rooms_page() -> Control:
+	## New room, then a tile per open room: its picture (room_thumbnail.gd), name and scale, Bring to me and Close.
 	var page := _page(8)
-	var list := VBoxContainer.new()
-	list.add_theme_constant_override("separation", 6)
-	page.add_child(list)
 	var rm = _main.room_manager if _main and _main.get("room_manager") else null
 	if rm == null:
-		list.add_child(_hint("Rooms are not available."))
+		page.add_child(_hint("Rooms are not available."))
 		return page
+	page.add_child(_button("New room", func() -> void: rm.new_room(), &"ButtonAccent"))
+	var grid := GridContainer.new()
+	grid.columns = ROOM_TILE_COLUMNS
+	grid.add_theme_constant_override("h_separation", tokens.gap)
+	grid.add_theme_constant_override("v_separation", tokens.gap)
+	page.add_child(grid)
+	var empty := _hint("No rooms open. New room makes an empty one; Room on an Assembly Tree row opens a sub-assembly in one.")
+	page.add_child(empty)
 	var fill := func() -> void:
-		for c in list.get_children():
-			list.remove_child(c)
+		for c in grid.get_children():
+			grid.remove_child(c)
 			c.queue_free()
-		if rm.rooms.is_empty():
-			list.add_child(_hint("No rooms open. Press Room on an Assembly Tree row."))
+		empty.visible = rm.rooms.is_empty()
 		for r in rm.rooms:
-			var room = r
-			var row := _row()
-			var name_l := Label.new()
-			name_l.text = "%s  %s" % [room.label, room.scale_text()]
-			name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			name_l.clip_text = true
-			row.add_child(name_l)
-			row.add_child(_button("Restore" if room.minimised else "Minimise", func() -> void:
-				if room.minimised:
-					rm.restore_room(room)
-				else:
-					rm.minimise_room(room)
-				rm.rooms_changed.emit()))
-			row.add_child(_button("Close", func() -> void: rm.close_room(room)))
-			list.add_child(row)
+			grid.add_child(_room_tile(rm, r))
 	fill.call()
 	rm.rooms_changed.connect(fill)
 	page.tree_exiting.connect(func() -> void:
 		if rm.rooms_changed.is_connected(fill):
 			rm.rooms_changed.disconnect(fill))
-	var table = _main.design_table if _main.get("design_table") != null else null
-	if table != null and table.world_preview != null:
-		var world_button := _button("Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)], func() -> void: pass)
-		world_button.pressed.connect(func() -> void:
-			if table.world_preview.available():
-				table.world_preview.cycle()
-			world_button.text = "Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)] if table.world_preview.available() else "Put a part on the design table first")
-		page.add_child(world_button)
-	var del := _button(rm.delete_selected_label(), func() -> void: rm.delete_selected_press())
-	rm.delete_state_changed.connect(func() -> void:
-		if is_instance_valid(del):
-			del.text = rm.delete_selected_label())
-	page.add_child(del)
 	return page
+
+
+func _room_tile(rm, room) -> Control:
+	var tile := PanelContainer.new()
+	tile.theme_type_variation = &"PanelRaised"
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	tile.add_child(box)
+	var picture := TextureRect.new()
+	picture.custom_minimum_size = Vector2(0, ROOM_THUMB_HEIGHT)
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.texture = UiIcons.texture("room", 96) # until the picture is ready, and for an empty room
+	picture.modulate = room.colour
+	box.add_child(picture)
+	_fill_room_thumbnail(rm, room, picture)
+	var name_l := Label.new()
+	name_l.text = room.label
+	name_l.clip_text = true
+	box.add_child(name_l)
+	var sub := _hint("%s%s" % [room.scale_text(), "  (minimised)" if room.minimised else ""], true)
+	box.add_child(sub)
+	var row := _row()
+	row.add_child(_button("Bring to me", func() -> void: rm.bring_to_me(room)))
+	row.add_child(_button("Close", func() -> void: rm.close_room(room), &"ButtonDanger"))
+	box.add_child(row)
+	return tile
+
+
+func _fill_room_thumbnail(rm, room, picture: TextureRect) -> void:
+	var texture: Texture2D = await rm.thumbnail(room)
+	if texture != null and is_instance_valid(picture):
+		picture.texture = texture
+		picture.modulate = Color.WHITE
 
 
 func _build_mates_page() -> Control:
@@ -1047,6 +1073,7 @@ func _build_files_page() -> Control:
 	if _main != null:
 		_main.dirty_changed.connect(func(_d: bool) -> void: _refresh_dirty_label())
 	_refresh_dirty_label()
+	page.add_child(_build_discard_box())
 	page.add_child(_button("Refresh list", _rescan_files))
 	page.add_child(_hint("Save writes the whole session, including edits made on the design table, as a new .didsa file the flat app can open. It never overwrites the file you opened.", true))
 	page.add_child(_button("Save as new file", func() -> void:
@@ -1066,6 +1093,36 @@ func _refresh_dirty_label() -> void:
 	_dirty_label.text = ("Unsaved changes. Save as new file before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
 	if _new_assembly_button:
 		_new_assembly_button.text = "New assembly" if _new_assembly_armed_until_ms == 0 else _new_assembly_armed_text()
+
+
+func _build_discard_box() -> VBoxContainer:
+	## The choice main.confirm_discard() asks for when an Open would lose unsaved changes: discard them and open, save first, or cancel.
+	_discard_box = VBoxContainer.new()
+	_discard_box.add_theme_constant_override("separation", tokens.gap)
+	_discard_label = _hint("")
+	_discard_label.add_theme_color_override("font_color", tokens.warn)
+	_discard_box.add_child(_discard_label)
+	var row := _row()
+	row.add_child(_button("Discard and open", func() -> void:
+		await _main.discard_and_continue()
+		_rescan_files(), &"ButtonDanger"))
+	row.add_child(_button("Save, then open", func() -> void:
+		await _main.save_and_continue()
+		_rescan_files(), &"ButtonAccent"))
+	row.add_child(_button("Cancel", func() -> void: _main.cancel_discard()))
+	_discard_box.add_child(row)
+	if _main != null:
+		_main.discard_prompt_changed.connect(_refresh_discard_box)
+	_refresh_discard_box()
+	return _discard_box
+
+
+func _refresh_discard_box() -> void:
+	if not is_instance_valid(_discard_box) or _main == null:
+		return
+	var what: String = _main.pending_discard()
+	_discard_box.visible = what != ""
+	_discard_label.text = "You have unsaved changes. \"%s\" will lose them." % what
 
 
 func _new_assembly_armed_text() -> String:
@@ -1099,7 +1156,7 @@ func _rescan_files() -> void:
 	if _main == null:
 		return
 	for path in _main.list_model_files():
-		var native: bool = path.get_extension().to_lower() in ["didsa", "didsaprt"]
+		var native: bool = NativeCompose.native_extension(path) != ""
 		_files_cache.append({"path": path, "native": native, "root_id": _main.native_file_root_part_id(path) if native else ""})
 	if _files_count_label:
 		_files_count_label.text = "%d model file(s) found" % _files_cache.size()
@@ -1209,6 +1266,16 @@ func _build_settings_table() -> Control:
 		page.add_child(_hint("The design table isn't available here."))
 		return page
 	var settings = _main.app_settings()
+	var table = _design_table
+	if table.get("world_preview") != null:
+		var preview_text := func() -> String:
+			return "Table part, in the world: %s" % table.world_preview.WorldPreview.MODE_NAMES[int(table.world_preview.mode)] if table.world_preview.available() else "Table part, in the world: put a part on the design table first"
+		var world_button := _button(preview_text.call(), func() -> void: pass)
+		world_button.pressed.connect(func() -> void:
+			if table.world_preview.available():
+				table.world_preview.cycle()
+			world_button.text = preview_text.call())
+		page.add_child(world_button)
 	page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
 		_design_table.keep_turn_on_return = i == 1
 		settings.set_table_keep_turn(i == 1)))

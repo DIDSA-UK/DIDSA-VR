@@ -50,6 +50,7 @@ const GLOW := 0.014 ## metres: how far the hovered wedge's glow reaches
 const LABEL_PIXEL_SIZE := 0.0006
 const SIZE_NAMES: Array[String] = ["Small", "Normal", "Large"]
 const SIZE_SCALES: Array[float] = [0.8, 1.0, 1.3]
+const BASE_SCALE := 2.0 / 3.0 ## the whole ring (drawing and hand travel) is this fraction of tool_wheel_math.gd's sizes; the Size setting multiplies it
 const TRIGGER_ACTION := "trigger_click"
 const GRIP_ACTION := "grip_click"
 
@@ -82,7 +83,7 @@ var _corner := 0.009
 var _border := 0.0035
 var _glow_alpha := 0.3
 var pill_provider: Callable = Callable() ## () -> Dictionary: the entry for the pill under a top-level ring ({} = no pill)
-var ring_lift := 0.45 ## metres the ring is drawn above the hand (the hand's own steering is unchanged): the wrist panel hangs below the hand, so with the ring this far up it never covers the tile being pointed at
+var ring_lift := 0.0 ## metres the ring is drawn above the hand (the hand's own steering is unchanged). 0: the ring opens centred on the hand (owner's headset report, Oct 2026: at 0.45 m it sat too high)
 var _pill: Dictionary = {}
 var _pill_hover := false
 var _pill_nodes: Dictionary = {}
@@ -120,6 +121,12 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 
 func set_size(index: int) -> void:
 	wheel_scale = SIZE_SCALES[clampi(index, 0, SIZE_SCALES.size() - 1)]
+
+
+func drawn_scale() -> float:
+	## The ring's scale in the world: BASE_SCALE times the Size setting. The hand's travel is divided by the same
+	## number, so the cursor stays on the drawn wedges.
+	return BASE_SCALE * wheel_scale
 
 
 func is_open() -> bool:
@@ -184,7 +191,7 @@ func _show_ring(entries: Array, at: Vector3) -> void:
 	_anchor = at
 	_orient_to_user()
 	global_transform = Transform3D(_basis_for(), _anchor + Vector3.UP * ring_lift)
-	scale = Vector3.ONE * wheel_scale
+	scale = Vector3.ONE * drawn_scale()
 	_rebuild()
 	_set_shown(not _entries.is_empty())
 	visible = _shown
@@ -265,7 +272,7 @@ func _process(_delta: float) -> void:
 	if _seen_revision != UiThemes.revision:
 		_rebuild() # the theme (or the effects switch) changed while the ring is up: re-skin it in place
 		_update_centre()
-	var offset := Math.project_offset(_hand.global_position, _anchor, _right) / maxf(wheel_scale, 0.01)
+	var offset := Math.project_offset(_hand.global_position, _anchor, _right) / maxf(drawn_scale(), 0.01)
 	var on_pill := not _pill.is_empty() and Math.in_pill(offset)
 	_update_hover(-1 if on_pill else Math.wedge_for(offset, _entries.size(), dead_zone), on_pill)
 	var shown_len := minf(offset.length(), Math.OUTER_RADIUS * 1.15)

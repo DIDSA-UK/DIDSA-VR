@@ -48,18 +48,22 @@ var visibility_ruled_parts: Array = [] ## parts whose load-rule visibility (visi
 var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 signal dirty_changed(dirty: bool)
+signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const STALE_MATES_KEY := "vr_stale_mates" ## the native-file extra that carries the design table's "mates need redoing" flags
 const DISCARD_CONFIRM_MS := 6000 ## how long a "this will discard your unsaved changes" warning stays armed for a second press
+var _startup_compose_note := "" ## native_compose.gd's "N referenced files not loaded" for the startup file, shown once its mesh is in
 var last_saved_path := "" ## the .didsa the last save wrote
 var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
 var _discard_armed_for := ""
 var _discard_armed_until_ms := 0
+var _pending_discard: Dictionary = {} ## {what, run: Callable}: the replace that hit unsaved changes, run by discard_and_continue()
 var _settings := preload("res://scripts/app_settings.gd").new() ## project folder + last-picked scene — see app_settings.gd
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment ## Light/Dark/Mid/Passthrough — see environment_manager.gd
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
+const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
 # Perf readout (see _process): the numbers milestone 1 exists to measure
@@ -437,6 +441,9 @@ func _add_tool_wheel() -> void:
 	add_child(_tool_wheel)
 	_tool_wheel.setup($XROrigin3D/RightController, $XROrigin3D/XRCamera3D, tokens, _wheel_flows.entries)
 	_tool_wheel.title_provider = _wheel_flows.ring_title
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.tool_message.connect(_set_status)
+		hand.tool_message.connect(_wheel_flows.say)
 	_tool_wheel.pill_provider = _wheel_flows.pill_entry
 	_tool_wheel.summary_changed.connect(_wheel_flows.on_wheel_summary)
 	_tool_wheel.shown_changed.connect(_wheel_flows.on_ring_shown)
@@ -822,14 +829,13 @@ func _begin_import() -> void:
 		_fetch_mesh()
 		return
 
-	var file := FileAccess.open(native_file_path, FileAccess.READ)
-	var raw_text := file.get_as_text()
-	file.close()
-
-	var parsed = JSON.parse_string(raw_text)
-	if parsed == null or not (parsed is Dictionary):
-		_set_status("Couldn't parse %s as JSON — is it a real exported .didsa/.DIDSAprt file?" % native_file_path)
+	var composed := compose_native(native_file_path) # the files its occurrences reference, folded in (native_compose.gd)
+	if not composed["ok"]:
+		_set_status(composed["error"])
 		return
+	var raw_text: String = composed["text"]
+	var parsed = composed["parsed"]
+	_startup_compose_note = NativeCompose.unresolved_note(composed)
 
 	var document_dict: Dictionary = parsed.get("document", {})
 	var root_part_id: String = str(document_dict.get("root_part_id", ""))
@@ -901,7 +907,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 		import_ms, download_ms, int(body.size() / 1024.0), Time.get_ticks_msec() - _parse_started_ms
 	]
 	print("DIDSA VR: ", _load_summary)
-	_set_status("Loaded %d part mesh(es). Grip a part to grab it." % _part_count)
+	_set_status("Loaded %d part mesh(es). Grip a part to grab it.%s" % [_part_count, _startup_compose_note])
 
 
 ## source_format string for each extension the backend's ImportSourceFormat
@@ -909,7 +915,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 ## through the backend's importer; glb/gltf load straight into Godot with no
 ## backend round trip at all (see load_glb_file()).
 const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
-const _NATIVE_FORMATS := ["didsa", "didsaprt"] ## a plain JSON native save/export, either extension (see README) — same file, no format difference.
+const _NATIVE_FORMATS := ["didsa", "didsaprt", "didsacad"] ## a plain JSON native save/export, any of the extensions it has had (current first; native_compose.gd) — same file, no format difference.
 
 func list_model_files() -> PackedStringArray:
 	## Model files the tablet's Files tab offers: res://models (next to the
@@ -979,27 +985,22 @@ func native_file_root_part_id(path: String) -> String:
 	return found
 
 
-func _read_native_json(path: String) -> Variant:
-	## Shared by open_native_file()/add_component_file(): reads and JSON-
-	## parses a local native file, or null (having already set the status)
-	## if it can't. Same parse this scene already does for native_file_path
-	## at startup (_begin_import()), factored out so both new runtime paths
-	## share it instead of duplicating the read-and-parse boilerplate.
-	if not FileAccess.file_exists(path):
-		_set_status("No such file: %s" % path)
-		return null
-	var file := FileAccess.open(path, FileAccess.READ)
-	var raw_text := file.get_as_text()
-	file.close()
-	var parsed = JSON.parse_string(raw_text)
-	if parsed == null or not (parsed is Dictionary):
-		_set_status("Couldn't parse %s as JSON — is it a real exported .didsa/.DIDSAprt file?" % path.get_file())
-		return null
-	return parsed
+func native_search_dirs() -> Array:
+	## Where a native file's `external_ref`s are looked for after its own folder: the project folder, then the models folders.
+	var dirs := []
+	if not _settings.project_folder.is_empty():
+		dirs.append(_settings.project_folder)
+	dirs.append_array(["res://models", "user://models"])
+	return dirs
+
+
+func compose_native(path: String) -> Dictionary:
+	## `path` with every file its occurrences reference folded in, ready to POST (native_compose.gd's compose()).
+	return NativeCompose.compose(path, native_search_dirs())
 
 
 func open_native_file(path: String) -> void:
-	if not confirm_discard("Open " + path.get_file()):
+	if not confirm_discard("Open " + path.get_file(), open_native_file.bind(path)):
 		return
 	if not _claim_load("Open"):
 		return
@@ -1019,10 +1020,12 @@ func _open_native_file_impl(path: String) -> void:
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("Open needs a backend (see secrets.cfg.example).")
 		return
-	var parsed = _read_native_json(path)
-	if parsed == null:
+	var composed := compose_native(path) # the files its occurrences reference, folded in (native_compose.gd)
+	if not composed["ok"]:
+		_set_status(composed["error"])
 		return
-	var raw_text := FileAccess.get_file_as_string(path) # sent AS IS: re-serialising `parsed` would turn every integer into a float
+	var parsed: Dictionary = composed["parsed"]
+	var raw_text: String = composed["text"] # the file's own text when nothing was referenced (re-serialising `parsed` would turn every integer into a float)
 	var document_dict: Dictionary = parsed.get("document", {})
 	var root_part_id: String = str(document_dict.get("root_part_id", ""))
 	if root_part_id.is_empty():
@@ -1056,7 +1059,7 @@ func _open_native_file_impl(path: String) -> void:
 		return
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
-	_set_status("Opened %s: %d part mesh(es)." % [path.get_file(), _part_count])
+	_set_status("Opened %s: %d part mesh(es).%s" % [path.get_file(), _part_count, NativeCompose.unresolved_note(composed)])
 
 
 func add_component_file(path: String) -> void:
@@ -1089,12 +1092,14 @@ func _add_component_file_impl(path: String) -> void:
 	if _resolved_part_id.is_empty():
 		_set_status("Load a backend-hosted assembly first — nothing to add %s onto." % path.get_file())
 		return
-	var parsed = _read_native_json(path)
-	if parsed == null:
+	var composed := compose_native(path) # a sub-assembly file brings the files it references (native_compose.gd)
+	if not composed["ok"]:
+		_set_status(composed["error"])
 		return
+	var component_text: String = composed["text"]
 	var e = room_manager.edit_api()
 	if e != null:
-		var refusal: String = await e.file_conflict(_resolved_part_id, FileAccess.get_file_as_string(path)) # (the server only checks the file's root; see room_edit.gd)
+		var refusal: String = await e.file_conflict(_resolved_part_id, component_text) # (the server only checks the file's root; see room_edit.gd)
 		if refusal != "":
 			_set_status(refusal)
 			return
@@ -1105,7 +1110,7 @@ func _add_component_file_impl(path: String) -> void:
 	_set_status("Adding %s to the assembly..." % path.get_file())
 	req.request(
 		"%s%s/parts/%s/add-component" % [backend_url, API_PREFIX, _resolved_part_id], headers,
-		HTTPClient.METHOD_POST, '{"component": %s}' % FileAccess.get_file_as_string(path) # the file's own text: re-serialising `parsed` would turn every integer into a float
+		HTTPClient.METHOD_POST, '{"component": %s}' % component_text # the file's own text (or native_compose.gd's): JSON.stringify would turn every integer into a float
 	)
 	var add_result: Array = await req.request_completed
 	if _parse_import_response(add_result, "add %s to the assembly" % path.get_file(), req) == null:
@@ -1172,7 +1177,7 @@ func load_glb_file(path: String) -> void:
 	if not FileAccess.file_exists(path):
 		_set_status("No such file: %s" % path)
 		return
-	if not confirm_discard("Open " + path.get_file()):
+	if not confirm_discard("Open " + path.get_file(), load_glb_file.bind(path)):
 		return
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
@@ -1184,7 +1189,7 @@ func load_glb_file(path: String) -> void:
 
 
 func _import_external_file(path: String, source_format: String) -> void:
-	if not confirm_discard("Open " + path.get_file()):
+	if not confirm_discard("Open " + path.get_file(), _import_external_file.bind(path, source_format)):
 		return
 	if not _claim_load("the import"):
 		return
@@ -1411,19 +1416,71 @@ func mark_clean() -> void:
 		dirty_changed.emit(false)
 
 
-func confirm_discard(what: String) -> bool:
-	## Ask before replacing the document. Clean: true at once. With unsaved edits the first call says so (and what to do) and returns false;
-	## the same `what` again within DISCARD_CONFIRM_MS goes ahead and discards them. Different actions don't share a confirmation.
+func confirm_discard(what: String, run: Callable = Callable()) -> bool:
+	## Ask before replacing the document. Clean: true at once. With unsaved edits the first call warns and returns false; the same
+	## `what` again within DISCARD_CONFIRM_MS goes ahead and discards them. Different actions don't share a confirmation.
+	## With `run` (the action itself, to call again) the warning is also a choice on the Files page: discard_and_continue() runs it,
+	## save_and_continue() saves first, cancel_discard() drops it (owner's report, Oct 2026: a bare refusal read as an error).
 	if not document_dirty:
+		_clear_pending_discard()
 		return true
 	var now := Time.get_ticks_msec()
 	if _discard_armed_for == what and now < _discard_armed_until_ms:
 		_discard_armed_for = ""
+		_clear_pending_discard()
 		return true
 	_discard_armed_for = what
 	_discard_armed_until_ms = now + DISCARD_CONFIRM_MS
-	_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
+	if run.is_valid():
+		_pending_discard = {"what": what, "run": run}
+		discard_prompt_changed.emit()
+		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (Files page)." % what)
+	else:
+		_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
 	return false
+
+
+func pending_discard() -> String:
+	## What is waiting on "discard your unsaved changes?" ("Open bracket.didsa"), or "" for nothing.
+	return str(_pending_discard.get("what", ""))
+
+
+func discard_and_continue() -> void:
+	## The user chose to lose the unsaved changes: run the waiting replace.
+	if _pending_discard.is_empty():
+		return
+	var pending := _pending_discard
+	_clear_pending_discard()
+	_discard_armed_for = str(pending["what"])
+	_discard_armed_until_ms = Time.get_ticks_msec() + DISCARD_CONFIRM_MS
+	await (pending["run"] as Callable).call()
+
+
+func save_and_continue() -> void:
+	## Save as a new file first; only once that worked, run the waiting replace.
+	if _pending_discard.is_empty():
+		return
+	var pending := _pending_discard
+	if await save_native_snapshot() == "":
+		return # the status line says why; the choice stays up
+	if _pending_discard != pending:
+		return # something else asked meanwhile
+	_clear_pending_discard()
+	await (pending["run"] as Callable).call()
+
+
+func cancel_discard() -> void:
+	_discard_armed_for = ""
+	if not _pending_discard.is_empty():
+		_set_status("Kept your unsaved changes; nothing was opened.")
+	_clear_pending_discard()
+
+
+func _clear_pending_discard() -> void:
+	if _pending_discard.is_empty():
+		return
+	_pending_discard = {}
+	discard_prompt_changed.emit()
 
 
 # --- New assembly / new part -----------------------------------------------------------

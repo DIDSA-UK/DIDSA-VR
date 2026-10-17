@@ -39,7 +39,7 @@ To try the UI without a backend or headset, open `lab/ui_lab.tscn` and press F6.
 ## The three working spaces
 
 - **World**: the main assembly at arena scale, with all the viewing, manipulation and assembly tools. The wrist tablet owns the world (scale, view, hide, mates, environment).
-- **Rooms**: a glass-walled, clipped, resizable window onto one sub-assembly. Summon one with the laser from the tablet's **Rooms** tile or from a tree row, resize it by its eight corner handles, carry it by its move bar, and **drop a carried part inside to add it** to that assembly. A room has its own console (scale, Fit walls, delete, close, minimise) and a **world preview** (Hidden / Ghost / Preview). Details: [`docs/assembly-rooms-scope.md`](docs/assembly-rooms-scope.md), [`docs/assembly-rooms-plan.md`](docs/assembly-rooms-plan.md).
+- **Rooms**: a glass-walled, clipped, resizable window onto one sub-assembly. Summon one with the laser from the tablet's **Rooms** tile or from a tree row, resize it by its eight corner handles, carry it by its move bar, and **drop a carried part inside to add it** to that assembly. A room has its own console (scale, Fit walls, delete, close, minimise); the Rooms tile lists the open rooms with a picture of each, Bring to me and Close and a **world preview** (Hidden / Ghost / Preview). Details: [`docs/assembly-rooms-scope.md`](docs/assembly-rooms-scope.md), [`docs/assembly-rooms-plan.md`](docs/assembly-rooms-plan.md).
 - **Design table**: a tilted console in front of you for authoring one part. Pick a flat face or reference plane, sketch on it with the laser, type dimensions on the numeric pad, then add features. Uses DIDSA-CAD's own tool names: Sketch (Line, Rectangle, Circle, Arc, Polygon, Point, Slot), Constrain, and Feature (Extrude, Revolve, Fillet, Chamfer, Shell, Mirror, plus the depth options added in Phase 7). Details: [`docs/design-table.md`](docs/design-table.md).
 
 ## Controls
@@ -70,11 +70,11 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the
 | Tile | Opens |
 |---|---|
 | **Design** | Summons the design table, or brings it to you. |
-| **Rooms** | Open a room, minimise/restore, close. |
+| **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
 | **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Relax/Enforce all, Fix/Float). |
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
-| **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. |
+| **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
 | **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
 
@@ -148,7 +148,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 - **No Quest-hardware measurements** yet (load time, frame rate, Quest 2). Headset testing is ongoing and informal.
 - **Cleartext HTTP on Android** (see Configuration).
 - **Server does not stop cycles or unknown Part ids** when adding occurrences; the client refuses them.
-- **Multi-file assemblies**: occurrences pointing at other files via `external_ref` with no stamped `resolved_part_id` do not auto-resolve on open. Open/Add one file at a time from the Files page.
+- **Multi-file assemblies** resolve on Open and Add the way the flat app does (`scripts/native_compose.gd`): each `external_ref` is looked for beside the opened file, then in the project folder and the models folders, under any native extension (`.didsa`, `.DIDSAprt`, `.didsacad`). A file whose Part id clashes with another file's is left out (the flat app re-mints it; not ported) and the status line names it.
 - **Rooms**: 0.5 to 40 m on a side, no overlapping rooms, no rooms inside rooms; the default room limit is 4 (Settings, Display).
 - **Sections** are one client-side plane; the backend's section endpoint is too slow for real-time dragging.
 - **Design table, not built**: surfacing, curves, gears, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Current list: [`docs/design-table.md`](docs/design-table.md), [`docs/design-table-gaps.md`](docs/design-table-gaps.md).

@@ -52,6 +52,7 @@ func _initialize() -> void:
 	# --- the chord takes the hand
 	_open_at_anchor()
 	print("SMOKE the chord opens the ring and sets the hand's wheel_open meta: ", wheel.is_open() and wheel.is_shown() and r.wheel_is_open())
+	print("SMOKE the ring opens centred on the hand, at two thirds of the base size: ", wheel.global_position.is_equal_approx(anchor) and is_equal_approx(wheel.drawn_scale(), 2.0 / 3.0) and wheel.global_transform.basis.get_scale().is_equal_approx(Vector3.ONE * 2.0 / 3.0))
 	print("SMOKE while it is open the hand is 'manipulating', so the stick does not turn or walk you: ", r.is_manipulating())
 	print("SMOKE while it is open the grip does not drag the world: ", not main._two_hand._hand_free_ignoring_button(r))
 	print("SMOKE the laser is hidden while the wheel is open: ", (await _laser_hidden()))
@@ -158,6 +159,25 @@ func _initialize() -> void:
 	tablet.pages.set_paint_colour("#3498db")
 	print("SMOKE choosing a swatch sets the colour both hands fire: ", r.paint_hex == "#3498db" and l.paint_hex == "#3498db" and tablet.pages.paint_colour() == "#3498db")
 	print("SMOKE the prompt names the colour: ", "#3498db" in flows.prompt_text())
+	# A shot that can't paint says why on the wrist and the status line (it used to be a buzz only). This part is the assembly's own content
+	# (no occurrence id), which has no colour in the backend's model.
+	var target := MeshInstance3D.new()
+	target.name = "RootBody"
+	target.mesh = BoxMesh.new()
+	target.set_meta("owner_part_id", "root")
+	target.set_meta("occurrence_id", "")
+	root.add_child(target)
+	target.create_trimesh_collision()
+	target.add_to_group("grabbable_parts")
+	target.global_position = r.global_position - r.global_transform.basis.z * 1.0
+	await physics_frame
+	await physics_frame
+	r._update_aim_hover()
+	print("SMOKE with Paint on the laser lights the part it would paint: ", r._aim_hover_node == target)
+	await r._try_shoot_colour()
+	print("SMOKE shooting a part that can't take a colour says why (wrist prompt and status): ", flows.prompt_text().begins_with("Couldn't paint RootBody") and str(main.status_text).begins_with("Couldn't paint RootBody"))
+	target.queue_free()
+	flows._toast_text = ""
 	manager.deactivate()
 	print("SMOKE switching it off disarms the trigger: ", not r.paint_active)
 

@@ -167,7 +167,20 @@ func _initialize() -> void:
 
 	# --- the Rooms tile
 	await open_category("rooms")
-	print("SMOKE the Rooms tile opens the Rooms page (no mode tool switched on): the table part's world button and the Delete-selected button: ", ui.selected_category_id == "rooms" and ui.selected_tool_id == "rooms" and tab.manager.active_id == "" and find_button(func(b): return b.text.begins_with("Table part, in the world") or b.text.begins_with("Put a part")) != null and find_button(func(b): return b.text.begins_with("Delete")) != null)
+	print("SMOKE the Rooms tile opens the Rooms page (no mode tool switched on) with a New room button: ", ui.selected_category_id == "rooms" and ui.selected_tool_id == "rooms" and tab.manager.active_id == "" and find_button(func(b): return b.text == "New room") != null)
+	print("SMOKE ...and none of the controls that are not about rooms: ", find_button(func(b): return b.text.begins_with("Table part, in the world")) == null and find_button(func(b): return b.text.begins_with("Delete")) == null)
+	var rm = main.room_manager
+	var room_glb: PackedByteArray = preload("res://tests/room_manager.gd").new().glb_for([{"pos": Vector3(0, 0, 0), "size": Vector3(100, 100, 100), "owner": "S", "occ": "k1"}])
+	var tile_room = rm.open_from_bytes(room_glb, "S", "Sub one")
+	await process_frame
+	var bring := find_button(func(b): return b.text == "Bring to me")
+	print("SMOKE an open room gets a tile with its thumbnail, name, Bring to me and Close: ", tile_room != null and bring != null and find_button(func(b): return b.text == "Close") != null and bring.get_parent().get_parent().get_children().any(func(c): return c is TextureRect) and bring.get_parent().get_parent().get_children().any(func(c): return c is Label and c.text == "Sub one"))
+	await aim_and_click(find_button(func(b): return b.text == "Close"))
+	print("SMOKE Close on the tile closes the room and the tile goes: ", rm.rooms.is_empty() and find_button(func(b): return b.text == "Bring to me") == null)
+	await open_tool("view", "visibility")
+	print("SMOKE Delete selected part moved to View > Visibility: ", find_button(func(b): return b.text.begins_with("Delete")) != null)
+	await open_tool("settings", "set_table")
+	print("SMOKE the table part's world-preview button moved to Settings > Design table: ", find_button(func(b): return b.text.begins_with("Table part, in the world")) != null)
 
 	# --- one active tool at a time
 	await open_category("assemble")
