@@ -20,7 +20,7 @@ func solves() -> Array:
 		func(c: Dictionary) -> String: return str(c["path"]))
 
 
-func _api_request(method: int, path: String, _body_dict) -> Dictionary:
+func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	calls.append({"method": method, "path": path})
 	var parts := path.split("?")[0].split("/", false) # parts, <id>, occurrences|mates, <occ>, solve
 	if parts.size() < 2 or parts[0] != "parts":
@@ -43,5 +43,9 @@ func _api_request(method: int, path: String, _body_dict) -> Dictionary:
 				return {"ok": true, "code": 200, "json": r.duplicate(true), "error": ""}
 		return {"ok": false, "code": 404, "json": {"detail": "Occurrence not found"}, "error": "404"}
 	if parts.size() == 4 and parts[2] == "occurrences" and method == HTTPClient.METHOD_PATCH:
+		for r in doc_occurrences.get(pid, []):
+			if str(r["id"]) == parts[3] and body_dict is Dictionary:
+				for key in body_dict:
+					r[key] = body_dict[key] # (a pose and / or the fixed flag, as stored)
 		return {"ok": true, "code": 200, "json": {}, "error": ""}
 	return {"ok": false, "code": 404, "json": {"detail": "Not Found"}, "error": "404"}

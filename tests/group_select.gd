@@ -14,6 +14,7 @@ const FakeApi := preload("res://tests/fake_room_api.gd")
 const CommandStack := preload("res://scripts/command_stack.gd")
 
 const STUB := "extends Node
+var relaxed := false
 var states := {}
 var poses := {}
 var saved := []
@@ -30,6 +31,8 @@ func is_constrained(_p):
 func is_nested_locked(_p):
 	return false
 func nested_occurrence_locked(_o, _c):
+	return false
+func is_sandboxed(_p):
 	return false
 func notify_nested_locked(_p):
 	pass

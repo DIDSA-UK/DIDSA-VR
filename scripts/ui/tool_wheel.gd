@@ -64,7 +64,14 @@ var _camera: Camera3D
 var _held := false ## the chord is held (the hand's "wheel_open" meta)
 var _shown := false ## the ring is up (it goes away as soon as one button is released)
 var _entries: Array = []
-var _stack: Array = [] ## the rings above the current one (for a sub-wheel): [{entries, title}]
+var _stack: Array = [] ## the rings above the current one (for a sub-wheel): [{entries, title, anchor, index}]
+const DWELL_S := 0.4 ## seconds resting on a sub-wheel's tile opens it; resting in the middle of a sub-wheel goes back up one
+var dwell_s := DWELL_S
+var _dwell_on := -2 ## what the hand is resting on: a tile's index, -1 the middle (back), -2 nothing that a rest would act on
+var _dwell_t := 0.0
+var _dwell_block := -2 ## the tile the hand came back onto after going back up: a rest on it doesn't open it again until the hand leaves it
+var _left_centre := false ## the hand has been out of the middle of this ring (a fresh sub-wheel opens with the hand in its middle: that is no "back")
+var _dwell_arc: MeshInstance3D
 var _title := ""
 var _hover := -1
 var _anchor := Vector3.ZERO
@@ -113,6 +120,12 @@ func setup(hand: XRController3D, camera: Camera3D, p_tokens: Resource, provider:
 	_cursor.mesh = dot
 	_cursor.material_override = _material(tokens.text, 1.0)
 	_ring.add_child(_cursor)
+	_dwell_arc = MeshInstance3D.new()
+	_dwell_arc.name = "DwellArc"
+	_dwell_arc.mesh = ImmediateMesh.new()
+	_dwell_arc.material_override = _material(tokens.accent, 0.95)
+	_dwell_arc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_ring.add_child(_dwell_arc)
 	visible = false
 	hand.wheel_enabled = true
 	hand.wheel_chord_started.connect(_on_chord)
@@ -197,6 +210,11 @@ func _show_ring(entries: Array, at: Vector3) -> void:
 	_pill_hover = false
 	_pill = pill_provider.call() if pill_provider.is_valid() and _stack.is_empty() else {} # only a top-level ring has the pill
 	_anchor = at
+	_dwell_on = -2
+	_dwell_t = 0.0
+	_dwell_block = -2
+	_left_centre = false
+	_draw_dwell(-2, 0.0)
 	_orient_to_user()
 	global_transform = Transform3D(_basis_for(), _anchor + Vector3.UP * ring_lift)
 	scale = Vector3.ONE * drawn_scale()
@@ -301,6 +319,94 @@ func _process(_delta: float) -> void:
 	_cursor.position = Vector3(offset.normalized().x * shown_len, offset.normalized().y * shown_len, 0.006) if offset.length() > 0.0001 else Vector3(0, 0, 0.006)
 	if not on_pill and _hover >= 0 and _entries[_hover].has("children") and bool(_entries[_hover].get("enabled", true)) and Math.is_drilling(offset):
 		_drill(_hover)
+		return
+	_update_dwell(_delta, offset, on_pill)
+
+
+func _update_dwell(delta: float, offset: Vector2, on_pill: bool) -> void:
+	## Resting the hand: on a sub-wheel's tile for dwell_s opens it where the hand is (no long reach outwards, so a second level stays
+	## near the body); in the middle of a sub-wheel for dwell_s goes back up one ring. Letting go in the middle still cancels.
+	var at_centre := offset.length() < dead_zone and not on_pill
+	if not at_centre:
+		_left_centre = true
+	if _hover != _dwell_block:
+		_dwell_block = -2
+	var target := -2
+	if at_centre and not _stack.is_empty() and _left_centre:
+		target = -1
+	elif not on_pill and _hover >= 0 and _hover != _dwell_block and _entries[_hover].has("children") and bool(_entries[_hover].get("enabled", true)):
+		target = _hover
+	if target != _dwell_on:
+		_dwell_on = target
+		_dwell_t = 0.0
+	elif target != -2:
+		_dwell_t += delta
+		if _dwell_t >= dwell_s:
+			_dwell_on = -2
+			_dwell_t = 0.0
+			_draw_dwell(-2, 0.0)
+			if target == -1:
+				_back()
+			else:
+				_drill(target)
+			return
+	_draw_dwell(_dwell_on, clampf(_dwell_t / maxf(dwell_s, 0.001), 0.0, 1.0))
+
+
+func dwell_target() -> int:
+	return _dwell_on
+
+
+func _draw_dwell(target: int, fraction: float) -> void:
+	## The rest timer: an arc filling along the outside of the tile being rested on, or round the middle for "back".
+	var im := _dwell_arc.mesh as ImmediateMesh
+	im.clear_surfaces()
+	if target == -2 or fraction <= 0.0:
+		return
+	var start := 0.0
+	var span := TAU
+	var radius := Math.INNER_RADIUS * 0.82
+	if target >= 0:
+		var half := TAU / float(maxi(_entries.size(), 1)) * 0.5
+		start = Math.centre_angle(target, _entries.size()) - half
+		span = half * 2.0
+		radius = Math.OUTER_RADIUS + 0.008
+	var width := 0.007
+	var steps := maxi(int(48.0 * fraction * span / TAU), 2)
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for i in steps + 1:
+		var a := start + span * fraction * float(i) / float(steps)
+		var d := Vector3(sin(a), cos(a), 0.0)
+		im.surface_add_vertex(d * (radius - width * 0.5) + Vector3(0, 0, 0.008))
+		im.surface_add_vertex(d * (radius + width * 0.5) + Vector3(0, 0, 0.008))
+	im.surface_end()
+
+
+func _back() -> void:
+	## Up one ring: the one this sub-wheel was opened from, where it was, with the tile the hand came from not reopening under it.
+	if _stack.is_empty():
+		return
+	var prev: Dictionary = _stack.pop_back()
+	_title = str(prev.get("title", ""))
+	UiFeedback.play("close", self)
+	UiFeedback.haptic(_hand, "press")
+	_show_ring(prev["entries"], prev.get("anchor", _hand.global_position))
+	_dwell_block = int(prev.get("index", -2))
+	_left_centre = true
+
+
+func ring_path() -> String:
+	## Where you are: the names of the rings from the top one down, "Tools › Mates › Type".
+	var names: Array[String] = []
+	var top := str(_stack[0]["title"]) if not _stack.is_empty() else _title
+	if top == "" and title_provider.is_valid():
+		top = str(title_provider.call())
+	names.append(top if top != "" else "Tools")
+	for i in range(1, _stack.size()):
+		names.append(str(_stack[i]["title"]))
+	if not _stack.is_empty():
+		names.append(_title)
+	return " › ".join(names)
 
 
 func _update_hover(index: int, on_pill: bool) -> void:
@@ -320,7 +426,7 @@ func _drill(index: int) -> void:
 	var children: Array = (_entries[index]["children"] as Callable).call()
 	if children.is_empty():
 		return
-	_stack.append({"entries": _entries, "title": _title})
+	_stack.append({"entries": _entries, "title": _title, "anchor": _anchor, "index": index})
 	_title = str(_entries[index].get("label", ""))
 	UiFeedback.play("open", self)
 	UiFeedback.haptic(_hand, "press")
@@ -628,10 +734,10 @@ func _update_centre() -> void:
 	elif _hover >= 0 and _hover < _entries.size():
 		_summary = _summary_for(_entries[_hover])
 	else:
-		var ring_name := _title
-		if ring_name == "" and title_provider.is_valid():
-			ring_name = str(title_provider.call())
-		_summary = {"title": ring_name if ring_name != "" else "Tools", "body": "Move to a tile and let go to choose it. Let go in the middle to cancel.", "tone": "normal", "accent": tokens.accent}
+		var body := "Move to a tile and let go to choose it. Let go in the middle to cancel."
+		if not _stack.is_empty():
+			body = "Rest in the middle to go back up. Let go in the middle to cancel."
+		_summary = {"title": ring_path(), "body": body, "tone": "normal", "accent": tokens.accent}
 	_paint_pill()
 	summary_changed.emit(_summary)
 

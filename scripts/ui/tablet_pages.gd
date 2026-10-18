@@ -681,15 +681,20 @@ func _build_mates_page() -> Control:
 	var bulk := _row()
 	page.add_child(bulk)
 	_mates_relax_button = Button.new()
-	_mates_relax_button.text = "Relax all: off"
+	_mates_relax_button.text = "Relax mates"
 	_mates_relax_button.toggle_mode = true
 	_mates_relax_button.custom_minimum_size = Vector2(0, 56)
 	_mates_relax_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Relax all mates is a sandbox (mates_tool.gd set_relaxed): on, moves are temporary; off ("Return parts"), everything goes back.
 	_mates_relax_button.toggled.connect(func(on: bool) -> void:
-		_mates_relax_button.text = "Relax all: %s" % ("ON" if on else "off")
+		_show_relax_state(on)
 		if _mates_tool:
 			_mates_tool.set_relaxed(on)
 	)
+	if _mates_tool and _mates_tool.has_signal("sandbox_changed"):
+		_mates_tool.sandbox_changed.connect(func(on: bool) -> void:
+			_mates_relax_button.set_pressed_no_signal(on)
+			_show_relax_state(on))
 	bulk.add_child(_mates_relax_button)
 	bulk.add_child(_button("Enforce all", func() -> void:
 		var owner_part_id: String = _main.current_root_part_id()
@@ -1212,10 +1217,16 @@ func _build_settings_display() -> Control:
 	page.add_child(_mode_toggle("Shadows", func(on: bool) -> void: _main.set_shadows(on)))
 	page.add_child(_choice_row("Resolution", ["100%", "80%", "65%"], 0, func(i: int) -> void: _main.set_render_scale([1.0, 0.8, 0.65][i])))
 	page.add_child(_choice_row("MSAA", ["Off", "2x", "4x"], 1, func(i: int) -> void: _main.set_msaa(i)))
+	page.add_child(_mode_toggle("Relaxed: ghost where each part goes back", func(on: bool) -> void: _main.set_sandbox_ghosts(on), _main.sandbox_ghosts()))
+	page.add_child(_mode_toggle("Relaxed: line to where it goes back", func(on: bool) -> void: _main.set_sandbox_lines(on), _main.sandbox_lines()))
 	page.add_child(_choice_row("Sub-assembly grip dead zone", ["Off", "Small (2 cm)", "Medium (4 cm)"], _main.group_deadzone_level(), func(i: int) -> void: _main.set_group_deadzone(i)))
 	var room_limits := [1, 2, 3, 4, 6, 8]
 	page.add_child(_choice_row("Max rooms", ["1", "2", "3", "4", "6", "8"], maxi(room_limits.find(_main.max_rooms()), 3), func(i: int) -> void: _main.set_max_rooms(room_limits[i])))
 	return page
+
+
+func _show_relax_state(on: bool) -> void:
+	_mates_relax_button.text = "Return parts" if on else "Relax mates"
 
 
 func _build_settings_appearance() -> Control:

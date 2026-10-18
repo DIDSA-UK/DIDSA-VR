@@ -177,6 +177,8 @@ func _add_mates_tool() -> void:
 	add_child(mates)
 	mates.setup(command_stack)
 	_mates_tool = mates
+	mates.sandbox_ghosts = _settings.sandbox_ghosts
+	mates.sandbox_lines = _settings.sandbox_lines
 
 
 func _add_measure_tool() -> void:
@@ -247,6 +249,24 @@ func _add_room_manager() -> void:
 	room_manager.preview_pulse = _settings.world_preview_pulse
 	room_manager.status.connect(_set_status)
 	_two_hand.focus = func(hand: Node3D) -> bool: return RoomRegistry.room_at(hand.global_position) == -1 # a grip on empty space inside a room is the room's
+
+
+func sandbox_ghosts() -> bool:
+	return _settings.sandbox_ghosts
+
+
+func set_sandbox_ghosts(on: bool) -> void:
+	_settings.set_sandbox_ghosts(on)
+	_mates_tool.sandbox_ghosts = on
+
+
+func sandbox_lines() -> bool:
+	return _settings.sandbox_lines
+
+
+func set_sandbox_lines(on: bool) -> void:
+	_settings.set_sandbox_lines(on)
+	_mates_tool.sandbox_lines = on
 
 
 func room_pedestal() -> bool:

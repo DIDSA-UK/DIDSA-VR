@@ -530,6 +530,8 @@ func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 
 func _group_refusal(gs) -> String:
 	## Why this sub-assembly can't be moved now ("" if it can). Only a top-level one is saved, so only its grounding and mates matter.
+	if mates_tool != null and mates_tool.relaxed:
+		return "" # the sandbox: anything moves, nothing is saved, it all goes home after
 	if gs.depth == 1 and mates_tool != null:
 		match mates_tool.group_state(gs.root_part_id, gs.occurrence_id()):
 			"grounded":
@@ -568,7 +570,8 @@ func _finish_group_move(gs) -> void:
 	var pg: Transform3D = parent.global_transform if parent != null else Transform3D.IDENTITY
 	var occ: String = gs.occurrence_id()
 	var owner: String = gs.root_part_id
-	var save: bool = occ != "" and mates_tool != null and mates_tool.group_state(owner, occ) == "ok"
+	var sandbox: bool = mates_tool != null and mates_tool.is_sandboxed(gs.anchor)
+	var save: bool = occ != "" and mates_tool != null and not sandbox and mates_tool.group_state(owner, occ) == "ok"
 	var old_pose: Variant = null
 	var new_pose: Variant = null
 	if save:
@@ -590,7 +593,7 @@ func _finish_group_move(gs) -> void:
 		save)
 	if save:
 		mates_tool.persist_group_pose(owner, occ, new_pose)
-	elif gs.depth > 1:
+	elif gs.depth > 1 and not sandbox:
 		group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
 
 
@@ -934,7 +937,7 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 		func() -> void:
 			part.global_transform = after
 			_sync_pose(part),
-		true) # persists: a part's pose is part of the document
+		not (mates_tool != null and mates_tool.is_sandboxed(part))) # persists: a part's pose is part of the document (a sandbox move is not: it goes home)
 	_sync_pose(part) # the move itself: the backend's copy must match what you see, or every later mate solves against a stale pose
 
 

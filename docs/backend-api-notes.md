@@ -248,9 +248,11 @@ between two circular edges is accepted).
 is a separate, explicit call. The flat app calls it immediately after
 `create_mate` for the newly-driven Occurrence ("a freshly-authored Mate
 visibly snaps its target into place immediately" — that endpoint's own
-docstring); this client does the same by default (`mates_tool.gd`'s
-`relaxed` flag can suspend it to place several Mates before solving them
-all). `solve_for_occurrence`'s response's `transform` is **local to the
+docstring); this client does the same by default. While mates are relaxed (the
+sandbox, `mates_tool.gd`'s `set_relaxed`) a new or edited Mate is only
+stored, and no part move is sent at all; when the sandbox ends the parts
+go back to their remembered poses and only then are those Mates' driven
+parts solved, so the solver never starts from a scattered layout. `solve_for_occurrence`'s response's `transform` is **local to the
 Occurrence's own parent Part**, in the same raw-mm units the glb's own
 per-instance translation uses (not pre-scaled) — for a top-level Occurrence
 this equals the instance's whole world-relative-to-root transform (no
