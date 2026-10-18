@@ -1033,13 +1033,7 @@ func refresh_nested_state(root_part_id: String) -> void:
 		var mated := {}
 		var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % pid, null)
 		if mate_result["ok"] and mate_result["json"] is Array:
-			for mate in mate_result["json"]:
-				if bool(mate.get("suppressed", false)):
-					continue
-				for ref in mate.get("references", []):
-					var top := mate_ref_top(str(ref.get("occurrence_id", "")))
-					if top != "":
-						mated[top] = true
+			mated = mated_tops((mate_result["json"] as Array).filter(func(m) -> bool: return m is Dictionary and not bool(m.get("suppressed", false))))
 		_nested_states[pid] = {"occurrences": occs, "mated": mated}
 	mates_changed.emit()
 
@@ -1068,13 +1062,29 @@ static func mate_ref_top(occurrence_id: String) -> String:
 	return occurrence_id.get_slice("/", 0)
 
 
-func _rebuild_mated_ids() -> void:
-	_mated_ids.clear()
-	for mate in mates:
+static func mated_tops(mate_list: Array) -> Dictionary:
+	## Every top-level occurrence the Mates involve -> true (the backend's mate_tops): each reference's own occurrence and, for a Width /
+	## Symmetric mid-plane whose second face is on another part (`midplane.b_occurrence_id`), that one's too. Root content ("") is left out.
+	var out := {}
+	for mate in mate_list:
+		if not (mate is Dictionary):
+			continue
 		for ref in mate.get("references", []):
-			var top := mate_ref_top(str(ref.get("occurrence_id", "")))
-			if top != "":
-				_mated_ids[top] = true
+			if not (ref is Dictionary):
+				continue
+			var ids: Array = [str(ref.get("occurrence_id", ""))]
+			var mid = ref.get("midplane")
+			if mid is Dictionary and mid.get("b_occurrence_id") != null:
+				ids.append(str(mid["b_occurrence_id"]))
+			for id in ids:
+				var top := mate_ref_top(id)
+				if top != "":
+					out[top] = true
+	return out
+
+
+func _rebuild_mated_ids() -> void:
+	_mated_ids = mated_tops(mates)
 
 
 func is_managed(part: Node3D) -> bool:
@@ -1133,11 +1143,7 @@ func load_owner_state(owner_part_id: String) -> bool:
 	var mated := {}
 	var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if mate_result["ok"] and mate_result["json"] is Array:
-		for mate in mate_result["json"]:
-			for ref in mate.get("references", []):
-				var top := mate_ref_top(str(ref.get("occurrence_id", "")))
-				if top != "":
-					mated[top] = true
+		mated = mated_tops(mate_result["json"])
 	set_owner_state(owner_part_id, occs, mated)
 	if _nested_states.has(owner_part_id):
 		_nested_states[owner_part_id] = {"occurrences": occs, "mated": mated} # a room's Part is also a sub-assembly of the world's root: its mates there are the same

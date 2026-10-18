@@ -54,6 +54,15 @@ func _initialize() -> void:
 	print("SMOKE every sub-assembly below the root is read, each after the ones inside it (Frame before Top and frame): ", mt._nested_order.has("PF") and mt._nested_order.has("PS") and mt._nested_order.find("PF") < mt._nested_order.find("PS") and not mt._nested_order.has("R"))
 	print("SMOKE ...with its own mates (the frame's two sides are mated in the frame): ", mt._nested_states["PF"]["mated"].has("A") and mt._nested_states["PF"]["mated"].has("B"))
 
+	# --- mid-plane (Width / Symmetric) references, shaped like Table Top with Frame.didsa (the owner's file, 17 Oct): a top centred between two
+	# faces of two frame sides, both inside the frame sub-assembly
+	var width_mates := [{"id": "w1", "references": [
+		{"occurrence_id": "TOP", "subshape_ref": null, "midplane": {"a": {"face_ref": {"index": 2}}, "b": {"face_ref": {"index": 0}}, "b_occurrence_id": null}},
+		{"occurrence_id": "FRAME/SIDE1", "subshape_ref": null, "midplane": {"a": {"face_ref": {"index": 0}}, "b": {"face_ref": {"index": 0}}, "b_occurrence_id": "FRAME/SIDE3"}}]}]
+	print("SMOKE a mid-plane mate whose two faces are in the same sub-assembly marks the top and that sub-assembly mated: ", FakeMates.mated_tops(width_mates).keys().size() == 2 and FakeMates.mated_tops(width_mates).has("TOP") and FakeMates.mated_tops(width_mates).has("FRAME"))
+	width_mates[0]["references"][1]["midplane"]["b_occurrence_id"] = "OTHER/SIDE3"
+	print("SMOKE ...and one whose second face is on another top-level occurrence marks that one too (the backend's mate_tops): ", FakeMates.mated_tops(width_mates).has("OTHER") and FakeMates.mated_tops(width_mates).has("FRAME"))
+
 	# --- moving a mated nested part on its own
 	print("SMOKE a nested part its sub-assembly's mates move is held while mates are enforced: ", mt.is_nested_locked(side))
 	print("SMOKE ...and so is a grounded one they reference; an unmated nested part is not: ", mt.is_nested_locked(unmated) and not mt.is_nested_locked(free_part))

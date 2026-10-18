@@ -30,7 +30,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 ## Tests (as of the last recorded run)
 
-- Headless suite (`tests/ci.sh`): **2790 SMOKE lines, 0 unexpected failures** (second bug-report round, 17 Oct 2026). Counts rise with every feature; treat this number as a floor.
+- Headless suite (`tests/ci.sh`): **2792 SMOKE lines, 0 unexpected failures** (second bug-report round, 17 Oct 2026). Counts rise with every feature; treat this number as a floor.
 - Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **49**, green (17 Oct), including `wheel_hint_render` (the wrist panel covers 0% of the tool wheel).
 - Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **377 SMOKE lines, 0 failures** on 17 Oct against DIDSA-CAD `main` (#303), run locally with the backend's conda environment; includes the new `e2e_bug_report` (20). Needs a DIDSA-CAD backend.
 - CI: `.github/workflows/headless-tests.yml` (every push and PR touching code) and `e2e-backend.yml`.
