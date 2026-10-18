@@ -81,11 +81,11 @@ static func circle(radius: float, steps: int = 40) -> PackedVector2Array:
 	return pts
 
 
-static func project_offset(hand: Vector3, anchor: Vector3, right: Vector3) -> Vector2:
-	## Hand movement since the wheel opened, as (right, up) in the wheel's vertical plane. `right` is the
-	## flattened unit vector that faced the user's right when the wheel opened.
+static func project_offset(hand: Vector3, anchor: Vector3, right: Vector3, up: Vector3 = Vector3.UP) -> Vector2:
+	## Hand movement since the wheel opened, as (right, up) in the wheel's plane. `right` is the level unit vector to the user's
+	## right; `up` the ring's own up (world up for a ring level with the eyes, tipped back towards the head otherwise).
 	var d := hand - anchor
-	return Vector2(d.dot(right), d.y)
+	return Vector2(d.dot(right), d.dot(up))
 
 
 static func is_drilling(offset: Vector2, drill_distance: float = DRILL_DISTANCE) -> bool:

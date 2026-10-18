@@ -1,6 +1,7 @@
 extends Node3D
 ## The handles that let you shape and move an Assembly Room by hand (docs/assembly-rooms-scope.md, section 6):
-##   * eight CORNER handles. Grip one with a hand, or aim the laser at it and grip, and that corner follows your hand while the OPPOSITE corner stays where it is
+##   * eight CORNER handles. Grip one with a hand, or aim the laser at it and grip, and that corner follows your hand (or, taken with the laser, the
+##     laser's end, at the distance it was taken from: owner's headset report, 17 Oct, the hand's own movement was too slow from across the room) while the OPPOSITE corner stays where it is
 ##     in the world; the faces that meet at the corner move with it, the content does not move or scale. A top corner moves the room's three dimensions at
 ##     once; a floor corner moves only the two along the floor (a room always stands on the floor), so there is no way to lift one. A side can't go under 0.5 m
 ##     (RoomVolume.MIN_DRAG_SIZE_M) and a drag that would overlap another room stops at the last size that didn't. Drag along one edge to change one dimension.
@@ -145,6 +146,11 @@ func held_by(hand: Node) -> bool:
 
 func candidate_for(hand: Node3D) -> int:
 	## Which handle this hand would take now: the nearest within reach of the hand itself, else the one nearest the laser's line; -1 for none.
+	return int(_candidate(hand)["handle"])
+
+
+func _candidate(hand: Node3D) -> Dictionary:
+	## candidate_for(), and how far along the laser the handle is: {handle, laser} (laser 0.0 when the hand itself is at the handle).
 	var best := -1
 	var best_d := INF
 	for handle in _handles:
@@ -153,7 +159,8 @@ func candidate_for(hand: Node3D) -> int:
 			best = handle
 			best_d = d
 	if best != -1:
-		return best
+		return {"handle": best, "laser": 0.0}
+	var best_along := 0.0
 	var origin := hand.global_position
 	var dir := -hand.global_transform.basis.z.normalized()
 	for handle in _handles:
@@ -165,14 +172,22 @@ func candidate_for(hand: Node3D) -> int:
 		if d <= LASER_REACH_M and d < best_d:
 			best = handle
 			best_d = d
-	return best
+			best_along = along
+	return {"handle": best, "laser": best_along}
+
+
+static func laser_tip(hand: Node3D, laser: float) -> Vector3:
+	## Where a corner taken with the laser is dragged to: the point that far along the hand's ray (the hand itself for a corner taken by hand).
+	## So a corner across the room follows the laser's end, which sweeps metres for a turn of the wrist, not the hand's own few centimetres.
+	return hand.global_position + (-hand.global_transform.basis.z.normalized()) * laser
 
 
 func try_grab(hand: Node3D) -> bool:
 	## A grip: takes the handle this hand is at (or aiming at). True if it did, so the grip is not also a part grab or a whole-room move.
 	if not enabled or is_held() or room == null or not is_instance_valid(room):
 		return false
-	var handle := candidate_for(hand)
+	var picked := _candidate(hand)
+	var handle := int(picked["handle"])
 	if handle == -1:
 		return false
 	var v: RoomVolume = room.volume
@@ -181,7 +196,8 @@ func try_grab(hand: Node3D) -> bool:
 		_held["grab_hand"] = hand.global_position
 		_held["grab_yaw"] = hand_yaw(hand)
 	else:
-		_held["grab_point"] = v.xform.affine_inverse() * hand.global_position
+		_held["laser"] = float(picked["laser"])
+		_held["grab_point"] = v.xform.affine_inverse() * laser_tip(hand, _held["laser"])
 		room.set_active_faces(faces_mask(handle))
 	hand.set_meta("room_handle_held", true) # two_hand_model.gd: this grip is not a whole-model / whole-room drag
 	return true
@@ -212,7 +228,7 @@ func update_drag() -> void:
 			room.move_box(moved)
 		return
 	var grab_xform: Transform3D = _held["grab_xform"]
-	var now_point: Vector3 = grab_xform.affine_inverse() * hand.global_position # in the frame the grab was made in, whatever the box has done since
+	var now_point: Vector3 = grab_xform.affine_inverse() * laser_tip(hand, float(_held["laser"])) # in the frame the grab was made in, whatever the box has done since
 	var result := resize_corner(_held["grab_half"], _held["corner"], _held["grab_point"], now_point)
 	var new_xform := Transform3D(grab_xform.basis, grab_xform.origin + grab_xform.basis * (result["shift"] as Vector3))
 	var probe2 := RoomVolume.make(new_xform, (result["half"] as Vector3) * 2.0)

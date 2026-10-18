@@ -96,6 +96,17 @@ func _initialize() -> void:
 	print("SMOKE ...and dragged right across, each floor dimension stops at 0.5 m: ", absf(room.volume.half.x - 0.25) < 0.001 and absf(room.volume.half.z - 0.25) < 0.001 and absf(room.volume.half.y - 1.5) < 0.001)
 	handles.release(floor_hand)
 
+	# --- a corner taken with the laser follows the laser's end, not the hand
+	room.set_box(Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0)), Vector3(1.5, 1.5, 1.5))
+	var far := hand_at(holder, Vector3(0.0, 1.4, 7.0), Vector3(1.5, 3.0, 1.5))
+	var far_taken: bool = handles.try_grab(far) and handles.held_by(far)
+	var reach: float = far.global_position.distance_to(Vector3(1.5, 3.0, 1.5))
+	far.global_transform = Transform3D(Basis.looking_at((Vector3(2.3, 3.4, 1.6) - far.global_position).normalized(), Vector3.UP), far.global_position) # a turn of the wrist; the hand stays put
+	handles.update_drag()
+	var tip := RoomHandles.laser_tip(far, reach)
+	print("SMOKE a corner taken with the laser from 5.7 m follows the laser's end (a wrist turn, the hand not moving, drags it ~0.9 m): ", far_taken and handles.handle_world_position(7).distance_to(tip) < 0.001 and handles.handle_world_position(7).distance_to(Vector3(1.5, 3.0, 1.5)) > 0.8)
+	handles.release(far)
+
 	# --- overlap stops a drag
 	room.set_box(Transform3D(Basis.IDENTITY, Vector3(0, 1.5, 0)), Vector3(1.5, 1.5, 1.5))
 	var neighbour := RoomVolume.make(Transform3D(Basis.IDENTITY, Vector3(3.2, 1.5, 0)), Vector3(3, 3, 3))

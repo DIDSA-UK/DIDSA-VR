@@ -60,6 +60,8 @@ func setup(ctx: Dictionary, p_tokens: Resource) -> void:
 	_hint.setup(_hand, tokens)
 	_manager.active_changed.connect(func(_id: String) -> void: refresh_prompt())
 	_mates.picks_changed.connect(refresh_prompt)
+	if _mates.has_signal("sandbox_changed"):
+		_mates.sandbox_changed.connect(func(_on: bool) -> void: refresh_prompt())
 	_measure.picks_changed.connect(refresh_prompt)
 	_measure.result_changed.connect(refresh_prompt)
 
@@ -99,6 +101,8 @@ func prompt_text() -> String:
 			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
 			return "Section\nGrip the plane to move it. Wheel: Flip."
+	if _mates != null and _mates.relaxed:
+		return "Mates relaxed\nMoves are temporary. Wheel: Return parts (under the ring) puts everything back."
 	return ""
 
 
@@ -155,8 +159,30 @@ func entries() -> Array:
 	return root_entries()
 
 
+func _relax_entry() -> Dictionary:
+	## Relax mates / Return parts: the sandbox (mates_tool.gd set_relaxed). Its label says what choosing it will do.
+	if _mates.relaxed:
+		return _action("mate_relax", "Return parts", "undo", Color(0.96, 0.69, 0.25), "Everything goes back where it was", _return_parts, true, true)
+	return _action("mate_relax", "Relax mates", "relax", Color(0.96, 0.69, 0.25), "Move anything; it all goes back after", _relax_mates)
+
+
+func _relax_mates() -> void:
+	_mates.set_relaxed(true)
+	say("Mates relaxed: moves are temporary", 3.0)
+
+
+func _return_parts() -> void:
+	say("Returning parts", 2.0)
+	await _mates.set_relaxed(false)
+	refresh_prompt()
+
+
 func pill_entry() -> Dictionary:
 	## The pill under every top-level ring: put the tool away. Greyed (with the reason) when there is nothing in the hand.
+	## While mates are relaxed it is Return parts instead, on every ring: leaving the sandbox never needs navigating.
+	if _mates != null and _mates.relaxed:
+		return {"id": "return_parts", "label": "Return", "title": "Return parts", "icon": "undo", "accent": Color(0.96, 0.69, 0.25), "enabled": true,
+			"hint": "Mates are relaxed: every part goes back where it was", "hint_disabled": "", "run": _return_parts}
 	var in_hand: bool = _manager.active_id != ""
 	var def = _registry.tool_def(_manager.active_id) if in_hand else null
 	return {"id": "clear_tool", "label": "Clear", "title": "Clear tool", "icon": "close", "accent": Color(0.62, 0.70, 0.80), "text_colour": tokens.danger, "enabled": in_hand,
@@ -245,10 +271,10 @@ func _summon_table() -> void:
 
 func _mates_entries() -> Array:
 	## The bottom 60 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand
-	## would drill into it on the way to the pill): Flip and Clear picks are the two wedges below.
+	## would drill into it on the way to the pill): with six wedges Clear picks is the one straight down, Flip and Relax either side.
 	var need := _mates_pick_hint()
 	# A Width mate has four picks and a Symmetric one three, so "start again" is a heavy undo: that wedge takes back the LAST pick instead
-	# (undo a few times to clear; the ring cannot grow a sixth wedge - the bottom 60 degrees are the Clear pill's).
+	# (undo a few times to clear).
 	var picks_entry: Dictionary
 	if _mates.is_multi():
 		picks_entry = _action("mate_undo", "Undo pick", "undo", Color(0.96, 0.69, 0.25), "Take back the last face", _mates.back_pick, not _mates.picked_labels().is_empty(), false, "Nothing picked yet")
@@ -258,7 +284,8 @@ func _mates_entries() -> Array:
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, need),
 		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
 		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, need),
-		picks_entry,
+		picks_entry, # (straight down, above the pill: never a sub-wheel there)
+		_relax_entry(),
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 	]
 
@@ -370,4 +397,4 @@ func _action(id: String, label: String, icon: String, accent: Color, hint: Strin
 
 
 func _submenu(id: String, label: String, icon: String, accent: Color, hint: String, children: Callable) -> Dictionary:
-	return {"id": id, "label": label, "icon": icon, "accent": accent, "hint": hint + " · move out", "enabled": true, "children": children}
+	return {"id": id, "label": label, "icon": icon, "accent": accent, "hint": hint + " · rest on it or move out", "enabled": true, "children": children}

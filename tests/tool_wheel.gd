@@ -24,8 +24,8 @@ func _open_at_anchor() -> void:
 
 
 func _move(offset: Vector2) -> void:
-	## The hand moves in the wheel's plane: up is world up; "right" is the wheel's own right.
-	r.global_position = anchor + wheel._right * offset.x + Vector3.UP * offset.y
+	## The hand moves in the wheel's plane, along its own right and up (it faces the head, so its up tips back when the hand is low).
+	r.global_position = anchor + wheel._right * offset.x + wheel._up * offset.y
 	wheel._process(0.0)
 
 
@@ -53,6 +53,17 @@ func _initialize() -> void:
 	_open_at_anchor()
 	print("SMOKE the chord opens the ring and sets the hand's wheel_open meta: ", wheel.is_open() and wheel.is_shown() and r.wheel_is_open())
 	print("SMOKE the ring opens centred on the hand, at two thirds of the base size: ", wheel.global_position.is_equal_approx(anchor) and is_equal_approx(wheel.drawn_scale(), 2.0 / 3.0) and wheel.global_transform.basis.get_scale().is_equal_approx(Vector3.ONE * 2.0 / 3.0))
+	var cam: Camera3D = main.get_node("XROrigin3D/XRCamera3D")
+	var faces_eye := func() -> bool:
+		var face: Vector3 = wheel.global_transform.basis.z.normalized()
+		return face.dot((cam.global_position - wheel.global_position).normalized()) > 0.999 and absf(wheel.global_transform.basis.x.normalized().y) < 0.001
+	print("SMOKE the ring faces the head: its face points at the eyes, tipped back as well as turned, its right level: ", faces_eye.call() and absf(wheel.global_transform.basis.z.normalized().y) > 0.05)
+	var cam_was := cam.global_position
+	cam.global_position = cam_was + Vector3(0.4, 0.2, 0.1) # the head moves while the ring is up
+	wheel._process(0.0)
+	print("SMOKE ...and keeps facing it as the head moves: ", faces_eye.call())
+	cam.global_position = cam_was
+	wheel._process(0.0)
 	print("SMOKE while it is open the hand is 'manipulating', so the stick does not turn or walk you: ", r.is_manipulating())
 	print("SMOKE while it is open the grip does not drag the world: ", not main._two_hand._hand_free_ignoring_button(r))
 	print("SMOKE the laser is hidden while the wheel is open: ", (await _laser_hidden()))
@@ -75,7 +86,7 @@ func _initialize() -> void:
 	# --- the ring follows the open tool
 	_open_at_anchor()
 	var mate_ids: Array = _ids(wheel.current_entries())
-	print("SMOKE with Mates on the ring is Create / Type / Flip / Clear / All tools (no sub-wheel in the bottom 60 degrees, which is the pill's): ", mate_ids == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"])
+	print("SMOKE with Mates on the ring is Create / Type / Flip / Clear / Relax / All tools (Clear straight down above the pill: no sub-wheel there): ", mate_ids == ["mate_create", "mate_type", "mate_flip", "mate_clear", "mate_relax", "all_tools"])
 	print("SMOKE Create is greyed until two parts are picked: ", not bool(wheel.current_entries()[0]["enabled"]))
 	print("SMOKE the prompt leads the user through Mates: ", flows.prompt_text().begins_with("Mates · Coincident") and "Pick a face" in flows.prompt_text())
 	_move(Vector2(0.0, 0.12))
@@ -104,7 +115,7 @@ func _initialize() -> void:
 	mt.mate_type = "width"
 	var width_entries: Array = flows.entries()
 	var width_ids: Array = _ids(width_entries)
-	print("SMOKE with a Width mate the Clear wedge becomes Undo pick (same five wedges): ", width_ids == ["mate_create", "mate_type", "mate_flip", "mate_undo", "all_tools"])
+	print("SMOKE with a Width mate the Clear wedge becomes Undo pick (same six wedges): ", width_ids == ["mate_create", "mate_type", "mate_flip", "mate_undo", "mate_relax", "all_tools"])
 	print("SMOKE Create and Flip say how many faces are still needed (four for Width): ", width_entries[0]["hint_disabled"] == "Pick the four faces first" and width_entries[2]["hint_disabled"] == "Pick the four faces first")
 	print("SMOKE Undo pick is greyed until something is picked: ", not bool(width_entries[3]["enabled"]) and width_entries[3]["hint_disabled"] == "Nothing picked yet")
 	print("SMOKE the prompt names Undo pick for a Width mate: ", flows.prompt_text().contains("Undo pick") and flows.prompt_text().contains("Width 1 of 4"))
@@ -124,7 +135,7 @@ func _initialize() -> void:
 	var sym_entries: Array = flows.entries()
 	print("SMOKE with a Symmetric mate the hints say three faces: ", sym_entries[0]["hint_disabled"] == "Pick the three faces first" and _ids(sym_entries)[3] == "mate_undo")
 	mt.mate_type = "concentric"
-	print("SMOKE a two-pick type has its Clear picks wedge back: ", _ids(flows.entries()) == ["mate_create", "mate_type", "mate_flip", "mate_clear", "all_tools"] and flows.entries()[0]["hint_disabled"] == "Pick two faces first")
+	print("SMOKE a two-pick type has its Clear picks wedge back: ", _ids(flows.entries()) == ["mate_create", "mate_type", "mate_flip", "mate_clear", "mate_relax", "all_tools"] and flows.entries()[0]["hint_disabled"] == "Pick two faces first")
 	wpart_a.free()
 	flows._toast_text = "" # the offset lines above spoke a toast; the checks below start from a quiet prompt
 
@@ -193,7 +204,7 @@ func _initialize() -> void:
 	print("SMOKE a top-level ring has the Clear tool pill, greyed with nothing in the hand: ", wheel.pill_entry().get("id", "") == "clear_tool" and not bool(wheel.pill_entry()["enabled"]))
 	print("SMOKE with the ring up the wrist panel shows the ring's name and how to use it: ", hint.is_showing() and hint.title_text() == "Tools" and "let go" in hint.body_text().to_lower())
 	var hint_top: Vector3 = hint.global_position
-	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and wheel.global_position.y - hint_top.y >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
+	print("SMOKE ...docked under the ring, in its plane, below the pill (not over the wedges round the hand): ", hint.is_docked() and absf((hint_top - wheel.global_position).dot(wheel.global_transform.basis.z.normalized())) < 0.01 and (wheel.global_position - hint_top).dot(wheel.global_transform.basis.y.normalized()) >= wheel.clear_drop() - 0.001 and wheel.clear_drop() > (0.22 + 0.018 + 0.058) * wheel.drawn_scale())
 	_move(Vector2(0.0, 0.12))
 	print("SMOKE ...then the tool tip of the tile pointed at: ", hint.title_text() == "Mates" and hint.body_text() == "Mate two parts together")
 	_move(Vector2(0.0, -0.26))
@@ -251,6 +262,56 @@ func _initialize() -> void:
 	UiThemes.apply("Navy")
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
+
+	# --- resting: on a sub-wheel's tile opens it, in the middle of a sub-wheel goes back up, the title says where you are
+	_open_at_anchor()
+	var vis_dir := Vector2(sin(TAU * 6.0 / 8.0), cos(TAU * 6.0 / 8.0))
+	_move(vis_dir * 0.08) # on the Visibility tile, well short of the reach that opens it
+	print("SMOKE resting on a sub-wheel's tile starts its timer, short of the reach: ", wheel.dwell_target() == 6 and wheel._stack.is_empty() and (wheel._dwell_arc.mesh as ImmediateMesh).get_surface_count() == 0)
+	wheel._process(0.25)
+	print("SMOKE ...an arc fills along the tile, and nothing opens before 0.4 s: ", wheel._stack.is_empty() and (wheel._dwell_arc.mesh as ImmediateMesh).get_surface_count() == 1)
+	wheel._process(0.2)
+	print("SMOKE ...then it opens, centred where the hand rests: ", wheel._stack.size() == 1 and wheel.global_position.is_equal_approx(r.global_position) and wheel.hovered_index() == -1)
+	print("SMOKE the panel's title is the path, and says how to go back: ", wheel.ring_path() == "Tools › Visibility" and wheel.summary()["title"] == "Tools › Visibility" and str(wheel.summary()["body"]).contains("Rest in the middle to go back"))
+	wheel._process(1.0)
+	print("SMOKE the hand starts in the middle of the new ring: resting there is not 'back' until it has been out: ", wheel._stack.size() == 1)
+	var sub_anchor: Vector3 = wheel.global_position
+	r.global_position = sub_anchor + wheel._right * 0.06
+	wheel._process(0.0)
+	r.global_position = sub_anchor
+	wheel._process(0.0)
+	wheel._process(0.45)
+	print("SMOKE out and back to the middle, a rest goes back up to the ring it came from, where it was (with its pill): ", wheel._stack.is_empty() and wheel.global_position.is_equal_approx(anchor) and not wheel.pill_entry().is_empty() and wheel.ring_path() == "Tools")
+	wheel._process(0.5)
+	wheel._process(0.5)
+	print("SMOKE ...the tile the hand came back onto doesn't reopen under it: ", wheel._stack.is_empty() and wheel.hovered_index() == 6)
+	_move(Vector2(sin(TAU * 5.0 / 8.0), cos(TAU * 5.0 / 8.0)) * 0.08)
+	_move(vis_dir * 0.08)
+	wheel._process(0.45)
+	print("SMOKE ...until the hand leaves it and comes back: then a rest opens it again: ", wheel._stack.size() == 1)
+	wheel._on_released("trigger_click")
+	wheel._on_released("grip_click")
+	print("SMOKE letting go closes it all: ", not wheel.is_open() and wheel._stack.is_empty())
+
+	# --- Relax mates / Return parts (the sandbox, mates_tool.gd)
+	var sandbox_tool = main._mates_tool
+	sandbox_tool.return_glide_s = 0.0
+	manager.toggle("mates")
+	var relax: Dictionary = flows.entries().filter(func(e: Dictionary) -> bool: return e["id"] == "mate_relax")[0]
+	print("SMOKE the Mates ring has Relax mates: ", relax["label"] == "Relax mates" and bool(relax["enabled"]))
+	(relax["run"] as Callable).call()
+	var back: Dictionary = flows.entries().filter(func(e: Dictionary) -> bool: return e["id"] == "mate_relax")[0]
+	print("SMOKE ...choosing it relaxes them, and the tile turns into Return parts: ", sandbox_tool.relaxed and back["label"] == "Return parts")
+	print("SMOKE ...the pill under every top-level ring is Return parts while relaxed: ", flows.pill_entry()["id"] == "return_parts" and bool(flows.pill_entry()["enabled"]))
+	print("SMOKE ...and the tablet's toggle follows: ", tablet.pages._mates_relax_button.button_pressed and tablet.pages._mates_relax_button.text == "Return parts")
+	await (flows.pill_entry()["run"] as Callable).call()
+	print("SMOKE choosing Return parts ends it: mates enforced, the pill is Clear again, the toggle is off: ", not sandbox_tool.relaxed and flows.pill_entry()["id"] == "clear_tool" and not tablet.pages._mates_relax_button.button_pressed and tablet.pages._mates_relax_button.text == "Relax mates")
+	manager.deactivate()
+	sandbox_tool.set_relaxed(true)
+	flows._toast_text = "" # (the last choice's few-second message)
+	flows._toast_until_ms = 0
+	print("SMOKE with no tool on, the wrist says mates are relaxed: ", flows.prompt_text().begins_with("Mates relaxed"))
+	await sandbox_tool.set_relaxed(false)
 
 	# --- settings
 	main.set_wheel_enabled(false)

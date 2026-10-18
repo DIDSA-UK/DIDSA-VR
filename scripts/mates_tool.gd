@@ -49,6 +49,7 @@ extends Node
 
 const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 signal picks_changed()
+signal sandbox_changed(on: bool) ## Relax all mates turned on (the sandbox) or off (the parts went home): the tablet's toggle and the wheel follow it
 signal document_changed() ## a mate was made or deleted, or a part grounded / floated: what a save would write is different
 signal mates_changed()
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
@@ -122,7 +123,10 @@ var mate_minimal_movement := true:
 	set(v):
 		mate_minimal_movement = v
 		request_preview()
-var relaxed := false
+var relaxed := false ## the SANDBOX (set_relaxed): mates are not enforced and every move is on screen only, until the parts go home
+var return_glide_s := 0.45 ## how long the parts take to glide home when the sandbox ends (0: at once; tests)
+var sandbox_ghosts := false ## while relaxed, a see-through copy of each moved part where it will go back to (Settings > Assemble)
+var sandbox_lines := false ## while relaxed, a thin line from each moved part to its home (Settings > Assemble)
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
 var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
@@ -153,6 +157,13 @@ var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-
 var _group_persist: Dictionary = {}
 var _current_owner_part_id := "" ## the ACTIVE root: the one the Mates page lists and creates mates on (the world's loaded root)
 var _other_states: Dictionary = {} ## owner Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every OTHER root whose parts can be moved and saved: each open Assembly Room's Part (load_owner_state)
+var _nested_states: Dictionary = {} ## sub-assembly Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every Part below the active root (refresh_nested_state)
+var _home: Dictionary = {} ## the sandbox's snapshot: part node -> its local transform when Relax went on (sandbox_snapshot() is the same, keyed for a scene)
+var _sandbox_solve: Array = [] ## [{owner, occ}]: what mates made or edited while relaxed drive, solved once the parts are home
+var _cues: Dictionary = {} ## part node -> {"ghost": Node3D, "line": MeshInstance3D}: the sandbox's optional cues
+var _cue_tick := 0.0
+var _nested_order: Array = [] ## those Parts, each after every Part below it: the order Enforce all solves them in
+const MAX_NEST_DEPTH := 32
 
 
 func setup(stack) -> void:
@@ -780,6 +791,8 @@ func create_mate() -> Dictionary:
 		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
 	clear_picks()
 	document_changed.emit()
+	if relaxed:
+		note_sandbox_mate(owner_part_id, driven_occurrence_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "mate %s" % (str(part.name) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
@@ -860,6 +873,8 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 			_pending_edit[edit_key] = detail["branch_changes"]
 		return {"ok": false, "error": _friendly_error(result)}
 	document_changed.emit()
+	if relaxed:
+		note_sandbox_mate(owner_part_id, driven_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (str(part.name) if part != null else driven_id))
 	await refresh_mates(owner_part_id)
@@ -904,12 +919,29 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 
 
 func enforce_all(owner_part_id: String) -> Dictionary:
-	## Solves every non-grounded occurrence any of this Part's own Mates
-	## reference, and reports the outcome on the tablet. Returns {ok, solved, problems}
-	## (ok = every mate was satisfied) and emits enforce_finished with the same.
+	## Re-applies every mate in the loaded assembly, at every level: each sub-assembly's own Mates first, deepest first (a sub-assembly is
+	## settled before the assembly it sits in is solved against it), then this Part's own. Every non-grounded occurrence a Mate moves is solved;
+	## a reference into a sub-assembly (`outer/inner`) solves `outer`, the top-level occurrence it moves. Afterwards every part nested in a
+	## sub-assembly is put back where the stored tree places it (a nested part moved by hand with mates relaxed moved on screen only).
+	## Returns {ok, solved, problems} (ok = every mate was satisfied) and emits enforce_finished with the same.
+	## In the sandbox the parts go home first: solving from a scattered layout is what the sandbox exists to avoid.
+	if relaxed:
+		await return_parts()
 	await refresh_state(owner_part_id)
 	var solved := 0
 	var problems: Array[String] = []
+	for pid in _nested_order:
+		var state: Dictionary = _nested_states.get(pid, {})
+		for occ_id in state.get("mated", {}):
+			if bool(state.get("occurrences", {}).get(occ_id, {}).get("fixed", false)):
+				continue
+			_busy = true
+			var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/solve" % [pid, occ_id], null)
+			_busy = false
+			if result["ok"]:
+				solved += 1
+			else:
+				problems.append("in sub-assembly %s: %s" % [await _part_label(pid), _friendly_error(result)])
 	for occ_id in _mated_ids:
 		if bool(occurrences.get(occ_id, {}).get("fixed", false)):
 			continue # grounded: it's the anchor the others are solved against
@@ -918,6 +950,7 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 			solved += 1
 		else:
 			problems.append(result["error"])
+	await _adopt_nested_poses(owner_part_id)
 	if problems.is_empty():
 		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
 	else:
@@ -927,8 +960,294 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 	return outcome
 
 
+func _part_label(part_id: String) -> String:
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s" % part_id, null)
+	if result["ok"] and result["json"] is Dictionary and str(result["json"].get("name", "")) != "":
+		return str(result["json"]["name"])
+	return part_id
+
+
+func _adopt_nested_poses(root_part_id: String) -> int:
+	## Puts every world part nested in a sub-assembly (group_index.gd's group_path, two or more levels) where the stored occurrence tree places
+	## it: the chain of its occurrences' transforms, root first (the glb flattens each instance onto its own node, so that chain IS its node's
+	## transform). Covers what a sub-assembly solve moved and what a hand move put out of place on screen. No undo entry: a nested move was
+	## never saved, so there is nothing to go back to. Returns how many nodes moved.
+	var rows_by_part := {}
+	var moved := 0
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if not is_instance_valid(node) or node.has_meta("room_id") or bool(node.get_meta("held", false)):
+			continue
+		if str(node.get_meta("group_root", "")) != root_part_id:
+			continue
+		var path: Array = node.get_meta("group_path", [])
+		var parts: Array = node.get_meta("group_parts", [])
+		if path.size() < 2 or parts.size() != path.size():
+			continue
+		var pose := Transform3D.IDENTITY
+		var ok := true
+		for i in path.size():
+			var pid: String = root_part_id if i == 0 else str(parts[i - 1])
+			if not rows_by_part.has(pid):
+				var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % pid, null)
+				rows_by_part[pid] = result["json"] if result["ok"] and result["json"] is Array else []
+			var row: Variant = null
+			for r in rows_by_part[pid]:
+				if str(r.get("id", "")) == str(path[i]):
+					row = r
+					break
+			if row == null or not (row.get("transform") is Dictionary):
+				ok = false
+				break
+			pose = pose * json_to_pose(row["transform"])
+		if not ok or not is_instance_valid(node) or _local_pose(node).is_equal_approx(pose):
+			continue
+		node.transform = pose
+		moved += 1
+	return moved
+
+
 func set_relaxed(on: bool) -> void:
-	relaxed = on
+	## Relax all mates is a SANDBOX. On: every placed part's pose is remembered, mates stop steering, and nothing that moves is saved, so parts
+	## can be pulled about, grounded ones too, to look and to clear the way. Off: every remembered part glides back to exactly where it was (no
+	## solve: a solve from a scattered layout can land on another branch or fail), then the mates made or edited meanwhile are solved from there.
+	## Parts that appeared meanwhile (a reload, a room opened, a file added) were never remembered and stay put; deleted ones are just gone.
+	if on == relaxed:
+		return
+	if on:
+		_enter_sandbox({})
+	else:
+		await return_parts()
+
+
+func is_sandboxed(part: Node3D) -> bool:
+	## This part's moves are the sandbox's: on screen only, back home when Relax goes off.
+	return relaxed and is_instance_valid(part) and _home.has(part)
+
+
+func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
+	relaxed = true
+	_home.clear()
+	if home.is_empty():
+		for node in get_tree().get_nodes_in_group("grabbable_parts"):
+			if is_instance_valid(node):
+				_home[node] = (node as Node3D).transform
+	else:
+		for node in home:
+			if is_instance_valid(node):
+				_home[node] = home[node]
+	for node in arrangement:
+		if is_instance_valid(node):
+			(node as Node3D).transform = arrangement[node]
+	_report("Mates relaxed: move anything, nothing is saved. Return parts puts everything back.")
+	sandbox_changed.emit(true)
+
+
+func _rebase_sandbox() -> void:
+	## A model (re)loaded while relaxed: its parts show their stored poses, which are their homes (nothing moved in the sandbox was saved).
+	var kept := {}
+	for node in _home:
+		if is_instance_valid(node):
+			kept[node] = _home[node]
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if is_instance_valid(node) and not kept.has(node):
+			kept[node] = (node as Node3D).transform
+	_home = kept
+
+
+func sandbox_snapshot() -> Dictionary:
+	## The remembered poses keyed the way a saved scene would name them: "<root>|<occurrence path>" (group_index.gd's path from the scope's
+	## root, the same at every level) -> pose json in the frame its node sits in. Parts with no path (root content, pattern copies) are keyed
+	## "<owner>|<occurrence>#<n>". Not saved anywhere yet: scenes are scoped separately.
+	var out := {}
+	for node in _home:
+		if not is_instance_valid(node):
+			continue
+		var path: Array = node.get_meta("group_path", [])
+		var key := ""
+		if not path.is_empty():
+			key = "%s|%s" % [str(node.get_meta("group_root", "")), "/".join(PackedStringArray(path.map(func(p) -> String: return str(p))))]
+		else:
+			var n := 0
+			key = "%s|%s#%d" % [owner_of(node), _occ_id(node), n]
+			while out.has(key):
+				n += 1
+				key = "%s|%s#%d" % [owner_of(node), _occ_id(node), n]
+		if node.has_meta("room_id"):
+			key = "room%d:%s" % [int(node.get_meta("room_id")), key]
+		out[key] = pose_to_json(_home[node])
+	return out
+
+
+func return_parts(record_undo: bool = true) -> Dictionary:
+	## Ends the sandbox: every remembered part glides home, ONE undo step (undoing it puts the arrangement back and relaxes again), then the
+	## mates made or edited while relaxed are solved from the home poses. Returns {ok, moved, problems}. A coroutine.
+	if not relaxed:
+		return {"ok": true, "moved": 0, "problems": []}
+	var homes := {}
+	var arrangement := {}
+	for node in _home:
+		if is_instance_valid(node):
+			homes[node] = _home[node]
+			if not (node as Node3D).transform.is_equal_approx(_home[node]):
+				arrangement[node] = (node as Node3D).transform
+	relaxed = false
+	_home.clear()
+	_clear_cues()
+	sandbox_changed.emit(false)
+	if record_undo and command_stack != null and not arrangement.is_empty():
+		command_stack.push("return parts",
+			func() -> void: _enter_sandbox(homes, arrangement),
+			func() -> void: return_parts(false))
+	await _glide_home(arrangement.keys(), homes)
+	var problems: Array[String] = []
+	var solve := _sandbox_solve.duplicate()
+	_sandbox_solve.clear()
+	for item in solve:
+		var result: Dictionary = await solve_occurrence(str(item["owner"]), str(item["occ"]))
+		if not result["ok"]:
+			problems.append(result["error"])
+	if problems.is_empty():
+		_report("Parts returned (%d moved back)." % arrangement.size() if not arrangement.is_empty() else "Mates enforced: nothing had moved.")
+	else:
+		_report("Parts returned, but a mate made while relaxed couldn't be met: %s" % "; ".join(problems))
+	return {"ok": problems.is_empty(), "moved": arrangement.size(), "problems": problems}
+
+
+func _glide_home(nodes: Array, homes: Dictionary) -> void:
+	var live := nodes.filter(func(n) -> bool: return is_instance_valid(n))
+	if live.is_empty():
+		return
+	if return_glide_s <= 0.0 or not is_inside_tree():
+		for node in live:
+			(node as Node3D).transform = homes[node]
+		return
+	var tween := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	for node in live:
+		tween.tween_property(node, "transform", homes[node], return_glide_s)
+	await tween.finished
+	for node in live:
+		if is_instance_valid(node):
+			(node as Node3D).transform = homes[node] # exactly home, whatever the interpolation left
+
+
+func note_sandbox_mate(owner_part_id: String, occurrence_id: String) -> void:
+	## A mate was made or edited while relaxed (stored, not solved): its driven part is solved once the parts are home.
+	if not relaxed or occurrence_id == "":
+		return
+	for item in _sandbox_solve:
+		if item["owner"] == owner_part_id and item["occ"] == occurrence_id:
+			return
+	_sandbox_solve.append({"owner": owner_part_id, "occ": occurrence_id})
+
+
+# --- the sandbox's optional cues: a ghost at home, a line to it ---
+
+func _process(delta: float) -> void:
+	if not relaxed or not (sandbox_ghosts or sandbox_lines):
+		if not _cues.is_empty():
+			_clear_cues()
+		return
+	_cue_tick += delta
+	if _cue_tick < 0.1:
+		return
+	_cue_tick = 0.0
+	update_cues()
+
+
+func update_cues() -> void:
+	## A ghost (and / or a line) for every remembered part that is away from home; none for one that is home. Public for tests.
+	for node in _cues.keys():
+		if not is_instance_valid(node) or not _home.has(node) or (node as Node3D).transform.is_equal_approx(_home[node]):
+			_free_cue(node)
+	if not relaxed:
+		return
+	for node in _home:
+		if not is_instance_valid(node) or (node as Node3D).transform.is_equal_approx(_home[node]):
+			continue
+		var cue: Dictionary = _cues.get(node, {})
+		var parent := (node as Node3D).get_parent() as Node3D
+		var home_global: Transform3D = (parent.global_transform if parent != null else Transform3D.IDENTITY) * (_home[node] as Transform3D)
+		if sandbox_ghosts and node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+			if not cue.has("ghost"):
+				var ghost := MeshInstance3D.new()
+				ghost.name = "HomeGhost"
+				ghost.mesh = (node as MeshInstance3D).mesh
+				ghost.material_override = _ghost_material()
+				ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				add_child(ghost)
+				cue["ghost"] = ghost
+			(cue["ghost"] as Node3D).global_transform = home_global
+		elif cue.has("ghost"):
+			(cue["ghost"] as Node).queue_free()
+			cue.erase("ghost")
+		if sandbox_lines:
+			if not cue.has("line"):
+				var line := MeshInstance3D.new()
+				line.name = "HomeLine"
+				line.mesh = ImmediateMesh.new()
+				var mat := StandardMaterial3D.new()
+				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mat.albedo_color = Color(GHOST_COLOUR, 0.6)
+				line.material_override = mat
+				line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				add_child(line)
+				cue["line"] = line
+			var a := _centre_of(node as Node3D, (node as Node3D).global_transform)
+			var b := _centre_of(node as Node3D, home_global)
+			var im := (cue["line"] as MeshInstance3D).mesh as ImmediateMesh
+			(cue["line"] as Node3D).global_transform = Transform3D.IDENTITY
+			im.clear_surfaces()
+			im.surface_begin(Mesh.PRIMITIVE_LINES)
+			im.surface_add_vertex(a)
+			im.surface_add_vertex(b)
+			im.surface_end()
+		elif cue.has("line"):
+			(cue["line"] as Node).queue_free()
+			cue.erase("line")
+		if cue.is_empty():
+			_cues.erase(node)
+		else:
+			_cues[node] = cue
+
+
+func cue_count() -> Dictionary:
+	var ghosts := 0
+	var lines := 0
+	for node in _cues:
+		ghosts += 1 if _cues[node].has("ghost") else 0
+		lines += 1 if _cues[node].has("line") else 0
+	return {"ghosts": ghosts, "lines": lines}
+
+
+static func _centre_of(node: Node3D, at: Transform3D) -> Vector3:
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		return at * (node as MeshInstance3D).mesh.get_aabb().get_center()
+	return at.origin
+
+
+func _ghost_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(GHOST_COLOUR, 0.22)
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.no_depth_test = false
+	return mat
+
+
+func _free_cue(node) -> void:
+	var cue: Dictionary = _cues.get(node, {})
+	for key in cue:
+		if is_instance_valid(cue[key]):
+			(cue[key] as Node).queue_free()
+	_cues.erase(node)
+
+
+func _clear_cues() -> void:
+	for node in _cues.keys():
+		_free_cue(node)
+	_cues.clear()
 
 
 # --- state, locking, and grounding ---
@@ -949,13 +1268,80 @@ func refresh_state(owner_part_id: String) -> void:
 		for occ in result["json"]:
 			occurrences[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
 	await refresh_mates(owner_part_id)
+	await refresh_nested_state(owner_part_id)
+	if relaxed:
+		_rebase_sandbox()
+
+
+func refresh_nested_state(root_part_id: String) -> void:
+	## Reads every sub-assembly below the active root: its occurrences (their `fixed` flags) and its own Mates. A part nested in one is not
+	## managed (its node's transform is root-relative, so a move of it is on screen only and never saved), but while mates are enforced a mated
+	## one must stay where its mates put it (is_nested_locked), and Enforce all solves these Parts' mates too, deepest first (_nested_order).
+	_nested_states.clear()
+	_nested_order.clear()
+	if backend_url.is_empty() or api_key.is_empty() or root_part_id.is_empty():
+		return
+	var rows_by_part := {}
+	await _walk_nested(root_part_id, [root_part_id], rows_by_part)
+	for pid in _nested_order:
+		var occs := {}
+		for row in rows_by_part.get(pid, []):
+			occs[str(row.get("id", ""))] = {"fixed": bool(row.get("fixed", false))}
+		var mated := {}
+		var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % pid, null)
+		if mate_result["ok"] and mate_result["json"] is Array:
+			mated = mated_tops((mate_result["json"] as Array).filter(func(m) -> bool: return m is Dictionary and not bool(m.get("suppressed", false))))
+		_nested_states[pid] = {"occurrences": occs, "mated": mated}
+	mates_changed.emit()
+
+
+func _walk_nested(part_id: String, ancestors: Array, rows_by_part: Dictionary) -> void:
+	## Depth-first over the occurrence tree; a Part goes into _nested_order after every Part below it (so a sub-assembly's own mates are solved
+	## before the mates of the assembly it sits in). A Part already on the path (a cycle) or seen before is not walked again.
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % part_id, null)
+	var rows: Array = result["json"] if result["ok"] and result["json"] is Array else []
+	rows_by_part[part_id] = rows
+	if ancestors.size() > MAX_NEST_DEPTH:
+		return
+	for row in rows:
+		if bool(row.get("suppressed", false)) or row.get("resolved_part_id") == null:
+			continue
+		var child := str(row["resolved_part_id"])
+		if child == "" or ancestors.has(child) or rows_by_part.has(child):
+			continue
+		await _walk_nested(child, ancestors + [child], rows_by_part)
+		_nested_order.append(child)
+
+
+static func mate_ref_top(occurrence_id: String) -> String:
+	## The top-level occurrence a mate reference moves. A reference into a sub-assembly is a `/`-joined path (`outer/inner`); the solver moves
+	## `outer` as a whole (the backend's mate_ref_tops), so that is the occurrence that is mated, and the one Enforce all solves.
+	return occurrence_id.get_slice("/", 0)
+
+
+static func mated_tops(mate_list: Array) -> Dictionary:
+	## Every top-level occurrence the Mates involve -> true (the backend's mate_tops): each reference's own occurrence and, for a Width /
+	## Symmetric mid-plane whose second face is on another part (`midplane.b_occurrence_id`), that one's too. Root content ("") is left out.
+	var out := {}
+	for mate in mate_list:
+		if not (mate is Dictionary):
+			continue
+		for ref in mate.get("references", []):
+			if not (ref is Dictionary):
+				continue
+			var ids: Array = [str(ref.get("occurrence_id", ""))]
+			var mid = ref.get("midplane")
+			if mid is Dictionary and mid.get("b_occurrence_id") != null:
+				ids.append(str(mid["b_occurrence_id"]))
+			for id in ids:
+				var top := mate_ref_top(id)
+				if top != "":
+					out[top] = true
+	return out
 
 
 func _rebuild_mated_ids() -> void:
-	_mated_ids.clear()
-	for mate in mates:
-		for ref in mate.get("references", []):
-			_mated_ids[str(ref.get("occurrence_id", ""))] = true
+	_mated_ids = mated_tops(mates)
 
 
 func is_managed(part: Node3D) -> bool:
@@ -1014,10 +1400,10 @@ func load_owner_state(owner_part_id: String) -> bool:
 	var mated := {}
 	var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if mate_result["ok"] and mate_result["json"] is Array:
-		for mate in mate_result["json"]:
-			for ref in mate.get("references", []):
-				mated[str(ref.get("occurrence_id", ""))] = true
+		mated = mated_tops(mate_result["json"])
 	set_owner_state(owner_part_id, occs, mated)
+	if _nested_states.has(owner_part_id):
+		_nested_states[owner_part_id] = {"occurrences": occs, "mated": mated} # a room's Part is also a sub-assembly of the world's root: its mates there are the same
 	return true
 
 
@@ -1043,6 +1429,30 @@ func is_constrained(part: Node3D) -> bool:
 	## Mated, free to move, and mates are enforced: its motion is steered by a
 	## live solve (constrain_drag()).
 	return not relaxed and not _mates_dirty(part) and is_managed(part) and is_mated(part) and not is_fixed(part)
+
+
+func is_nested_locked(part: Node3D) -> bool:
+	## A part inside a sub-assembly (one this tool doesn't manage) that its sub-assembly's own Mates move, while mates are enforced: it stays
+	## where they put it. Its move could only ever be on screen (never saved) and would just break those mates. The sub-assembly as a whole
+	## can still be taken (the grip's wider levels); Relax all mates moves the part anyway, and an Assembly Room of that sub-assembly edits it.
+	if not is_instance_valid(part) or _mates_dirty(part) or is_managed(part):
+		return false
+	return nested_occurrence_locked(owner_of(part), _occ_id(part))
+
+
+func nested_occurrence_locked(owner_part_id: String, occurrence_id: String) -> bool:
+	## The occurrence `occurrence_id` of the sub-assembly Part `owner_part_id` is moved by that Part's own Mates, and mates are enforced: neither
+	## the part it places nor (for a sub-assembly inside a sub-assembly) the group it places moves on its own.
+	if relaxed or occurrence_id == "":
+		return false
+	return _nested_states.get(owner_part_id, {}).get("mated", {}).has(occurrence_id)
+
+
+func notify_nested_locked(part: Node3D) -> void:
+	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
+		return
+	_last_locked_notice_ms = Time.get_ticks_msec()
+	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % str(part.name))
 
 
 func _mates_dirty(part: Node3D) -> bool:
@@ -1117,6 +1527,8 @@ func _friendly_error(result: Dictionary) -> String:
 				return "the two faces of a pair are not parallel"
 			"missing_reference":
 				return "one of the picked faces no longer exists"
+			"unresolved_mate_occurrence", "occurrence_not_found":
+				return "a mate names a part that isn't in the assembly (%s): the sub-assembly may have changed since the mate was made" % str(detail.get("occurrence_id", "?"))
 		return str(detail.get("type", detail))
 	if detail != null:
 		return str(detail)
@@ -1166,8 +1578,8 @@ func persist_pose(part: Node3D) -> void:
 	## rotate/nudge, undo/redo — so the backend's copy always matches what you
 	## see, which every later mate solve depends on. Latest-wins per occurrence
 	## (a burst of moves collapses to one write; writes never overlap).
-	if not is_managed(part):
-		return
+	if not is_managed(part) or is_sandboxed(part):
+		return # (a sandbox move is on screen only: set_relaxed)
 	var occ := _occ_id(part)
 	var entry: Dictionary = _persist.get_or_add(occ, {"pose": null, "running": false, "owner": ""})
 	entry["pose"] = pose_to_json(_local_pose(part))
@@ -1336,6 +1748,15 @@ func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	_stat_add("projection_us_total", elapsed)
 	stat_motion["projection_us_max"] = maxi(int(stat_motion["projection_us_max"]), elapsed)
 	return parent.global_transform * grabbed_pose
+
+
+func take_stuck_notice(part: Node3D) -> bool:
+	## True once per drag, the first time it is asked after the backend said this part has no free motion (so the hand buzzes once).
+	var state: Dictionary = _drag.get(part, {})
+	if state.get("stuck") == false:
+		state["stuck"] = true
+		return true
+	return false
 
 
 func desired_global(part: Node3D) -> Transform3D:
@@ -1543,6 +1964,11 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 	for mem in members:
 		ids.append(str(mem["occurrence_id"]))
 	var model = Projector.from_anchor(refs, basis, lever)
+	if basis.is_empty() and not state.has("stuck"):
+		# No free motion at all: the mates fix this part completely. Without saying so it just doesn't follow the hand, which reads as a dead grip.
+		state["stuck"] = false # (false until the hand that holds it has buzzed: take_stuck_notice)
+		var node: Node3D = state["part"]
+		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (str(node.name) if is_instance_valid(node) else "That part"))
 	var wish = state["wish"]
 	if ids != state["members"]:
 		# first anchor, or the group changed under the drag: a fresh model and blender

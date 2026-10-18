@@ -37,6 +37,7 @@ func _initialize() -> void:
 	_r.position = _anchor
 	_main._show_model(FileAccess.get_file_as_bytes("res://tests/fixtures/topology_box_cylinder.glb"), "", 0.001)
 	_wheel = _main.get_node("ToolWheel")
+	_wheel.dwell_s = 1.0e6 # this test only hovers each wedge while it renders; a slow render must not count as a rest that opens a sub-wheel (tests/tool_wheel.gd covers that)
 	_flows = _main.get_node("WheelFlows")
 	_eye = Camera3D.new()
 	_eye.fov = 75.0
@@ -132,7 +133,7 @@ func _open() -> void:
 
 
 func _move(offset: Vector2) -> void:
-	_r.global_position = _anchor + _wheel._right * offset.x + Vector3.UP * offset.y
+	_r.global_position = _anchor + _wheel._right * offset.x + _wheel._up * offset.y
 	for i in 3:
 		await process_frame
 

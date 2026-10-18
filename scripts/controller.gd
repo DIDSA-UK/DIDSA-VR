@@ -220,6 +220,9 @@ func _physics_process(delta: float) -> void:
 	if pushing and mates_tool and mates_tool.is_locked(selected_node):
 		mates_tool.notify_locked(selected_node) # grounded by an enforced mate: not movable (throttled message)
 		return
+	if pushing and mates_tool and _sel_group == null and mates_tool.is_nested_locked(selected_node):
+		mates_tool.notify_nested_locked(selected_node) # held by its sub-assembly's mates (throttled message)
+		return
 	# Enforced mates: the increments below are applied to the drag's ACCUMULATED
 	# wish (the displayed pose lags a network round trip behind), then handed to
 	# the live solver, whose answer is what's shown — see mates_tool.gd.
@@ -250,6 +253,8 @@ func _physics_process(delta: float) -> void:
 		_nudge_along_aim(selected_node, forward, 1.0, speed, delta)
 	if constrained:
 		selected_node.global_transform = mates_tool.constrain_drag(selected_node, selected_node.global_transform)
+		if mates_tool.take_stuck_notice(selected_node):
+			trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0) # fully constrained: the wrist says so (mates_tool.gd)
 
 
 func _nudge_along_aim(part: Node3D, aim: Vector3, direction: float, speed: float, delta: float) -> void:
@@ -419,7 +424,7 @@ func _try_grab() -> void:
 		if group_deadzone > 0.0 and GroupIndex.has_groups(target):
 			_begin_latch(target)
 			return
-		_begin_hold(target, target.global_transform)
+		_begin_part_hold(target)
 
 
 # --- sub-assemblies: choosing what a grip or the laser takes (group_index.gd, group_set.gd) ---
@@ -437,7 +442,7 @@ func _begin_latch(target: Node3D) -> void:
 	## each trigger click widens that one level. Moving the hand out of the sphere takes it.
 	var levels := GroupIndex.levels(target, _scope_nodes())
 	if levels.size() <= 1:
-		_begin_hold(target, target.global_transform) # nothing wider to choose
+		_begin_part_hold(target) # nothing wider to choose
 		return
 	_latch = {"target": target, "levels": levels, "level": 0, "at": global_position, "nodes": [], "cues": []}
 	var sphere := GroupCues.sphere(group_deadzone)
@@ -495,9 +500,18 @@ func _commit_latch() -> void:
 	var target: Node3D = _latch["target"]
 	_end_latch()
 	if int(level["depth"]) == 0:
-		_begin_hold(target, target.global_transform)
+		_begin_part_hold(target)
 		return
 	_begin_group_hold(target, level)
+
+
+func _begin_part_hold(target: Node3D) -> void:
+	## A grip that takes the part on its own. A part its sub-assembly's mates hold (with mates enforced) refuses: only the sub-assembly can go.
+	if mates_tool and mates_tool.is_nested_locked(target):
+		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
+		mates_tool.notify_nested_locked(target)
+		return
+	_begin_hold(target, target.global_transform)
 
 
 func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
@@ -516,12 +530,19 @@ func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 
 func _group_refusal(gs) -> String:
 	## Why this sub-assembly can't be moved now ("" if it can). Only a top-level one is saved, so only its grounding and mates matter.
+	if mates_tool != null and mates_tool.relaxed:
+		return "" # the sandbox: anything moves, nothing is saved, it all goes home after
 	if gs.depth == 1 and mates_tool != null:
 		match mates_tool.group_state(gs.root_part_id, gs.occurrence_id()):
 			"grounded":
 				return "%s is grounded (fixed): unground it to move it." % gs.label
 			"mated":
 				return "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % gs.label
+	if gs.depth > 1 and mates_tool != null and gs.prefix.size() >= gs.depth:
+		# A sub-assembly inside another moves on screen only: one its parent's mates hold would just be pulled off them.
+		var parts: Array = gs.anchor.get_meta("group_parts", [])
+		if parts.size() >= gs.depth - 1 and mates_tool.nested_occurrence_locked(str(parts[gs.depth - 2]), str(gs.prefix[gs.depth - 1])):
+			return "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % gs.label
 	return ""
 
 
@@ -549,7 +570,8 @@ func _finish_group_move(gs) -> void:
 	var pg: Transform3D = parent.global_transform if parent != null else Transform3D.IDENTITY
 	var occ: String = gs.occurrence_id()
 	var owner: String = gs.root_part_id
-	var save: bool = occ != "" and mates_tool != null and mates_tool.group_state(owner, occ) == "ok"
+	var sandbox: bool = mates_tool != null and mates_tool.is_sandboxed(gs.anchor)
+	var save: bool = occ != "" and mates_tool != null and not sandbox and mates_tool.group_state(owner, occ) == "ok"
 	var old_pose: Variant = null
 	var new_pose: Variant = null
 	if save:
@@ -571,7 +593,7 @@ func _finish_group_move(gs) -> void:
 		save)
 	if save:
 		mates_tool.persist_group_pose(owner, occ, new_pose)
-	elif gs.depth > 1:
+	elif gs.depth > 1 and not sandbox:
 		group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
 
 
@@ -883,6 +905,8 @@ func _update_held_part(delta: float) -> void:
 		# Enforced mates: the part slides along what they allow (a live solve on
 		# the backend, mates_tool.gd) instead of following the hand freely.
 		held_node.global_transform = mates_tool.constrain_drag(held_node, desired)
+		if mates_tool.take_stuck_notice(held_node):
+			trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0) # fully constrained: the wrist says so (mates_tool.gd)
 	else:
 		held_node.global_transform = desired
 	if _held_group != null:
@@ -913,7 +937,7 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 		func() -> void:
 			part.global_transform = after
 			_sync_pose(part),
-		true) # persists: a part's pose is part of the document
+		not (mates_tool != null and mates_tool.is_sandboxed(part))) # persists: a part's pose is part of the document (a sandbox move is not: it goes home)
 	_sync_pose(part) # the move itself: the backend's copy must match what you see, or every later mate solves against a stale pose
 
 

@@ -36,6 +36,8 @@ var room_pedestal: bool = true ## the faint column from a room's console down to
 var world_preview_auto: bool = true ## a room's world preview follows its parts as they move (off: it shows the last Push)
 var world_preview_pulse: bool = false ## the world preview breathes (aesthetic)
 var group_deadzone: int = 1 ## the dead zone when you grip a part inside a sub-assembly (controller.gd group_deadzone): 0 Off, 1 Small (2 cm), 2 Medium (4 cm)
+var sandbox_ghosts: bool = false ## Relax all mates: a see-through copy of each moved part where it goes back to (mates_tool.gd)
+var sandbox_lines: bool = false ## Relax all mates: a thin line from each moved part to where it goes back to
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
 
 
@@ -54,6 +56,8 @@ func load_from_disk() -> void:
 	world_preview_pulse = bool(config.get_value("rooms", "preview_pulse", world_preview_pulse))
 	group_deadzone = clampi(int(config.get_value("rooms", "group_deadzone", group_deadzone)), 0, 2)
 	room_pedestal = bool(config.get_value("rooms", "pedestal", room_pedestal))
+	sandbox_ghosts = bool(config.get_value("mates", "sandbox_ghosts", sandbox_ghosts))
+	sandbox_lines = bool(config.get_value("mates", "sandbox_lines", sandbox_lines))
 	wheel_size = clampi(int(config.get_value("comfort", "wheel_size", wheel_size)), 0, 2)
 	ui_theme = str(config.get_value("appearance", "theme", ui_theme))
 	view_render_mode = clampi(int(config.get_value("appearance", "view_render_mode", view_render_mode)), 0, 2)
@@ -78,6 +82,8 @@ func save_to_disk() -> void:
 	config.set_value("rooms", "preview_auto", world_preview_auto)
 	config.set_value("rooms", "preview_pulse", world_preview_pulse)
 	config.set_value("rooms", "pedestal", room_pedestal)
+	config.set_value("mates", "sandbox_ghosts", sandbox_ghosts)
+	config.set_value("mates", "sandbox_lines", sandbox_lines)
 	config.set_value("comfort", "wheel_size", wheel_size)
 	config.set_value("appearance", "theme", ui_theme)
 	config.set_value("appearance", "view_render_mode", view_render_mode)
@@ -155,6 +161,16 @@ func set_wheel_size(index: int) -> void:
 
 func set_room_pedestal(on: bool) -> void:
 	room_pedestal = on
+	save_to_disk()
+
+
+func set_sandbox_ghosts(on: bool) -> void:
+	sandbox_ghosts = on
+	save_to_disk()
+
+
+func set_sandbox_lines(on: bool) -> void:
+	sandbox_lines = on
 	save_to_disk()
 
 

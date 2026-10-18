@@ -71,7 +71,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the
 |---|---|
 | **Design** | Summons the design table, or brings it to you. |
 | **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
-| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Relax/Enforce all, Fix/Float). |
+| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
