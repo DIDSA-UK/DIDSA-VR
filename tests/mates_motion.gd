@@ -235,6 +235,27 @@ func _initialize() -> void:
 	bad_res["json"]["quality"]["residual_inf"] = 3e-6
 	tool.handle_anchor_response(st2, bad_res, st2["wish"])
 	print("SMOKE ...and so is an anchor with residual_inf above 1e-6: ", tool.stat_motion["anchors_rejected"].get("residual", 0) == 1 and int(tool.stat_motion["anchors_accepted"]) == 2)
+	# a fully constrained part: converged, but no free direction at all (an empty basis)
+	var st3: Dictionary = tool._new_drag_state(mated)
+	st3["running"] = true
+	st3["wish"] = Se3.make_pose([10.0, 20.0, 30.0], Se3.identity())
+	tool._drag[mated] = st3
+	var stuck_answer: Dictionary = good.call(10.0)
+	stuck_answer["json"]["dof"] = 0
+	stuck_answer["json"]["basis"] = []
+	tool.handle_anchor_response(st3, stuck_answer, null)
+	print("SMOKE a fully constrained part (dof 0) says so on the wrist, naming the part: ", tool.status_text().contains("fully constrained by its mates") and tool.status_text().begins_with(str(mated.name)))
+	print("SMOKE ...and the hand buzzes once per drag, not every frame or every anchor: ", tool.take_stuck_notice(mated) and not tool.take_stuck_notice(mated))
+	tool.handle_anchor_response(st3, stuck_answer, st3["wish"])
+	print("SMOKE ...(a later anchor of the same drag doesn't repeat it): ", not tool.take_stuck_notice(mated))
+	tool._drag.erase(mated)
+	var free_state: Dictionary = tool._new_drag_state(mated)
+	free_state["running"] = true
+	tool._drag[mated] = free_state
+	tool._report("")
+	tool.handle_anchor_response(free_state, good.call(10.0), null)
+	print("SMOKE a part with free motion gets no such notice: ", not tool.take_stuck_notice(mated) and not tool.status_text().contains("fully constrained"))
+	tool._drag.erase(mated)
 	var no_basis: Dictionary = good.call(58.0)
 	no_basis["json"].erase("basis")
 	tool.handle_anchor_response(st2, no_basis, st2["wish"])

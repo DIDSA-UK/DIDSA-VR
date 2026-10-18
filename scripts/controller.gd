@@ -253,6 +253,8 @@ func _physics_process(delta: float) -> void:
 		_nudge_along_aim(selected_node, forward, 1.0, speed, delta)
 	if constrained:
 		selected_node.global_transform = mates_tool.constrain_drag(selected_node, selected_node.global_transform)
+		if mates_tool.take_stuck_notice(selected_node):
+			trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0) # fully constrained: the wrist says so (mates_tool.gd)
 
 
 func _nudge_along_aim(part: Node3D, aim: Vector3, direction: float, speed: float, delta: float) -> void:
@@ -900,6 +902,8 @@ func _update_held_part(delta: float) -> void:
 		# Enforced mates: the part slides along what they allow (a live solve on
 		# the backend, mates_tool.gd) instead of following the hand freely.
 		held_node.global_transform = mates_tool.constrain_drag(held_node, desired)
+		if mates_tool.take_stuck_notice(held_node):
+			trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0) # fully constrained: the wrist says so (mates_tool.gd)
 	else:
 		held_node.global_transform = desired
 	if _held_group != null:

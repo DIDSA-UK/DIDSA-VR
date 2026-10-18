@@ -1493,6 +1493,15 @@ func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	return parent.global_transform * grabbed_pose
 
 
+func take_stuck_notice(part: Node3D) -> bool:
+	## True once per drag, the first time it is asked after the backend said this part has no free motion (so the hand buzzes once).
+	var state: Dictionary = _drag.get(part, {})
+	if state.get("stuck") == false:
+		state["stuck"] = true
+		return true
+	return false
+
+
 func desired_global(part: Node3D) -> Transform3D:
 	## The accumulated wish for a drag in progress (controller.gd's laser
 	## rotate/nudge applies its per-frame increments on top of THIS, not the
@@ -1698,6 +1707,11 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 	for mem in members:
 		ids.append(str(mem["occurrence_id"]))
 	var model = Projector.from_anchor(refs, basis, lever)
+	if basis.is_empty() and not state.has("stuck"):
+		# No free motion at all: the mates fix this part completely. Without saying so it just doesn't follow the hand, which reads as a dead grip.
+		state["stuck"] = false # (false until the hand that holds it has buzzed: take_stuck_notice)
+		var node: Node3D = state["part"]
+		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (str(node.name) if is_instance_valid(node) else "That part"))
 	var wish = state["wish"]
 	if ids != state["members"]:
 		# first anchor, or the group changed under the drag: a fresh model and blender
