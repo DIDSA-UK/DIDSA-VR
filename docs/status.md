@@ -32,9 +32,9 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 ## Tests (as of the last recorded run)
 
-- Headless suite (`tests/ci.sh`): **2914 SMOKE lines, 0 unexpected failures** (19 Oct 2026, branch `claude/appearance-and-scenes`: the Appearance tool's five new test files; `colour_tool.gd` and the two old colour e2e files went with the tool they tested). Counts rise with every feature; treat this number as a floor.
-- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **53**, green (19 Oct), including `appearance_render` (a backend glb split by appearance draws) and `wheel_hint_render` (the wrist panel covers 0% of the tool wheel).
-- Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **395 SMOKE lines, 0 failures, 32 tests** on 19 Oct against DIDSA-CAD branch `claude/appearance-and-scenes`, run locally with the backend's conda environment; includes the new `e2e_appearance` (15). Needs a DIDSA-CAD backend.
+- Headless suite (`tests/ci.sh`): **2990 SMOKE lines, 0 unexpected failures** (19 Oct 2026, branch `claude/appearance-and-scenes`, M4: `clip_look`, `scene_vectors`, `scenes_tool`, `scenes_ui` new). Counts rise with every feature; treat this number as a floor.
+- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **63**, green (19 Oct), including `appearance_clip_render` (painted looks under the section clip) and `appearance_render`.
+- Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **415 SMOKE lines, 0 failures, 33 tests** on 19 Oct against DIDSA-CAD branch `claude/appearance-and-scenes`, run locally with the backend's conda environment; includes the new `e2e_scenes` (20). Needs a DIDSA-CAD backend.
 - CI: `.github/workflows/headless-tests.yml` (every push and PR touching code) and `e2e-backend.yml`.
 
 ## Open items that matter most
