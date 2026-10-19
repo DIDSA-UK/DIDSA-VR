@@ -85,7 +85,7 @@ func _initialize() -> void:
 	main._mates_tool.document_changed.emit()
 	print("SMOKE a mate made or deleted, or a part grounded, marks it: ", main.document_dirty)
 	main.mark_clean()
-	main._colour_tool.document_changed.emit()
+	main._appearance_tool.document_changed.emit()
 	print("SMOKE a colour set marks it: ", main.document_dirty)
 	main.mark_clean()
 	main.design_table.notify_edited("PART_X", [])

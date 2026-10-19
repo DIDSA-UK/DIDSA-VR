@@ -57,7 +57,7 @@ static func release(part: MeshInstance3D) -> void:
 static func reconcile(parts: Array) -> void:
 	## `parts` is the arena's parts (main.gd's _arena_parts()): NOT the design table's copy or anything else meant to ignore rooms; those are never passed.
 	## Once a frame while rooms exist (cheap: a meta read and a reference compare per part): wraps any part whose override was replaced since
-	## (colour_tool.gd paints by setting material_override) or that has never been wrapped, keeping each part in the room its meta says.
+	## (appearance_tool.gd paints by setting material_override) or that has never been wrapped, keeping each part in the room its meta says.
 	if RoomRegistry.rooms.is_empty():
 		for part in parts:
 			if is_instance_valid(part) and part is MeshInstance3D and part.has_meta(WRAPPED):
@@ -80,4 +80,4 @@ static func _albedo(material: Material, part: MeshInstance3D) -> Color:
 	var base := part.get_active_material(0)
 	if base is BaseMaterial3D:
 		return (base as BaseMaterial3D).albedo_color
-	return Color(0.7, 0.7, 0.7, 1.0) ## colour_tool.gd's neutral default
+	return Color(0.7, 0.7, 0.7, 1.0) ## appearance_tool.gd's neutral default

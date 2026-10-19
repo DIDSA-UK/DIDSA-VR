@@ -131,14 +131,19 @@ func _initialize() -> void:
 
 	var moved_local: Vector3 = target.transform.origin # (read now: later reloads of the room replace its part nodes)
 
-	# --- a colour set on a room part is saved on its occurrence
-	var colour_result: Dictionary = await main._colour_tool.set_color(target, "#cc3322")
+	# --- a colour painted on a room part (the Appearance tool's Part row) is an override in the room's Part, mirrored into its occurrence's colour
+	var at: Node = main._appearance_tool
+	print("SMOKE a room part is painted in the room's own Part: ", at.root_of(target, main.current_root_part_id()) == s_id, " (%s, group_root %s)" % [at.root_of(target, main.current_root_part_id()), str(target.get_meta("group_root", "-"))])
+	await at.ensure_loaded(s_id)
+	at.brush = {"colour": "#CC3322"}
+	var part_row: Array = at.rows_for(target, 0, main.get_tree().get_nodes_in_group("grabbable_parts"), main.current_root_part_id()).filter(func(row) -> bool: return row["id"] == "part")
+	var colour_result: Dictionary = await at.apply(part_row[0], s_id, main.get_tree().get_nodes_in_group("grabbable_parts"), main.current_root_part_id()) if not part_row.is_empty() else {"ok": false}
 	var after_colour = await _get_json("/parts/%s/occurrences" % s_id)
 	var coloured := false
 	for occ in after_colour:
 		if occ["id"] == occ_id and str(occ.get("color", "")).to_lower() == "#cc3322":
 			coloured = true
-	print("SMOKE a colour set on a room part is saved on its occurrence: ", colour_result.get("ok", false) and coloured)
+	print("SMOKE a colour painted on a room part is saved in the room (its occurrence's colour mirrors it): ", colour_result.get("ok", false) and coloured)
 
 	# --- Fix / Float on a room part is saved on its occurrence (and read back through the room's own state)
 	var was_fixed: bool = main._mates_tool.is_fixed(target)

@@ -12,7 +12,7 @@ extends RefCounted
 ##
 ## ctx (Dictionary) wires the real thing in; the UI Lab passes a stub:
 ##   left, right, camera, two_hand, locomotion, main, command_stack, mates_tool,
-##   colour_tool, section_tool, measure_tool, assembly_tree_window,
+##   appearance_tool, section_tool, measure_tool, assembly_tree_window,
 ##   calculator_window, image_viewer_window, browser_window,
 ##   dragging: Callable() -> bool  (true while the laser is dragging a slider)
 ##   navigate: Callable(category_id)  (opens a category on the tablet: a status chip's tap)
@@ -25,12 +25,8 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
-const COLOUR_SWATCHES: Array[Dictionary] = [
-	{"name": "Red", "hex": "#e63946"}, {"name": "Orange", "hex": "#f4a340"},
-	{"name": "Yellow", "hex": "#f1c40f"}, {"name": "Green", "hex": "#2ecc71"},
-	{"name": "Blue", "hex": "#3498db"}, {"name": "Purple", "hex": "#9b59b6"},
-	{"name": "White", "hex": "#f5f5f5"}, {"name": "Black", "hex": "#222222"},
-]
+const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
+const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
 const SCENE_ICONS := {"Light": "scene_light", "Dark": "scene_dark", "Mid": "scene_mid", "Passthrough": "scene_passthrough"}
 const ACCENT_DESIGN := Color(1.00, 0.71, 0.33)
 const ACCENT_ASSEMBLY := Color(0.37, 0.76, 1.00)
@@ -51,7 +47,7 @@ var _locomotion: Node
 var _main: Node
 var _command_stack = null
 var _mates_tool: Node
-var _colour_tool: Node
+var _appearance_tool: Node
 var _section_tool: Node
 var _measure_tool: Node
 var _assembly_tree_window: Node
@@ -76,8 +72,7 @@ var _mates_next_button: Button
 var _mates_relax_button: Button
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
-var _colour_group_toggle: Button
-var _paint_hex_label: Label
+var _appearance_page: RefCounted = null ## appearance_page.gd, once built
 var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
@@ -104,7 +99,7 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 	_main = ctx.get("main")
 	_command_stack = ctx.get("command_stack")
 	_mates_tool = ctx.get("mates_tool")
-	_colour_tool = ctx.get("colour_tool")
+	_appearance_tool = ctx.get("appearance_tool")
 	_section_tool = ctx.get("section_tool")
 	_measure_tool = ctx.get("measure_tool")
 	_assembly_tree_window = ctx.get("assembly_tree_window")
@@ -152,14 +147,11 @@ func register(reg) -> void:
 	reg.add_tool("view", "display", "Display", "eye_shaded", _build_display_page, {
 		"caption": "shaded · edges · wire",
 		"help": "How models are drawn: Shaded, Shaded + edges (the part's real CAD edges over its faces) or Wireframe (edges only). Saved for next time."})
-	reg.add_tool("view", "colours", "Colours", "colours", _build_colours_page, {
-		"caption": "colour parts", "status": _colour_status,
-		"help": "Laser-select a part first, then tap a swatch. Apply to whole group colours every occurrence sharing its owner. Not undoable: pick another colour or Clear."})
-	reg.add_tool("view", "paint", "Paint", "paint", _build_paint_page, {
+	reg.add_tool("view", "paint", "Appearance", "paint", _build_paint_page, {
 		"kind": "mode", "on_activate": _set_paint.bind(true), "on_deactivate": _set_paint.bind(false),
-		"caption": "shoot to paint",
-		"hint": "Point at a part and pull the right trigger to paint it.",
-		"help": "Switch the tool on, pick a colour, then point the right laser at a part and pull the trigger to paint it. Undo puts the old colour back. The tool wheel (right trigger + grip) has the palette too."})
+		"caption": "colour · see-through · shine · glow", "status": _paint_status,
+		"hint": "Click paints the body under the laser. Hold the trigger to choose what to paint.",
+		"help": "Switch the tool on and set the brush: a colour (palette, picker, hex, recent, or the eyedropper), and any of opacity, shine, metal and glow (only the switched-on properties are painted). Point the right laser at a part: a click paints that body; hold the trigger to choose the face, the part, every copy of a pattern, every placement of the part, a sub-assembly or the whole assembly, and let go on the row (off the panel paints nothing). Clear removes that level's own paint. Undo puts it back. While mates are relaxed, painting is temporary and goes back with the parts."})
 	reg.add_tool("view", "environment", "Environment", "environment", _build_environment_page, {
 		"caption": "scene · passthrough",
 		"help": "How the room around the model looks: a rendered backdrop, or step into mixed reality (Passthrough)."})
@@ -239,30 +231,45 @@ func _set_paint(on: bool) -> void:
 
 
 func set_paint_colour(hex: String) -> void:
-	## The colour the Paint tool applies (the tool wheel's palette and this tool's own page both set it).
-	_left.paint_hex = hex
-	_right.paint_hex = hex
-	if _paint_hex_label:
-		_paint_hex_label.text = "Colour: %s" % hex
+	## The colour the Appearance tool paints (the tool wheel's palette and the page both set it; the brush's other properties stay).
+	if _appearance_page != null:
+		_appearance_page.set_colour(hex)
+	elif _appearance_tool != null:
+		var b: Dictionary = _appearance_tool.brush.duplicate()
+		b["colour"] = hex.to_upper()
+		_appearance_tool.brush = b
+
+
+func set_paint_clear() -> void:
+	## The Clear swatch (the wheel's palette has it too).
+	if _appearance_page != null:
+		_appearance_page.set_clear()
+	elif _appearance_tool != null:
+		_appearance_tool.brush = {}
 
 
 func paint_colour() -> String:
-	return _right.paint_hex
+	## The brush's colour, "Clear" for the Clear swatch, "" if it paints no colour.
+	if _appearance_tool == null:
+		return ""
+	return "Clear" if _appearance_tool.brush.is_empty() else str(_appearance_tool.brush.get("colour", ""))
+
+
+func _paint_status() -> String:
+	return _appearance_tool.panel_title() if _appearance_tool != null else ""
 
 
 func _build_paint_page() -> Control:
-	var page := _page()
-	_paint_hex_label = _hint("Colour: %s" % _right.paint_hex)
-	page.add_child(_paint_hex_label)
-	var grid := GridContainer.new()
-	grid.columns = 4
-	for swatch in COLOUR_SWATCHES:
-		var b := Button.new()
-		b.text = swatch["name"]
-		b.pressed.connect(set_paint_colour.bind(swatch["hex"]))
-		grid.add_child(b)
-	page.add_child(grid)
-	return page
+	if _appearance_tool == null:
+		return _hint("The Appearance tool isn't available.")
+	_appearance_page = AppearancePage.new(_appearance_tool, tokens, _main.open_keyboard_for if _main != null else Callable(), func(text: String, kind: String) -> void: toast.emit(text, kind))
+	return _appearance_page.build()
+
+
+func _on_custom_colour_pressed() -> void:
+	## The hex field (the full keyboard: it needs a-f).
+	if _appearance_page != null:
+		_appearance_page._on_hex()
 
 
 func _set_mates(on: bool) -> void:
@@ -857,74 +864,6 @@ func _on_delete_mate_pressed(mate_id: String) -> void:
 
 func _trim_mate_value(x) -> String:
 	return ("%.3f" % float(x)).rstrip("0").rstrip(".")
-
-
-# --- Assembly: Colours ---------------------------------------------------------------
-
-func _build_colours_page() -> Control:
-	var page := _page(8)
-	# Colouring hierarchy ("for now" scope, docs/status.md): "this one Occurrence"
-	# (laser-select it, the default) or "every Occurrence sharing its immediate owner".
-	_colour_group_toggle = _mode_toggle("Apply to whole group", func(_on: bool) -> void: pass, false)
-	page.add_child(_colour_group_toggle)
-	var grid := HFlowContainer.new()
-	grid.add_theme_constant_override("h_separation", tokens.gap)
-	grid.add_theme_constant_override("v_separation", tokens.gap)
-	page.add_child(grid)
-	for swatch in COLOUR_SWATCHES:
-		var b := Button.new()
-		b.text = swatch["name"]
-		b.custom_minimum_size = Vector2(120, 56)
-		var fill := Color(swatch["hex"])
-		var ink := _readable_text_color(swatch["hex"])
-		for state in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
-			b.add_theme_color_override(state, ink)
-		b.add_theme_stylebox_override("normal", tokens.box(fill, fill.darkened(0.25)))
-		b.add_theme_stylebox_override("hover", tokens.box(fill.lightened(0.12), Color.WHITE))
-		b.add_theme_stylebox_override("pressed", tokens.box(fill, Color.WHITE))
-		b.pressed.connect(_apply_colour.bind(swatch["hex"]))
-		grid.add_child(b)
-	var custom_row := _row()
-	page.add_child(custom_row)
-	custom_row.add_child(_button("Custom hex…", _on_custom_colour_pressed))
-	custom_row.add_child(_button("Clear colour", func() -> void: _apply_colour("")))
-	return page
-
-
-func _colour_status() -> String:
-	var selected: Node3D = _main.current_selected_part() if _main else null
-	return "Selected: %s" % (str(selected.name) if selected else "nothing — laser-select a part first")
-
-
-func _on_custom_colour_pressed() -> void:
-	_main.open_keyboard_for("", func(text: String) -> void:
-		var hex := text if text.begins_with("#") else "#" + text
-		if hex.length() == 7:
-			_apply_colour(hex)
-		else:
-			toast.emit("Not a valid hex colour (want #RRGGBB): %s" % text, "error")
-	, {"mode": "full", "title": "Custom colour, e.g. #3a7bd5 (0-9, a-f)", "confirm_label": "Set"})
-
-
-func _apply_colour(hex: String) -> void:
-	if not _colour_tool:
-		return
-	var part: Node3D = _main.current_selected_part()
-	if part == null:
-		toast.emit("Selected: nothing — laser-select a part first", "error")
-		return
-	if _colour_group_toggle and _colour_group_toggle.button_pressed:
-		var group_result: Dictionary = await _colour_tool.set_group_color(part, hex)
-		if group_result["ok"]:
-			toast.emit("Coloured %d occurrence(s) in the group." % group_result["count"], "ok")
-		elif group_result["count"] > 0:
-			toast.emit("Coloured %d, then failed: %s" % [group_result["count"], group_result["error"]], "error")
-		else:
-			toast.emit("Couldn't colour the group: %s" % group_result["error"], "error")
-		return
-	var result: Dictionary = await _colour_tool.set_color(part, hex)
-	if not result["ok"]:
-		toast.emit("Couldn't set colour: %s" % result["error"], "error")
 
 
 func _readable_text_color(hex: String) -> Color:

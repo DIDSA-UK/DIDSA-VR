@@ -43,7 +43,9 @@ func is_group() -> bool:
 
 func occurrence_id() -> String:
 	## The occurrence a move of this group is saved on, or "" if it can't be saved (not a top-level sub-assembly).
-	return str(prefix[0]) if depth == 1 and not prefix.is_empty() else ""
+	if depth != 1 or prefix.is_empty() or str(prefix[0]).contains("#pattern:"):
+		return "" # (a pattern copy of a sub-assembly has no occurrence of its own to save on: its place is the pattern's)
+	return str(prefix[0])
 
 
 func set_flag(key: String, on: bool) -> void:

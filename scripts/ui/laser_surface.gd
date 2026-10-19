@@ -82,8 +82,8 @@ func setup(p_host: Node3D, p_viewport: SubViewport, p_right: XRController3D, p_p
 	right.button_released.connect(_on_right_released)
 
 
-func add_slider(slider: Slider) -> void:
-	## A press that starts on a registered slider keeps tracking the laser.
+func add_slider(slider: Control) -> void:
+	## A press that starts on a registered slider (or a control dragged like one, the colour picker) keeps tracking the laser.
 	_sliders.append(slider)
 
 

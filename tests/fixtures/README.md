@@ -58,3 +58,18 @@ and copy it over.
   regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.
 - **`block_60x40x20.step`** — a 60 x 40 x 20 mm box written with pythonocc's STEP writer (`BRepPrimAPI_MakeBox(60, 40, 20)` through `STEPControl_Writer`, from
   `DIDSA-CAD/backend`'s environment). An IMPORTED part with no sketch or feature history, for the Modify tools in `tests/e2e_modify.gd`.
+
+## `appearance_vectors.json` — golden vectors for the Appearance tool's rule
+
+A **copy** of DIDSA-CAD's `docs/appearance/vectors.json` (57 cases), written by `tools/appearance_vectors/generate.py` from the
+reference rule `backend/app/document/appearance.py`. `tests/appearance_vectors.gd` checks `scripts/appearance/appearance_rule.gd`
+against it, and fails if the copy differs from a reachable DIDSA-CAD checkout. Refresh: copy the file over from DIDSA-CAD
+(branch `claude/appearance-and-scenes` until it merges).
+
+## `appearance_split.glb` — a real glb split by appearance
+
+DIDSA-CAD's `assembly-mesh.glb` of one Part with two 10 mm boxes, the second body painted #E63946 at opacity 0.5 (a Part body
+appearance), so its mesh is two indexed primitives. Used by `tests/appearance_glb.gd` and `tests/appearance_render.gd`.
+Regenerate from `DIDSA-CAD/backend` with its environment:
+`python /path/to/didsa-vr/tests/fixtures/make_appearance_split_glb.py /path/to/didsa-vr/tests/fixtures/appearance_split.glb`
+(body ids are new each time; the tests read them from the file).

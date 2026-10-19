@@ -11,11 +11,13 @@ extends RefCounted
 ##   group_root   String         the Part the scope is rooted at (the loaded root for the world, the room's Part for a room)
 ## A node that doesn't line up (a pattern-derived copy, a hidden occurrence the mesh left out, a stale tree) simply has no group_path and behaves as a
 ## plain part. The walk mirrors router._walk_assembly_glb_instances: suppressed occurrences and unresolved ones are skipped, as is a Part already on the
-## path (a cycle); Component patterns are not replayed (their copies carry no occurrence id).
+## path (a cycle); Component patterns are not replayed (their copies carry no occurrence id): a copy is placed by the `instance_path` a newer backend
+## writes on every node (`_tag_pattern_copy`), so it gets a path with its `#pattern:` segment and the source's Parts and names.
 ##
 ## A "level" is a candidate for what a grip or a selection should take: the part itself, then each sub-assembly it sits in, innermost first, never the root.
 
 const MAX_DEPTH := 32
+const PATTERN_SEGMENT := "#pattern:"
 
 
 static func replay(rows_by_part: Dictionary, root_part_id: String, part_names: Dictionary = {}) -> Array:
@@ -51,10 +53,17 @@ static func assign(nodes: Array, entries: Array, root_part_id: String, include_h
 		entries = entries.filter(func(e: Dictionary) -> bool: return not bool(e.get("hidden", false))) # the mesh leaves a hidden occurrence's own node out (its children stay)
 	var tagged := 0
 	var at := 0
+	var by_path := {} ## "a/b/c" -> entry, for the pattern copies (no occurrence id of their own: found by their instance_path)
+	for e in entries:
+		by_path["/".join(PackedStringArray((e["path"] as Array).map(func(x) -> String: return str(x))))] = e
 	for node in nodes:
 		if not is_instance_valid(node):
 			continue
 		_clear(node)
+		if str(node.get_meta("instance_path", "")).find(PATTERN_SEGMENT) >= 0:
+			if _tag_pattern_copy(node, by_path, root_part_id):
+				tagged += 1 # (a copy's empty occurrence id would otherwise match the root's own content)
+			continue
 		var owner := str(node.get_meta("owner_part_id", ""))
 		var occ := str(node.get_meta("occurrence_id", ""))
 		var found := -1
@@ -73,6 +82,35 @@ static func assign(nodes: Array, entries: Array, root_part_id: String, include_h
 		node.set_meta("group_root", root_part_id)
 		tagged += 1
 	return tagged
+
+
+static func _tag_pattern_copy(node: Node, by_path: Dictionary, root_part_id: String) -> bool:
+	## A component pattern's copy carries no occurrence id, but a backend with the Appearance tool names it by its full path
+	## (`instance_path`, a `<source>#pattern:<pattern>:<index>` segment): it sits where its source does, so it takes the source's
+	## Parts and names (the copy's own segment labelled "<name> (copy <index>)"). Returns false if it can't be placed.
+	var instance_path := str(node.get_meta("instance_path", ""))
+	if instance_path.find(PATTERN_SEGMENT) < 0:
+		return false
+	var path := Array(instance_path.split("/"))
+	var base := "/".join(PackedStringArray(path.map(func(x) -> String: return base_segment(str(x)))))
+	if not by_path.has(base):
+		return false
+	var entry: Dictionary = by_path[base]
+	var names: Array = (entry["names"] as Array).duplicate()
+	for i in path.size():
+		var segment := str(path[i])
+		if i < names.size() and segment.find(PATTERN_SEGMENT) >= 0:
+			names[i] = "%s (copy %s)" % [names[i], segment.get_slice(":", segment.get_slice_count(":") - 1)]
+	node.set_meta("group_path", path)
+	node.set_meta("group_parts", (entry["parts"] as Array).duplicate())
+	node.set_meta("group_names", names)
+	node.set_meta("group_root", root_part_id)
+	return true
+
+
+static func base_segment(segment: String) -> String:
+	var at := segment.find(PATTERN_SEGMENT)
+	return segment if at < 0 else segment.substr(0, at)
 
 
 static func _clear(node: Node) -> void:

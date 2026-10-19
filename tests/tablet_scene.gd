@@ -194,17 +194,18 @@ func _initialize() -> void:
 	print("SMOKE MSAA Off -> ", main.get_viewport().msaa_3d, " (0 = disabled)")
 	print("SMOKE tablet panel rendering while open: ", tab._viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS)
 
-	# --- real-headset regression: the Colours tab's error/status text used to
+	# --- real-headset regression: a page's error/status text used to
 	# get clobbered by the periodic refresh (_process()'s own 0.25s tick)
 	# before it could be read — a held error is only worth anything if it
-	# actually survives at least one of those ticks. Nothing is laser-selected
-	# here, so "Clear" hits _apply_colour()'s own no-selection branch.
+	# actually survives at least one of those ticks. (It was the old Colours
+	# page's; now the Appearance page's: Clear, then "Save brush..." refuses.)
 	await go_home_laser()
 	await aim_and_click(tab.ui.home_tile("view"))
-	await aim_and_click(tab.ui.hub_tile("colours"))
-	await aim_and_click(find_button(func(b): return b.text == "Clear colour"))
+	await aim_and_click(tab.ui.hub_tile("paint"))
+	await aim_and_click(find_button(func(b): return b.text == "Clear"))
+	await aim_and_click(find_button(func(b): return b.text == "Save brush…"))
 	var message_text: String = tab.ui.status_text()
-	print("SMOKE clearing with nothing selected shows the no-selection message: ", message_text.find("laser-select a part first") != -1)
+	print("SMOKE saving a Clear brush shows why it can't: ", message_text.find("Clear can't be saved") != -1)
 	await create_timer(0.3).timeout # outlasts one 0.25s refresh tick
 	print("SMOKE the message survives a periodic refresh tick: ", tab.ui.status_text() == message_text)
 	# the "nothing selected" toast and the live selection text read identically when nothing is selected, so prove

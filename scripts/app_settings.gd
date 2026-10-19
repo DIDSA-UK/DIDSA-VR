@@ -39,6 +39,8 @@ var group_deadzone: int = 1 ## the dead zone when you grip a part inside a sub-a
 var sandbox_ghosts: bool = false ## Relax all mates: a see-through copy of each moved part where it goes back to (mates_tool.gd)
 var sandbox_lines: bool = false ## Relax all mates: a thin line from each moved part to where it goes back to
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
+var paint_recent: Array = [] ## the Appearance tool's recent colours ("#RRGGBB", newest first, appearance_tool.gd RECENT_MAX)
+var paint_saved: Array = [] ## the Appearance tool's own saved appearances: [{name, appearance}] (the presets are built in, appearance_tool.gd)
 
 
 func load_from_disk() -> void:
@@ -67,6 +69,10 @@ func load_from_disk() -> void:
 	table_slab_size = Vector2(float(config.get_value("table", "slab_w", 0.0)), float(config.get_value("table", "slab_d", 0.0)))
 	sound_enabled = bool(config.get_value("comfort", "sound_enabled", sound_enabled))
 	sound_volume = clampf(float(config.get_value("comfort", "sound_volume", sound_volume)), 0.0, 1.0)
+	var recent = config.get_value("paint", "recent", paint_recent)
+	paint_recent = recent if recent is Array else []
+	var saved = config.get_value("paint", "saved", paint_saved)
+	paint_saved = saved if saved is Array else []
 
 
 func save_to_disk() -> void:
@@ -94,6 +100,8 @@ func save_to_disk() -> void:
 	config.set_value("table", "slab_d", table_slab_size.y)
 	config.set_value("comfort", "sound_enabled", sound_enabled)
 	config.set_value("comfort", "sound_volume", sound_volume)
+	config.set_value("paint", "recent", paint_recent)
+	config.set_value("paint", "saved", paint_saved)
 	var err := config.save(path())
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [path(), err])
@@ -206,4 +214,14 @@ func set_haptics_level(level: int) -> void:
 
 func set_last_scene(scene_name: String) -> void:
 	last_scene = scene_name
+	save_to_disk()
+
+
+func set_paint_recent(colours: Array) -> void:
+	paint_recent = colours.duplicate()
+	save_to_disk()
+
+
+func set_paint_saved(entries: Array) -> void:
+	paint_saved = entries.duplicate(true)
 	save_to_disk()

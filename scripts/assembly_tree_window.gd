@@ -2,7 +2,7 @@ extends "res://scripts/diegetic_panel.gd"
 ## Milestone 3: the interactive assembly tree named in the vision brief's
 ## Assembly-tools list but never built until now. Browses the loaded
 ## assembly's Occurrence hierarchy - GET /document/parts/{id}/occurrences,
-## recursed lazily on expand, the same real endpoint colour_tool.gd's own
+## recursed lazily on expand, the same real endpoint appearance_tool.gd's own
 ## "whole group" feature already proved (see that script's docstring for
 ## why there's no single nested-tree endpoint to call instead) - and lets
 ## you select a part by name/structure instead of only by already looking
@@ -145,7 +145,7 @@ func _apply_part_names(rows: Array) -> void:
 static func _occurrences_to_rows(occurrences: Array) -> Array:
 	## Pure (no network): OccurrenceResponse-shaped dicts -> this window's own
 	## row shape. Split out so tests/assembly_tree_window.gd can exercise it
-	## directly against a synthetic response, same precedent as colour_tool.gd's
+	## directly against a synthetic response, same precedent as appearance_tool.gd's
 	## _hex_to_color()/mates_tool.gd's build_create_payload().
 	var rows: Array = []
 	for occ in occurrences:
@@ -352,7 +352,7 @@ func _list_occurrences(part_id: String) -> Dictionary:
 
 
 func _get_json(path: String) -> Dictionary:
-	## Same fresh-HTTPRequest-per-call pattern as colour_tool.gd/mates_tool.gd's
+	## Same fresh-HTTPRequest-per-call pattern as appearance_tool.gd/mates_tool.gd's
 	## own _api_request - see either for the docstring this mirrors.
 	var req := HTTPRequest.new()
 	add_child(req)

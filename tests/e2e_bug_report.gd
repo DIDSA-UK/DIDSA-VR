@@ -156,7 +156,8 @@ func _initialize() -> void:
 	print("SMOKE turning and moving the model carries the dimension with it: ", not dims.items().is_empty() and (dims.items()[0]["a"] as Vector3).is_equal_approx(expected) and not (dims.items()[0]["a"] as Vector3).is_equal_approx(a_before))
 	main._tablet.manager.deactivate()
 
-	# --- Paint: aim the right laser at the peg, shoot
+	# --- Paint (the Appearance tool): aim the right laser at the peg and click - the BODY under the laser is painted, as an override in the
+	# root (never in the peg's own file), on release
 	var r: XRController3D = main.get_node("XROrigin3D/RightController")
 	main._tablet.manager.activate("paint")
 	main._tablet.pages.set_paint_colour("#3498db")
@@ -165,20 +166,24 @@ func _initialize() -> void:
 	r.global_transform = Transform3D(Basis.looking_at(target - from, Vector3.UP), from)
 	await physics_frame
 	await physics_frame
-	await r._try_shoot_colour()
-	var peg_row: Dictionary = {}
+	await r._arm_paint()
+	await r._finish_paint() # (a click: up well inside the 0.45 s hold)
+	var listed: Array = (await _api(HTTPClient.METHOD_GET, "/parts/%s/appearance-overrides" % root_id))["json"]["overrides"]
+	var peg_body := listed.filter(func(o) -> bool: return o["path"] == "occ-peg" and o.get("body_id") != null and o.get("face") == null)
+	var painted_local: bool = peg_node.material_override is StandardMaterial3D and (peg_node.material_override as StandardMaterial3D).albedo_color.is_equal_approx(Color.html("#3498DB")) \
+		or (peg_node.has_meta("room_clip_prior") and peg_node.get_meta("room_clip_prior") is StandardMaterial3D)
+	print("SMOKE a paint click on the peg saves a body override in the root and colours it here: ", peg_body.size() == 1 and str(peg_body[0]["appearance"].get("colour")) == "#3498DB" and painted_local, " (overrides %s; status: %s)" % [str(listed), main.status_text])
+	var peg_part_id := ""
 	for o in (await _api(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % root_id))["json"]:
 		if o["id"] == "occ-peg":
-			peg_row = o
-	var painted_local: bool = peg_node.material_override is StandardMaterial3D or (peg_node.has_meta("room_clip_prior") and peg_node.get_meta("room_clip_prior") is StandardMaterial3D)
-	print("SMOKE a paint shot at the peg saves its colour on the backend and colours it here: ", str(peg_row.get("color")).to_lower() == "#3498db" and painted_local, " (stored %s; status: %s)" % [str(peg_row.get("color")), main.status_text])
+			peg_part_id = str(o.get("resolved_part_id", ""))
+	var peg_file: Dictionary = await _api(HTTPClient.METHOD_GET, "/parts/%s" % peg_part_id)
+	print("SMOKE ...and leaves the peg's own file alone (no part / body appearance): ", int(peg_file["code"]) == 200 and (peg_file["json"] as Dictionary).get("appearance") == null and (peg_file["json"] as Dictionary).get("body_appearances", {}).is_empty())
 	main.command_stack.undo()
-	await _wait_for(func() -> bool: return not main._colour_tool.is_busy(), 10000)
+	await _wait_for(func() -> bool: return not main._appearance_tool.is_busy(), 10000)
 	await create_timer(0.5).timeout
-	for o in (await _api(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % root_id))["json"]:
-		if o["id"] == "occ-peg":
-			peg_row = o
-	print("SMOKE undo puts the old (no) colour back on the backend: ", peg_row.get("color") == null or str(peg_row.get("color")) == "", " (stored %s)" % str(peg_row.get("color")))
+	listed = (await _api(HTTPClient.METHOD_GET, "/parts/%s/appearance-overrides" % root_id))["json"]["overrides"]
+	print("SMOKE undo takes the paint off again on the backend: ", listed.is_empty(), " (overrides %s)" % str(listed))
 	main._tablet.manager.deactivate()
 
 	# --- Open with unsaved changes

@@ -49,6 +49,8 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 		var extras: Dictionary = node_json.get("extras", {})
 		scene_node.set_meta("occurrence_id", extras.get("occurrence_id", ""))
 		scene_node.set_meta("owner_part_id", extras.get("owner_part_id", ""))
+		if extras.has("instance_path"): # the full occurrence path from the glb's root (#pattern: copies included; "" = root content). Absent from an older backend.
+			scene_node.set_meta("instance_path", str(extras["instance_path"]))
 
 		var mesh_index = node_json.get("mesh")
 		if mesh_index == null or mesh_index < 0 or mesh_index >= json_meshes.size():
@@ -56,21 +58,32 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 		var primitives: Array = json_meshes[mesh_index].get("primitives", [])
 		if primitives.is_empty():
 			continue
-		var prim_extras: Dictionary = primitives[0].get("extras", {})
-		if prim_extras.has("face_ids"):
+		# A part whose bodies or faces are painted differently comes as one primitive per appearance (DIDSA-CAD
+		# `encode_assembly_glb`), each carrying its own triangles' face_ids / body_ids. Godot makes one surface per primitive
+		# and get_faces() / the trimesh collider read the surfaces one after another, so the lists are joined in that order.
+		# The topology rides on the first primitive (it is per body, the same for every primitive).
+		var face_ids_int: Array = []
+		var body_ids: Array = []
+		var has_ids := false
+		for primitive in primitives:
+			var prim_extras: Dictionary = primitive.get("extras", {})
+			if not prim_extras.has("face_ids"):
+				continue
+			has_ids = true
 			# JSON round-trips every number as float - re-cast to int here (once,
 			# at tag time) rather than at every later subshape_ref_for_hit() call,
 			# and so a request built from this always sends a real JSON integer,
 			# not e.g. "index": 3.0.
-			var face_ids: Array = prim_extras["face_ids"]
-			var face_ids_int: Array = []
-			for fid in face_ids:
+			for fid in prim_extras["face_ids"]:
 				face_ids_int.append(int(fid))
+			body_ids.append_array(prim_extras["body_ids"])
+		if has_ids:
 			scene_node.set_meta("face_ids", face_ids_int)
-			scene_node.set_meta("body_ids", prim_extras["body_ids"])
-			if prim_extras.has("topology"):
+			scene_node.set_meta("body_ids", body_ids)
+			var first_extras: Dictionary = primitives[0].get("extras", {})
+			if first_extras.has("topology"):
 				if not topology_cache.has(mesh_index): # instances of one mesh share one converted copy
-					topology_cache[mesh_index] = _convert_topology(prim_extras["topology"])
+					topology_cache[mesh_index] = _convert_topology(first_extras["topology"])
 				scene_node.set_meta("topology", topology_cache[mesh_index])
 
 

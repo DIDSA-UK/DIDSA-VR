@@ -96,7 +96,7 @@ func prompt_text() -> String:
 				line = "Dimensions are on the model; volume, area and mass are on the tablet."
 			return "Measure\n%s" % line
 		"paint":
-			return "Paint · %s\nTrigger paints the part you point at." % _paint_hex()
+			return "Appearance · %s\nClick paints the body; hold the trigger to choose what." % _paint_hex()
 		"shoot_hide":
 			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
@@ -203,7 +203,7 @@ func ring_title() -> String:
 		"measure":
 			return "Measure"
 		"paint":
-			return "Paint"
+			return "Appearance"
 	return "Tools"
 
 
@@ -213,7 +213,7 @@ func root_entries() -> Array:
 		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
-		_tool_entry("paint", "Paint", "paint", Color(0.48, 0.88, 0.69), "Shoot a part to colour it"),
+		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Paint colour, see-through, shine, glow"),
 		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
@@ -358,9 +358,15 @@ func _colour_entries() -> Array:
 	for swatch in _swatches:
 		var colour := Color.html(swatch["hex"])
 		out.append(_action("colour_" + str(swatch["name"]), swatch["name"], "colours", colour, "Paint with %s" % str(swatch["name"]).to_lower(),
-			_set_paint_colour.bind(swatch["hex"]), true, _paint_hex() == swatch["hex"]))
+			_set_paint_colour.bind(swatch["hex"]), true, _paint_hex() == str(swatch["hex"]).to_upper()))
+	out.append(_action("colour_clear", "Clear", "close", Color(0.62, 0.70, 0.80), "Paint Clear: removes that level's own paint", _set_paint_clear, true, _paint_hex() == "Clear"))
 	out.append(_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries))
 	return out
+
+
+func _set_paint_clear() -> void:
+	_tablet.pages.set_paint_clear()
+	refresh_prompt()
 
 
 func _set_paint_colour(hex: String) -> void:

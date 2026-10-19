@@ -204,7 +204,7 @@ func _run_measure() -> void:
 
 
 func _api_request(method: int, path: String, body_dict) -> Dictionary:
-	## Same fresh-HTTPRequest-per-call pattern as mates_tool.gd/colour_tool.
+	## Same fresh-HTTPRequest-per-call pattern as mates_tool.gd/appearance_tool.
 	## gd's own _api_request - see either's docstring.
 	var req := HTTPRequest.new()
 	add_child(req)

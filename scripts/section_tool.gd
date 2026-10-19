@@ -37,16 +37,16 @@ extends Node
 ## controller.gd's own part-grab search, in the same synchronous call, so a
 ## hand can never grab both at once.
 ##
-## The other real design problem: colour_tool.gd already owns
+## The other real design problem: appearance_tool.gd already owns
 ## `material_override` on parts (its optimistic local colour preview). Rather
 ## than touch that shipped, real-backend-confirmed code, this tool WRAPS
-## whatever is currently in `material_override` (null, or colour_tool's own
+## whatever is currently in `material_override` (null, or appearance_tool's own
 ## flat-colour StandardMaterial3D) into a clip-aware ShaderMaterial only
 ## while active, re-deriving the wrap every frame from whatever's actually
-## there right now (self-healing if colour_tool changes a part's colour
+## there right now (self-healing if appearance_tool changes a part's colour
 ## while sectioning is on — briefly unclipped for that one part until the
 ## next frame's reconcile, not a crash), and restoring exactly what was there
-## before on deactivate. Zero changes needed to colour_tool.gd.
+## before on deactivate. Zero changes needed to appearance_tool.gd.
 
 const OneEuro := preload("res://scripts/one_euro.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, same convention controller.gd's own preload uses
@@ -363,7 +363,7 @@ func _update_global_plane() -> void:
 func reconcile(parts: Array) -> void:
 	## Call once a frame while active: wraps any part whose material_override
 	## isn't (currently, by reference) the ShaderMaterial this tool installed
-	## for it — a freshly-loaded part, one colour_tool.gd just changed, or one
+	## for it — a freshly-loaded part, one appearance_tool.gd just changed, or one
 	## this tool has never seen — and leaves an already-correctly-wrapped part
 	## untouched. Cheap (a dictionary lookup + reference compare per part) so
 	## running it every frame while the tool is on is fine.
@@ -410,7 +410,7 @@ func _albedo_of(material: Material, part: MeshInstance3D) -> Color:
 	var base := part.get_active_material(0)
 	if base is BaseMaterial3D:
 		return (base as BaseMaterial3D).albedo_color
-	return Color(0.7, 0.7, 0.7, 1.0) ## same neutral default colour_tool.gd's DEFAULT_MATERIAL_COLOR uses, for a part with no material at all
+	return Color(0.7, 0.7, 0.7, 1.0) ## same neutral default appearance_tool.gd's DEFAULT_MATERIAL_COLOR uses, for a part with no material at all
 
 
 func _unwrap_all() -> void:

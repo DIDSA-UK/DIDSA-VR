@@ -77,9 +77,8 @@ var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 var measure_tool_active := false ## wrist tablet's Measure tab: trigger picks a measure entity instead of selecting/hiding
 var measure_tool = null ## set by main.gd; a shared measure_tool.gd instance
-var paint_active := false ## Paint mode tool (tool wheel / tablet): trigger paints whatever the laser hits with paint_hex
-var paint_hex := "#d94a3b" ## the colour the Paint tool puts on a part
-var colour_tool = null ## set by main.gd; a shared colour_tool.gd instance (Paint applies colours through it)
+var paint_active := false ## the Appearance tool (tool wheel / tablet): a trigger click paints the body under the laser, a hold opens the paint breadcrumb
+var appearance_tool = null ## set by main.gd; the shared appearance_tool.gd instance (what to paint with, where it goes)
 var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
 var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
@@ -92,6 +91,11 @@ var _crumb = null ## the open laser breadcrumb
 var _crumb_levels: Array = []
 var _crumb_press: Dictionary = {} ## the trigger press that may turn into a breadcrumb: {ms, node, point}
 var _select_down := false
+var _paint_press: Dictionary = {} ## the trigger press of the Appearance tool: {ms, node, face_index, point}; a click or, held, the breadcrumb
+var _paint_crumb = null ## the open paint breadcrumb (group_breadcrumb.gd with swatches)
+var _paint_rows: Array = [] ## its rows (appearance_tool.gd rows_for)
+var _paint_hover := -1 ## the row being previewed
+var _paint_cues: Array = [] ## brackets round what the previewed row paints
 var _wheel_press_ms := {} ## action name -> Time.get_ticks_msec() of its last press, for wheel chord detection
 var _laser: MeshInstance3D
 var _laser_mesh: CylinderMesh
@@ -203,6 +207,7 @@ func _physics_process(delta: float) -> void:
 		section_tool.update_held(self, delta, steadiness > 0)
 	_update_latch()
 	_update_crumb()
+	_update_paint_crumb()
 	if _sel_group != null:
 		_sel_group.follow() # last frame's thumbstick / nudge moved the anchor: the rest of the group goes with it
 	if held_node != null:
@@ -319,6 +324,7 @@ func reset_interaction() -> void:
 	_try_release()
 	_clear_selection()
 	_close_crumb()
+	_cancel_paint()
 	_set_grab_hover(null)
 	_set_aim_hover(null, Vector3.ZERO)
 
@@ -380,7 +386,7 @@ func _on_button_pressed(action_name: String) -> void:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
 		elif paint_active:
-			_try_shoot_colour()
+			_arm_paint()
 		elif parts_enabled and laser_select_enabled:
 			_try_select()
 			_arm_crumb()
@@ -392,6 +398,7 @@ func _on_button_released(action_name: String) -> void:
 	elif action_name == select_action:
 		_select_down = false
 		_finish_crumb()
+		_finish_paint()
 	if wheel_is_open():
 		return
 
@@ -962,40 +969,150 @@ func _try_shoot_hide() -> void:
 	part.visible = false
 
 
-func _try_shoot_colour() -> void:
-	## Paint: the same real ray test as shoot-hide, but the trigger paints the hit part paint_hex.
-	## Undoable: the part's colour before the shot is put back (colour_tool.gd's set_color with the old hex, or
-	## "" to clear back to no override).
-	## A shot that can't paint says why (tool_message): a buzz alone read as "the tool is broken" on the headset.
-	if colour_tool == null:
-		return
-	if bool(colour_tool.is_busy()):
-		tool_message.emit("Paint: still saving the last colour, shoot again in a moment.")
+# --- the Appearance tool's gun (DIDSA-CAD docs/appearance-tool-scope.md D1) ---
+
+func _world_root() -> String:
+	return str(appearance_tool.get("world_root")) if appearance_tool != null else ""
+
+
+func _arm_paint() -> void:
+	## Trigger down with the Appearance tool on. Nothing is painted yet: a click (up within CRUMB_HOLD_MS) paints the body on release,
+	## a hold opens the breadcrumb. With the eyedropper armed the shot takes the look under the laser instead.
+	_paint_press = {}
+	if appearance_tool == null:
 		return
 	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
 	var part: Node3D = hit.get("part")
 	if part == null:
 		return
-	var before: String = str(part.get_meta("paint_prev", ""))
-	var hex := paint_hex
-	var result: Dictionary = await colour_tool.set_color(part, hex)
+	if bool(appearance_tool.eyedropper):
+		await appearance_tool.ensure_loaded(appearance_tool.root_of(part, _world_root()))
+		var got: Dictionary = appearance_tool.take_from(part, int(hit.get("face_index", -1)), _world_root())
+		trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+		tool_message.emit("Took the look of %s: %s." % [part.name, appearance_tool.Rule.key_of(got).replace(";", ", ")])
+		return
+	if bool(appearance_tool.is_busy()):
+		tool_message.emit("Paint: still saving the last paint, shoot again in a moment.")
+		return
+	_paint_press = {"ms": Time.get_ticks_msec(), "node": part, "face_index": int(hit.get("face_index", -1)), "point": hit.get("point", part.global_position)}
+	appearance_tool.ensure_loaded(appearance_tool.root_of(part, _world_root())) # (fire and forget: the lists are usually in by the time the trigger comes up)
+
+
+func _update_paint_crumb() -> void:
+	if _paint_crumb != null:
+		var row: int = _paint_crumb.update_aim(global_position, -global_transform.basis.z)
+		if row != _paint_hover:
+			_paint_hover = row
+			_show_paint_row(row)
+		return
+	if _paint_press.is_empty():
+		return
+	if not _select_down or not is_instance_valid(_paint_press["node"]):
+		_paint_press = {}
+		return
+	if Time.get_ticks_msec() - int(_paint_press["ms"]) >= CRUMB_HOLD_MS:
+		_open_paint_crumb()
+
+
+func _open_paint_crumb() -> void:
+	var node: Node3D = _paint_press["node"]
+	_paint_rows = appearance_tool.rows_for(node, int(_paint_press["face_index"]), _scope_nodes(), _world_root())
+	var texts: Array = []
+	var swatches: Array = []
+	var notes: Array = []
+	var start := 0
+	for i in _paint_rows.size():
+		var row: Dictionary = _paint_rows[i]
+		texts.append(row["label"])
+		var look: Dictionary = row.get("swatch", {})
+		swatches.append(appearance_tool.Look.colour_of(str(look["colour"]), float(look.get("opacity", 1.0))) if look.has("colour") else null)
+		notes.append("set here" if bool(row.get("set_here", false)) else "")
+		if row["id"] == "body":
+			start = i # (what a click would have done: lit when it opens)
+	_paint_crumb = GroupBreadcrumb.new()
+	_scene_root().add_child(_paint_crumb)
+	var head := _camera.global_position if _camera != null else global_position
+	_paint_crumb.open(texts, _paint_press["point"], head, start, {"title": appearance_tool.panel_title(), "swatches": swatches, "notes": notes})
+	_paint_hover = -2 # (the first update_aim previews whatever the laser is on)
+	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+
+
+func _show_paint_row(row: int) -> void:
+	## Hovering a row: the model shows what a release would do (everything else keeps its own look), brackets show its extent, a tick.
+	GroupCues.clear(_paint_cues)
+	_paint_cues = []
+	var nodes := _scope_nodes()
+	if row < 0 or row >= _paint_rows.size():
+		appearance_tool.end_preview(nodes, _world_root())
+		return
+	var r: Dictionary = _paint_rows[row]
+	var node: Node3D = _paint_press.get("node")
+	appearance_tool.preview(r, appearance_tool.root_of(node, _world_root()), nodes, _world_root())
+	var box := GroupIndex.union_aabb(r["members"])
+	var brackets := GroupCues.brackets(box.grow(0.004))
+	_scene_root().add_child(brackets)
+	_paint_cues.append(brackets)
+	trigger_haptic_pulse("haptic", 0.0, 0.2, 0.03, 0.0)
+	var count := (r["members"] as Array).size()
+	tool_message.emit("Paint · %s%s" % [r["label"], ", %d parts" % count if count > 1 and not str(r["label"]).contains("(") else ""])
+
+
+func _finish_paint() -> void:
+	## Trigger up. Over a row: that row is painted (one undo step). Off the panel: nothing (a hold means "I want to choose"). No panel
+	## (a click): the body under the laser.
+	if _paint_crumb != null:
+		var index := _paint_hover
+		var rows := _paint_rows
+		var node: Node3D = _paint_press.get("node")
+		_close_paint_crumb()
+		if index < 0 or index >= rows.size() or not is_instance_valid(node):
+			appearance_tool.end_preview(_scope_nodes(), _world_root())
+			tool_message.emit("Nothing painted (let go off the panel).")
+			_paint_press = {}
+			return
+		_paint_press = {}
+		await _paint_row(node, rows[index])
+		return
+	if _paint_press.is_empty():
+		return
+	var press := _paint_press
+	_paint_press = {}
+	if not is_instance_valid(press["node"]):
+		return
+	var root: String = appearance_tool.root_of(press["node"], _world_root())
+	await appearance_tool.ensure_loaded(root)
+	var rows: Array = appearance_tool.rows_for(press["node"], int(press["face_index"]), _scope_nodes(), _world_root())
+	var body := rows.filter(func(r) -> bool: return r["id"] == "body")
+	await _paint_row(press["node"], body[0] if not body.is_empty() else rows[0])
+
+
+func _paint_row(node: Node3D, row: Dictionary) -> void:
+	var result: Dictionary = await appearance_tool.apply(row, appearance_tool.root_of(node, _world_root()), _scope_nodes(), _world_root())
 	if not result.get("ok", false):
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
-		tool_message.emit("Couldn't paint %s: %s" % [part.name, str(result.get("error", "unknown error"))])
+		tool_message.emit("Couldn't paint %s: %s" % [str(row.get("label", "")), str(result.get("error", "unknown error"))])
 		return
-	part.set_meta("paint_prev", hex)
 	trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
-	tool_message.emit("Painted %s %s." % [part.name, hex])
-	if command_stack:
-		command_stack.push("colour %s" % part.name,
-			func() -> void:
-				if is_instance_valid(part):
-					colour_tool.set_color(part, before)
-					part.set_meta("paint_prev", before),
-			func() -> void:
-				if is_instance_valid(part):
-					colour_tool.set_color(part, hex)
-					part.set_meta("paint_prev", hex))
+
+
+func _close_paint_crumb() -> void:
+	GroupCues.clear(_paint_cues)
+	_paint_cues = []
+	_paint_rows = []
+	_paint_hover = -1
+	if _paint_crumb != null:
+		if is_instance_valid(_paint_crumb):
+			if _paint_crumb.get_parent() != null:
+				_paint_crumb.get_parent().remove_child(_paint_crumb)
+			_paint_crumb.queue_free()
+		_paint_crumb = null
+
+
+func _cancel_paint() -> void:
+	if _paint_crumb != null and appearance_tool != null:
+		appearance_tool.end_preview(_scope_nodes(), _world_root())
+	_close_paint_crumb()
+	_paint_press = {}
 
 
 func _try_pick_mate_entity() -> void:
@@ -1090,7 +1207,12 @@ func _update_aim_hover() -> void:
 	var hit := {}
 	if ((parts_enabled and laser_select_enabled) or hide_tool_active or paint_active or mates_tool_active or measure_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
-	if face_highlight != null and (mates_tool_active or measure_tool_active):
+	if face_highlight != null and paint_active and not mates_tool_active and not measure_tool_active:
+		# The Appearance tool: outline the body a click would paint (the outline only, no colour, so sweeping across a model doesn't flicker).
+		_set_aim_hover(null, Vector3.ZERO)
+		var paint_part: Node3D = hit.get("part")
+		face_highlight.set_hover_entity(self, paint_part, TopologyPick.body_entity(paint_part, int(hit.get("face_index", -1))) if paint_part != null else {})
+	elif face_highlight != null and (mates_tool_active or measure_tool_active):
 		# A pick takes one CAD face (Mates) or face / edge / vertex (Measure), so light up just that, not the
 		# whole mesh (which says nothing about what the trigger is about to take).
 		_set_aim_hover(null, Vector3.ZERO)

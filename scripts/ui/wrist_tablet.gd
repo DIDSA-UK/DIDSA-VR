@@ -84,7 +84,7 @@ var _idle_left := 0.0
 var _seen_revision := 0
 
 
-func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, colour_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null, design_table: Node = null) -> void:
+func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_hand: Node, locomotion: Node, main: Node, command_stack = null, mates_tool: Node = null, appearance_tool: Node = null, section_tool: Node = null, measure_tool: Node = null, assembly_tree_window: Node = null, calculator_window: Node = null, image_viewer_window: Node = null, browser_window: Node = null, design_table: Node = null) -> void:
 	_left = left
 	_right = right
 	_camera = camera
@@ -99,7 +99,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 	pages = TabletPages.new()
 	pages.setup({
 		"left": left, "right": right, "camera": camera, "two_hand": two_hand, "locomotion": locomotion,
-		"main": main, "command_stack": command_stack, "mates_tool": mates_tool, "colour_tool": colour_tool,
+		"main": main, "command_stack": command_stack, "mates_tool": mates_tool, "appearance_tool": appearance_tool,
 		"section_tool": section_tool, "measure_tool": measure_tool, "assembly_tree_window": assembly_tree_window,
 		"calculator_window": calculator_window, "image_viewer_window": image_viewer_window, "browser_window": browser_window, "design_table": design_table,
 		"dragging": func() -> bool: return surface != null and surface.dragging_slider(),

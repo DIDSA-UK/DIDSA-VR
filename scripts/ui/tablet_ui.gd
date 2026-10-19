@@ -53,7 +53,7 @@ var history_open := false
 var help_open := false
 
 var pages_scroll: ScrollContainer ## the host hands this to its LaserSurface as scroll_target
-var sliders: Array = [] ## every HSlider in every page, for LaserSurface.add_slider()
+var sliders: Array = [] ## every HSlider in every page, and every control in the "laser_draggable" group, for LaserSurface.add_slider()
 
 var _panel: PanelContainer
 var _back_button: Button
@@ -382,6 +382,9 @@ func rebuild() -> void:
 			_holder.add_child(page)
 			_pages[t.id] = page
 	sliders = _holder.find_children("*", "HSlider", true, false)
+	for node in _holder.find_children("*", "Control", true, false):
+		if node.is_in_group("laser_draggable") and not sliders.has(node):
+			sliders.append(node) # a control that is dragged like a slider (the Appearance page's colour picker)
 	_refresh_tile_captions()
 
 	# Come back to where we were if that screen still exists, otherwise Home.

@@ -208,9 +208,9 @@ func _initialize() -> void:
 	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE switching Measure on turns Measure ON and Mates OFF: ", tab.manager.active_id == "measure" and r.measure_tool_active and not r.mates_tool_active and not main._mates_tool.active and main._measure_tool.active)
 	print("SMOKE ...only one mode tool is ever on: ", [r.mates_tool_active, r.measure_tool_active, r.hide_tool_active, main._section_tool.active].count(true) == 1)
-	await open_tool("view", "colours")
-	print("SMOKE viewing a page tool (Colours) leaves Measure on: ", tab.manager.active_id == "measure" and ui.selected_tool_id == "colours")
-	print("SMOKE ...and Colours' status line reports the selection: ", ui.status_text().contains("Selected"))
+	await open_tool("files", "models") # (a page tool; it was the Colours page until the Appearance tool replaced it with a mode tool)
+	print("SMOKE viewing a page tool (Files) leaves Measure on: ", tab.manager.active_id == "measure" and ui.selected_tool_id == "models")
+	print("SMOKE ...and Files' status line is its own (the app's status): ", ui.status_text().contains(str(main.status_text)))
 	await open_tool("inspect", "sections")
 	print("SMOKE Sections is a mode tool too: it replaces Measure: ", tab.manager.active_id == "sections" and main._section_tool.active and not r.measure_tool_active)
 

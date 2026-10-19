@@ -147,6 +147,7 @@ func _adopt(scene: Node) -> void:
 			parts.append(node)
 			node.add_to_group("room_parts")
 			node.set_meta("room_id", get_instance_id())
+			node.set_meta("room_part_id", part_id) # the assembly a paint on it goes into, before group_index.gd has tagged its group_root
 			node.set_meta("room_orig", (node as Node3D).transform) # (the pose it opened at: what a world preview measures the edit against)
 
 

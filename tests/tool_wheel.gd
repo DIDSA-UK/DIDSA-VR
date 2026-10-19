@@ -160,23 +160,33 @@ func _initialize() -> void:
 	tablet.close_tablet()
 	manager.deactivate()
 
-	# --- Paint
+	# --- Appearance (the paint gun; replaced Paint)
 	var tool_def = tablet.registry.tool_def("paint")
-	print("SMOKE the paint tool is a registered mode tool: ", tool_def != null and tool_def.is_mode())
+	print("SMOKE the Appearance tool is a registered mode tool: ", tool_def != null and tool_def.is_mode() and tool_def.label == "Appearance")
 	manager.activate("paint")
 	print("SMOKE switching it on arms the trigger on both hands: ", r.paint_active and l_active(l))
 	var swatch_ids: Array = _ids(flows.entries())
-	print("SMOKE its ring is the palette plus All tools: ", swatch_ids.size() == 9 and swatch_ids[0] == "colour_Red" and swatch_ids[8] == "all_tools")
+	print("SMOKE its ring is the palette, Clear and All tools: ", swatch_ids.size() == 10 and swatch_ids[0] == "colour_Red" and swatch_ids[8] == "colour_clear" and swatch_ids[9] == "all_tools")
 	tablet.pages.set_paint_colour("#3498db")
-	print("SMOKE choosing a swatch sets the colour both hands fire: ", r.paint_hex == "#3498db" and l.paint_hex == "#3498db" and tablet.pages.paint_colour() == "#3498db")
-	print("SMOKE the prompt names the colour: ", "#3498db" in flows.prompt_text())
-	# A shot that can't paint says why on the wrist and the status line (it used to be a buzz only). This part is the assembly's own content
-	# (no occurrence id), which has no colour in the backend's model.
+	print("SMOKE choosing a swatch sets the brush's colour: ", main._appearance_tool.brush.get("colour") == "#3498DB" and tablet.pages.paint_colour() == "#3498DB")
+	print("SMOKE the prompt names the colour: ", "#3498DB" in flows.prompt_text())
+	flows._set_paint_clear()
+	print("SMOKE the ring's Clear makes the brush Clear: ", main._appearance_tool.brush.is_empty() and tablet.pages.paint_colour() == "Clear")
+	tablet.pages.set_paint_colour("#3498db")
+	# Aiming with the tool on lights the BODY a click would paint (face_highlight.gd's body entity), not the whole mesh.
 	var target := MeshInstance3D.new()
 	target.name = "RootBody"
 	target.mesh = BoxMesh.new()
 	target.set_meta("owner_part_id", "root")
 	target.set_meta("occurrence_id", "")
+	var tri_count: int = target.mesh.get_faces().size() / 3
+	var ids: Array = []
+	var bodies: Array = []
+	for i in tri_count:
+		ids.append(i / 2)
+		bodies.append("body-1")
+	target.set_meta("face_ids", ids)
+	target.set_meta("body_ids", bodies)
 	root.add_child(target)
 	target.create_trimesh_collision()
 	target.add_to_group("grabbable_parts")
@@ -184,9 +194,8 @@ func _initialize() -> void:
 	await physics_frame
 	await physics_frame
 	r._update_aim_hover()
-	print("SMOKE with Paint on the laser lights the part it would paint: ", r._aim_hover_node == target)
-	await r._try_shoot_colour()
-	print("SMOKE shooting a part that can't take a colour says why (wrist prompt and status): ", flows.prompt_text().begins_with("Couldn't paint RootBody") and str(main.status_text).begins_with("Couldn't paint RootBody"))
+	var lit: Dictionary = main.face_highlight._hover.get(r, {})
+	print("SMOKE with Appearance on the laser lights the body it would paint (not the whole-part tint): ", not lit.is_empty() and lit["part"] == target and str(lit["key"]) == "solid:body-1" and r._aim_hover_node == null)
 	target.queue_free()
 	flows._toast_text = ""
 	manager.deactivate()

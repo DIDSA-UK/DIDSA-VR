@@ -8,7 +8,7 @@ extends RefCounted
 ## their per-material `window_clip` switch on, which is the table's copy, its edge lines and its overlays, never the arena's parts (they are across
 ## the room and must not vanish). So the box is one set of global uniforms, set each frame from where the window is (`update`), and `reconcile`
 ## makes sure the copy and what hangs on it are wearing a switched-on material:
-##   * the copy's faces: a section_clip ShaderMaterial carrying the colour it had (colour_tool.gd's flat override, or the glTF surface's own albedo,
+##   * the copy's faces: a section_clip ShaderMaterial carrying the colour it had (appearance_tool.gd's flat override, or the glTF surface's own albedo,
 ##     per surface), installed as `material_override` when the copy had an override and as per-surface overrides otherwise, and taken off again by
 ##     `end()` (the copy goes back to exactly what it had);
 ##   * its edge lines (view_modes.gd picks the switched-on line material for a part with the `window_clip` meta);
@@ -175,8 +175,8 @@ func _make_material(albedo: Color) -> ShaderMaterial:
 
 
 static func _albedo(material: Material) -> Color:
-	## The colour a material shows: colour_tool.gd's flat override and the glTF surfaces are both StandardMaterial3D (mesh_export.py only ever
-	## sets a base colour); the neutral grey colour_tool.gd uses for a part with no colour otherwise.
+	## The colour a material shows: appearance_tool.gd's flat override and the glTF surfaces are both StandardMaterial3D (mesh_export.py only ever
+	## sets a base colour); the neutral grey appearance_tool.gd uses for a part with no colour otherwise.
 	if material is BaseMaterial3D:
 		return (material as BaseMaterial3D).albedo_color
 	return Color(0.7, 0.7, 0.7, 1.0)

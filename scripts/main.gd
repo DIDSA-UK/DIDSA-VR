@@ -77,7 +77,7 @@ var _measure_dimensions: Node3D ## measure_dimensions.gd: Measure results drawn 
 var _keyboard: Node
 var _mates_tool: Node
 var _measure_tool: Node
-var _colour_tool: Node
+var _appearance_tool: Node ## the Appearance tool (appearance_tool.gd): what paint does, where it goes
 var _section_tool: Node
 var _assembly_tree_window: Node
 var _calculator_window: Node
@@ -114,7 +114,7 @@ func _ready() -> void:
 	_add_mates_tool()
 	_add_measure_tool()
 	_add_face_highlight()
-	_add_colour_tool()
+	_add_appearance_tool()
 	_add_section_tool()
 	_add_view_modes() # after the section tool: its edge shader uses the section clip's global uniforms
 	_add_room_manager() # before the tree window: its rows have a Room button
@@ -129,15 +129,17 @@ func _ready() -> void:
 	design_table.apply_settings(_settings) # the table's remembered size, zoom limit and what happens to a part sent back
 	command_stack.changed.connect(mark_dirty) # only entries that change the document (a part's pose) fire it, not hide / navigate
 	_mates_tool.document_changed.connect(mark_dirty)
-	_colour_tool.document_changed.connect(mark_dirty)
+	_appearance_tool.document_changed.connect(mark_dirty)
+	_appearance_tool.configure(design_table.api, _settings) # the design table's own backend client: one request at a time, the app's document session
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
 	$XROrigin3D/RightController.mates_tool = _mates_tool
 	$XROrigin3D/LeftController.measure_tool = _measure_tool
 	$XROrigin3D/RightController.measure_tool = _measure_tool
-	$XROrigin3D/LeftController.colour_tool = _colour_tool
-	$XROrigin3D/RightController.colour_tool = _colour_tool
+	$XROrigin3D/LeftController.appearance_tool = _appearance_tool
+	$XROrigin3D/RightController.appearance_tool = _appearance_tool
+	_appearance_tool.message.connect(_set_status)
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
 	_apply_group_deadzone()
@@ -148,7 +150,6 @@ func _ready() -> void:
 	_load_secrets()
 	_mates_tool.configure_backend(backend_url, api_key)
 	_measure_tool.configure_backend(backend_url, api_key)
-	_colour_tool.configure_backend(backend_url, api_key)
 	_assembly_tree_window.configure_backend(backend_url, api_key)
 	room_manager.configure_backend(backend_url, api_key)
 	design_table.configure_backend(backend_url, api_key)
@@ -207,11 +208,14 @@ func _add_face_highlight() -> void:
 		hand.face_highlight = highlight
 
 
-func _add_colour_tool() -> void:
-	var colours := preload("res://scripts/colour_tool.gd").new()
-	colours.name = "ColourTool"
-	add_child(colours)
-	_colour_tool = colours
+func _add_appearance_tool() -> void:
+	var appearance := preload("res://scripts/appearance_tool.gd").new()
+	appearance.name = "AppearanceTool"
+	appearance.mates_tool = _mates_tool # painting is temporary while mates are relaxed (the sandbox)
+	appearance.face_highlight = face_highlight
+	appearance.command_stack = command_stack
+	add_child(appearance)
+	_appearance_tool = appearance
 
 
 func _add_section_tool() -> void:
@@ -441,7 +445,7 @@ func _add_design_table() -> void:
 func _add_wrist_tablet() -> void:
 	var tablet: Node = preload("res://scripts/ui/wrist_tablet.gd").new()
 	tablet.name = "WristTablet"
-	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _colour_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window, design_table)
+	tablet.setup($XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D, _two_hand, $XROrigin3D, self, command_stack, _mates_tool, _appearance_tool, _section_tool, _measure_tool, _assembly_tree_window, _calculator_window, _image_viewer_window, _browser_window, design_table)
 	_tablet = tablet
 
 
@@ -1379,6 +1383,8 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 		_set_status("glTF parsed but produced no scene.")
 		return false
 	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
+	_appearance_tool.forget() # the glb's materials are the looks now; the tool reads the lists again when it is next used
+	_appearance_tool.world_root = _resolved_part_id
 
 	# Nothing may still hold, or have selected, a part that's about to go —
 	# and the undo/redo history can't point at nodes that are about to be freed.
@@ -1768,6 +1774,7 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		view_modes.apply_to(part) # the new shape's edges
 		updated += 1
 	if updated > 0:
+		_appearance_tool.forget() # a painted face may have moved: its current index is read again
 		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
 		_measure_tool.clear_picks()
 	return updated

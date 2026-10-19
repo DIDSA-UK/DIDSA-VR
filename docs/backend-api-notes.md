@@ -136,9 +136,26 @@ GET /document/parts/{part_id}/assembly-mesh.glb
 (`backend/app/document/router.py` ~line 8958, encoder in
 `backend/app/document/mesh_export.py::encode_assembly_glb`)
 
-- Binary glTF (`.glb`), node-instanced: one mesh per unique `(part_id, colour)`,
-  one node per placed instance with quaternion rotation (reuses
+- Binary glTF (`.glb`), node-instanced: one mesh per unique `(part_id, resolved
+  appearance)`, one node per placed instance with quaternion rotation (reuses
   `assembly_solver._quaternion_from_axis_angle`).
+- **Appearance (DIDSA-CAD `docs/appearance-tool-scope.md` V1, branch
+  `claude/appearance-and-scenes`):** each instance's material is its resolved
+  appearance (`material_for_appearance`: base colour + opacity, metallic,
+  roughness, emission with `KHR_materials_emissive_strength`; opacity < 1 is
+  `alphaMode: BLEND`, which Godot imports as alpha with a depth pre-pass).
+  Colours are written LINEAR (converted from the picked sRGB hex), so Godot's
+  importer shows the hex as picked. `material.extras.appearance` lists only the
+  fields that were set. A part whose bodies or faces look different is split
+  into **one primitive per look**, each with an index accessor into the shared
+  position / normal accessors and its own triangles' `face_ids` / `body_ids`
+  (topology on the first primitive only): `mesh_identity.gd` joins them in
+  surface order, which is `get_faces()` and the trimesh collider's order
+  (`tests/appearance_glb.gd` checks it on a real backend glb).
+- Every node's `extras` also carries `instance_path`: the full occurrence path
+  from the requested Part (`outer/inner/leaf`, a pattern copy's
+  `<source>#pattern:<pattern id>:<index>` segment included; `""` = the root's own
+  content). `group_index.gd` places pattern copies with it.
 - Hidden instances omitted by default; `?include_hidden=true` to include them.
 - `?quality=0..1` and `?tier=coarse|full` control tessellation density.
 - Accessors are unindexed — vertex welding is deliberately deferred
@@ -396,7 +413,31 @@ newer pick has already superseded it (`measure_tool.gd`'s own
 `_measure_token`, found necessary by a real e2e run against a live
 backend, not anticipated up front).
 
-## Occurrence colour
+## Appearance overrides (the Appearance tool)
+
+```
+GET /document/parts/{part_id}/appearance-overrides
+PUT /document/parts/{part_id}/appearance-overrides
+PATCH /document/parts/{part_id}          (appearance, body_appearances, face_appearances: the Part's own)
+```
+(DIDSA-CAD `backend/app/document/appearance_routes.py`, branch `claude/appearance-and-scenes`.) An override is
+`{path, scope?, pattern_id?, part_id?, body_id?, face?, appearance}`: `path` is an occurrence path from the Part (`""` = the
+Whole assembly, or with `body_id` one of its own bodies), `scope` is null, `"pattern"` (every copy of `pattern_id`, whose source
+is the last segment) or `"same_part"` (every placement of `part_id`, empty path). PUT sets or replaces the override with that
+target and returns the whole list; `appearance: null` clears it. GET lists them with `legacy: true` for an Occurrence's old
+`color`, `unresolved` (why a target can't be found now; kept, ignored) and `face_current_index` (a face is re-found by its
+signature after an edit). `GET /parts/{id}` now also returns the Part's own `appearance`, `body_appearances` and
+`face_appearances` (each face with `current_index` / `unresolved`). Which look wins is the reference rule in DIDSA-CAD
+`backend/app/document/appearance.py`; this client's copy is `scripts/appearance/appearance_rule.gd`, checked against the same
+golden vectors (`tests/appearance_vectors.gd`). `appearance_tool.gd` paints in the scope's own Part (the world's root, or a
+room's Part) and never edits a placed part's file.
+
+## Occurrence colour (legacy alias)
+
+Since the Appearance tool, `Occurrence.color` is an alias: the backend reads it as the override `{path: <occurrence>,
+appearance: {colour}}` in the Part that places it, and mirrors a top-level occurrence's own override colour into it (so an
+older client still shows it). This client no longer writes it directly (`colour_tool.gd` is gone); the notes below describe
+the field as it was.
 
 ```
 PATCH /document/parts/{part_id}/occurrences/{occurrence_id}
@@ -410,11 +451,7 @@ not omitted) explicitly clears it back to no override** — omitting the
 "omitted-means-unchanged, empty-string-means-clear" convention `hidden`/
 `fixed`/`name_override` on this same schema use. The colour string itself is
 opaque and unvalidated server-side (any string is accepted and echoed back
-verbatim) — this client always sends a `"#RRGGBB"` hex string to match how
-`mesh_export.py`'s `_color_to_base_color_factor` decodes it for rendering
-(straight 0–255→0–1 channel scaling, no sRGB conversion) — `colour_tool.gd`'s
-own local preview matches that exact scaling so its optimistic
-`material_override` renders the same shade a real reload would.
+verbatim).
 
 ## Listing an Occurrence's direct children
 
