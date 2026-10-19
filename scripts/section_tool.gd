@@ -51,6 +51,8 @@ extends Node
 const OneEuro := preload("res://scripts/one_euro.gd")
 const TwoHandModel := preload("res://scripts/two_hand_model.gd") ## just for its STEADINESS_* tables, same convention controller.gd's own preload uses
 const ClipShader := preload("res://shaders/section_clip.gdshader")
+const ClipLook := preload("res://scripts/clip_look.gd") ## the part's whole look in the clip shader, per surface for a part split by appearance
+const SURFACE_WRAP := "surfaces" ## _wrapped's value for a part wrapped surface by surface (clip_look.gd)
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
 
 signal changed() ## wrist tablet refresh, mirroring mates_tool.gd's picks_changed
@@ -71,6 +73,7 @@ var _gesture_start_transform := Transform3D.IDENTITY
 
 var _wrapped: Dictionary = {} ## part (MeshInstance3D) -> the ShaderMaterial we installed as its material_override
 var _unclipped_override: Dictionary = {} ## part -> whatever material_override it had right before we wrapped it (Material or null)
+var _adopted_surfaces: Dictionary = {} ## part -> true: wrapped surface by surface by the room clip, adopted (left in place when the tool goes off)
 
 
 func _init() -> void:
@@ -374,48 +377,57 @@ func reconcile(parts: Array) -> void:
 		if not (part is MeshInstance3D):
 			continue
 		still_present[part] = true
-		if _wrapped.has(part) and _wrapped[part] == part.material_override:
+		if _wrapped.has(part) and str(_wrapped[part]) == SURFACE_WRAP and part.material_override == null and ClipLook.surfaces_wrapped(part):
+			continue # wrapped surface by surface (a part split by appearance) and untouched since
+		if _wrapped.has(part) and not (_wrapped[part] is String) and _wrapped[part] == part.material_override:
 			continue # already wrapped and untouched since — has() matters: a never-wrapped part's material_override is also null, which Dictionary.get()'s own "missing key" default would otherwise collide with
 		_wrap(part)
 	for part in _wrapped.keys():
 		if not still_present.has(part):
 			_wrapped.erase(part)
 			_unclipped_override.erase(part)
+			_adopted_surfaces.erase(part)
 
 
 func _wrap(part: MeshInstance3D) -> void:
+	if ClipLook.per_surface(part):
+		# Split by appearance (one surface per look): each surface wears its own clip material. A room's wrap of it is adopted as it is.
+		_unclipped_override[part] = null
+		if ClipLook.surfaces_wrapped(part):
+			_adopted_surfaces[part] = true
+		else:
+			ClipLook.wrap_surfaces(part)
+			_adopted_surfaces.erase(part)
+		_wrapped[part] = SURFACE_WRAP
+		return
+	if str(_wrapped.get(part, "")) == SURFACE_WRAP:
+		# Was split, now one look (repainted): its old per-surface clip materials would sit under the new override; drop ours.
+		if not _adopted_surfaces.has(part):
+			ClipLook.unwrap_surfaces(part)
+		_adopted_surfaces.erase(part)
+		_wrapped.erase(part)
 	var current: Material = part.material_override
-	if current is ShaderMaterial and (current as ShaderMaterial).shader == ClipShader:
+	if ClipLook.is_clip(current):
 		# Already wearing the clip material (a room's part, scripts/room/room_clip.gd): adopt it, so its colour and room slot survive, and leave
 		# it as it is when the tool goes off (the section plane itself is a global uniform every such material already reads).
 		_unclipped_override[part] = current
 		_wrapped[part] = current
 		return
 	_unclipped_override[part] = current
-	var albedo := _albedo_of(current, part)
-	var shader_mat := ShaderMaterial.new()
-	shader_mat.shader = ClipShader
-	shader_mat.set_shader_parameter("albedo_color", albedo)
+	var shader_mat := ClipLook.clip_for(current, part) # the part's whole look (colour, opacity, metal, shine, glow)
 	part.material_override = shader_mat
 	_wrapped[part] = shader_mat
 
 
-func _albedo_of(material: Material, part: MeshInstance3D) -> Color:
-	if material is BaseMaterial3D:
-		return (material as BaseMaterial3D).albedo_color
-	# No override: read the part's own glTF-generated material (mesh_export.py
-	# only ever sets baseColorFactor, so a StandardMaterial3D with just
-	# albedo_color is exactly what GLTFDocument produces here — see
-	# shaders/section_clip.gdshader's own docstring).
-	var base := part.get_active_material(0)
-	if base is BaseMaterial3D:
-		return (base as BaseMaterial3D).albedo_color
-	return Color(0.7, 0.7, 0.7, 1.0) ## same neutral default appearance_tool.gd's DEFAULT_MATERIAL_COLOR uses, for a part with no material at all
-
-
 func _unwrap_all() -> void:
 	for part in _wrapped.keys():
-		if is_instance_valid(part) and part.material_override == _wrapped[part]:
+		if not is_instance_valid(part):
+			continue
+		if str(_wrapped[part]) == SURFACE_WRAP:
+			if not _adopted_surfaces.has(part):
+				ClipLook.unwrap_surfaces(part) # (a room's wrap stays: the room clip still needs it)
+		elif part.material_override == _wrapped[part]:
 			part.material_override = _unclipped_override.get(part)
 	_wrapped.clear()
+	_adopted_surfaces.clear()
 	_unclipped_override.clear()

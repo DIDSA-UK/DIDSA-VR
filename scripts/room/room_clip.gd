@@ -6,6 +6,7 @@ extends RefCounted
 ## part's own material back. section_tool.gd's wrap ADOPTS a part already wearing this material instead of replacing it (and losing the slot).
 
 const ClipShader := preload("res://shaders/section_clip.gdshader")
+const ClipLook := preload("res://scripts/clip_look.gd") ## the part's whole look in the clip shader, per surface for a part split by appearance
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 
@@ -17,12 +18,13 @@ static func assign(part: MeshInstance3D, slot: int) -> void:
 	## slot -1 = the world, >= 0 = that room.
 	ClipGlobals.ensure()
 	part.set_meta(RoomRegistry.META, slot)
-	var mat := part.material_override as ShaderMaterial
-	if mat == null or mat.shader != ClipShader:
+	if ClipLook.per_surface(part):
+		# Split by appearance: each surface wears its own look's clip material (material_override stays empty).
+		if not ClipLook.surfaces_wrapped(part):
+			ClipLook.wrap_surfaces(part)
+	elif not ClipLook.is_clip(part.material_override):
 		var prior: Material = part.material_override
-		mat = ShaderMaterial.new()
-		mat.shader = ClipShader
-		mat.set_shader_parameter("albedo_color", _albedo(prior, part))
+		var mat := ClipLook.clip_for(prior, part)
 		part.set_meta(PRIOR, prior)
 		part.set_meta(WRAPPED, mat)
 		part.material_override = mat
@@ -52,12 +54,13 @@ static func release(part: MeshInstance3D) -> void:
 			part.material_override = part.get_meta(PRIOR)
 		part.remove_meta(WRAPPED)
 		part.remove_meta(PRIOR)
+	ClipLook.unwrap_surfaces(part)
 
 
 static func reconcile(parts: Array) -> void:
 	## `parts` is the arena's parts (main.gd's _arena_parts()): NOT the design table's copy or anything else meant to ignore rooms; those are never passed.
 	## Once a frame while rooms exist (cheap: a meta read and a reference compare per part): wraps any part whose override was replaced since
-	## (appearance_tool.gd paints by setting material_override) or that has never been wrapped, keeping each part in the room its meta says.
+	## (appearance_tool.gd paints by setting material_override, or splits a part's mesh into one surface per look) or that has never been wrapped, keeping each part in the room its meta says.
 	if RoomRegistry.rooms.is_empty():
 		for part in parts:
 			if is_instance_valid(part) and part is MeshInstance3D and part.has_meta(WRAPPED):
@@ -67,17 +70,8 @@ static func reconcile(parts: Array) -> void:
 		if not is_instance_valid(part) or not (part is MeshInstance3D):
 			continue # (a part freed since the list was made, say a room that just closed)
 		var slot := RoomRegistry.slot_of(part)
-		var mat := part.material_override as ShaderMaterial
-		if mat == null or mat.shader != ClipShader or not part.has_meta(RoomRegistry.META) or int(part.get_meta(RoomRegistry.META)) != slot:
+		var wrapped := ClipLook.surfaces_wrapped(part) if ClipLook.per_surface(part) else ClipLook.is_clip(part.material_override)
+		if not wrapped or not part.has_meta(RoomRegistry.META) or int(part.get_meta(RoomRegistry.META)) != slot:
 			assign(part, slot)
 		else:
 			sync_children(part) # edge lines / overlays built since the last pass
-
-
-static func _albedo(material: Material, part: MeshInstance3D) -> Color:
-	if material is BaseMaterial3D:
-		return (material as BaseMaterial3D).albedo_color
-	var base := part.get_active_material(0)
-	if base is BaseMaterial3D:
-		return (base as BaseMaterial3D).albedo_color
-	return Color(0.7, 0.7, 0.7, 1.0) ## appearance_tool.gd's neutral default

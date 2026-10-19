@@ -32,3 +32,4 @@ e2e_rooms
 e2e_groups
 e2e_bug_report
 e2e_appearance
+e2e_scenes

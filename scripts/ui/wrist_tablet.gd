@@ -104,6 +104,7 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, two_
 		"calculator_window": calculator_window, "image_viewer_window": image_viewer_window, "browser_window": browser_window, "design_table": design_table,
 		"dragging": func() -> bool: return surface != null and surface.dragging_slider(),
 		"navigate": func(category_id: String) -> void: ui.select_category(category_id),
+		"open_tool": func(tool_id: String) -> void: ui.select_tool(tool_id),
 	}, tokens, manager)
 	pages.register(registry)
 

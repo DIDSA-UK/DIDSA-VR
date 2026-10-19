@@ -1042,6 +1042,17 @@ func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
 	sandbox_changed.emit(true)
 
 
+func sandbox_home_of(node: Node) -> Variant:
+	## Where a remembered part goes back to (its real pose), or null when it isn't remembered.
+	return _home.get(node) if relaxed else null
+
+
+func arrange_in_sandbox(home: Dictionary, arrangement: Dictionary) -> void:
+	## Relaxes (or stays relaxed) with `home` as the real poses and puts the parts where `arrangement` says: a shown scene
+	## (scenes_tool.gd). Return parts takes them home as usual.
+	_enter_sandbox(home, arrangement)
+
+
 func _rebase_sandbox() -> void:
 	## A model (re)loaded while relaxed: its parts show their stored poses, which are their homes (nothing moved in the sandbox was saved).
 	var kept := {}

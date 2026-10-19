@@ -172,6 +172,13 @@ func _relax_mates() -> void:
 
 
 func _return_parts() -> void:
+	var scenes = _scenes()
+	if scenes != null and scenes.scene_unsaved():
+		# The shown scene has unsaved changes: the Scenes page asks (Update / Discard / Stay) instead of losing them.
+		scenes.request_back()
+		_open_scenes_tablet()
+		say("Unsaved scene: choose on the tablet", 3.0)
+		return
 	say("Returning parts", 2.0)
 	await _mates.set_relaxed(false)
 	refresh_prompt()
@@ -218,7 +225,65 @@ func root_entries() -> Array:
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
+		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
 	]
+
+
+func _scenes():
+	return _main.get("scenes_tool") if _main != null else null
+
+
+func scenes_entries() -> Array:
+	## The Scenes sub-wheel (scenes_tool.gd): Back to default, Update, Save as new, then a wedge per scene (the first six).
+	var scenes = _scenes()
+	if scenes == null:
+		return []
+	var accent := Color(0.96, 0.69, 0.25)
+	var shown_id: String = scenes.shown_id()
+	var out := [
+		_action("scene_back", "Default", "undo", accent, "Back to default: every part back where it is", _scene_back, _mates != null and _mates.relaxed, false, "Nothing is moved: this is the default"),
+		_action("scene_update", "Update", "check", accent, "Keep what is on screen in \"%s\"" % scenes.shown_name(), _scene_update, shown_id != "", false, "Show a scene first"),
+		_action("scene_new", "Save new", "scenes", accent, "Save what is on screen as a new scene", _scene_new),
+	]
+	for scene in scenes.scenes_of().slice(0, 6):
+		var id := str(scene.get("id", ""))
+		out.append(_action("scene_" + id, str(scene.get("name", "")), "image", accent, "Show this scene", _scene_show.bind(id), true, id == shown_id))
+	return out
+
+
+func _scene_back() -> void:
+	var r: String = await _scenes().request_back()
+	if r == "ask":
+		_open_scenes_tablet()
+		say("Unsaved scene: choose on the tablet", 3.0)
+	refresh_prompt()
+
+
+func _scene_update() -> void:
+	var r: Dictionary = await _scenes().update_scene()
+	say("Scene updated" if r["ok"] else str(r["error"]), 3.0)
+
+
+func _scene_new() -> void:
+	_open_scenes_tablet() # the name is typed on the tablet's keyboard
+	if _tablet.pages.get("_scenes_page") != null:
+		_tablet.pages._scenes_page._on_save_new()
+
+
+func _scene_show(scene_id: String) -> void:
+	var r: String = await _scenes().request_show(scene_id)
+	if r == "ask":
+		_open_scenes_tablet()
+		say("Unsaved scene: choose on the tablet", 3.0)
+	elif r == "shown":
+		say("Showing \"%s\"" % _scenes().shown_name(), 3.0)
+	refresh_prompt()
+
+
+func _open_scenes_tablet() -> void:
+	if not _tablet.is_open():
+		_tablet.open_tablet()
+	_tablet.ui.select_tool("scenes")
 
 
 func visibility_entries(has_selection: bool = true) -> Array:

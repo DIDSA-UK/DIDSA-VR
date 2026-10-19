@@ -136,7 +136,7 @@ func _load_part(pid: String) -> void:
 	for row in rows:
 		if bool(row.get("suppressed", false)) or row.get("resolved_part_id") == null:
 			continue
-		entry["occurrences"][str(row["id"])] = {"part_id": str(row["resolved_part_id"]), "color": row.get("color")}
+		entry["occurrences"][str(row["id"])] = {"part_id": str(row["resolved_part_id"]), "color": row.get("color"), "hidden": bool(row.get("hidden", false))} # (hidden: for scenes_tool.gd)
 	_set_overrides(entry, (await _fetch("/parts/%s/appearance-overrides" % pid)).get("overrides", []))
 	_patterns[pid] = await _get_list("/parts/%s/component-patterns" % pid)
 	_model["parts"][pid] = entry

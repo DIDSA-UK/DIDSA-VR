@@ -21,15 +21,15 @@ render_mode cull_disabled;
 // rather than a true stencil-capped one (which would need a second render
 // pass this single fragment shader can't do), at zero extra draw calls.
 //
-// ALBEDO is the only per-part input: mesh_export.py's AssemblyGlbInstance
-// only ever sets pbrMetallicRoughness.baseColorFactor (see that module's
-// encode_assembly_glb) and never a metallicFactor/roughnessFactor override or
-// any texture — this shader is never asked to render a textured part.
-// section_tool.gd reads the current albedo_color off whatever material it's
-// replacing (the glTF-generated StandardMaterial3D, or colour_tool.gd's flat
-// override) before installing this.
+// The part's whole look is the input (the Appearance tool, DIDSA-CAD
+// docs/appearance-tool-scope.md): albedo (with alpha), metallic, roughness and
+// emission, read by scripts/clip_look.gd off whatever material it replaces (the
+// glTF-generated StandardMaterial3D or the Appearance tool's own). A part
+// split by appearance (one surface per look) wears one of these per surface.
+// A see-through look uses section_clip_alpha.gdshader (the same body, with
+// alpha and a depth pre-pass). Never a textured part.
 //
-// METALLIC/ROUGHNESS below used to be hardcoded to the glTF spec's own
+// METALLIC/ROUGHNESS defaults (when a wrapper doesn't set them) used to be hardcoded to the glTF spec's own
 // unset-field defaults (1.0 each, matching what mesh_export.py's own output
 // technically carries) — real-headset feedback traced part of the
 // "disappears" bug above to this too: fully metallic + fully rough has
@@ -42,35 +42,4 @@ render_mode cull_disabled;
 // oversight; visibility here matters more than exactly reproducing a shine
 // difference nobody's actually asked for.
 
-uniform vec4 albedo_color : source_color = vec4(1.0);
-
-#include "res://shaders/clip_common.gdshaderinc" // the section plane and the sketch-window box, shared with the edge and highlight shaders
-
-// World position must be computed in vertex(): in Godot 4's fragment(),
-// VERTEX is VIEW-space, not model-space. The earlier version here did
-// MODEL_MATRIX * VERTEX inside fragment(), which mixes the two — with the
-// assembly root scaled 0.001 and placed at spawn_position, every fragment
-// landed at ~the model's origin, so the clip test became all-or-nothing for
-// the whole model and it "vanished" exactly when the plane crossed the
-// model's origin (real-headset report). tests/section_render.gd missed it
-// because it rendered an identity-transform mesh through a plain camera,
-// where view-space happens to be close to world-space.
-varying vec3 world_pos;
-
-void vertex() {
-	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-}
-
-void fragment() {
-	if (clipped(world_pos)) {
-		discard;
-	}
-	NORMAL = FRONT_FACING ? NORMAL : -NORMAL;
-	// The newly-visible interior (a back face, only ever seen at all once
-	// cull_disabled above stops hiding it) reads darker, same convention
-	// real CAD tools use to mark a cut face as "inside", not just more of
-	// the same outer surface.
-	ALBEDO = FRONT_FACING ? albedo_color.rgb : albedo_color.rgb * 0.6;
-	METALLIC = 0.0;
-	ROUGHNESS = 0.6;
-}
+#include "res://shaders/section_clip_body.gdshaderinc"

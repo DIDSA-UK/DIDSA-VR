@@ -26,6 +26,7 @@ const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
+const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
 const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
 const SCENE_ICONS := {"Light": "scene_light", "Dark": "scene_dark", "Mid": "scene_mid", "Passthrough": "scene_passthrough"}
 const ACCENT_DESIGN := Color(1.00, 0.71, 0.33)
@@ -57,6 +58,7 @@ var _browser_window: Node
 var _design_table: Node
 var _dragging: Callable = Callable()
 var _navigate: Callable = Callable() ## (category_id) -> void: opens a category on the tablet (a status chip's tap)
+var _open_tool: Callable = Callable() ## (tool_id) -> void: opens a tool's page on the tablet
 
 var _scale_label: Label
 var _lock_button: Button
@@ -73,6 +75,7 @@ var _mates_relax_button: Button
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
 var _appearance_page: RefCounted = null ## appearance_page.gd, once built
+var _scenes_page: RefCounted = null ## scenes_page.gd, once built
 var _environment_status_label: Label
 var _project_folder_label: Label
 var _info_label: Label
@@ -109,6 +112,7 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 	_design_table = ctx.get("design_table")
 	_dragging = ctx.get("dragging", Callable())
 	_navigate = ctx.get("navigate", func(_category_id: String) -> void: pass)
+	_open_tool = ctx.get("open_tool", func(_tool_id: String) -> void: pass)
 
 
 func register(reg) -> void:
@@ -128,6 +132,10 @@ func register(reg) -> void:
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
+
+	reg.add_tool("assemble", "scenes", "Scenes", "scenes", _build_scenes_page, {
+		"caption": "show · save · back to default",
+		"help": "A scene is a named arrangement of the assembly (parts moved, hidden or painted, and where you look from) that changes nothing in the model. Show relaxes the mates and arranges the parts as the scene says; anything you move or paint then is temporary. Update scene keeps what is on screen in the shown scene; Save as new names a new one (from the default too: relax, move, paint, save). Back to default puts every part back, and asks first if the scene has unsaved changes. View on Show turns and places the model to the scene's viewpoint at the scale you have."})
 
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
 	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
@@ -264,6 +272,15 @@ func _build_paint_page() -> Control:
 		return _hint("The Appearance tool isn't available.")
 	_appearance_page = AppearancePage.new(_appearance_tool, tokens, _main.open_keyboard_for if _main != null else Callable(), func(text: String, kind: String) -> void: toast.emit(text, kind))
 	return _appearance_page.build()
+
+
+func _build_scenes_page() -> Control:
+	var scenes = _main.get("scenes_tool") if _main != null else null
+	if scenes == null:
+		return _hint("Scenes aren't available.")
+	_scenes_page = ScenesPage.new(scenes, tokens, _main.open_keyboard_for, func(text: String, kind: String) -> void: toast.emit(text, kind))
+	_scenes_page.scope_names = func(root: String) -> String: return _main.scope_name(root) if _main.has_method("scope_name") else root
+	return _scenes_page.build()
 
 
 func _on_custom_colour_pressed() -> void:
@@ -694,6 +711,13 @@ func _build_mates_page() -> Control:
 	_mates_relax_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Relax all mates is a sandbox (mates_tool.gd set_relaxed): on, moves are temporary; off ("Return parts"), everything goes back.
 	_mates_relax_button.toggled.connect(func(on: bool) -> void:
+		var scenes = _main.get("scenes_tool") if _main != null else null
+		if not on and scenes != null and scenes.scene_unsaved():
+			# Return parts would lose a scene's unsaved changes: the Scenes page asks first (Update / Discard / Stay).
+			_mates_relax_button.set_pressed_no_signal(true)
+			scenes.request_back()
+			_open_tool.call("scenes")
+			return
 		_show_relax_state(on)
 		if _mates_tool:
 			_mates_tool.set_relaxed(on)

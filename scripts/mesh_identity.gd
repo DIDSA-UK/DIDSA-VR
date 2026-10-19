@@ -43,10 +43,13 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 	for i in mini(json_nodes.size(), scene_children.size()):
 		var node_json: Dictionary = json_nodes[i]
 		var scene_node := scene_children[i]
+		var extras: Dictionary = node_json.get("extras", {})
 		if not (scene_node is MeshInstance3D):
+			# A placed instance with no geometry of its own (a sub-assembly): only its path, so a scene (scenes_tool.gd) can pose it.
+			if scene_node is Node3D and extras.has("instance_path"):
+				scene_node.set_meta("instance_path", str(extras["instance_path"]))
 			continue
 
-		var extras: Dictionary = node_json.get("extras", {})
 		scene_node.set_meta("occurrence_id", extras.get("occurrence_id", ""))
 		scene_node.set_meta("owner_part_id", extras.get("owner_part_id", ""))
 		if extras.has("instance_path"): # the full occurrence path from the glb's root (#pattern: copies included; "" = root content). Absent from an older backend.

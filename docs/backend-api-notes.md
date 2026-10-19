@@ -156,6 +156,12 @@ GET /document/parts/{part_id}/assembly-mesh.glb
   from the requested Part (`outer/inner/leaf`, a pattern copy's
   `<source>#pattern:<pattern id>:<index>` segment included; `""` = the root's own
   content). `group_index.gd` places pattern copies with it.
+- **The node list is flat**: one top-level node per placed instance, sub-assemblies
+  included, each at its pose in the requested Part's frame (mm). A Part with no
+  geometry of its own (a sub-assembly) is a mesh-less node, which Godot imports as
+  a plain `Node3D`; `mesh_identity.gd` tags it with `instance_path` too, and
+  `scenes_tool.gd` poses it (`tests/e2e_scenes.gd` checks the order and poses on
+  a real backend glb).
 - Hidden instances omitted by default; `?include_hidden=true` to include them.
 - `?quality=0..1` and `?tier=coarse|full` control tessellation density.
 - Accessors are unindexed — vertex welding is deliberately deferred
@@ -431,6 +437,23 @@ signature after an edit). `GET /parts/{id}` now also returns the Part's own `app
 `backend/app/document/appearance.py`; this client's copy is `scripts/appearance/appearance_rule.gd`, checked against the same
 golden vectors (`tests/appearance_vectors.gd`). `appearance_tool.gd` paints in the scope's own Part (the world's root, or a
 room's Part) and never edits a placed part's file.
+
+## Scenes
+
+```
+GET    /document/parts/{part_id}/scenes
+POST   /document/parts/{part_id}/scenes                 {name, overrides, section_planes?, viewpoint?}   (201)
+GET    /document/parts/{part_id}/scenes/{scene_id}
+PATCH  /document/parts/{part_id}/scenes/{scene_id}      each given field replaces that part whole
+DELETE /document/parts/{part_id}/scenes/{scene_id}      (204)
+```
+(DIDSA-CAD `backend/app/document/scenes_routes.py`, branch `claude/appearance-and-scenes`.) A scene override is
+`{path, body_id?, face?, transform?, hidden?, appearance?}`; a transform is the occurrence's local one at its own level (the
+`{translation (mm), rotation_axis, rotation_angle_degrees}` shape), and a body / face or path `""` takes an appearance only
+(422 otherwise). A viewpoint is `{eye, target, up}` in the Part's frame (mm). Every response carries `unresolved` (overrides
+kept but not matching the assembly now). Composition (what a shown scene looks like) is the client's job; the reference is
+DIDSA-CAD `backend/app/document/scene_compose.py` and this client's copy is `scripts/appearance/scene_compose.gd`
+(`tests/scene_vectors.gd`). `scenes_tool.gd` never sends `section_planes` on Update, so a flat-app section plane survives.
 
 ## Occurrence colour (legacy alias)
 

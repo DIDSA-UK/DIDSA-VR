@@ -56,6 +56,7 @@ const _ICONS := {
 	"flip": '<path d="M8 18H36"/><path d="M30 12L36 18L30 24"/><path d="M40 30H12"/><path d="M18 24L12 30L18 36"/>',
 	"relax": '<circle cx="13" cy="24" r="8"/><circle cx="35" cy="24" r="8"/><path d="M21 24H23M25 24H27"/>',
 	"clear_picks": '<path d="M10 10L38 38"/><path d="M38 10L10 38"/><circle cx="24" cy="24" r="17"/>',
+	"scenes": '<rect x="6" y="18" width="36" height="22" rx="2"/><path d="M6 18L9 8L42 12L41 18"/><path d="M16 9L14 18M26 10L24 18M35 11L33 18"/>',
 	"layers": '<path d="M24 6L42 16L24 26L6 16Z"/><path d="M6 24L24 34L42 24"/><path d="M6 32L24 42L42 32"/>',
 	"tablet": '<rect x="9" y="6" width="30" height="36" rx="4"/><path d="M21 36H27"/>',
 	"tools": '<circle cx="24" cy="24" r="6"/><circle cx="24" cy="8" r="3"/><circle cx="24" cy="40" r="3"/><circle cx="8" cy="24" r="3"/><circle cx="40" cy="24" r="3"/>',

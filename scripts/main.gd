@@ -78,6 +78,7 @@ var _keyboard: Node
 var _mates_tool: Node
 var _measure_tool: Node
 var _appearance_tool: Node ## the Appearance tool (appearance_tool.gd): what paint does, where it goes
+var scenes_tool: Node ## Scenes (scenes_tool.gd): show / save / update scenes on the sandbox; the tablet's Scenes page and the wheel use it
 var _section_tool: Node
 var _assembly_tree_window: Node
 var _calculator_window: Node
@@ -115,6 +116,7 @@ func _ready() -> void:
 	_add_measure_tool()
 	_add_face_highlight()
 	_add_appearance_tool()
+	_add_scenes_tool()
 	_add_section_tool()
 	_add_view_modes() # after the section tool: its edge shader uses the section clip's global uniforms
 	_add_room_manager() # before the tree window: its rows have a Room button
@@ -131,6 +133,7 @@ func _ready() -> void:
 	_mates_tool.document_changed.connect(mark_dirty)
 	_appearance_tool.document_changed.connect(mark_dirty)
 	_appearance_tool.configure(design_table.api, _settings) # the design table's own backend client: one request at a time, the app's document session
+	scenes_tool.api = design_table.api
 	$XROrigin3D/LeftController.command_stack = command_stack
 	$XROrigin3D/RightController.command_stack = command_stack
 	$XROrigin3D/LeftController.mates_tool = _mates_tool
@@ -140,6 +143,7 @@ func _ready() -> void:
 	$XROrigin3D/LeftController.appearance_tool = _appearance_tool
 	$XROrigin3D/RightController.appearance_tool = _appearance_tool
 	_appearance_tool.message.connect(_set_status)
+	scenes_tool.message.connect(_set_status)
 	$XROrigin3D/LeftController.section_tool = _section_tool
 	$XROrigin3D/RightController.section_tool = _section_tool
 	_apply_group_deadzone()
@@ -216,6 +220,41 @@ func _add_appearance_tool() -> void:
 	appearance.command_stack = command_stack
 	add_child(appearance)
 	_appearance_tool = appearance
+
+
+func _add_scenes_tool() -> void:
+	var scenes := preload("res://scripts/scenes_tool.gd").new()
+	scenes.name = "ScenesTool"
+	scenes.mates_tool = _mates_tool
+	scenes.appearance_tool = _appearance_tool
+	scenes.camera = $XROrigin3D/XRCamera3D
+	scenes.scopes = scene_scopes
+	add_child(scenes)
+	scenes_tool = scenes
+
+
+func scene_scopes() -> Array:
+	## Where scenes live (scenes_tool.gd): the world's assembly (its glb's root under AssemblyRoot, which a viewpoint moves) and each
+	## open Assembly Room's Part (a viewpoint doesn't move a room).
+	var out: Array = []
+	if _resolved_part_id != "" and assembly_root.get_child_count() > 0:
+		out.append({"root": _resolved_part_id, "scene": assembly_root.get_child(0), "view": assembly_root})
+	if room_manager != null:
+		for room in room_manager.rooms:
+			if is_instance_valid(room) and room.content_root != null and room.content_root.get_child_count() > 0:
+				out.append({"root": room.part_id, "scene": room.content_root.get_child(0), "view": null})
+	return out
+
+
+func scope_name(root: String) -> String:
+	## The Scenes page's name for a scope: World, or the room's label.
+	if root == _resolved_part_id:
+		return "World"
+	if room_manager != null:
+		for room in room_manager.rooms:
+			if is_instance_valid(room) and room.part_id == root:
+				return str(room.label)
+	return root
 
 
 func _add_section_tool() -> void:
@@ -1384,6 +1423,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 		return false
 	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 	_appearance_tool.forget() # the glb's materials are the looks now; the tool reads the lists again when it is next used
+	scenes_tool.forget() # a shown scene's nodes are about to go
 	_appearance_tool.world_root = _resolved_part_id
 
 	# Nothing may still hold, or have selected, a part that's about to go —

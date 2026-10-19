@@ -7,6 +7,8 @@ extends RefCounted
 ##   GET/PUT /document/parts/{id}/appearance-overrides   the list; PUT sets / replaces / (appearance null) clears one target,
 ##       and mirrors a top-level occurrence's own colour into its row's `color`, as the backend does.
 ## `parts`: {id: {name, appearance?, body_appearances?, occurrences: [rows], patterns: [rows], overrides: [records]}}.
+##   GET/POST /document/parts/{id}/scenes, PATCH/DELETE /document/parts/{id}/scenes/{scene id}   a Part's `scenes` (scenes_tool.gd):
+##       POST mints the id; PATCH replaces each field it is given.
 ## Every call is recorded in `calls`; set `fail_puts` to make every PUT a 422.
 
 var parts: Dictionary = {}
@@ -72,6 +74,27 @@ func request(method: int, path: String, body = null) -> Dictionary:
 				out["unresolved"] = null
 				out["face_current_index"] = int(r["face"]["index"]) if r.get("face") is Dictionary else null
 				return out)})
+		"scenes":
+			var scenes: Array = part.get("scenes", [])
+			part["scenes"] = scenes
+			if bits.size() == 2 and method == HTTPClient.METHOD_GET:
+				return _ok(scenes.duplicate(true))
+			if bits.size() == 2 and method == HTTPClient.METHOD_POST:
+				var scene := {"id": "scene-%d" % (scenes.size() + 1), "name": str(body.get("name", "")), "overrides": (body.get("overrides", []) as Array).duplicate(true),
+					"section_planes": body.get("section_planes", []), "viewpoint": body.get("viewpoint"), "unresolved": []}
+				scenes.append(scene)
+				return {"ok": true, "code": 201, "json": scene.duplicate(true), "error": ""}
+			for scene in scenes:
+				if bits.size() == 3 and scene["id"] == bits[2]:
+					if method == HTTPClient.METHOD_DELETE:
+						scenes.erase(scene)
+						return {"ok": true, "code": 204, "json": null, "error": ""}
+					if method == HTTPClient.METHOD_PATCH:
+						for k in body:
+							scene[k] = body[k]
+						return _ok(scene.duplicate(true))
+					return _ok(scene.duplicate(true))
+			return {"ok": false, "code": 404, "json": {"detail": "Scene not found"}, "error": "404"}
 	return {"ok": false, "code": 404, "json": null, "error": "no route"}
 
 

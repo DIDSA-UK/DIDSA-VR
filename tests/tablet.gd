@@ -185,7 +185,7 @@ func _initialize() -> void:
 	# --- one active tool at a time
 	await open_category("assemble")
 	print("SMOKE opening a category shows a tool but switches NO mode tool on: ", ui.selected_category_id == "assemble" and ui.selected_tool_id == "mates" and tab.manager.active_id == "" and not r.mates_tool_active)
-	print("SMOKE a category with one tool shows no chip strip: ", not ui._strip_scroll.visible)
+	print("SMOKE a category with two tools (Assemble: Mates, Scenes) shows the chip strip: ", ui._strip_scroll.visible)
 	await aim_and_click(find_button(func(b): return b.text == "Tool: off"))
 	print("SMOKE the header switch turns the Mates tool on (both hands + tool): ", tab.manager.active_id == "mates" and l.mates_tool_active and r.mates_tool_active and main._mates_tool.active)
 	print("SMOKE the tool header shows 'Tool: ON': ", find_button(func(b): return b.text == "Tool: ON") != null)
@@ -373,6 +373,12 @@ func _initialize() -> void:
 	print("SMOKE an error toast shows in the status bar, pulses it, and asks for an error haptic: ", ui.status_text() != "" and ui._status_panel.self_modulate != Color.WHITE and cues == ["error"])
 	ui.tick(0.016)
 	print("SMOKE ...the status bar says what went wrong: ", ui.status_text().contains("Couldn't do the thing"))
+
+	# --- a category with one tool (Rooms) shows no chip strip; Assemble > Scenes is a page
+	await open_category("rooms")
+	print("SMOKE a category with one tool shows no chip strip: ", ui.selected_category_id == "rooms" and not ui._strip_scroll.visible)
+	await open_tool("assemble", "scenes")
+	print("SMOKE Assemble > Scenes opens the Scenes page: ", ui.selected_tool_id == "scenes" and find_button(func(b): return b.text == "Save as new...") != null and find_button(func(b): return b.text == "Back to default") != null)
 
 	# --- Reduce motion: instant open and stow
 	var UiFeedback = load("res://scripts/ui/ui_feedback.gd")
