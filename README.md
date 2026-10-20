@@ -130,7 +130,7 @@ api_key="your-BROWSER_RELAY_API_KEY"
 2. **Project, Export, Add, Android**; set your Android SDK path on first use. Under **Xr Features**: `Xr Mode` = `OpenXR`; `Hand Tracking` = off (controllers only).
 3. Export a debug APK, then `adb install -r path/to/exported.apk`.
 4. Launch **DIDSA Design Tools VR** from the headset's Unknown Sources list. (Renamed from "DIDSA VR Spike", and the name is a placeholder; export presets are git-ignored, so check your local preset's name and package ID.)
-5. Standalone passthrough also needs the OpenXR Vendors plugin, which is not included.
+5. **Standalone passthrough** (and the QR scan's permission) need the OpenXR Vendors plugin in a Gradle build: `tools/install_vendors_plugin.sh`, a ready export preset to copy, and a first-run checklist for the headset are in [`docs/android-build.md`](docs/android-build.md). Prepared without an Android SDK: no APK has been built from it yet.
 
 ## Testing
 

@@ -109,13 +109,14 @@ What step L5 has to answer (write the answers into this page and the scope):
 
 - Does *QR codes supported* say yes on your Quest 3 and Horizon OS version? (A forum report says it works on a Quest 3 with Horizon OS v83 and Godot 4.6, not
   4.5.)
-- Which Android permission is needed? The scanner asks for `com.oculus.permission.USE_SCENE` at runtime; the manifest line for it lives in the export preset
-  (`export_presets.cfg` is git-ignored, so add it to your local preset), and **whether marker tracking needs it is unknown**.
+- Which Android permission is needed? The OpenXR Vendors plugin writes `com.oculus.permission.USE_SCENE` (and `USE_ANCHOR_API`) into the manifest by itself while
+  `xr/openxr/extensions/spatial_entity/enabled` is on (its source says so), and the scanner asks for the scene permission at run time. **Whether marker tracking
+  needs exactly that one is still unknown**; the Scan page says what the headset answered.
 - Does the runtime create a marker tracker for a code on a monitor at all, and how large must it be on screen?
 - Is the tracker delivered through the XRServer's `tracker_added` / `tracker_updated` (what the scanner listens to, plus a 0.5 s poll)?
 
-**Passthrough is the practical blocker.** To see the screen the headset needs passthrough, and on a standalone Quest that needs the OpenXR Vendors plugin
-(step L0 of the scope; not in the project). Over a PC link (Virtual Desktop) the headset's own passthrough settings apply but marker tracking would need the
+**Passthrough** is needed to see the screen, and on a standalone Quest that needs the OpenXR Vendors plugin: step L0, now prepared (`docs/android-build.md`;
+the plugin is fetched by `tools/install_vendors_plugin.sh`, and no APK has been built from it yet). Over a PC link (Virtual Desktop) the headset's own passthrough settings apply but marker tracking would need the
 PC runtime to offer it, which is untested. If marker tracking works and passthrough does not, the options are L0, or the typed route above. If marker tracking
 does not work, route B (the Passthrough Camera API with a QR decoder in a small Kotlin plugin) breaks the "no addons" rule and needs L0 too.
 
@@ -123,5 +124,6 @@ does not work, route B (the Passthrough Camera API with a QR decoder in a small 
 
 `tests/servers.gd` (the store, the address rules, switching and forgetting, the unload, secrets.cfg, a hand-written file, the Servers page) and
 `tests/qr_scanner.gd`, `tests/scan_page.gd` (the scanner and the Scan page, with codes fed in by hand), `tests/pairing_payload.gd` (the code's format) and `tests/pairing_flow.gd` (Connect, Save anyway, Cancel), and
-`tests/server_probe.gd` (the Test button against a stub `/health` server, `tests/helpers/stub_health_server.py`, needs `python3`). **Not run against a
-real DIDSA-CAD backend** (none was available in the build session), and not on a headset.
+`tests/server_probe.gd` (the Test button against a stub `/health` server, `tests/helpers/stub_health_server.py`, needs `python3`) and, against a **real DIDSA-CAD
+backend** (branch `claude/vr-landing-feature-scope-kspao7`, 20 Oct 2026), `tests/e2e_servers.gd`: Test, adding and switching, the demo table and plate and peg,
+Continue, offline unloading, New assembly and pairing by code with the right and a wrong key. Not on a headset.

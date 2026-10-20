@@ -32,3 +32,6 @@ models/*
 /ui/logo/source/node_modules/
 /ui/logo/source/masks/
 /ui/logo/source/package*.json
+
+# The OpenXR Vendors plugin (tools/install_vendors_plugin.sh): native libraries and AARs, fetched and checked, not committed
+/addons/godotopenxrvendors/

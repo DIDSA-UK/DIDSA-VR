@@ -218,7 +218,7 @@ the APK.
 
 | Step | What | Rough size | Tests |
 |---|---|---|---|
-| **L0** Custom Android build | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config for `http://` to LAN addresses, **only if** the headset test shows Android blocks it (see
+| **L0** Custom Android build **(prepared; no APK built: see [`android-build.md`](android-build.md))** | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config for `http://` to LAN addresses, **only if** the headset test shows Android blocks it (see
 [Plain http on the Quest](#plain-http-on-the-quest)); and route B for QR if route A fails. Record the export settings in the README (the preset itself stays git-ignored). The Vendors plugin is an addon, so this is a deliberate exception to the no-addons rule, to note in `CLAUDE.md`. | 1 day | APK builds and installs; by hand on the headset |
 | **L1** Landing shell **(built)** | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
 | **L2** Demo content **(built)** | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
@@ -276,8 +276,8 @@ Test / Forget, "Use no server", typed entry with Test and Save and use), address
 server loaded (asking first about unsaved changes). secrets.cfg is a read-only developer override that wins at start. `adb push` route documented, with the
 folder printed on the Servers page. Tests: `servers`, `server_probe`.
 
-- **Verified:** headless and on a real socket against a stub `/health` server. **Not verified:** against a real DIDSA-CAD backend (no backend in the build
-  session: the scope's "live backend: switch and open the table" is **not done**, and there is no `e2e_servers.gd`); that every startup `configure_backend()`
+- **Verified:** headless, on a real socket against a stub `/health` server, and **against a real DIDSA-CAD backend** (`tests/e2e_servers.gd`, 20 Oct 2026: Test, add and
+  switch with no restart, the demo table and plate and peg opening, Continue, offline unloading, New assembly). **Not verified:** that every startup `configure_backend()`
   consumer was found (the six that exist are re-pointed and tested, a seventh would still hold the old address); the `adb push` folder on a Quest; plain
   `http://` to a LAN server on the Quest.
 - **Not built:** a per-server "Connected" state (the pill says "Server: host", set not checked); renaming a saved server; per-server document sessions
@@ -303,8 +303,23 @@ no address or key, an address `server_address.gd` refuses so plain http only on 
 the Scan page raises **Connect to <name>?**, tests the server, then saves and switches (details: [`servers.md`](servers.md#after-a-code-is-read-l6)). Tests:
 `pairing_payload` (60 generated codes in DIDSA-CAD's encoding plus 24 refusals), `pairing_flow`.
 
-- **Not done:** the scope's "live: pairing against a backend" (no backend in the build session; the server's answer is stood in); a real scan (L5 is open); the
-  card on top of the screen; DIDSA-CAD's version 2 (needs backend work).
+- **Verified against the real backend:** a code with a wrong key is refused by the server (Save anyway / Cancel), a code with the right key is tested, saved,
+  switched to and opens a file (`tests/e2e_servers.gd`; the code itself was fed to the Scan page, not read by a headset).
+- **Not done:** a real scan (L5 is open); the card on top of the screen; DIDSA-CAD's version 2 (needs backend work).
+
+## What was prepared (L0)
+
+[`android-build.md`](android-build.md) has the steps. In the repo: `tools/install_vendors_plugin.sh` (the OpenXR Vendors plugin 5.1.0-stable, pinned and
+SHA-256 checked, git-ignored), `tools/android/export_presets.cfg.example` (Quest 3, Gradle build, OpenXR mode, Meta plugin, passthrough optional, arm64 only, demo
+files in, tests out), `tools/android/apply_cleartext_overlay.sh` + `network_security_config.xml` (only if a headset shows plain http blocked), and Android-only
+settings in `project.godot` (Meta passthrough, spatial-entity marker tracking). `tests/android_config.gd` checks what can be checked without an SDK.
+
+- **Found:** the plugin writes `com.oculus.permission.USE_SCENE` and `USE_ANCHOR_API` into the manifest itself while the spatial-entity setting is on, and honours the
+  `.android` feature-tag overrides; it loads in Godot 4.7.2 and a pack export with the preset holds the demo files and no `secrets.cfg`. 411 test scripts were
+  going into the pack: the preset excludes `tests/*`.
+- **Not done / unverified:** **no APK was built** (no Android SDK or export templates reachable, no headset); the plugin's AARs and manifest in a real build; the preset's
+  option names are from the plugin's source, not the Export dialog. The plugin is an addon: the "no addons" rule now has this one exception (`CLAUDE.md`).
+- **Not done:** vendoring the plugin into git (82 MB; fetched instead), a CI job that builds the APK (needs the SDK and templates in the runner).
 
 ## Decisions (owner, 20 Oct 2026)
 
