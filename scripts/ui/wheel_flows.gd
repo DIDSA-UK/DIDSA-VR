@@ -226,6 +226,7 @@ func root_entries() -> Array:
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
 		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
+		_action("home", "Home", "home", Color(0.62, 0.70, 0.80), "Back to the landing: demos, tips, logo", _main.go_home),
 	]
 
 

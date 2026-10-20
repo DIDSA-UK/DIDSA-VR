@@ -74,7 +74,7 @@ func _initialize() -> void:
 	var flows = main.get_node("WheelFlows")
 	var tablet = main._tablet
 
-	_check(_ids(flows.root_entries()).has("scenes") and flows.root_entries()[flows.root_entries().size() - 1].has("children"), "the root ring has a Scenes sub-wheel")
+	_check(_ids(flows.root_entries()).has("scenes") and flows.root_entries()[_ids(flows.root_entries()).find("scenes")].has("children"), "the root ring has a Scenes sub-wheel")
 	var ring: Array = flows.scenes_entries()
 	_check(_ids(ring) == ["scene_back", "scene_update", "scene_new", "scene_s1"], "the Scenes sub-wheel: Default, Update, Save new, then the scene")
 	_check(not bool(_entry(ring, "scene_back")["enabled"]) and not bool(_entry(ring, "scene_update")["enabled"]), "Default and Update are greyed with nothing shown")

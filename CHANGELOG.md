@@ -3,6 +3,15 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## Branch `claude/vr-landing-build` (20 Oct, not merged)
+
+- **The landing, L1 to L3** (`docs/landing-scope.md`; offline demo for handing the APK to friends). Headless- and software-render-tested; not checked on the headset.
+  - **L1 shell:** the app starts on a landing state of the world (`scripts/landing/`) instead of importing `res://assembly.didsa` (Settings > **Show the landing on start** off gives the old start back). A launcher window (Continue, Open..., New assembly, Demo models, Demo assemblies, Servers, Settings, About) with a connection pill; anything that needs a server is greyed "Needs a server" offline. **Home** tile on the wrist tablet (12th tile) and wedge on the tool wheel (10th) returns to the landing. Status messages now reach the headset through the launcher's status line (`main.status_changed`). About shows `demo/CREDITS.md` (the SLS model is CC BY). `user://recent.cfg` remembers the last file for Continue. Servers shows the configured server or "Offline" with a "Scan: coming soon" note (real server management is L4).
+  - **L2 demo content:** Demo models page (rockets and spacecraft from `demo/`) with **Full size** (1:1 in front of you) and **On the desk** (1:50, capped so the largest side is 1.5 m, on a plinth at waist height). Rocket garden: the five demo rockets at true size 40-60 m out with name plates and heights (no colliders, no shadows). Demo assemblies open with `open_native_file()` when a backend is set.
+  - **L3 logo and tips:** the 3D logo 2.5 m ahead at eye height with a porthole pulse and a slow sway (both stopped by Reduce motion); a tips reel of 17 tips (`scripts/landing/tips.gd`, 8 s, previous / pause / next, Settings > Show tips). Offline the tips about server features are left out; four of the scope's drafted tips were corrected against `controller.gd`.
+  - **Tests:** `landing`, `tips_reel`, `landing_render`. Every other test now runs with `DIDSA_NO_LANDING=1` (set by the `tests/*.sh` scripts; set it when running an `e2e_*` test by hand).
+  - **Not done:** Continue's thumbnail, the "What is this?", Tour and Mixed reality tiles, seated / standing and snap angle in the landing's Settings, picking a garden rocket; the controller drawing in tips.
+
 ## Branch `claude/appearance-and-scenes` (19-20 Oct, not merged)
 
 - **Finding moved files** (20 Oct; DIDSA-CAD `docs/moved-files-scope.md` F2; needs the DIDSA-CAD backend on the same branch for `ref_part_id`). Headless- and live-backend-tested; not checked on the headset.

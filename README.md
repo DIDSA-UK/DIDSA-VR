@@ -31,7 +31,7 @@ Tests at the last recorded run: 2512 headless checks, 42 render tests, live-back
 
 1. Install Godot 4.7.x and open this folder as a project.
 2. Copy `secrets.cfg.example` to `secrets.cfg` and fill in your backend `url` and `api_key` (the file is git-ignored). With no `secrets.cfg` the app still starts, ready for a local `.glb`.
-3. Put a saved assembly (a `.didsa` / `.DIDSAprt` whose root Part has occurrences) next to `project.godot` as `assembly.didsa`. A sample is included.
+3. The app starts on the **landing** (logo, rocket garden of demo models, a launcher panel, tips); it no longer imports `assembly.didsa` by itself. To get the old start-up import (a saved assembly whose root Part has occurrences, next to `project.godot` as `assembly.didsa`; a sample is included), turn off Settings > **Show the landing on start**, or open the file from the launcher's Continue / Open... tiles.
 4. Press **F6** in the editor. The console logs the import, the mesh download and the part count; you get a flat 3D preview.
 
 To try the UI without a backend or headset, open `lab/ui_lab.tscn` and press F6.
@@ -65,7 +65,7 @@ Every part move, whole-model move, scale change and Visibility action goes onto 
 
 ## The wrist tablet
 
-A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the top bar shows status chips (active tool, Unsaved, Table open) and **Undo / Redo / Settings / Close**.
+A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** climbs one level; the top bar shows status chips (active tool, Unsaved, Table open) and **Undo / Redo / Settings / Close**.
 
 | Tile | Opens |
 |---|---|
@@ -75,6 +75,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
+| **Home** | Back to the landing: the demo models, the launcher and the tips. (The tool wheel has a Home wedge too.) |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
 | **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
 

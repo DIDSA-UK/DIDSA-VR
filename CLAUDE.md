@@ -18,6 +18,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 - `scripts/room/`: Assembly Rooms (clipped sub-assembly workspaces): manager, registry, clip, handles, console, edit, world preview.
 - `scripts/design_table/`: the part-modelling console (sketch, constraints, features); `cad_api.gd` is its backend client.
 - `scripts/ui/`: wrist tablet (`tablet_registry.gd`, `tablet_pages.gd`), theming (`didsa_ui_theme.gd`), shader FX.
+- `scripts/landing/`: the first screen (a state of `main.gd`'s world): logo, rocket garden, launcher, tips (`landing.gd` is the entry; scope in `docs/landing-scope.md`). `DIDSA_NO_LANDING=1` turns it off for tests.
 - `scripts/motion/`: constrained-drag projector and benchmarks. `shaders/`: clip, grid, glass-wall and effect shaders.
 - `demo/`: models and assemblies shipped in the APK (1:1 glb, `importer="keep"`; credits in `demo/CREDITS.md`, rules in `demo/README.md`).
 - `ui/logo/`: the DIDSA logo traced from the artwork (SVG, 3D glb; how to redo it in `ui/logo/source/`). `icon.svg` is its emblem.
@@ -41,6 +42,7 @@ CI pins Godot 4.7.2 (`.github/workflows`). The renderer is `mobile`; physics run
 - Backend native units are millimetres; Godot reads glTF as metres (`spawn_scale` 0.001).
 - The server does not stop cycles or unknown Part ids when adding occurrences; the client must.
 - Say what you could not verify. Headless tests cannot judge feel, fake a real grip press, or render for real. Testing on the headset is ongoing and informal, so the repo does not record which features have been checked by hand: do not write "works on the headset" unless the owner says so.
+- The app starts on the landing, not the start-up import of `assembly.didsa`. Tests (and any `e2e_*` run by hand) need `DIDSA_NO_LANDING=1`; the scripts in `tests/` set it.
 - Adding a test file: add it to `tests/run_all.sh` and a row in `tests/README.md`; live-backend tests also go in `tests/e2e_ci_list.txt`.
 
 ## Naming

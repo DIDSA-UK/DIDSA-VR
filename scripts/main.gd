@@ -22,7 +22,9 @@ const BackendSession := preload("res://scripts/backend_session.gd") ## the API k
 @export var relay_url: String = "" ## Loaded from secrets.cfg's [browser_relay] section - the Browser window's
 ## own separate service (DIDSA-CAD repo, browser-relay/), not the CAD backend above.
 @export var relay_api_key: String = "" ## Matches the relay's BROWSER_RELAY_API_KEY.
-@export var native_file_path: String = "res://assembly.didsa" ## The exported native file to import before loading.
+@export var native_file_path: String = "res://assembly.didsa" ## The exported native file to import before loading (only when the landing is off).
+@export var landing_enabled: bool = OS.get_environment("DIDSA_NO_LANDING") == "" ## false: no landing at start, the old start-up import (the tests set DIDSA_NO_LANDING; see tests/README.md)
+@export var landing_wait_seconds: float = 3.0 ## on a headset: how long to wait for tracking before placing the landing (a flat preview doesn't wait)
 @export var part_id_override: String = "" ## Leave blank to auto-read root_part_id from native_file_path.
 @export var quality: float = 0.5 ## 0..1, same slider as the JSON endpoint.
 @export var include_hidden: bool = false
@@ -48,6 +50,7 @@ var visibility_ruled_parts: Array = [] ## parts whose load-rule visibility (visi
 var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 signal dirty_changed(dirty: bool)
+signal status_changed(text: String) ## every _set_status(): the landing's launcher shows it in the headset
 signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
 signal references_changed() ## the opened file's moved / missing references (reference_review()) changed: the Files > References page redraws
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
@@ -69,6 +72,8 @@ var _settings := preload("res://scripts/app_settings.gd").new() ## project folde
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
+const Landing := preload("res://scripts/landing/landing.gd") ## the first screen: a state of this world, see landing.gd
+const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
@@ -100,6 +105,7 @@ var _parse_started_ms := 0
 var _load_summary := ""
 var _part_count := 0
 var view_modes ## view_modes.gd: Shaded / Shaded + edges / Wireframe
+var landing: Node ## landing.gd: logo, rocket garden, launcher and tips; enter()ed at start and by go_home()
 
 # All endpoints below live under the backend's "/document" router prefix —
 # see backend/app/document/router.py's `router = APIRouter(prefix="/document", ...)`.
@@ -167,6 +173,11 @@ func _ready() -> void:
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
 	_world_environment.apply_saved_scene(_settings.last_scene)
+	_add_landing()
+	if landing_enabled and _settings.show_landing:
+		_set_status(startup_status())
+		_enter_landing_at_start() # no start-up import: the landing offers Continue, Open and the demos
+		return
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("No backend configured (see secrets.cfg.example). Turn your left wrist up and use the Files tab to load a local .glb.")
 		return
@@ -528,6 +539,101 @@ func _add_tool_wheel() -> void:
 	_measure_dimensions.name = "MeasureDimensions"
 	add_child(_measure_dimensions)
 	_measure_dimensions.setup(_measure_tool, $XROrigin3D/XRCamera3D)
+
+
+func _add_landing() -> void:
+	landing = Landing.new()
+	landing.name = "Landing"
+	add_child(landing)
+	landing.setup(self, $XROrigin3D/LeftController, $XROrigin3D/RightController, $XROrigin3D/XRCamera3D)
+
+
+func _enter_landing_at_start() -> void:
+	## On a headset the camera has no pose in the first frames, so wait (a few seconds at most) until it is up at head height; a flat
+	## preview has no tracking to wait for.
+	var waited := 0.0
+	var camera: Node3D = $XROrigin3D/XRCamera3D
+	while xr_interface != null and xr_interface.is_initialized() and camera.position.y < 0.3 and waited < landing_wait_seconds:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	await get_tree().process_frame
+	if is_inside_tree() and not landing.is_active() and _part_count == 0:
+		landing.enter()
+
+
+func go_home() -> void:
+	## The Home tile (wrist tablet) and the wheel's Home: back to the landing, in front of where you are looking now.
+	if _tablet.is_open():
+		_tablet.close_tablet()
+	landing.enter()
+
+
+func open_tablet_at(category_id: String) -> void:
+	## Opens the wrist tablet on a category (the landing's Open... and Settings tiles).
+	if not _tablet.is_open():
+		_tablet.open_tablet()
+	_tablet.ui.select_category(category_id)
+
+
+func show_landing_on_start() -> bool:
+	return _settings.show_landing
+
+
+func set_show_landing_on_start(on: bool) -> void:
+	_settings.set_show_landing(on)
+
+
+func show_tips() -> bool:
+	return _settings.show_tips
+
+
+func set_show_tips(on: bool) -> void:
+	_settings.set_show_tips(on)
+	landing.set_show_tips(on)
+
+
+func has_backend() -> bool:
+	return not backend_url.is_empty() and not api_key.is_empty()
+
+
+func connection_text() -> String:
+	## The landing's connection pill. A server is "set", not "checked": nothing has called it yet.
+	if not has_backend():
+		return "Offline: demo models only"
+	return "Server: %s" % _backend_host()
+
+
+func server_note() -> String:
+	## The Servers tile's small line.
+	return "Offline" if not has_backend() else _backend_host()
+
+
+func server_detail() -> String:
+	if not has_backend():
+		return "No server is set, so everything that needs DIDSA-CAD (opening native files, mates, measuring, painting) is greyed out. The demo models work offline."
+	var origin := "From secrets.cfg" if FileAccess.file_exists(secrets_file_path) else "Set in this build"
+	return "%s: %s. Not checked yet. Adding and switching servers from the headset comes with the Servers page." % [origin, backend_url]
+
+
+func _backend_host() -> String:
+	var host := backend_url.trim_prefix("https://").trim_prefix("http://")
+	return host.get_slice("/", 0)
+
+
+func startup_status() -> String:
+	return "Offline: demo models only. Pick a rocket under Demo models, or point at the wrist icon for the tablet." if not has_backend() else "Server: %s. Pick Continue, Open or a demo." % _backend_host()
+
+
+func say(text: String) -> void:
+	## A status message from the landing (or anything else without its own line): console and headset.
+	_set_status(text)
+
+
+func place_model(world_transform: Transform3D, scale_value: float) -> void:
+	## Puts the model that was just shown (a demo: landing.gd) at a pose and scale of its own instead of in front of the user.
+	assembly_root.transform = Transform3D(world_transform.basis.scaled(Vector3.ONE * scale_value), world_transform.origin)
+	_two_hand.set_real_life_scale(scale_value)
+	_two_hand.remember_home()
 
 
 func wheel_enabled() -> bool:
@@ -1185,6 +1291,7 @@ func _open_native_file_impl(path: String) -> void:
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
 	_note_references(path, composed)
+	RecentFile.remember(path)
 	_set_status("Opened %s: %d part mesh(es).%s" % [path.get_file(), _part_count, NativeCompose.unresolved_note(composed)])
 
 
@@ -1298,20 +1405,22 @@ func reload_world_model(dirty: bool = true) -> bool:
 	return shown
 
 
-func load_glb_file(path: String) -> void:
-	## Load a bare .glb/.gltf straight from disk — no backend round trip.
+func load_glb_file(path: String) -> bool:
+	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown.
 	if not FileAccess.file_exists(path):
 		_set_status("No such file: %s" % path)
-		return
+		return false
 	if not confirm_discard("Open " + path.get_file(), load_glb_file.bind(path)):
-		return
+		return false
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
-		return
+		return false
+	RecentFile.remember(path)
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])
+	return true
 
 
 func _import_external_file(path: String, source_format: String) -> void:
@@ -1502,6 +1611,8 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * scale_value), spawn_position)
 	_two_hand.set_real_life_scale(scale_value)
 	_two_hand.remember_home()
+	if landing != null:
+		landing.on_model_shown() # whatever loaded it, the landing is over
 
 	_part_count = 0
 	# The scene ROOT itself can be the mesh: a glTF whose only scene node is a
@@ -1958,3 +2069,4 @@ func _all_descendants(root: Node) -> Array[Node]:
 func _set_status(text: String) -> void:
 	print("DIDSA VR: ", text)
 	status_text = text
+	status_changed.emit(text)

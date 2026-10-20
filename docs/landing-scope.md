@@ -1,6 +1,6 @@
 # Landing: scope
 
-**Status:** scope only (20 Oct 2026). Nothing in the app is built. The demo files it needs are in [`../demo/`](../demo/) and verified to
+**Status:** L1 to L3 built (20 Oct 2026, headless- and render-tested; not checked on a headset: see [What was built](#what-was-built-l1-to-l3)). L0 and L4 to L7 are not started. The demo files it needs are in [`../demo/`](../demo/) and verified to
 load and pack (see [What was checked](#what-was-checked)). Branch `claude/vr-landing-feature-scope-kspao7`.
 
 **Goal:** a sideloaded APK that you can hand to a friend. They put the headset on, see what the app is, can do something impressive
@@ -220,15 +220,53 @@ the APK.
 |---|---|---|---|
 | **L0** Custom Android build | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config for `http://` to LAN addresses, **only if** the headset test shows Android blocks it (see
 [Plain http on the Quest](#plain-http-on-the-quest)); and route B for QR if route A fails. Record the export settings in the README (the preset itself stays git-ignored). The Vendors plugin is an addon, so this is a deliberate exception to the no-addons rule, to note in `CLAUDE.md`. | 1 day | APK builds and installs; by hand on the headset |
-| **L1** Landing shell | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
-| **L2** Demo content | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
-| **L3** Logo and tips | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
+| **L1** Landing shell **(built)** | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
+| **L2** Demo content **(built)** | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
+| **L3** Logo and tips **(built)** | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
 | **L4** Servers | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
 | **L5** QR spike, on the headset | Turn on marker tracking; does `is_qrcode_supported()` say yes on your Quest 3 and Horizon OS version; permissions; read a test code | 1 day | by hand only |
 | **L6** QR pairing | Scan, "Connect to ...?", save. The flat app's side (checks and code) is built in DIDSA-CAD | 2 days (VR) | headless: payload parsing and refusals (DIDSA-CAD's payload tests are the reference); live: pairing against a backend |
 | **L7** Tour | Guided first two minutes | 2 days | headless: steps advance |
 
 L1 to L3 give the demo you want for friends, entirely offline (L0 is not needed for them). L0 and L4 to L6 are for connecting your own server.
+
+## What was built (L1 to L3)
+
+Code in `scripts/landing/`: `landing.gd` (the state: enter / leave, placement, what the tiles do), `launcher_window.gd` (the tiles and pages, on
+`diegetic_panel.gd`), `didsa_logo.gd`, `rocket_garden.gd`, `tips.gd` + `tips_reel.gd`, `demo_catalog.gd`, `recent_file.gd`. Tests: `landing`,
+`tips_reel`, `landing_render` (see `tests/README.md`).
+
+- **Start-up:** with no setting changed the app starts on the landing and does **not** import `res://assembly.didsa`. Settings > **Show the
+  landing on start** off restores the old start (with a backend, the start-up import). `main.landing_enabled` / `DIDSA_NO_LANDING` is for tests.
+  On a headset the landing waits (up to 3 s) for tracking before placing itself.
+- **Leaving:** loading anything by any route (`_show_model()`) ends the landing. **Home** (tablet tile, 12th of the 12; tool wheel, 10th wedge)
+  returns, placed where you are looking now. The loaded model stays loaded but is **hidden** while the landing is up and comes back with
+  Continue or any load. Its colliders are not switched off, so a grip on empty space could still move the hidden model (not tried on a headset).
+- **Launcher:** Continue (last file, `user://recent.cfg`; greyed offline for a native file, a glb needs no server; the thumbnail in the scope is
+  **not built**, it shows the name), Open... (the tablet's Files page), New assembly and Demo assemblies (greyed "Needs a server" offline),
+  Demo models, Servers (shows the configured server or "Offline: demo models only" and a "Coming soon: Scan" note: real management is L4),
+  Settings (Show the landing on start, Show tips, Reduce motion, then the tablet's settings; the scope's seated / standing and snap angle in
+  Comfort are **not built**), About (version and `demo/CREDITS.md` as plain text). The connection pill reads "Server: host" (set, **not
+  checked**) or "Offline: demo models only"; a tap opens Servers. **Not built:** the "What is this?" tile (the line under the logo and About
+  carry it), Tour and Mixed reality tiles (suggested only).
+- **Status in the headset:** `main.status_changed` feeds the launcher's status line. Only while the landing is up: after that the existing
+  tablet status lines are all there is.
+- **Demo models:** both **Full size** (1:1, base on the floor, `max(2.5 m, half the width + 3 m)` ahead) and **On the desk**. On the desk is
+  1:50, but **brought down so the largest side is 1.5 m** (Saturn V is 1:74: at 1:50 it would be 2.2 m tall on a waist-high plinth); the status
+  line says the ratio used. Waist height is 0.55 x eye height. The plinth is scenery (no collider).
+- **Rocket garden:** the five rockets from `demo/rockets/` stand at 40-60 m on an arc, none within 14 degrees of dead ahead (the logo hangs
+  there), loaded one per frame, no colliders, shadows off, about 56k triangles for the five (the nine are 135k; the four spacecraft are not in the
+  garden). Plates show the largest dimension (Pegasus XL lies flat: its length). **Not built:** picking a garden rocket to bring it close.
+- **Logo:** the glb 2.5 m ahead at eye height, facing you; porthole pulse (2.6 s, swells to 1.22x with its glow) and a 7 degree sway (14 s);
+  both frozen, logo straight ahead, by Reduce motion. A caption line sits under it.
+- **Tips:** the 17 as data in `tips.gd`, 8 s, Previous / Pause / Next, fade (none under Reduce motion), Settings > Show tips. **Offline, the six
+  tips about features that need a server are left out** (paint, measure, mates, rooms, scenes, same files). Checked against `controller.gd`,
+  `locomotion.gd` and the README: tip 4 (the wheel is trigger and grip **together**, not held), 8 (A / X, B / Y nudge added), 9 (undo covers
+  moves, scale and mates, not "every change") and 16 (passthrough on a standalone Quest needs the OpenXR Vendors plugin, not in the project)
+  were reworded; the others hold. The controller drawing is not built.
+- **Not verified:** everything on a headset (placement and comfort of the panels, the sway, the garden's frame rate and load hitch, the tile
+  sizes at arm's length); the real APK (export filter `demo/*`, `res://demo/` listing in an exported build); a Quest-class cost for 56k
+  triangles with the Mobile renderer. The renders are GL-compatibility under Xvfb.
 
 ## Decisions (owner, 20 Oct 2026)
 

@@ -46,7 +46,7 @@ func _initialize() -> void:
 
 	print("SMOKE the wheel is built and the right hand is wired for it (the left is not): ", wheel != null and r.wheel_enabled and not l.wheel_enabled)
 	var root_ids: Array = _ids(flows.entries())
-	print("SMOKE the root ring: mates, measure, table, paint tool, shoot hide, section, visibility, undo, scenes: ", root_ids == ["mates", "measure", "table", "paint", "shoot_hide", "sections", "visibility", "undo", "scenes"])
+	print("SMOKE the root ring: mates, measure, table, paint tool, shoot hide, section, visibility, undo, scenes, home: ", root_ids == ["mates", "measure", "table", "paint", "shoot_hide", "sections", "visibility", "undo", "scenes", "home"])
 	print("SMOKE nothing is active and the wheel is closed at the start: ", manager.active_id == "" and not wheel.is_open() and not r.wheel_is_open())
 
 	# --- the chord takes the hand
@@ -72,7 +72,7 @@ func _initialize() -> void:
 	print("SMOKE a hand near the centre hovers nothing: ", wheel.hovered_index() == -1)
 	_move(Vector2(0.0, 0.12))
 	print("SMOKE moving the hand up hovers the first wedge (Mates): ", wheel.hovered_index() == 0)
-	_move(Vector2(0.12, 0.0))
+	_move(Vector2(sin(TAU * 2.0 / 10.0), cos(TAU * 2.0 / 10.0)) * 0.12)
 	print("SMOKE moving it right hovers the third wedge (Summon table): ", wheel.hovered_index() == 2)
 
 	# --- release on a wedge runs it
@@ -151,7 +151,7 @@ func _initialize() -> void:
 
 	# --- Measure: tool + the tablet opens by itself
 	_open_at_anchor()
-	_move(Vector2(sin(TAU / 9.0), cos(TAU / 9.0)) * 0.12) # wedge 1
+	_move(Vector2(sin(TAU / 10.0), cos(TAU / 10.0)) * 0.12) # wedge 1
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
 	print("SMOKE choosing Measure switches it on: ", manager.is_active("measure") and main._measure_tool.active and r.measure_tool_active)
@@ -234,7 +234,7 @@ func _initialize() -> void:
 	print("SMOKE releasing on the pill puts the tool away: ", manager.active_id == "" and not r.hide_tool_active)
 	print("SMOKE ...and the panel says so: ", hint.is_showing() and hint.title_text() == "Hands free")
 	_open_at_anchor()
-	var visibility_angle := Vector2(sin(TAU * 6.0 / 9.0), cos(TAU * 6.0 / 9.0))
+	var visibility_angle := Vector2(sin(TAU * 6.0 / 10.0), cos(TAU * 6.0 / 10.0))
 	_move(visibility_angle * 0.24)
 	print("SMOKE a sub-wheel has no pill: ", wheel.pill_entry().is_empty())
 	wheel._on_released("trigger_click")
@@ -274,7 +274,7 @@ func _initialize() -> void:
 
 	# --- resting: on a sub-wheel's tile opens it, in the middle of a sub-wheel goes back up, the title says where you are
 	_open_at_anchor()
-	var vis_dir := Vector2(sin(TAU * 6.0 / 9.0), cos(TAU * 6.0 / 9.0))
+	var vis_dir := Vector2(sin(TAU * 6.0 / 10.0), cos(TAU * 6.0 / 10.0))
 	_move(vis_dir * 0.08) # on the Visibility tile, well short of the reach that opens it
 	print("SMOKE resting on a sub-wheel's tile starts its timer, short of the reach: ", wheel.dwell_target() == 6 and wheel._stack.is_empty() and (wheel._dwell_arc.mesh as ImmediateMesh).get_surface_count() == 0)
 	wheel._process(0.25)
@@ -294,7 +294,7 @@ func _initialize() -> void:
 	wheel._process(0.5)
 	wheel._process(0.5)
 	print("SMOKE ...the tile the hand came back onto doesn't reopen under it: ", wheel._stack.is_empty() and wheel.hovered_index() == 6)
-	_move(Vector2(sin(TAU * 5.0 / 9.0), cos(TAU * 5.0 / 9.0)) * 0.08)
+	_move(Vector2(sin(TAU * 5.0 / 10.0), cos(TAU * 5.0 / 10.0)) * 0.08)
 	_move(vis_dir * 0.08)
 	wheel._process(0.45)
 	print("SMOKE ...until the hand leaves it and comes back: then a rest opens it again: ", wheel._stack.size() == 1)

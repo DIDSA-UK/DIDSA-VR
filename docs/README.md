@@ -21,7 +21,7 @@ Start with [`status.md`](status.md) (what is built, what is verified, what is op
 | [`scope-modelling-depth.md`](scope-modelling-depth.md) | Design table modelling depth (scoping pass, 2026-10-08). |
 | [`scope-references-and-dimensioning.md`](scope-references-and-dimensioning.md) | Design table references and dimensioning (scoping pass). |
 | [`design-table-brief.md`](design-table-brief.md) | The original design-table requirements brief (not live-synced). |
-| [`landing-scope.md`](landing-scope.md) | The landing (first screen): launcher, QR server pairing, tips, 3D logo, demo models (scope, 2026-10-20; not built). |
+| [`landing-scope.md`](landing-scope.md) | The landing (first screen): launcher, QR server pairing, tips, 3D logo, demo models (scope, 2026-10-20; L1 to L3, the offline demo, built; servers and QR not). |
 
 ## Gaps and live trackers
 

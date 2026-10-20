@@ -9,9 +9,11 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 LOG="${RUN_LOG:-render.log}"
 export DIDSA_SETTINGS_PATH="user://settings_test.cfg"
+export DIDSA_RECENT_PATH="user://recent_test.cfg"
+export DIDSA_NO_LANDING=1 # main.gd starts without the landing: the old start-up import (the e2e tests rely on it)
 : > "$LOG"
 fail=0
-for t in sketch_clip_render section_render section_render_transformed highlight_clip_render room_clip_render room_render room_walls_render room_preview_render wheel_hint_render appearance_render appearance_clip_render; do
+for t in sketch_clip_render section_render section_render_transformed highlight_clip_render room_clip_render room_render room_walls_render room_preview_render wheel_hint_render appearance_render appearance_clip_render landing_render; do
   echo "== $t" | tee -a "$LOG"
   out=$(timeout 300 xvfb-run -a "$GODOT" --path . --script "res://tests/$t.gd" 2>&1)
   echo "$out" | grep -E "SMOKE" | cut -c1-200 | tee -a "$LOG"
