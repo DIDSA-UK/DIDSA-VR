@@ -23,3 +23,7 @@ models/*
 /e2e.log
 /logs/
 /backend.log
+
+# The demo model script's npm packages
+/demo/tools/node_modules/
+/demo/tools/package*.json

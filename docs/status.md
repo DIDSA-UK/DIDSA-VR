@@ -28,6 +28,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 | Sub-assembly selection, group moves, world preview (Hidden/Ghost/Preview) | Yes | Not confirmed; see the rooms plan | PR #43; headless and render tests |
 | **Design table** (sketch, constrain, features, options to Phase 7) | Yes | Yes | [`design-table.md`](design-table.md), [`design-table-gaps.md`](design-table-gaps.md) |
 | Passthrough / mixed reality | Wired | n/a | Standalone Quest also needs the OpenXR Vendors plugin (not included) |
+| **Landing** (first screen, demo content) | Scope only: [`landing-scope.md`](landing-scope.md) | n/a | Demo models in `demo/` (nine rockets and spacecraft, 1:1, Draco removed, load in Godot 4.7.2 and pack with export filter `demo/*`; credits in `demo/CREDITS.md`) and the table / plate-and-peg native files. Not yet listed anywhere in the app. QR pairing not tried on a headset. |
 | Multiplayer / observer client | Not built | | Idea recorded in [`vision-brief.md`](vision-brief.md) |
 
 ## Tests (as of the last recorded run)

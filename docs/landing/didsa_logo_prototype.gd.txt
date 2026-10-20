@@ -1,0 +1,60 @@
+extends Node3D
+## Prototype: the DIDSA logo built from code (planet ring, tilted orbit band, rocket, porthole, exhaust, wordmark).
+const INK := Color(0.93, 0.95, 0.98)
+const ACCENT := Color(0.18, 0.62, 0.82)
+
+func _ready() -> void:
+	var ink := StandardMaterial3D.new(); ink.albedo_color = INK; ink.metallic = 0.3; ink.roughness = 0.35
+	var accent := StandardMaterial3D.new(); accent.albedo_color = ACCENT; accent.emission_enabled = true; accent.emission = ACCENT; accent.emission_energy_multiplier = 1.5
+	var emblem := Node3D.new(); add_child(emblem); emblem.position = Vector3(-1.25, 0, 0)
+	_add(emblem, _ellipse_tube(0.62, 0.62, 0.035), ink, Vector3.ZERO, 0.0) # planet
+	var orbit := Node3D.new(); emblem.add_child(orbit); orbit.rotation.z = deg_to_rad(48)
+	_add(orbit, _ellipse_tube(0.98, 0.30, 0.03), ink, Vector3.ZERO, 0.0)
+	var rocket := _add(orbit, _extrude(PackedVector2Array([Vector2(0.36, 0), Vector2(0.18, 0.09), Vector2(-0.04, 0.10), Vector2(-0.20, 0.22), Vector2(-0.16, 0.06), Vector2(-0.22, 0.05), Vector2(-0.22, -0.05), Vector2(-0.16, -0.06), Vector2(-0.20, -0.22), Vector2(-0.04, -0.10), Vector2(0.18, -0.09)]), 0.06), ink, Vector3(0.18, 0, 0.0), 0.0)
+	for side in [-1.0, 1.0]: # exhaust trails
+		_add(orbit, _box(Vector3(0.5, 0.025, 0.03)), ink, Vector3(-0.42, side * 0.07, 0), 0.0)
+	var dot := MeshInstance3D.new(); var sphere := SphereMesh.new(); sphere.radius = 0.055; sphere.height = 0.11; dot.mesh = sphere
+	dot.material_override = accent; orbit.add_child(dot); dot.position = Vector3(0.72, 0.16, 0.03)
+	var word := _text("DIDSA", 0.62, 0.08); word.material_override = ink; add_child(word); word.position = Vector3(0.95, 0.12, 0)
+	var sub := _text("DIDSBURY SPACE AGENCY", 0.13, 0.02); sub.material_override = ink; add_child(sub); sub.position = Vector3(0.95, -0.38, 0)
+
+func _add(parent: Node3D, mesh: Mesh, mat: Material, pos: Vector3, _r: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new(); mi.mesh = mesh; mi.material_override = mat; parent.add_child(mi); mi.position = pos; return mi
+
+func _text(t: String, size: float, depth: float) -> MeshInstance3D:
+	var tm := TextMesh.new(); tm.text = t; tm.font_size = 64; tm.pixel_size = size / 64.0 * 1.4; tm.depth = depth
+	var mi := MeshInstance3D.new(); mi.mesh = tm; return mi
+
+func _box(size: Vector3) -> Mesh:
+	var b := BoxMesh.new(); b.size = size; return b
+
+func _ellipse_tube(a: float, b: float, r: float, seg := 96, ring := 12) -> Mesh:
+	var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in seg:
+		for j in ring:
+			var quad := []
+			for d in [[0, 0], [1, 0], [1, 1], [0, 1]]:
+				var t := TAU * float(i + d[0]) / seg; var u := TAU * float(j + d[1]) / ring
+				var c := Vector3(a * cos(t), b * sin(t), 0)
+				var n2 := Vector3(b * cos(t), a * sin(t), 0).normalized()
+				var n := n2 * cos(u) + Vector3(0, 0, sin(u))
+				quad.append([c + n * r, n])
+			for k in [0, 1, 2, 0, 2, 3]:
+				st.set_normal(quad[k][1]); st.add_vertex(quad[k][0])
+	return st.commit()
+
+func _extrude(poly: PackedVector2Array, depth: float) -> Mesh:
+	var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var tris := Geometry2D.triangulate_polygon(poly)
+	for z in [depth / 2, -depth / 2]:
+		var order: Array = Array(tris) if z > 0 else Array(tris).duplicate()
+		if z < 0: order.reverse()
+		for idx in order:
+			st.set_normal(Vector3(0, 0, sign(z))); st.add_vertex(Vector3(poly[idx].x, poly[idx].y, z))
+	for i in poly.size():
+		var p := poly[i]; var q := poly[(i + 1) % poly.size()]
+		var n := Vector3(q.y - p.y, p.x - q.x, 0).normalized()
+		for v in [Vector3(p.x, p.y, depth / 2), Vector3(q.x, q.y, -depth / 2), Vector3(q.x, q.y, depth / 2), Vector3(p.x, p.y, depth / 2), Vector3(p.x, p.y, -depth / 2), Vector3(q.x, q.y, -depth / 2)]:
+			st.set_normal(n); st.add_vertex(v)
+	st.generate_tangents()
+	return st.commit()

@@ -19,6 +19,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 - `scripts/design_table/`: the part-modelling console (sketch, constraints, features); `cad_api.gd` is its backend client.
 - `scripts/ui/`: wrist tablet (`tablet_registry.gd`, `tablet_pages.gd`), theming (`didsa_ui_theme.gd`), shader FX.
 - `scripts/motion/`: constrained-drag projector and benchmarks. `shaders/`: clip, grid, glass-wall and effect shaders.
+- `demo/`: models and assemblies shipped in the APK (1:1 glb, `importer="keep"`; credits in `demo/CREDITS.md`, rules in `demo/README.md`).
 - `ui/themes/`: theme presets. `lab/ui_lab.tscn`: UI sandbox (F6, no headset). `tests/`: headless, render and live-backend tests.
 
 ## Commands
