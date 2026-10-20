@@ -81,7 +81,7 @@ position, so the "Connect?" card can appear on top of your screen. **Unverified:
 with Horizon OS v83 and Godot 4.6, and that it did not with 4.5. Nothing has been run on a headset here. Which Android permission it
 needs (probably the spatial-data / scene permission) and whether passthrough must be on are also unknown.
 
-**Route B, fallback: the Passthrough Camera API.** Quest 3 and 3S, Horizon OS v74 or later: the forward cameras through Android Camera2
+**Route B, fallback: the Passthrough Camera API** (possible now that custom builds are allowed). Quest 3 and 3S, Horizon OS v74 or later: the forward cameras through Android Camera2
 (`android.permission.CAMERA` and `horizonos.permission.HEADSET_CAMERA`, up to 1280x960 at 30 fps, enough for a QR code filling part
 of a monitor). Decoding needs ZXing in a small Kotlin Godot Android plugin, so this breaks the "no addons" rule and needs a custom
 Gradle build. Meta's QuestCameraKit has a ZXing QR sample to follow.
@@ -94,7 +94,7 @@ Gradle build. Meta's QuestCameraKit has a ZXing QR sample to follow.
 - The backend prints the QR code in its terminal on start (Python `qrcode` package), for when the flat app is not open.
 - Contents, short enough for a small code: `didsa-vr:1?n=Workshop%20PC&u=https://cad.example.net&k=<key>` with optional `s=` (document
   session) and `r=` / `rk=` (browser relay). The headset refuses anything that does not start `didsa-vr:`, and anything over `http://`
-  (Android blocks cleartext; the URL must be HTTPS, for example a Cloudflare Tunnel; see `status.md` open item 2).
+  (Android blocks cleartext; until step L0 allows LAN `http://`, the URL must be HTTPS, for example a Cloudflare Tunnel; see `status.md` open item 2).
 - **Security:** version 1 puts the backend's single `CAD_API_KEY` in the code, so anyone who photographs your screen has it. Show it
   only on request, and hide it again after 60 s. Version 2 (backend work): a short-lived pairing token in the code, exchanged once for
   a per-device key you can revoke.
@@ -104,8 +104,8 @@ Gradle build. Meta's QuestCameraKit has a ZXing QR sample to follow.
 1. **Pre-load the headset** (best for a demo you set up yourself): `adb push servers.cfg /sdcard/Android/data/<package>/files/servers.cfg`
    (that folder is `user://`). No typing at all. Document the command in the README.
 2. **Typed**, as the last resort: URL and key on the existing full keyboard, with "https://" pre-filled and a **Test** button.
-3. **Later, LAN discovery**: the headset broadcasts, the server answers, you press Allow on the PC. No QR and no typing, but an
-   `http://` LAN address is blocked on Android without the same custom Gradle build. Not for the first version.
+3. **Later, LAN discovery**: the headset broadcasts, the server answers, you press Allow on the PC. No QR and no typing. An `http://`
+   LAN address needs the network security config from step L0. Not for the first version.
 
 For handing the APK to friends none of this matters: they use the demo models offline.
 
@@ -159,8 +159,8 @@ All 1:1 in metres, Y up, base on the floor and centred at the origin; Draco remo
 |---|---|---|---|---|---|
 | SLS Block 1 | Your upload (WISEMANmods, CC BY) | x19.66 (it was about 1:20) | 98.1 m tall, core 8.5 m | 98.1 m, core 8.4 m | Boosters come out 5.1 m wide (real 3.7 m): the model's proportions. 912 triangles, colours only, no textures. NASA's own detailed SLS Block 1 is in their library as a 7z, if a better one is wanted. |
 | Saturn V | NASA 3D Resources (replaces your upload) | x8.516 (it was about 1:8.5) | 110.6 m tall, body 10.8 m | 110.6 m, 10.1 m | Your file is this NASA model re-exported with its textures lost; NASA's original keeps them. Scaled to height; the body comes out 7% too wide. |
-| Delta II | Your upload | x1 (already 1:1) | 40.5 m, core 2.44 m | 38.9-39.0 m, core 2.44 m | Core exact, fairing about 4% long. Three boosters: the 7320 / 7420 version. An invisible 1 m box had a collider; removed. |
-| Pegasus XL | Your upload | x0.96 | 16.6 m long, 1.29 m, span 6.76 m | 16.9 m, 1.27 m, span 6.7 m | It was about 4% big. Lies horizontal (it is launched from under an aircraft). Invisible box removed. |
+| Delta II | Your upload (NASA 3D Resources) | x1 (already 1:1) | 40.5 m, core 2.44 m | 38.9-39.0 m, core 2.44 m | Core exact, fairing about 4% long. Three boosters: the 7320 / 7420 version. An invisible 1 m box had a collider; removed. |
+| Pegasus XL | Your upload (NASA 3D Resources) | x0.96 | 16.6 m long, 1.29 m, span 6.76 m | 16.9 m, 1.27 m, span 6.7 m | It was about 4% big. Lies horizontal (it is launched from under an aircraft). Invisible box removed. |
 | Jupiter-C (Explorer 1) | Your upload (NASA 3D Resources) | x1.2135 | 21.2 m, body 1.83 m | 21.2 m, 1.78 m | It was about 82% size. **Draco compressed: as uploaded it would not load in Godot.** |
 | Voyager | NASA 3D Resources | x36.6 | dish 3.66 m, boom tip to tip 12.3 m | dish 3.66 m | It was about 1:37 |
 | Hubble Space Telescope | NASA 3D Resources | x0.0254 | 13.35 m long, 4.27 m | 13.2 m, 4.2 m | Modelled in inches |
@@ -198,7 +198,7 @@ the APK.
 
 | Step | What | Rough size | Tests |
 |---|---|---|---|
-| **L1** Landing shell | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
+| **L0** Custom Android build | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config that allows `http://` to LAN addresses, so a home server needs no tunnel; and route B for QR if route A fails. Record the export settings in the README (the preset itself stays git-ignored). The Vendors plugin is an addon, so this is a deliberate exception to the no-addons rule, to note in `CLAUDE.md`. | 1 day | APK builds and installs; by hand on the headset |\n| **L1** Landing shell | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
 | **L2** Demo content | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
 | **L3** Logo and tips | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
 | **L4** Servers | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
@@ -206,16 +206,20 @@ the APK.
 | **L6** QR pairing | Scan, "Connect to ...?", save. DIDSA-CAD: Connect a headset page, terminal QR | 2 days (VR) + 1-2 days (CAD) | headless: payload parsing and refusals; live: pairing against a backend |
 | **L7** Tour | Guided first two minutes | 2 days | headless: steps advance |
 
-L1 to L3 give the demo you want for friends, entirely offline. L4 to L6 are for connecting your own server.
+L1 to L3 give the demo you want for friends, entirely offline (L0 is not needed for them). L0 and L4 to L6 are for connecting your own server.
 
-## Questions for you
+## Decisions (owner, 20 Oct 2026)
 
-1. Where did the Pegasus XL and Delta II files come from? `../demo/CREDITS.md` needs their source and licence.
-2. Saturn V: scale it to its height (done; body 7% wide) or to its diameter (then it is 103 m tall)?
-3. What Horizon OS version is your Quest 3 on? Route A needs v83 or later, as far as is known.
-4. Wordmark font: match the logo artwork (which font is it?) or any clean free sans?
-5. Should a friend's APK have no server at all (demo only), or should Servers be visible to them too?
-6. Is a custom Gradle build acceptable later? It is needed for the Vendors plugin (passthrough on standalone), route B and LAN `http://`.
+1. **Sources:** every supplied model is from NASA 3D Resources (Pegasus XL and Delta II included); `../demo/CREDITS.md` says so.
+2. **Saturn V:** scaled to its height (110.6 m), as done. No better free textured model was found: NASA's is the only one downloadable
+   here, and the Sketchfab ones need a logged-in download. Swap it if you find a better one; the script makes that one command.
+3. **Headset:** Quest 3, kept up to date, so Horizon OS is past v83 and route A (built-in QR tracking) is the first thing to try.
+4. **Custom (Gradle) Android builds are allowed.** That opens three things that were blocked, listed in step L0 of the build plan.
+
+Still open:
+
+1. Wordmark font: match the logo artwork (which font is it?) or any clean free sans?
+2. Should a friend's APK have no server at all (demo only), or should Servers be visible to them too?
 
 ## What was checked
 
