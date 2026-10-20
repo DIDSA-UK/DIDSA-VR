@@ -84,6 +84,18 @@ runtime finds and decodes the code and Godot hands over an `OpenXRMarkerTracker`
 (`project.godot`, **Android only**, so desktop and PC-VR builds are unchanged): `xr/openxr/extensions/spatial_entity/enabled`, `.../enable_marker_tracking`
 and `.../enable_builtin_marker_tracking`, each with the `.android` feature tag.
 
+### After a code is read (L6)
+
+A DIDSA pairing code raises **Connect to <name>?** on the Scan page: its address (and, for plain http, the unencrypted-key warning), nothing saved yet,
+the key never shown. **Connect** asks the server (`GET /health` with the code's key); if it answers the server is saved to `servers.cfg`, switched to at once
+(document session and browser relay come with it) and the Servers page opens. If it does not answer the card says why and offers **Save anyway** or Cancel.
+**Cancel** (also while it is asking) saves nothing. Rescanning a saved server updates its key. Another QR code, a code the address rules refuse, or a newer
+version are reported on the page and never raise a card. The rules a code must pass are the typed ones ([above](#which-addresses-are-accepted)), plus no
+control characters and sane lengths (`pairing_payload.gd`).
+
+Not built: the card appearing on top of the screen where the code was seen (it is on the launcher), and DIDSA-CAD's version 2 (a short-lived pairing token
+exchanged once for a per-device key: backend work, so version 1 still carries the single `CAD_API_KEY`).
+
 ### Running the spike (needs a headset and an APK built with these settings)
 
 1. Landing > **Servers** > **Scan a QR code**. The page lists each stage with the headset's answer: *OpenXR running*, *Marker tracking present*, *QR codes
@@ -110,6 +122,6 @@ does not work, route B (the Passthrough Camera API with a QR decoder in a small 
 ## Tests
 
 `tests/servers.gd` (the store, the address rules, switching and forgetting, the unload, secrets.cfg, a hand-written file, the Servers page) and
-`tests/qr_scanner.gd`, `tests/scan_page.gd` (the scanner and the Scan page, with codes fed in by hand) and `tests/pairing_payload.gd` (the code's format), and
+`tests/qr_scanner.gd`, `tests/scan_page.gd` (the scanner and the Scan page, with codes fed in by hand), `tests/pairing_payload.gd` (the code's format) and `tests/pairing_flow.gd` (Connect, Save anyway, Cancel), and
 `tests/server_probe.gd` (the Test button against a stub `/health` server, `tests/helpers/stub_health_server.py`, needs `python3`). **Not run against a
 real DIDSA-CAD backend** (none was available in the build session), and not on a headset.

@@ -225,7 +225,7 @@ the APK.
 | **L3** Logo and tips **(built)** | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
 | **L4** Servers **(built; stub-server tested, not against a real backend)** | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
 | **L5** QR spike, on the headset **(tooling built; the headset run is NOT done)** | Turn on marker tracking; does `is_qrcode_supported()` say yes on your Quest 3 and Horizon OS version; permissions; read a test code | 1 day | by hand only |
-| **L6** QR pairing | Scan, "Connect to ...?", save. The flat app's side (checks and code) is built in DIDSA-CAD | 2 days (VR) | headless: payload parsing and refusals (DIDSA-CAD's payload tests are the reference); live: pairing against a backend |
+| **L6** QR pairing **(built; a real scan not tried; no live backend)** | Scan, "Connect to ...?", save. The flat app's side (checks and code) is built in DIDSA-CAD | 2 days (VR) | headless: payload parsing and refusals (DIDSA-CAD's payload tests are the reference); live: pairing against a backend |
 | **L7** Tour | Guided first two minutes | 2 days | headless: steps advance |
 
 L1 to L3 give the demo you want for friends, entirely offline (L0 is not needed for them). L0 and L4 to L6 are for connecting your own server.
@@ -295,6 +295,16 @@ builds only**. Procedure and the open questions: [`servers.md`](servers.md#scann
 - **Practical blocker:** seeing the screen needs passthrough, which on a standalone Quest needs L0 (the OpenXR Vendors plugin). Over a PC link it is untested.
 - **Risk to check on the first Android build:** the three settings are requested at OpenXR start-up; if a Quest runtime treated the extension as required, an
   unsupported runtime would fail to start OpenXR. Godot's wrappers normally request such extensions as optional, but that was not confirmed in source here.
+
+## What was built (L6)
+
+`pairing_payload.gd` parses DIDSA-CAD's `didsa-vr:1?n=&u=&k=` (and the reserved `s`, `r`, `rk`) and refuses what the contract asks (anything not `didsa-vr:1?`,
+no address or key, an address `server_address.gd` refuses so plain http only on a local network, control characters, absurd lengths, a duplicated key);
+the Scan page raises **Connect to <name>?**, tests the server, then saves and switches (details: [`servers.md`](servers.md#after-a-code-is-read-l6)). Tests:
+`pairing_payload` (60 generated codes in DIDSA-CAD's encoding plus 24 refusals), `pairing_flow`.
+
+- **Not done:** the scope's "live: pairing against a backend" (no backend in the build session; the server's answer is stood in); a real scan (L5 is open); the
+  card on top of the screen; DIDSA-CAD's version 2 (needs backend work).
 
 ## Decisions (owner, 20 Oct 2026)
 

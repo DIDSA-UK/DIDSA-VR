@@ -45,6 +45,17 @@ func _initialize() -> void:
 			print("  round trip failed for ", k, " -> ", r)
 	check("build then parse returns the same name, address and key for awkward keys", round_ok)
 
+	# --- codes in DIDSA-CAD's encoding (tests/fixtures/make_pairing_codes.py: Dart's encodeQueryComponent via Python's quote_plus) --------------------------
+	var vectors = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/pairing_codes.json"))
+	var wrong_vectors := 0
+	for v in vectors:
+		var r := Payload.parse(v["code"])
+		if not (r["ok"] and r["name"] == str(v["name"]).strip_edges().substr(0, 64) and r["url"] == v["url"] and r["api_key"] == str(v["key"]).strip_edges()):
+			wrong_vectors += 1
+			if wrong_vectors < 4:
+				print("  vector failed: ", v, " -> ", r)
+	check("%d generated codes (spaces, symbols, accents, CJK, emoji) decode to exactly what was encoded" % vectors.size(), vectors.size() == 60 and wrong_vectors == 0)
+
 	# --- refused ------------------------------------------------------------------------------------------------------------------
 	check("an empty string", refused("", "not a DIDSA"))
 	check("any other QR code's text", refused("https://example.com/", "not a DIDSA"))

@@ -26,6 +26,9 @@ var scanner: Node ## qr_scanner.gd, from landing.gd
 var _scan_report: Label
 var _scan_read: Label
 var _scan_passthrough: Button
+var _pending: Dictionary = {} ## a pairing code that was read and is waiting for Connect / Cancel (PairingPayload.parse's result)
+var _scan_card: VBoxContainer
+var _card_test_failed := false
 var _scan_last := "Nothing read yet." ## what the last QR code was, in words (never the code itself: it carries the key)
 var _scan_restore_scene := ""
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
@@ -372,12 +375,19 @@ func _build_scan() -> void:
 	_scan_read.name = "ScanRead"
 	_scan_read.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_body.add_child(_scan_read)
+	_scan_card = VBoxContainer.new()
+	_scan_card.name = "ConnectCard"
+	_scan_card.add_theme_constant_override("separation", 8)
+	_body.add_child(_scan_card)
+	_refresh_card()
 	_body.add_child(_hint("Quest 3 or later, up to date. Nothing is saved until you say Connect. This page also says exactly what the headset answered at each step, so a scan that does nothing explains itself."))
 	scanner.start()
 	_refresh_scan()
 
 
 func _leave_scan() -> void:
+	_pending = {}
+	_card_test_failed = false
 	if scanner != null:
 		scanner.stop()
 	if _scan_restore_scene != "":
@@ -407,7 +417,87 @@ func _refresh_scan() -> void:
 func _on_code_seen(text: String) -> void:
 	## A QR code was read. What it is, in words: the code carries the API key, so it is never shown.
 	_scan_last = describe_code(text)
+	if PairingPayload.looks_like_pairing(text):
+		var parsed := PairingPayload.parse(text)
+		if parsed["ok"]:
+			_pending = parsed # waits for Connect: nothing is saved or switched until then
+			_card_test_failed = false
+			_refresh_card()
+			UiFeedback.haptic(_right, "confirm")
 	_refresh_scan()
+
+
+func _refresh_card() -> void:
+	## "Connect to <name>?": what the code names (never its key), a warning when the address is plain http, and the two choices. Connect asks the
+	## server first; if it does not answer the choice becomes Save anyway / Cancel.
+	if _scan_card == null or not is_instance_valid(_scan_card):
+		return
+	for child in _scan_card.get_children():
+		_scan_card.remove_child(child)
+		child.queue_free()
+	if _pending.is_empty():
+		return
+	var title := _info("Connect to %s?" % _pending["name"])
+	title.name = "CardTitle"
+	_scan_card.add_child(title)
+	var detail := _hint(str(_pending["url"]) + ("\n" + str(_pending["warning"]) if _pending["warning"] != "" else ""))
+	detail.name = "CardDetail"
+	_scan_card.add_child(detail)
+	if not main.server_store.find_by_url(str(_pending["url"])).is_empty():
+		_scan_card.add_child(_hint("This server is already saved: connecting updates its key."))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_scan_card.add_child(row)
+	var connect := _action("Save anyway" if _card_test_failed else "Connect", _connect_pending, 0)
+	connect.name = "CardConnect"
+	row.add_child(connect)
+	var cancel := _action("Cancel", _cancel_pending, 0)
+	cancel.name = "CardCancel"
+	row.add_child(cancel)
+	var result := Label.new()
+	result.name = "CardResult"
+	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_scan_card.add_child(result)
+
+
+func _cancel_pending() -> void:
+	_pending = {}
+	_card_test_failed = false
+	_scan_last = "Cancelled. Nothing was saved."
+	_refresh_card()
+	_refresh_scan()
+
+
+func _connect_pending() -> void:
+	if _pending.is_empty():
+		return
+	var chosen := _pending
+	var result_label: Label = _scan_card.find_child("CardResult", true, false)
+	if not _card_test_failed:
+		for button in _scan_card.find_children("Card*", "Button", true, false):
+			(button as Button).disabled = true # one request at a time
+		if result_label != null:
+			result_label.text = "Asking %s ..." % chosen["url"]
+		var answer: Dictionary = await main.test_server(str(chosen["url"]), str(chosen["api_key"]))
+		if not is_instance_valid(self) or _pending != chosen:
+			return # cancelled, or another code arrived, while it was asking
+		if not answer["ok"]:
+			_card_test_failed = true
+			_refresh_card()
+			var failed_label: Label = _scan_card.find_child("CardResult", true, false)
+			if failed_label != null:
+				failed_label.text = "The server did not answer: %s Save it anyway, or cancel." % answer["message"]
+			return
+	var entry: Dictionary = main.add_server({"name": chosen["name"], "url": chosen["url"], "api_key": chosen["api_key"],
+		"document_session": chosen["document_session"], "relay_url": chosen["relay_url"], "relay_api_key": chosen["relay_api_key"]}, true)
+	if entry.is_empty():
+		if result_label != null:
+			result_label.text = "Couldn't save that server (is the list full? Forget one under Servers)."
+		return
+	_pending = {}
+	_card_test_failed = false
+	show_page("servers")
+	main.say("Connected to %s." % entry["name"])
 
 
 static func describe_code(text: String) -> String:

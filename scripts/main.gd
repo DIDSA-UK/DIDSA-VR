@@ -1076,8 +1076,12 @@ func add_server(fields: Dictionary, use_now: bool = true) -> Dictionary:
 	return entry
 
 
+var test_server_override: Callable = Callable() ## tests only: (url, key) -> {ok, message, code} in place of the real request (a pairing code cannot name localhost, where a stub server would be)
+
 func test_server(url: String, key: String) -> Dictionary:
 	## {ok, message, code}: asks /health with the key (server_probe.gd).
+	if test_server_override.is_valid():
+		return await test_server_override.call(url, key)
 	var probe := ServerProbe.new()
 	add_child(probe)
 	var result: Dictionary = await probe.check(url, key)
