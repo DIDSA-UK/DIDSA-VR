@@ -33,8 +33,8 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 ## Tests (as of the last recorded run)
 
-- Headless suite (`tests/ci.sh`): **3028 SMOKE lines, 0 unexpected failures** (20 Oct 2026, branch `claude/appearance-and-scenes`, finding moved files F2: `file_lookup_vectors`, `moved_files` new). Counts rise with every feature; treat this number as a floor.
-- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **63**, green (20 Oct), including `appearance_clip_render` (painted looks under the section clip) and `appearance_render`.
+- Headless suite (`tests/ci.sh`): **3124 SMOKE lines, 0 unexpected failures** (20 Oct 2026, branch `claude/vr-landing-build`: `landing`, `tips_reel` new; before that 3028 on `claude/appearance-and-scenes`, finding moved files F2: `file_lookup_vectors`, `moved_files` new). Counts rise with every feature; treat this number as a floor.
+- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): 77 SMOKE lines, green (20 Oct; `landing_render` new; was 63 SMOKE lines), including `appearance_clip_render` (painted looks under the section clip) and `appearance_render`.
 - Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **430 SMOKE lines, 0 failures, 34 tests** on 20 Oct against DIDSA-CAD branch `claude/appearance-and-scenes`, run locally with the backend's conda environment; includes the new `e2e_moved_files` (15). Needs a DIDSA-CAD backend.
 - CI: `.github/workflows/headless-tests.yml` (every push and PR touching code) and `e2e-backend.yml`.
 
