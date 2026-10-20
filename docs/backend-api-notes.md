@@ -482,8 +482,12 @@ verbatim).
 GET /document/parts/{part_id}/occurrences
 ```
 (`list_occurrences` in `router.py`; response is `list[OccurrenceResponse]`
-— `id`, `external_ref`, `resolved_part_id`, `name_override`, `transform`,
-`suppressed`, `hidden`, `fixed`, `color`.) One row per *direct* child
+— `id`, `external_ref`, `resolved_part_id`, `ref_part_id`, `name_override`,
+`transform`, `suppressed`, `hidden`, `fixed`, `color`.) `ref_part_id` (DIDSA-CAD
+`docs/moved-files-scope.md`, F1) is the root Part id of the file the
+occurrence places, kept even while it is unresolved, and saved in native
+files too (a file saved before it existed seeds it from its stored
+`resolved_part_id`); `native_compose.gd` looks a moved file up by it. One row per *direct* child
 Occurrence of the given Part — not recursive. `colour_tool.gd`'s
 `set_group_color()` (see "Occurrence colour" above) was this client's
 first use of it, for "every sibling sharing an owner". Milestone 3's

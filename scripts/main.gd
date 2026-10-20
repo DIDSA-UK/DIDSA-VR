@@ -49,10 +49,16 @@ var _native_extras: Dictionary = {} ## top-level keys of the loaded native file 
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 signal dirty_changed(dirty: bool)
 signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
+signal references_changed() ## the opened file's moved / missing references (reference_review()) changed: the Files > References page redraws
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const STALE_MATES_KEY := "vr_stale_mates" ## the native-file extra that carries the design table's "mates need redoing" flags
 const DISCARD_CONFIRM_MS := 6000 ## how long a "this will discard your unsaved changes" warning stays armed for a second press
+var _startup_composed: Dictionary = {} ## the startup file's compose result, for its references once its mesh is in
 var _startup_compose_note := "" ## native_compose.gd's "N referenced files not loaded" for the startup file, shown once its mesh is in
+var _reference_choices: Dictionary = {} ## finding moved files: native file -> {"<part id>/<occurrence id>": the file the user picked for it}
+var _reference_review: Dictionary = {"root": "", "relinked": [], "review": [], "bases": []} ## the last opened file's moved / missing references
+var _references_left: Dictionary = {} ## review keys the user chose to leave missing (hidden on the References page until the next open)
+var _dirty_from_relink := false ## the only unsaved change is a moved file's corrected path: picking another reference re-opens without asking
 var last_saved_path := "" ## the .didsa the last save wrote
 var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
 var _discard_armed_for := ""
@@ -898,13 +904,14 @@ func _begin_import() -> void:
 		_fetch_mesh()
 		return
 
-	var composed := compose_native(native_file_path) # the files its occurrences reference, folded in (native_compose.gd)
+	var composed := compose_native(native_file_path, _reference_choices.get(native_file_path, {})) # the files its occurrences reference, folded in (native_compose.gd)
 	if not composed["ok"]:
 		_set_status(composed["error"])
 		return
 	var raw_text: String = composed["text"]
 	var parsed = composed["parsed"]
 	_startup_compose_note = NativeCompose.unresolved_note(composed)
+	_startup_composed = composed
 
 	var document_dict: Dictionary = parsed.get("document", {})
 	var root_part_id: String = str(document_dict.get("root_part_id", ""))
@@ -976,6 +983,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 		import_ms, download_ms, int(body.size() / 1024.0), Time.get_ticks_msec() - _parse_started_ms
 	]
 	print("DIDSA VR: ", _load_summary)
+	_note_references(native_file_path, _startup_composed)
 	_set_status("Loaded %d part mesh(es). Grip a part to grab it.%s" % [_part_count, _startup_compose_note])
 
 
@@ -1063,9 +1071,57 @@ func native_search_dirs() -> Array:
 	return dirs
 
 
-func compose_native(path: String) -> Dictionary:
-	## `path` with every file its occurrences reference folded in, ready to POST (native_compose.gd's compose()).
-	return NativeCompose.compose(path, native_search_dirs())
+func compose_native(path: String, choices: Dictionary = {}) -> Dictionary:
+	## `path` with every file its occurrences reference folded in, ready to POST (native_compose.gd's compose()); `choices` are the
+	## user's picks for moved / missing references (reference_review()).
+	return NativeCompose.compose(path, native_search_dirs(), choices)
+
+
+# --- Finding moved files (DIDSA-CAD docs/moved-files-scope.md, F2) ------------------------------------------------------
+
+func _note_references(path: String, composed: Dictionary) -> void:
+	## After an open: what native_compose.gd found in new places and what it couldn't, for Files > References. A path corrected by id
+	## is an unsaved change (the next save writes it), not something changed on disk behind the user's back.
+	if _reference_review.get("root", "") != path:
+		_references_left.clear()
+	_reference_review = {"root": path, "relinked": composed.get("relinked", []), "review": composed.get("review", []), "bases": composed.get("bases", [])}
+	if not _reference_review["relinked"].is_empty():
+		mark_dirty()
+		_dirty_from_relink = true
+	references_changed.emit()
+
+
+func reference_review() -> Dictionary:
+	## {root, relinked, review (minus the ones left missing), bases}: see native_compose.gd's compose().
+	var open: Array = []
+	for item in _reference_review.get("review", []):
+		if not _references_left.has(item["key"]):
+			open.append(item)
+	return {"root": _reference_review.get("root", ""), "relinked": _reference_review.get("relinked", []), "review": open, "bases": _reference_review.get("bases", [])}
+
+
+func choose_reference(key: String, file: String) -> void:
+	## Files > References: use `file` for the reference `key` and open the file again with it (a full re-open, as Open does). When the
+	## only unsaved change is a corrected path from that same open, nothing is lost, so it doesn't ask.
+	var root: String = _reference_review.get("root", "")
+	if root == "":
+		return
+	var picks: Dictionary = _reference_choices.get(root, {})
+	picks[key] = file
+	_reference_choices[root] = picks
+	if document_dirty and _dirty_from_relink:
+		mark_clean()
+	open_native_file(root)
+
+
+func leave_reference_missing(key: String) -> void:
+	_references_left[key] = true
+	references_changed.emit()
+
+
+func reference_files() -> Array:
+	## Locate...: every native file in the folders the opened file's references are looked for in ([{path, file, part_id}]).
+	return NativeCompose.FileIndex.build(_reference_review.get("bases", []))
 
 
 func open_native_file(path: String) -> void:
@@ -1089,7 +1145,7 @@ func _open_native_file_impl(path: String) -> void:
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("Open needs a backend (see secrets.cfg.example).")
 		return
-	var composed := compose_native(path) # the files its occurrences reference, folded in (native_compose.gd)
+	var composed := compose_native(path, _reference_choices.get(path, {})) # the files its occurrences reference, folded in (native_compose.gd)
 	if not composed["ok"]:
 		_set_status(composed["error"])
 		return
@@ -1128,6 +1184,7 @@ func _open_native_file_impl(path: String) -> void:
 		return
 	if not _show_model(mesh_body, "", spawn_scale):
 		return
+	_note_references(path, composed)
 	_set_status("Opened %s: %d part mesh(es).%s" % [path.get_file(), _part_count, NativeCompose.unresolved_note(composed)])
 
 
@@ -1476,6 +1533,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 func mark_dirty() -> void:
 	## An edit that a save would write. Set by the undo stack (moves, mates, colours...), by the design table (a feature, a value, a new
 	## part, hide / show) and by adding a component; cleared by a save and by loading something (the loaded file is the new baseline).
+	_dirty_from_relink = false
 	if not document_dirty:
 		document_dirty = true
 		dirty_changed.emit(true)
@@ -1483,6 +1541,7 @@ func mark_dirty() -> void:
 
 func mark_clean() -> void:
 	_discard_armed_for = ""
+	_dirty_from_relink = false
 	if document_dirty:
 		document_dirty = false
 		dirty_changed.emit(false)

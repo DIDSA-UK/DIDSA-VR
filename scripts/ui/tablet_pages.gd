@@ -89,6 +89,10 @@ const NEW_ASSEMBLY_CONFIRM_MS := 4000
 const ROOM_TILE_COLUMNS := 2 ## the Rooms page's grid of open rooms
 const ROOM_THUMB_HEIGHT := 150 ## tablet pixels
 var _files_cache: Array = [] ## [{path, native, root_id}] — scanned on select/Refresh, never per frame (a project folder may be a network mount)
+var _locate_key := "" ## Files > References' Locate...: the reference being located ("" = the review list shows)
+var _locate_ref := ""
+var _locate_ref_id := ""
+var _locate_files: Array = [] ## file_index.gd's entries, scanned once when Locate... is pressed (never per frame)
 
 
 func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
@@ -177,6 +181,10 @@ func register(reg) -> void:
 	reg.add_tool("files", "models", "Models", "models", _build_files_page, {
 		"on_select": _rescan_files, "status": _files_status, "list": _files_rows, "list_empty": "No model files found.",
 		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
+	reg.add_tool("files", "references", "References", "files", _build_references_page, {
+		"caption": "moved · missing files", "on_select": _cancel_locate, "status": _references_status, "list": _references_rows,
+		"list_empty": "Every file the opened assembly places was found where it was.",
+		"help": "The parts the opened assembly places are found by their path, and when a file has moved, by its part id in the project folder. A file found in a new place is used and listed here; Save as new file writes its new path. When several files carry the part, or only a file with the same name is found, nothing is loaded until you pick one here: Use opens the assembly again with it (a file that is not the placed part asks for a second press). Locate... lists every model file to pick from; Leave missing hides the row."})
 
 	# Each floating window is its own tile: tap to open it (Image Viewer and Browser: tap again for another).
 	reg.add_category("tree", "Tree", "tree", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("tree")})
@@ -1128,6 +1136,84 @@ func _rescan_files() -> void:
 		_files_cache.append({"path": path, "native": native, "root_id": _main.native_file_root_part_id(path) if native else ""})
 	if _files_count_label:
 		_files_count_label.text = "%d model file(s) found" % _files_cache.size()
+
+
+# --- Files > References: finding moved files (DIDSA-CAD docs/moved-files-scope.md, F2) ---------------------------------
+
+func _build_references_page() -> Control:
+	var page := _page()
+	page.add_child(_hint("Files the opened assembly places that moved or are missing. The choices are beside the tablet."))
+	page.add_child(_hint("The project folder (Settings) and the models folders are searched, every subfolder included.", true))
+	return page
+
+
+func _references_status() -> String:
+	if _main == null:
+		return ""
+	var r: Dictionary = _main.reference_review()
+	if str(r["root"]) == "":
+		return "Open a native assembly first."
+	if _locate_key != "":
+		return "Locate the file for %s." % _locate_ref.get_file()
+	return "%s: %d found in a new place, %d to review." % [str(r["root"]).get_file(), (r["relinked"] as Array).size(), (r["review"] as Array).size()]
+
+
+func _references_rows() -> Array:
+	var rows := []
+	if _main == null:
+		return rows
+	if _locate_key != "":
+		rows.append({"id": "locate", "title": "Locate %s" % _locate_ref.get_file(), "subtitle": "Pick the file this reference should place.",
+			"state": "normal", "actions": [{"label": "Cancel", "callback": _cancel_locate}]})
+		for f in _locate_files:
+			rows.append(_candidate_row(_locate_key, _locate_ref_id, f))
+		return rows
+	var r: Dictionary = _main.reference_review()
+	for m in r["relinked"]:
+		var how := "picked by you" if m["via"] == "choice" else "found by its part id"
+		rows.append({"id": "moved:" + str(m["key"]), "title": "%s -> %s" % [str(m["ref"]).get_file(), m["path"]],
+			"subtitle": "Moved, %s%s. Save as new file writes the new path." % [how, "; the file at the old path is a different part" if m["path_mismatch"] else ""], "state": "ok"})
+	for item in r["review"]:
+		var ref := str(item["ref"])
+		var why := "Not found in the project folder or the models folders."
+		match str(item["result"]):
+			"ask":
+				why = "Moved, and %d files carry this part (copies?). Pick the right one; nothing is loaded until you do." % (item["candidates"] as Array).size()
+			"suggest":
+				why = ("The file at %s is a different part." % ref) if item["path_mismatch"] else "Not found. A file with the same name is elsewhere; it may be a different part."
+		rows.append({"id": "ref:" + str(item["key"]), "title": ref.get_file(), "subtitle": why, "state": "warn" if item["result"] != "missing" else "error",
+			"actions": [{"label": "Locate...", "callback": _start_locate.bind(str(item["key"]), ref, str(item["ref_part_id"]))},
+				{"label": "Leave missing", "callback": _main.leave_reference_missing.bind(str(item["key"]))}]})
+		for c in item["candidates"]:
+			rows.append(_candidate_row(str(item["key"]), str(item["ref_part_id"]), c))
+	return rows
+
+
+func _candidate_row(key: String, ref_part_id: String, c: Dictionary) -> Dictionary:
+	## One file that could be the reference's: Use re-opens the assembly with it. A file that is not the placed part (another id, or one
+	## that couldn't be read) needs a second press: never a silent swap.
+	var same := ref_part_id != "" and str(c["part_id"]) == ref_part_id
+	return {"id": "use:%s:%s" % [key, c["file"]], "title": str(c["path"]),
+		"subtitle": "The placed part." if same else "A different part, or one that couldn't be read: press Use twice to use it anyway.",
+		"state": "normal" if same else "warn",
+		"actions": [{"label": "Use", "accent": same, "confirm": not same, "callback": _use_reference.bind(key, str(c["file"]))}]}
+
+
+func _use_reference(key: String, file: String) -> void:
+	_cancel_locate()
+	_main.choose_reference(key, file)
+
+
+func _start_locate(key: String, ref: String, ref_part_id: String) -> void:
+	_locate_key = key
+	_locate_ref = ref
+	_locate_ref_id = ref_part_id
+	_locate_files = _main.reference_files() if _main != null else []
+
+
+func _cancel_locate() -> void:
+	_locate_key = ""
+	_locate_files = []
 
 
 func _files_status() -> String:

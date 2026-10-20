@@ -66,6 +66,13 @@ reference rule `backend/app/document/appearance.py`. `tests/appearance_vectors.g
 against it, and fails if the copy differs from a reachable DIDSA-CAD checkout. Refresh: copy the file over from DIDSA-CAD
 (branch `claude/appearance-and-scenes` until it merges).
 
+## `file_lookup_vectors.json` — golden vectors for finding moved files
+
+A **copy** of DIDSA-CAD's `docs/file-lookup/vectors.json` (16 cases), written by `tools/file_lookup_vectors/generate.py` from the
+reference rule `backend/app/document/file_lookup.py`. `tests/file_lookup_vectors.gd` checks `scripts/file_lookup.gd` against it, and
+fails if the copy differs from a reachable DIDSA-CAD checkout. Refresh: copy the file over from DIDSA-CAD (branch
+`claude/appearance-and-scenes` until it merges).
+
 ## `appearance_split.glb` — a real glb split by appearance
 
 DIDSA-CAD's `assembly-mesh.glb` of one Part with two 10 mm boxes, the second body painted #E63946 at opacity 0.5 (a Part body

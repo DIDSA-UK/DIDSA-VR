@@ -4,7 +4,7 @@ Short, current status. Read this first, then the doc for whatever you are touchi
 The full chronological build log (every round, bug found, and decision since September 2026) is
 [`status-history/status-log.md`](status-history/status-log.md); search it by heading.
 
-**Last reviewed:** 2026-10-19 on branch `claude/appearance-and-scenes` (Scenes in VR, M4, and the clip shader carrying paint; before that the Appearance tool, M2; not merged); before that 2026-10-17 (bug-report fixes, two rounds, see CHANGELOG); before that 2026-10-16 (name: "DIDSA Design Tools VR", a placeholder), at `main` after PR #44. **Engine:** Godot 4.7.2, Mobile renderer, OpenXR.
+**Last reviewed:** 2026-10-20 on branch `claude/appearance-and-scenes` (finding moved files, F2; before that Scenes in VR, M4, and the clip shader carrying paint, and the Appearance tool, M2; not merged); before that 2026-10-17 (bug-report fixes, two rounds, see CHANGELOG); before that 2026-10-16 (name: "DIDSA Design Tools VR", a placeholder), at `main` after PR #44. **Engine:** Godot 4.7.2, Mobile renderer, OpenXR.
 **Update this file whenever a capability changes state, a verification gap closes, or the test counts move.**
 
 ## The one thing to know
@@ -32,9 +32,9 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 ## Tests (as of the last recorded run)
 
-- Headless suite (`tests/ci.sh`): **2990 SMOKE lines, 0 unexpected failures** (19 Oct 2026, branch `claude/appearance-and-scenes`, M4: `clip_look`, `scene_vectors`, `scenes_tool`, `scenes_ui` new). Counts rise with every feature; treat this number as a floor.
-- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **63**, green (19 Oct), including `appearance_clip_render` (painted looks under the section clip) and `appearance_render`.
-- Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **415 SMOKE lines, 0 failures, 33 tests** on 19 Oct against DIDSA-CAD branch `claude/appearance-and-scenes`, run locally with the backend's conda environment; includes the new `e2e_scenes` (20). Needs a DIDSA-CAD backend.
+- Headless suite (`tests/ci.sh`): **3028 SMOKE lines, 0 unexpected failures** (20 Oct 2026, branch `claude/appearance-and-scenes`, finding moved files F2: `file_lookup_vectors`, `moved_files` new). Counts rise with every feature; treat this number as a floor.
+- Render tests under Xvfb + Mesa (`tests/ci_render.sh`): **63**, green (20 Oct), including `appearance_clip_render` (painted looks under the section clip) and `appearance_render`.
+- Live-backend end to end (`tests/ci_e2e.sh`, list in `tests/e2e_ci_list.txt`): **430 SMOKE lines, 0 failures, 34 tests** on 20 Oct against DIDSA-CAD branch `claude/appearance-and-scenes`, run locally with the backend's conda environment; includes the new `e2e_moved_files` (15). Needs a DIDSA-CAD backend.
 - CI: `.github/workflows/headless-tests.yml` (every push and PR touching code) and `e2e-backend.yml`.
 
 ## Open items that matter most
@@ -43,7 +43,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 2. **Cleartext HTTP on Android.** Use an HTTPS URL (e.g. a Cloudflare Tunnel) for the backend on Quest; a custom Gradle build to allow HTTP is not planned.
 3. **Server does not guard cycles or unknown Part ids** on `POST /parts/{id}/occurrences`; the client refuses them (see [`backend-api-notes.md`](backend-api-notes.md)).
 4. **Design table not built:** surfacing family, curves, gears, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Authoritative list: [`design-table.md`](design-table.md) and [`design-table-gaps.md`](design-table-gaps.md). Check them before relying on this summary; Phase 7 closed some.
-5. **Multi-file assemblies** now resolve client-side on Open / Add (`scripts/native_compose.gd`, a port of the flat app's composer with the `.DIDSAprt` / `.didsa` fallback, numbers kept exactly as written). Verified against a live backend (`tests/e2e_bug_report.gd`), not on the headset. A clashing Part id between two files is reported, not re-minted.
+5. **Multi-file assemblies** now resolve client-side on Open / Add (`scripts/native_compose.gd`, a port of the flat app's composer with the `.DIDSAprt` / `.didsa` fallback, numbers kept exactly as written). Verified against a live backend (`tests/e2e_bug_report.gd`), not on the headset. A clashing Part id between two files is reported, not re-minted. **Moved files** (20 Oct, DIDSA-CAD `docs/moved-files-scope.md` F2): a part file that moved or was renamed is found by its part id in the opened file's folder, the project folder and the models folders (every subfolder); several matches, a different file at the path or a name-only match are listed on **Files > References** to pick from (Locate... lists every model file), never loaded silently. Headless (`tests/moved_files.gd`, `tests/file_lookup_vectors.gd`) and live backend (`tests/e2e_moved_files.gd`); not on the headset. Picks only for the opened file, not for Add or a room.
 6. **Quest 2** has not been measured at all.
 7. **No `godot-xr-tools` or addons**, deliberately, to keep measuring the bare engine. Revisit once the interaction model is proven.
 

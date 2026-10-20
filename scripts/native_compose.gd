@@ -15,6 +15,13 @@ extends RefCounted
 ## reuses another file's Part id is left as it was (the backend skips an unresolved Occurrence) and listed in
 ## `unresolved`, so the caller can say so. The flat app re-mints a clashing id; that is not ported.
 ##
+## Finding moved files (DIDSA-CAD docs/moved-files-scope.md, F2): an occurrence remembers the root Part id of the file it places
+## (`ref_part_id`; a file saved before that existed uses its stored `resolved_part_id`). When the path finds nothing, or finds a
+## file with another id, file_lookup.gd's rule looks the id up in file_index.gd's index of the same folders: one file with it is
+## used and listed in `relinked` (the occurrence's `external_ref` becomes its new path, written on the next save); several, a
+## same-name file only, or nothing are left unresolved as before and listed in `review` with their candidates, for the Files >
+## References page. `choices` ({"<part id>/<occurrence id>": file}) are the user's picks from that page, used as they are.
+##
 ## Numbers are kept exactly as the files wrote them. Godot's JSON parser reads every number as a float, so a round trip
 ## through it turns 0 into 0.0 (the backend refuses that for an integer field) or, written back as integers, 20.0 into 20;
 ## the backend's add-component then saw the session's copy of a Part differ from the same file and re-minted it as a new
@@ -22,6 +29,8 @@ extends RefCounted
 ## each number's own text, and to_json() writes it back verbatim; with nothing to resolve the file's own text is sent.
 
 const NATIVE_EXTENSIONS: Array[String] = ["didsa", "DIDSAprt", "didsacad"] ## current first (relative_path.dart)
+const FileLookup := preload("res://scripts/file_lookup.gd")
+const FileIndex := preload("res://scripts/file_index.gd")
 
 
 static func native_extension(path: String) -> String:
@@ -68,10 +77,11 @@ static func find_file(ref: String, bases: Array) -> String:
 	return ""
 
 
-static func compose(root_path: String, search_dirs: Array = []) -> Dictionary:
-	## {ok, text, root_part_id, parsed (the root file as read), resolved: int, unresolved: [String], error}.
-	## `text` is ready to POST. With nothing to resolve it is the root file's own text, unchanged.
-	var out := {"ok": false, "text": "", "root_part_id": "", "parsed": null, "resolved": 0, "unresolved": [], "error": ""}
+static func compose(root_path: String, search_dirs: Array = [], choices: Dictionary = {}) -> Dictionary:
+	## {ok, text, root_part_id, parsed (the root file as read), resolved: int, unresolved: [String], relinked: [{key, ref, path,
+	## file, via, path_mismatch}], review: [{key, part_id, occurrence_id, ref, ref_part_id, result, candidates: [{path, file,
+	## part_id}], path_mismatch}], bases, error}. `text` is ready to POST. With nothing to resolve it is the root file's own text.
+	var out := {"ok": false, "text": "", "root_part_id": "", "parsed": null, "resolved": 0, "unresolved": [], "relinked": [], "review": [], "bases": [], "error": ""}
 	if not FileAccess.file_exists(root_path):
 		out["error"] = "No such file: %s" % root_path
 		return out
@@ -93,6 +103,7 @@ static func compose(root_path: String, search_dirs: Array = []) -> Dictionary:
 	for d in search_dirs:
 		if str(d) != "" and not (str(d) in bases):
 			bases.append(str(d))
+	out["bases"] = bases
 	var state := {
 		"parts": [], # every Part in the payload, root file's first
 		"part_ids": {}, # part id -> the file it came from
@@ -102,6 +113,10 @@ static func compose(root_path: String, search_dirs: Array = []) -> Dictionary:
 		"unresolved": [],
 		"resolved": 0,
 		"bases": bases,
+		"choices": choices,
+		"index": null, # file_index.gd's entries, built the first time a reference misses
+		"relinked": [],
+		"review": [],
 	}
 	for part in root_parts:
 		if part is Dictionary:
@@ -128,15 +143,24 @@ static func compose(root_path: String, search_dirs: Array = []) -> Dictionary:
 	out["text"] = to_json(composed)
 	out["resolved"] = state["resolved"]
 	out["unresolved"] = state["unresolved"]
+	out["relinked"] = state["relinked"]
+	out["review"] = state["review"]
 	return out
 
 
 static func unresolved_note(composed: Dictionary) -> String:
 	## " N referenced files not loaded: ..." for a status line, or "".
 	var missing: Array = composed.get("unresolved", [])
+	var moved: Array = composed.get("relinked", [])
+	var note := ""
+	if not moved.is_empty():
+		var names := PackedStringArray()
+		for m in moved:
+			names.append("%s -> %s" % [str(m["ref"]).get_file(), m["path"]])
+		note = " %d moved file%s found in %s: %s." % [moved.size(), "" if moved.size() == 1 else "s", "its new place" if moved.size() == 1 else "new places", ", ".join(names)]
 	if missing.is_empty():
-		return ""
-	return " %d referenced file%s not loaded: %s." % [missing.size(), "" if missing.size() == 1 else "s", ", ".join(PackedStringArray(missing))]
+		return note
+	return note + " %d referenced file%s not loaded: %s." % [missing.size(), "" if missing.size() == 1 else "s", ", ".join(PackedStringArray(missing))]
 
 
 static func _has_external_refs(parts: Array) -> bool:
@@ -178,20 +202,87 @@ static func _resolve_occurrences(state: Dictionary, part: Dictionary, ancestors:
 		if not _needs_file(occ, state["part_ids"]):
 			continue
 		var ref := str(occ["external_ref"])
-		var file := find_file(ref, state["bases"])
+		var key := "%s/%s" % [str(part.get("id", "")), str(occ.get("id", ""))]
+		var located := _locate(state, occ, ref, key, part)
+		if located.is_empty():
+			continue
+		var file: String = located["file"]
 		var part_id := _resolve_file(state, file, ref, ancestors)
 		if part_id == "":
 			continue
 		occ["resolved_part_id"] = part_id
-		occ["external_ref"] = _ref_as_found(ref, file)
+		occ["external_ref"] = located["ref"] if located["ref"] != "" else _ref_as_found(ref, file)
+		if located.has("relinked"):
+			state["relinked"].append(located["relinked"])
 		state["resolved"] += 1
+
+
+static func ref_part_id_of(occ: Dictionary) -> String:
+	## The root Part id of the file `occ` places, as last known: `ref_part_id`, else (a file saved before it existed) the stored
+	## `resolved_part_id`; "" when neither is set. The backend seeds it the same way.
+	for field in ["ref_part_id", "resolved_part_id"]:
+		if occ.get(field) != null and str(occ[field]) != "":
+			return str(occ[field])
+	return ""
+
+
+static func _index(state: Dictionary) -> Array:
+	if state["index"] == null:
+		state["index"] = FileIndex.build(state["bases"])
+	return state["index"]
+
+
+static func _locate(state: Dictionary, occ: Dictionary, ref: String, key: String, part: Dictionary) -> Dictionary:
+	## Where the file `occ` places is: {file, ref (its new external_ref, "" to keep the found name in the old folder), relinked?},
+	## or {} (noted in unresolved, and in review when the user can do something about it). See this file's header.
+	var chosen := str(state["choices"].get(key, ""))
+	if chosen != "":
+		var chosen_ref := FileIndex.relative_to(chosen, state["bases"])
+		if chosen_ref == "" or not FileAccess.file_exists(chosen):
+			state["unresolved"].append("%s (the chosen file is not in the project folder)" % ref)
+			return {}
+		return {"file": chosen, "ref": chosen_ref, "relinked": {"key": key, "ref": ref, "path": chosen_ref, "file": chosen, "via": "choice", "path_mismatch": false}}
+	var ref_id := ref_part_id_of(occ)
+	var file := find_file(ref, state["bases"])
+	var at_path = null
+	if file != "":
+		if ref_id == "":
+			return {"file": file, "ref": ""} # an older reference: whatever is at its path, as before
+		var at_id := FileIndex.read_part_id(file)
+		if at_id == ref_id:
+			return {"file": file, "ref": ""}
+		at_path = {"path": FileIndex.relative_to(file, state["bases"]), "part_id": at_id if at_id != "" else null}
+	var index := _index(state)
+	var entries := []
+	var file_by_path := {}
+	for entry in index:
+		entries.append({"path": entry["path"], "part_id": entry["part_id"] if entry["part_id"] != "" else null})
+		if not file_by_path.has(entry["path"]):
+			file_by_path[entry["path"]] = entry
+	if at_path != null and not file_by_path.has(at_path["path"]):
+		file_by_path[at_path["path"]] = {"path": at_path["path"], "file": file, "part_id": str(at_path["part_id"]) if at_path["part_id"] != null else ""}
+	var answer := FileLookup.find_file({"external_ref": ref, "ref_part_id": ref_id if ref_id != "" else null}, at_path, entries)
+	if answer["result"] == "found":
+		var found: Dictionary = file_by_path[answer["path"]]
+		return {"file": found["file"], "ref": str(answer["path"]), "relinked": {"key": key, "ref": ref, "path": answer["path"], "file": found["file"], "via": answer["via"], "path_mismatch": answer["path_mismatch"]}}
+	var candidates := []
+	for path in answer["candidates"]:
+		var c: Dictionary = file_by_path[path]
+		candidates.append({"path": path, "file": c["file"], "part_id": c["part_id"]})
+	state["review"].append({"key": key, "part_id": str(part.get("id", "")), "occurrence_id": str(occ.get("id", "")), "ref": ref,
+		"ref_part_id": ref_id, "result": answer["result"], "candidates": candidates, "path_mismatch": answer["path_mismatch"]})
+	match answer["result"]:
+		"ask":
+			state["unresolved"].append("%s (moved; %d copies found, pick one in Files > References)" % [ref, candidates.size()])
+		"suggest":
+			state["unresolved"].append("%s (%s; see Files > References)" % [ref, "the file there is a different one" if answer["path_mismatch"] else "not found, a file with that name is elsewhere"])
+		_:
+			state["unresolved"].append("%s (not found)" % ref)
+	return {}
 
 
 static func _resolve_file(state: Dictionary, file: String, ref: String, ancestors: Array) -> String:
 	## The Part id `file` contributes to the payload (reading and folding it in the first time), or "" (noted in unresolved).
-	if file == "":
-		state["unresolved"].append("%s (not found)" % ref)
-		return ""
 	if file in ancestors:
 		state["unresolved"].append("%s (refers back to itself)" % ref)
 		return ""
