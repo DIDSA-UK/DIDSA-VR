@@ -178,7 +178,7 @@ func _initialize() -> void:
 	var body = launcher._body
 	check("no servers: the page says none is set and offers the form", "No server is set" in _all_text(body) and body.find_child("Form_url", true, false) != null and body.find_child("Server_*", true, false) == null)
 	check("Save and Test are off until there is an address and a key", body.find_child("SaveForm", true, false).disabled and body.find_child("TestForm", true, false).disabled)
-	check("Scan is shown and is not yet available", body.find_child("Scan", true, false).disabled)
+	check("Scan is offered", body.find_child("Scan", true, false) != null and not body.find_child("Scan", true, false).disabled)
 	body.find_child("Form_url", true, false).pressed.emit()
 	await frames(1)
 	check("tapping Address opens the full keyboard", main._keyboard.is_open())

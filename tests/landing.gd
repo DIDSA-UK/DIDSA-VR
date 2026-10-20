@@ -79,7 +79,7 @@ func _initialize() -> void:
 	tile("servers").pressed.emit()
 	await frames(2)
 	var servers_text := _all_text(landing.launcher._body)
-	check("Servers offline: says no server is set and shows the Scan note as coming soon", "No server is set" in servers_text and "coming soon" in servers_text.to_lower())
+	check("Servers offline: says no server is set and offers Scan", "No server is set" in servers_text and "Scan a QR code" in servers_text)
 
 	# --- About: the CC BY credit ---------------------------------------------------------------------------------------
 	landing.launcher.show_page("about")

@@ -6,6 +6,7 @@ extends "res://scripts/diegetic_panel.gd"
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
+const PairingPayload := preload("res://scripts/landing/pairing_payload.gd")
 const ServerAddress := preload("res://scripts/landing/server_address.gd")
 
 const LOWER_BY := 0.28 ## metres below where a window opens (10 cm under the eyes)
@@ -21,6 +22,12 @@ var _pill: Button
 var _scroll: ScrollContainer
 var _back: Button
 var _server_result: Label
+var scanner: Node ## qr_scanner.gd, from landing.gd
+var _scan_report: Label
+var _scan_read: Label
+var _scan_passthrough: Button
+var _scan_last := "Nothing read yet." ## what the last QR code was, in words (never the code itself: it carries the key)
+var _scan_restore_scene := ""
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
 
 
@@ -76,6 +83,11 @@ func _build_content() -> Control:
 	return column
 
 
+func _on_closed() -> void:
+	if page == "scan":
+		_leave_scan()
+
+
 func _on_opened() -> void:
 	show_page("home")
 	set_status(main.status_text if main != null else "")
@@ -87,6 +99,8 @@ func set_status(text: String) -> void:
 
 
 func show_page(name: String) -> void:
+	if page == "scan" and name != "scan":
+		_leave_scan()
 	page = name
 	if _body == null:
 		return
@@ -105,12 +119,14 @@ func show_page(name: String) -> void:
 			_build_servers()
 		"settings":
 			_build_settings()
+		"scan":
+			_build_scan()
 		"about":
 			_build_about()
 		_:
 			page = "home"
 			_build_home()
-	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers",
+	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers", "scan": "Scan a QR code",
 		"settings": "Settings", "about": "About"}.get(page, "DIDSA Design Tools VR"))
 	page_changed.emit(page)
 
@@ -292,9 +308,8 @@ func _server_row(entry: Dictionary) -> Control:
 
 
 func _scan_button() -> Button:
-	var button := _action("Scan a QR code (coming soon)", func() -> void: pass, 0)
+	var button := _action("Scan a QR code", func() -> void: show_page("scan"), 0)
 	button.name = "Scan"
-	button.disabled = true
 	return button
 
 
@@ -333,6 +348,75 @@ func _save_form() -> void:
 		return
 	_form = {"name": "", "url": "https://", "api_key": ""}
 	show_page("servers")
+
+
+# --- Scan a QR code (L5: the headset spike; L6: pairing) --------------------------------------------------------------------
+
+func attach_scanner(p_scanner: Node) -> void:
+	scanner = p_scanner
+	scanner.report_changed.connect(_refresh_scan)
+	scanner.code_seen.connect(_on_code_seen)
+
+
+func _build_scan() -> void:
+	_body.add_child(_hint("On your PC or phone open DIDSA-CAD and choose Connect a VR headset. Turn passthrough on so you can see the screen, then look at the code, close enough that it fills a good part of your view."))
+	_scan_passthrough = _action("", _toggle_scan_passthrough, 0)
+	_scan_passthrough.name = "Passthrough"
+	_body.add_child(_scan_passthrough)
+	_scan_report = Label.new()
+	_scan_report.name = "ScanReport"
+	_scan_report.theme_type_variation = &"LabelSmall"
+	_scan_report.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_body.add_child(_scan_report)
+	_scan_read = Label.new()
+	_scan_read.name = "ScanRead"
+	_scan_read.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_body.add_child(_scan_read)
+	_body.add_child(_hint("Quest 3 or later, up to date. Nothing is saved until you say Connect. This page also says exactly what the headset answered at each step, so a scan that does nothing explains itself."))
+	scanner.start()
+	_refresh_scan()
+
+
+func _leave_scan() -> void:
+	if scanner != null:
+		scanner.stop()
+	if _scan_restore_scene != "":
+		main.set_scene(_scan_restore_scene)
+		_scan_restore_scene = ""
+
+
+func _toggle_scan_passthrough() -> void:
+	if _scan_restore_scene == "":
+		_scan_restore_scene = main.current_scene() if main.current_scene() != "Passthrough" else "Mid"
+		main.set_scene("Passthrough")
+	else:
+		main.set_scene(_scan_restore_scene)
+		_scan_restore_scene = ""
+	_refresh_scan()
+
+
+func _refresh_scan() -> void:
+	if page != "scan" or _scan_report == null or not is_instance_valid(_scan_report):
+		return
+	var status: String = main.passthrough_status()
+	_scan_passthrough.text = "Passthrough: %s" % ("ON (tap to turn off)" if main.current_scene() == "Passthrough" else "off (tap to turn on)")
+	_scan_report.text = scanner.report() + ("\n" + status if status != "" else "")
+	_scan_read.text = _scan_last
+
+
+func _on_code_seen(text: String) -> void:
+	## A QR code was read. What it is, in words: the code carries the API key, so it is never shown.
+	_scan_last = describe_code(text)
+	_refresh_scan()
+
+
+static func describe_code(text: String) -> String:
+	if not PairingPayload.looks_like_pairing(text):
+		return "Read a QR code that is not a DIDSA pairing code (%d characters). Ignored." % text.length()
+	var parsed := PairingPayload.parse(text)
+	if not parsed["ok"]:
+		return "Read a DIDSA pairing code, but it was refused: %s" % parsed["error"]
+	return "Read a DIDSA pairing code for %s (%s)." % [parsed["name"], ServerAddress.default_name(parsed["url"])]
 
 
 # --- Settings ---------------------------------------------------------------------------------------------

@@ -224,7 +224,7 @@ the APK.
 | **L2** Demo content **(built)** | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
 | **L3** Logo and tips **(built)** | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
 | **L4** Servers **(built; stub-server tested, not against a real backend)** | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
-| **L5** QR spike, on the headset | Turn on marker tracking; does `is_qrcode_supported()` say yes on your Quest 3 and Horizon OS version; permissions; read a test code | 1 day | by hand only |
+| **L5** QR spike, on the headset **(tooling built; the headset run is NOT done)** | Turn on marker tracking; does `is_qrcode_supported()` say yes on your Quest 3 and Horizon OS version; permissions; read a test code | 1 day | by hand only |
 | **L6** QR pairing | Scan, "Connect to ...?", save. The flat app's side (checks and code) is built in DIDSA-CAD | 2 days (VR) | headless: payload parsing and refusals (DIDSA-CAD's payload tests are the reference); live: pairing against a backend |
 | **L7** Tour | Guided first two minutes | 2 days | headless: steps advance |
 
@@ -282,6 +282,19 @@ folder printed on the Servers page. Tests: `servers`, `server_probe`.
   `http://` to a LAN server on the Quest.
 - **Not built:** a per-server "Connected" state (the pill says "Server: host", set not checked); renaming a saved server; per-server document sessions
   in the typed form (the file supports `document_session`).
+
+## What was built (L5)
+
+The spike itself needs your Quest and was **not run**. Built so that it explains itself when it is: `scripts/landing/qr_scanner.gd` (listens to the
+`XRServer` for `OpenXRMarkerTracker`s, asks the headset about QR support, asks for the scene permission on Android), the launcher's **Scan page** (each stage's
+answer, a passthrough button, what a read code was, never the code), and `project.godot` settings turning on spatial-entity marker tracking for **Android
+builds only**. Procedure and the open questions: [`servers.md`](servers.md#scanning-a-qr-code).
+
+- **Found while building it:** the marker-tracking capability singleton exists in a desktop build and `Engine.get_singleton("OpenXRSpatialMarkerTrackingCapability")`
+  answers `is_qrcode_supported()` from GDScript (false without a headset), so route A is callable without an addon. Nothing is known about a headset's answer.
+- **Practical blocker:** seeing the screen needs passthrough, which on a standalone Quest needs L0 (the OpenXR Vendors plugin). Over a PC link it is untested.
+- **Risk to check on the first Android build:** the three settings are requested at OpenXR start-up; if a Quest runtime treated the extension as required, an
+  unsupported runtime would fail to start OpenXR. Godot's wrappers normally request such extensions as optional, but that was not confirmed in source here.
 
 ## Decisions (owner, 20 Oct 2026)
 

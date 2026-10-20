@@ -13,6 +13,7 @@ const DidsaLogo := preload("res://scripts/landing/didsa_logo.gd")
 const RocketGarden := preload("res://scripts/landing/rocket_garden.gd")
 const LauncherWindow := preload("res://scripts/landing/launcher_window.gd")
 const TipsReel := preload("res://scripts/landing/tips_reel.gd")
+const QrScanner := preload("res://scripts/landing/qr_scanner.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
 const LOGO_DISTANCE := 2.5 ## metres ahead of the user
@@ -25,6 +26,7 @@ var logo: Node3D
 var garden: Node3D
 var launcher: Node
 var reel: Node
+var scanner: Node ## qr_scanner.gd: reads QR codes through the headset's marker tracking; the launcher's Scan page starts and stops it
 var active := false
 var plinth: MeshInstance3D
 var _caption: Label3D
@@ -64,6 +66,10 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	reel.name = "TipsReel"
 	add_child(reel)
 	reel.setup_reel(left, right, camera)
+	scanner = QrScanner.new()
+	scanner.name = "QrScanner"
+	add_child(scanner)
+	launcher.attach_scanner(scanner)
 	main.status_changed.connect(launcher.set_status)
 	main.server_changed.connect(_on_server_changed)
 

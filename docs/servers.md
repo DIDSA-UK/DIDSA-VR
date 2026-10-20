@@ -76,10 +76,40 @@ on the headset and correct this paragraph. The app reads the file at start, so r
 
 ## Scanning a QR code
 
-See the section below once L5 and L6 land; the code's format is DIDSA-CAD's `docs/vr-headset-pairing.md`.
+DIDSA-CAD shows the code (File > **Connect a VR headset...**, or the connection screen's **Connect a VR headset**): `didsa-vr:1?n=<name>&u=<url>&k=<key>`,
+format and checks in DIDSA-CAD's `docs/vr-headset-pairing.md`. The headset reads it with **OpenXR marker tracking, which is in Godot's core**: the
+runtime finds and decodes the code and Godot hands over an `OpenXRMarkerTracker` whose marker data is the text. No camera access, no decoder, no addon.
+
+**Step L5 is the headset spike, and it has not been run.** What is built is a Scan page that makes the first run explain itself, and the project settings
+(`project.godot`, **Android only**, so desktop and PC-VR builds are unchanged): `xr/openxr/extensions/spatial_entity/enabled`, `.../enable_marker_tracking`
+and `.../enable_builtin_marker_tracking`, each with the `.android` feature tag.
+
+### Running the spike (needs a headset and an APK built with these settings)
+
+1. Landing > **Servers** > **Scan a QR code**. The page lists each stage with the headset's answer: *OpenXR running*, *Marker tracking present*, *QR codes
+   supported*, *Scene permission* (asked at the page's start on Android), *Listening*, trackers seen, QR codes read.
+2. Show a code on a screen (DIDSA-CAD, **Connect a VR headset**) and look at it. You must be able to see the screen: **turn passthrough on** (the page has
+   a button).
+3. When a code is read the page says what it was ("a DIDSA pairing code for Workshop PC (cad.example.net)", "a QR code that is not ours", "refused: ...").
+   It never prints the code, which carries the API key.
+
+What step L5 has to answer (write the answers into this page and the scope):
+
+- Does *QR codes supported* say yes on your Quest 3 and Horizon OS version? (A forum report says it works on a Quest 3 with Horizon OS v83 and Godot 4.6, not
+  4.5.)
+- Which Android permission is needed? The scanner asks for `com.oculus.permission.USE_SCENE` at runtime; the manifest line for it lives in the export preset
+  (`export_presets.cfg` is git-ignored, so add it to your local preset), and **whether marker tracking needs it is unknown**.
+- Does the runtime create a marker tracker for a code on a monitor at all, and how large must it be on screen?
+- Is the tracker delivered through the XRServer's `tracker_added` / `tracker_updated` (what the scanner listens to, plus a 0.5 s poll)?
+
+**Passthrough is the practical blocker.** To see the screen the headset needs passthrough, and on a standalone Quest that needs the OpenXR Vendors plugin
+(step L0 of the scope; not in the project). Over a PC link (Virtual Desktop) the headset's own passthrough settings apply but marker tracking would need the
+PC runtime to offer it, which is untested. If marker tracking works and passthrough does not, the options are L0, or the typed route above. If marker tracking
+does not work, route B (the Passthrough Camera API with a QR decoder in a small Kotlin plugin) breaks the "no addons" rule and needs L0 too.
 
 ## Tests
 
 `tests/servers.gd` (the store, the address rules, switching and forgetting, the unload, secrets.cfg, a hand-written file, the Servers page) and
+`tests/qr_scanner.gd`, `tests/scan_page.gd` (the scanner and the Scan page, with codes fed in by hand) and `tests/pairing_payload.gd` (the code's format), and
 `tests/server_probe.gd` (the Test button against a stub `/health` server, `tests/helpers/stub_health_server.py`, needs `python3`). **Not run against a
 real DIDSA-CAD backend** (none was available in the build session), and not on a headset.
