@@ -92,12 +92,15 @@ Gradle build. Meta's QuestCameraKit has a ZXing QR sample to follow.
 
 - Where: the connection screen's **Connect a VR headset** button, and File > **Connect a VR headset...**.
 - On tap it checks first, and shows the code only if nothing fails: a server is set; its address is one a headset can reach (it
-  refuses the on-phone `localhost` server, the emulator alias, link-local addresses and, for now, any `http://`; it warns for `.local`,
-  Tailscale and a private `https://` address); `GET /health` answers with the key; and the server has the endpoints this app needs
+  refuses the emulator alias, link-local addresses and `http://` on the internet; `http://` on the local network passes with a
+  warning, as do `.local`, Tailscale and a private `https://` address); `GET /health` answers with the key; and the server has the endpoints this app needs
   (read from `/openapi.json`; a missing Mates / Measure / Appearance / Scenes route is a warning, since only that tool is lost).
+- **The phone's own server** (Server Management's Termux backend, `http://127.0.0.1:8000`) pairs too: turn on Server Management's
+  **Let VR headsets on this Wi-Fi connect** and Restart, and the code carries the phone's Wi-Fi address (`http://192.168.x.y:8000`),
+  checked there before it is shown. The headset must be on the same Wi-Fi (or the phone's hotspot), and the phone must stay awake.
 - Contents: `didsa-vr:1?n=<name>&u=<url>&k=<key>`, each value percent-encoded; `n` is the host name. Reserved, optional: `s=`
-  (document session), `r=` / `rk=` (browser relay). The headset must refuse anything that does not start `didsa-vr:1?`, and anything
-  over `http://` until step L0 allows LAN addresses (then DIDSA-CAD's `HeadsetPairing.headsetAllowsLanHttp` flips with it).
+  (document session), `r=` / `rk=` (browser relay). The headset must refuse anything that does not start `didsa-vr:1?`, and `http://` to
+  anything but a private (local-network) address.
 - **Security:** version 1 carries the backend's single `CAD_API_KEY`, so anyone who photographs the screen has it. The code appears
   only on request and hides itself after 60 s. Version 2 (backend work): a short-lived pairing token exchanged once for a per-device
   key you can revoke.
@@ -112,6 +115,15 @@ Gradle build. Meta's QuestCameraKit has a ZXing QR sample to follow.
    LAN address needs the network security config from step L0. Not for the first version.
 
 For handing the APK to friends none of this matters: they use the demo models offline.
+
+### Plain http on the Quest
+
+This repo has said "Android blocks cleartext HTTP" since the start, but the status log records it as never tried. Android's rule is
+enforced by its Java networking stack (`HttpURLConnection`, OkHttp, WebView); Android's own `NetworkSecurityPolicy` documentation
+says the socket API is not expected to honour it. Godot's `HTTPRequest` is native code on its own sockets, so `http://` to a LAN
+server very likely works on the Quest already. **First headset test:** connect to a LAN `http://` server (the phone's server, or a PC).
+If it works, no network security config is needed and step L0 is only for the Vendors plugin; if it fails, DIDSA-CAD's
+`HeadsetPairing.headsetAllowsLanHttp` goes false until L0 adds the config.
 
 ## Tips
 
@@ -141,15 +153,20 @@ First draft, from the README's Controls table (check each against `controller.gd
 
 ## Logo
 
-Yes, it can be modelled, and a prototype has been built and rendered (scratch code, not in the app; copy at
-[`landing/didsa_logo_prototype.gd.txt`](landing/didsa_logo_prototype.gd.txt)):
+Built as an asset (20 Oct 2026): traced from the owner's 1024 x 1024 artwork, so it matches the original exactly, wordmark included.
 
-![3D DIDSA logo prototype, software render](landing/logo-prototype.png)
+![The traced DIDSA logo extruded in 3D, straight on and turned 28 degrees, software render](landing/logo-3d.png)
 
-It is made in code at run time from the logo in DIDSA-CAD (`client/assets/images/didsa_logo_dark.png`): the planet is a tube around a
-circle, the orbit a tube around a tilted ellipse, the rocket an extruded outline, the exhaust two bars, the porthole an emissive blue
-sphere, and the wordmark `TextMesh` with depth. No asset files; about 3,000 triangles. To do for the real one: trace the rocket outline
-from the artwork rather than by eye; the wordmark in Barlow bold (OFL, in `ui/fonts/`); a slow idle animation; and the same emblem as the **APK launcher icon**, replacing the placeholder `icon.svg`.
+- `ui/logo/didsa_logo.svg`: the vector logo (potrace), in the artwork's black and blue. Rasterised beside the source image it is the
+  same shape.
+- `ui/logo/didsa_logo.glb`: the SVG's shapes extruded (holes kept, earcut), 1.2 m wide, facing +Z, one node per part
+  (`Emblem`, `Porthole`, `Wordmark`, `Tagline`) so the landing can animate the porthole's pulse; near-white `Ink` and an emissive
+  blue `Accent`, for a dark room. About 27,000 triangles. Loads as a normal Godot scene (`load("res://ui/logo/didsa_logo.glb")`).
+- `icon.svg`, the APK launcher icon, is now the emblem on a dark square (it was a placeholder triangle).
+- How to redo it: `ui/logo/source/README.md` (the source image, `make_masks.py`, `trace_logo.mjs`; not exported).
+- The emblem traces as one connected shape (planet ring, orbit band, rocket and exhaust touch), so the rocket cannot move along the
+  orbit by itself; the idle animation is the porthole's pulse and a slow sway of the whole logo. Splitting the rocket out would
+  mean cutting the shape by hand.
 
 ## Demo models
 
@@ -201,7 +218,8 @@ the APK.
 
 | Step | What | Rough size | Tests |
 |---|---|---|---|
-| **L0** Custom Android build | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config that allows `http://` to LAN addresses, so a home server needs no tunnel; and route B for QR if route A fails. Record the export settings in the README (the preset itself stays git-ignored). The Vendors plugin is an addon, so this is a deliberate exception to the no-addons rule, to note in `CLAUDE.md`. | 1 day | APK builds and installs; by hand on the headset |
+| **L0** Custom Android build | Switch the export to Godot's Gradle build. It allows: the OpenXR Vendors plugin (passthrough on a standalone Quest, which the QR scan needs to be pleasant); a network security config for `http://` to LAN addresses, **only if** the headset test shows Android blocks it (see
+[Plain http on the Quest](#plain-http-on-the-quest)); and route B for QR if route A fails. Record the export settings in the README (the preset itself stays git-ignored). The Vendors plugin is an addon, so this is a deliberate exception to the no-addons rule, to note in `CLAUDE.md`. | 1 day | APK builds and installs; by hand on the headset |
 | **L1** Landing shell | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
 | **L2** Demo content | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
 | **L3** Logo and tips | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
@@ -220,8 +238,8 @@ L1 to L3 give the demo you want for friends, entirely offline (L0 is not needed 
 3. **Headset:** Quest 3, kept up to date, so Horizon OS is past v83 and route A (built-in QR tracking) is the first thing to try.
 4. **Custom (Gradle) Android builds are allowed.** That opens three things that were blocked, listed in step L0 of the build plan.
 
-5. **Wordmark font:** any clean free sans. Barlow (OFL), which DIDSA-CAD already ships, in a bold weight; the font and its `OFL.txt`
-   go in `ui/fonts/`.
+5. **Wordmark font:** any clean free sans was agreed (Barlow), but no font is needed now: the wordmark is traced from the artwork
+   with the rest of the logo.
 6. **The Servers tile is shown in every build**, friends' included. Offline it reads "Offline: demo models only" and offers Scan.
 7. **The QR code is shown by the flat app** (built, see [Adding a server](#adding-a-server)).
 

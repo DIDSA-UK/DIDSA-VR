@@ -27,3 +27,8 @@ models/*
 # The demo model script's npm packages
 /demo/tools/node_modules/
 /demo/tools/package*.json
+
+# Logo tracing scratch
+/ui/logo/source/node_modules/
+/ui/logo/source/masks/
+/ui/logo/source/package*.json

@@ -117,7 +117,7 @@ url="ws://your-relay-host:8100"
 api_key="your-BROWSER_RELAY_API_KEY"
 ```
 
-- **Use an HTTPS URL on Quest** (for example a Cloudflare Tunnel). Android blocks cleartext HTTP except to localhost, and allowing it needs a custom Gradle build. A LAN `http://` URL is fine for desktop preview.
+- **On Quest, prefer an HTTPS URL** (for example a Cloudflare Tunnel). A LAN `http://` URL is fine for desktop preview and probably on Quest too: Android's cleartext-HTTP rule is enforced by its Java networking, and Godot's `HTTPRequest` uses its own sockets. Not yet tried on a headset; see [`docs/landing-scope.md`](docs/landing-scope.md#plain-http-on-the-quest).
 - Without `[browser_relay]` the Browser window says "No browser relay configured".
 - By default each launch uses its own backend document session (`vr-...`) so it never replaces what the flat app has open.
 - Main node, Backend group: `native_file_path` (default `res://assembly.didsa`), `part_id_override` (rarely needed), `quality`, `tier`, `include_hidden`; `local_glb_scale` for local glTF files in millimetres.
@@ -146,7 +146,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 ## Known limitations
 
 - **No Quest-hardware measurements** yet (load time, frame rate, Quest 2). Headset testing is ongoing and informal.
-- **Cleartext HTTP on Android** (see Configuration).
+- **Plain HTTP on Quest untested** (see Configuration).
 - **Server does not stop cycles or unknown Part ids** when adding occurrences; the client refuses them.
 - **Multi-file assemblies** resolve on Open and Add the way the flat app does (`scripts/native_compose.gd`): each `external_ref` is looked for beside the opened file, then in the project folder and the models folders, under any native extension (`.didsa`, `.DIDSAprt`, `.didsacad`). A file whose Part id clashes with another file's is left out (the flat app re-mints it; not ported) and the status line names it.
 - **Rooms**: 0.5 to 40 m on a side, no overlapping rooms, no rooms inside rooms; the default room limit is 4 (Settings, Display).
