@@ -6,6 +6,7 @@ extends "res://scripts/diegetic_panel.gd"
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
+const ServerAddress := preload("res://scripts/landing/server_address.gd")
 
 const LOWER_BY := 0.28 ## metres below where a window opens (10 cm under the eyes)
 
@@ -19,6 +20,8 @@ var _status: Label
 var _pill: Button
 var _scroll: ScrollContainer
 var _back: Button
+var _server_result: Label
+var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
 
 
 func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamera3D, p_landing: Node) -> void:
@@ -226,15 +229,110 @@ func _build_assemblies() -> void:
 		row.add_child(button)
 
 
-# --- Servers (L4 builds the real thing) ------------------------------------------------------------------
+# --- Servers -----------------------------------------------------------------------------------------------------
 
 func _build_servers() -> void:
 	_body.add_child(_info(main.connection_text()))
 	_body.add_child(_hint(main.server_detail()))
-	_body.add_child(_hint("Coming soon: Scan. Point the headset at the QR code DIDSA-CAD shows (Connect a VR headset) to add a server without typing."))
-	var scan := _action("Scan a QR code (coming soon)", func() -> void: pass, 0)
-	scan.disabled = true
-	_body.add_child(scan)
+	_server_result = Label.new() # what Test said
+	_server_result.name = "TestResult"
+	_server_result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_server_result.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.add_child(_server_result)
+	for entry in main.server_entries():
+		_body.add_child(_server_row(entry))
+	if main.active_server_id != "":
+		_body.add_child(_action("Use no server (offline, demo models only)", func() -> void:
+			main.switch_server("")
+			show_page("servers"), 0))
+	_body.add_child(_hint("Add a server. Point the headset at the QR code DIDSA-CAD shows (Connect a VR headset), or type it."))
+	_body.add_child(_scan_button())
+	for field in [["name", "Name"], ["url", "Address"], ["api_key", "Key"]]:
+		_body.add_child(_form_button(field[0], field[1]))
+	var check := ServerAddress.check(str(_form["url"])) if str(_form["url"]) not in ["", "https://"] else {}
+	if not check.is_empty():
+		var note := _hint(check["message"])
+		note.name = "AddressNote"
+		_body.add_child(note)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_body.add_child(row)
+	var test := _action("Test these", _test_form, 0)
+	test.name = "TestForm"
+	test.disabled = check.is_empty() or check["level"] == ServerAddress.Level.REFUSED or str(_form["api_key"]) == ""
+	row.add_child(test)
+	var save := _action("Save and use", _save_form, 0)
+	save.name = "SaveForm"
+	save.disabled = test.disabled
+	row.add_child(save)
+	_body.add_child(_hint("The list is kept in %s on this headset. To load it without typing, see docs/servers.md." % OS.get_user_data_dir()))
+
+
+func _server_row(entry: Dictionary) -> Control:
+	var box := HBoxContainer.new()
+	box.name = "Server_" + str(entry["id"])
+	box.add_theme_constant_override("separation", 8)
+	var label := Label.new()
+	label.text = "%s\n%s" % [entry["name"], entry["url"]]
+	label.theme_type_variation = &"LabelSmall"
+	label.clip_text = true
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(label)
+	var use := _action("In use" if entry["current"] else "Use", func() -> void:
+		if main.switch_server(str(entry["id"])):
+			show_page("servers"), 120)
+	use.disabled = entry["current"]
+	box.add_child(use)
+	box.add_child(_action("Test", func() -> void: _run_test(str(entry["url"]), str(entry["api_key"])), 100))
+	if not entry.get("readonly", false):
+		box.add_child(_action("Forget", func() -> void:
+			if main.forget_server(str(entry["id"])):
+				show_page("servers"), 110))
+	return box
+
+
+func _scan_button() -> Button:
+	var button := _action("Scan a QR code (coming soon)", func() -> void: pass, 0)
+	button.name = "Scan"
+	button.disabled = true
+	return button
+
+
+func _form_button(field: String, title: String) -> Button:
+	var value := str(_form[field])
+	var shown := "•".repeat(mini(value.length(), 12)) if field == "api_key" else value
+	var button := _action("%s: %s" % [title, shown if shown != "" else "tap to type"], func() -> void:
+		main.open_keyboard_for(str(_form[field]), func(text: String) -> void:
+			_form[field] = text.strip_edges()
+			if field == "url" and str(_form["name"]) == "":
+				_form["name"] = ServerAddress.default_name(text)
+			show_page("servers"), {"mode": "full", "title": title}), 0)
+	button.name = "Form_" + field
+	return button
+
+
+func _run_test(url: String, key: String) -> void:
+	if _server_result != null:
+		_server_result.text = "Testing %s ..." % url
+	var result: Dictionary = await main.test_server(url, key)
+	if _server_result != null and is_instance_valid(_server_result):
+		_server_result.text = ("OK: " if result["ok"] else "Not working: ") + str(result["message"])
+
+
+func _test_form() -> void:
+	_run_test(ServerAddress.normalise(str(_form["url"])), str(_form["api_key"]))
+
+
+func _save_form() -> void:
+	var check := ServerAddress.check(str(_form["url"]))
+	if check["level"] == ServerAddress.Level.REFUSED:
+		return
+	var entry: Dictionary = main.add_server({"name": _form["name"], "url": check["url"], "api_key": _form["api_key"]}, true)
+	if entry.is_empty():
+		main.say("Couldn't save that server (is the list full?).")
+		return
+	_form = {"name": "", "url": "https://", "api_key": ""}
+	show_page("servers")
 
 
 # --- Settings ---------------------------------------------------------------------------------------------

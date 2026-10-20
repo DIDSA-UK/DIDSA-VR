@@ -223,7 +223,7 @@ the APK.
 | **L1** Landing shell **(built)** | Landing state in `main.gd` (replaces the start-up import of `res://assembly.didsa`), launcher panel, Home tile, status shown in the headset, About and credits | 2-3 days | headless: tiles, Home returns, no backend calls offline; render: the layout |
 | **L2** Demo content **(built)** | Demo models page (Full size / On the desk), rocket garden with name plates, demo assemblies greyed offline | 2 days | headless: every demo glb loads at 1:1 (sizes in the table above); render: garden |
 | **L3** Logo and tips **(built)** | `scripts/landing/didsa_logo.gd` from the prototype, tips reel, APK icon | 1-2 days | headless: reel cycles, pause; render: logo |
-| **L4** Servers | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
+| **L4** Servers **(built; stub-server tested, not against a real backend)** | `user://servers.cfg`, Servers page, switch server without restart, typed entry, `adb push` route documented | 2-3 days | headless: config round trip, switch; live backend: switch and open the table |
 | **L5** QR spike, on the headset | Turn on marker tracking; does `is_qrcode_supported()` say yes on your Quest 3 and Horizon OS version; permissions; read a test code | 1 day | by hand only |
 | **L6** QR pairing | Scan, "Connect to ...?", save. The flat app's side (checks and code) is built in DIDSA-CAD | 2 days (VR) | headless: payload parsing and refusals (DIDSA-CAD's payload tests are the reference); live: pairing against a backend |
 | **L7** Tour | Guided first two minutes | 2 days | headless: steps advance |
@@ -267,6 +267,21 @@ Code in `scripts/landing/`: `landing.gd` (the state: enter / leave, placement, w
 - **Not verified:** everything on a headset (placement and comfort of the panels, the sway, the garden's frame rate and load hitch, the tile
   sizes at arm's length); the real APK (export filter `demo/*`, `res://demo/` listing in an exported build); a Quest-class cost for 56k
   triangles with the Mobile renderer. The renders are GL-compatibility under Xvfb.
+
+## What was built (L4)
+
+Details and the file format: [`servers.md`](servers.md). `user://servers.cfg` (`server_store.gd`), the Servers page of the launcher (list with Use /
+Test / Forget, "Use no server", typed entry with Test and Save and use), address rules ported from DIDSA-CAD's pairing checks (`server_address.gd`),
+`main.switch_server()` / `add_server()` / `forget_server()` which re-point every tool at the new backend **without a restart** and unload what the old
+server loaded (asking first about unsaved changes). secrets.cfg is a read-only developer override that wins at start. `adb push` route documented, with the
+folder printed on the Servers page. Tests: `servers`, `server_probe`.
+
+- **Verified:** headless and on a real socket against a stub `/health` server. **Not verified:** against a real DIDSA-CAD backend (no backend in the build
+  session: the scope's "live backend: switch and open the table" is **not done**, and there is no `e2e_servers.gd`); that every startup `configure_backend()`
+  consumer was found (the six that exist are re-pointed and tested, a seventh would still hold the old address); the `adb push` folder on a Quest; plain
+  `http://` to a LAN server on the Quest.
+- **Not built:** a per-server "Connected" state (the pill says "Server: host", set not checked); renaming a saved server; per-server document sessions
+  in the typed form (the file supports `document_session`).
 
 ## Decisions (owner, 20 Oct 2026)
 

@@ -50,6 +50,7 @@ var visibility_ruled_parts: Array = [] ## parts whose load-rule visibility (visi
 var _native_extras: Dictionary = {} ## top-level keys of the loaded native file the backend ignores (the flat app's hidden_feature_ids, section_planes...): kept so a save writes them back — see save_native_snapshot()
 var command_stack := preload("res://scripts/command_stack.gd").new() ## shared undo/redo history — see command_stack.gd
 signal dirty_changed(dirty: bool)
+signal server_changed ## the backend this app talks to was switched (or went offline): see switch_server()
 signal status_changed(text: String) ## every _set_status(): the landing's launcher shows it in the headset
 signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
 signal references_changed() ## the opened file's moved / missing references (reference_review()) changed: the Files > References page redraws
@@ -74,6 +75,8 @@ const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empt
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const Landing := preload("res://scripts/landing/landing.gd") ## the first screen: a state of this world, see landing.gd
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
+const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
+const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
@@ -105,6 +108,9 @@ var _parse_started_ms := 0
 var _load_summary := ""
 var _part_count := 0
 var view_modes ## view_modes.gd: Shaded / Shaded + edges / Wireframe
+var server_store := ServerStore.new() ## the servers this headset knows; secrets.cfg is a developer override on top (see _load_servers())
+var active_server_id := "" ## "secrets" (res://secrets.cfg), a server_store id, or "" (offline)
+var _secrets_server: Dictionary = {} ## what secrets.cfg gave, kept so it can be switched back to
 var landing: Node ## landing.gd: logo, rocket garden, launcher and tips; enter()ed at start and by go_home()
 
 # All endpoints below live under the backend's "/document" router prefix —
@@ -164,12 +170,8 @@ func _ready() -> void:
 	$XROrigin3D/LeftController.laser_select_enabled = false # real-headset feedback: left trigger-select blocked left-hand locomotion (controller.gd's is_manipulating()) — grip-grab stays on both hands, left laser is freed up for a later tool (context menu, multi-select — not decided yet)
 	$XROrigin3D/RightController.button_pressed.connect(_on_right_stick_click)
 	_load_secrets()
-	_mates_tool.configure_backend(backend_url, api_key)
-	_measure_tool.configure_backend(backend_url, api_key)
-	_assembly_tree_window.configure_backend(backend_url, api_key)
-	room_manager.configure_backend(backend_url, api_key)
-	design_table.configure_backend(backend_url, api_key)
-	_browser_window.configure_relay(relay_url, relay_api_key)
+	_load_servers()
+	_apply_backend()
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
 	_world_environment.apply_saved_scene(_settings.last_scene)
@@ -611,8 +613,8 @@ func server_note() -> String:
 func server_detail() -> String:
 	if not has_backend():
 		return "No server is set, so everything that needs DIDSA-CAD (opening native files, mates, measuring, painting) is greyed out. The demo models work offline."
-	var origin := "From secrets.cfg" if FileAccess.file_exists(secrets_file_path) else "Set in this build"
-	return "%s: %s. Not checked yet. Adding and switching servers from the headset comes with the Servers page." % [origin, backend_url]
+	var origin := "From secrets.cfg" if active_server_id == "secrets" else "From servers.cfg"
+	return "%s: %s. Use Test to check it answers." % [origin, backend_url]
 
 
 func _backend_host() -> String:
@@ -966,6 +968,147 @@ func _load_secrets() -> void:
 	BackendSession.set_session_id(str(config.get_value("backend", "document_session", ""))) # optional: a fixed document session id (default: a fresh one per launch)
 	relay_url = config.get_value("browser_relay", "url", relay_url)
 	relay_api_key = config.get_value("browser_relay", "api_key", relay_api_key)
+
+
+func _load_servers() -> void:
+	## Which server to start on: res://secrets.cfg when it names one (the developer override), else the one chosen last in servers.cfg, else none.
+	if has_backend():
+		_secrets_server = {"id": "secrets", "name": "From secrets.cfg", "url": backend_url, "api_key": api_key, "document_session": "",
+			"relay_url": relay_url, "relay_api_key": relay_api_key, "readonly": true}
+		active_server_id = "secrets"
+	server_store.load_from_disk()
+	if active_server_id == "":
+		var saved := server_store.current()
+		if not saved.is_empty():
+			_set_backend_from(saved)
+			active_server_id = str(saved["id"])
+
+
+func _set_backend_from(entry: Dictionary) -> void:
+	backend_url = str(entry.get("url", ""))
+	api_key = str(entry.get("api_key", ""))
+	relay_url = str(entry.get("relay_url", ""))
+	relay_api_key = str(entry.get("relay_api_key", ""))
+	BackendSession.set_session_id(str(entry.get("document_session", "")))
+
+
+func _apply_backend() -> void:
+	## Tells everything that talks to the backend where it is now. Called at start and again whenever the server changes, so no restart is needed.
+	_mates_tool.configure_backend(backend_url, api_key)
+	_measure_tool.configure_backend(backend_url, api_key)
+	_assembly_tree_window.configure_backend(backend_url, api_key)
+	room_manager.configure_backend(backend_url, api_key)
+	design_table.configure_backend(backend_url, api_key)
+	_browser_window.configure_relay(relay_url, relay_api_key)
+
+
+func server_entries() -> Array[Dictionary]:
+	## Every server the Servers page lists: secrets.cfg's first (read-only), then servers.cfg's. Each carries `current`.
+	var out: Array[Dictionary] = []
+	if not _secrets_server.is_empty():
+		var first := _secrets_server.duplicate()
+		first["current"] = active_server_id == "secrets"
+		out.append(first)
+	for entry in server_store.servers:
+		var copy: Dictionary = entry.duplicate()
+		copy["current"] = active_server_id == str(entry["id"])
+		out.append(copy)
+	return out
+
+
+func switch_server(id: String) -> bool:
+	## Use another server ("" = go offline) without a restart. What is loaded from the old server (a native file, a new assembly) is unloaded first,
+	## since its part ids mean nothing to the new one; unsaved changes ask first, like any replace. True if it switched.
+	var entry: Dictionary = {}
+	if id == "secrets":
+		entry = _secrets_server
+	elif id != "":
+		entry = server_store.find(id)
+	if id != "" and entry.is_empty():
+		_set_status("That server is not in the list any more.")
+		return false
+	if id == active_server_id:
+		return true
+	if _load_busy:
+		_set_status("Busy: still working on the previous file. Try switching server again in a moment.")
+		return false
+	if _resolved_part_id != "" and not confirm_discard("Switch server"):
+		return false
+	if _resolved_part_id != "":
+		unload_model()
+	if id == "":
+		backend_url = ""
+		api_key = ""
+		relay_url = ""
+		relay_api_key = ""
+	else:
+		_set_backend_from(entry)
+	active_server_id = id
+	if id != "secrets":
+		server_store.set_current(id) # secrets.cfg is not remembered: it is read at every start anyway
+	_apply_backend()
+	server_changed.emit()
+	_set_status("Offline: demo models only." if id == "" else "Server: %s." % _backend_host())
+	return true
+
+
+func forget_server(id: String) -> bool:
+	## Remove a server from servers.cfg; if it is the one in use, go offline first. secrets.cfg's entry cannot be forgotten.
+	if id == "secrets" or server_store.find(id).is_empty():
+		return false
+	if id == active_server_id and not switch_server(""):
+		return false
+	return server_store.remove(id)
+
+
+func add_server(fields: Dictionary, use_now: bool = true) -> Dictionary:
+	## Saves a server (typed or scanned) and, by default, switches to it. Returns the stored entry, or {} when it is refused.
+	var entry := server_store.add(fields, use_now)
+	if entry.is_empty():
+		return {}
+	if use_now:
+		if active_server_id == str(entry["id"]): # the same server added again with a new key or name: apply it where it is
+			_set_backend_from(entry)
+			_apply_backend()
+			server_changed.emit()
+		else:
+			switch_server(str(entry["id"]))
+	return entry
+
+
+func test_server(url: String, key: String) -> Dictionary:
+	## {ok, message, code}: asks /health with the key (server_probe.gd).
+	var probe := ServerProbe.new()
+	add_child(probe)
+	var result: Dictionary = await probe.check(url, key)
+	probe.queue_free()
+	return result
+
+
+func unload_model() -> void:
+	## Empties the world of what was loaded (the same clean-up _show_model() does before it puts a new model in), for a server switch.
+	_appearance_tool.forget()
+	scenes_tool.forget()
+	_appearance_tool.world_root = ""
+	room_manager.on_model_replaced(false)
+	command_stack.clear()
+	design_table.on_model_replaced()
+	_mates_tool.clear_picks()
+	_section_tool.reset()
+	design_table.tree.mark_stale()
+	_assembly_tree_window.mark_stale()
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.reset_interaction()
+	for old in assembly_root.get_children():
+		assembly_root.remove_child(old)
+		old.queue_free()
+	_part_count = 0
+	_resolved_part_id = ""
+	_native_extras.clear()
+	visibility_ruled_parts.clear()
+	native_file_path = ""
+	_load_summary = ""
+	mark_clean()
 
 
 func _start_xr() -> void:

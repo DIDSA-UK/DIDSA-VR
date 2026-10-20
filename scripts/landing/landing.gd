@@ -65,6 +65,14 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	add_child(reel)
 	reel.setup_reel(left, right, camera)
 	main.status_changed.connect(launcher.set_status)
+	main.server_changed.connect(_on_server_changed)
+
+
+func _on_server_changed() -> void:
+	## A different server (or none): the tiles that need one, the connection pill and the tips list follow.
+	reel.set_connected(main.has_backend())
+	if launcher.is_open():
+		launcher.show_page(launcher.page)
 
 
 func is_active() -> bool:
