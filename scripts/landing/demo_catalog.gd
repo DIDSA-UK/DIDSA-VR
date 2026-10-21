@@ -11,10 +11,10 @@ const ASSEMBLY_FILES: Array[Dictionary] = [
 const CREDITS_PATH := "res://demo/CREDITS.md"
 const DESK_RATIO := 50.0 ## "On the desk" is 1:50 ...
 const DESK_MAX_SIZE := 1.5 ## ... unless that would stand taller than this (metres), then the largest side is brought down to it
-const INFO := { ## file base name -> {name, height (metres: the published figure the scope checks the glb against; its largest dimension)}
+const INFO := { ## file base name -> {name, height (metres: the published figure the scope checks the glb against; its largest dimension), night_lift (optional: the model is dark metal that vanishes against the night sky, so the garden lifts it)}
 	"Saturn_V": {"name": "Saturn V", "height": 110.6},
 	"SLS_Block_1": {"name": "SLS Block 1", "height": 98.1},
-	"Starship_SN20_BN4": {"name": "Starship SN20 / BN4", "height": 120.0},
+	"Starship_SN20_BN4": {"name": "Starship SN20 / BN4", "height": 120.0, "night_lift": true},
 	"Falcon_Heavy": {"name": "Falcon Heavy", "height": 70.0},
 	"Falcon_9": {"name": "Falcon 9", "height": 70.0},
 	"Delta_II": {"name": "Delta II", "height": 40.5},
@@ -28,7 +28,7 @@ const ORDER: Array[String] = ["Saturn_V", "SLS_Block_1", "Starship_SN20_BN4", "F
 
 
 static func models(kind: String = "") -> Array[Dictionary]:
-	## [{id, name, kind, path, height}] in ORDER (unknown files last, by name); `kind` "rocket" / "spacecraft" or "" for both.
+	## [{id, name, kind, path, height, night_lift}] in ORDER (unknown files last, by name); `kind` "rocket" / "spacecraft" or "" for both.
 	## `height` is the size to expect, 0 when the file isn't in INFO (the garden measures those itself).
 	var found: Array[Dictionary] = []
 	for dir_kind in MODEL_DIRS:
@@ -39,7 +39,7 @@ static func models(kind: String = "") -> Array[Dictionary]:
 			var id := file_name.get_basename()
 			var info: Dictionary = INFO.get(id, {})
 			found.append({"id": id, "name": info.get("name", id.replace("_", " ")), "kind": dir_kind,
-				"path": dir_path.path_join(file_name), "height": float(info.get("height", 0.0))})
+				"path": dir_path.path_join(file_name), "height": float(info.get("height", 0.0)), "night_lift": bool(info.get("night_lift", false))})
 	found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		var ia := ORDER.find(a["id"])
 		var ib := ORDER.find(b["id"])

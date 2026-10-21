@@ -49,6 +49,8 @@ func _add_rocket(model: Dictionary, slot: Vector2) -> void:
 	add_child(holder)
 	holder.add_child(scene)
 	_no_shadows(scene)
+	if model.get("night_lift", false):
+		_lift_dark(scene)
 	var box := DemoCatalog.bounds(scene)
 	var extent := maxf(box.size.y, maxf(box.size.x, box.size.z)) # a rocket's height (the largest dimension, in case one lies flat)
 	var callout := DimensionCallout.build(box.size, slot.y, str(model["name"]).to_upper(), "%.1f m" % extent, entries.size())
@@ -92,6 +94,26 @@ func _make_ring(radius: float, distance: float) -> MeshInstance3D:
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.name = "Ring"
 	return node
+
+
+func _lift_dark(root: Node) -> void:
+	## A black, glossy model (the Starship) reflects the dark sky and disappears against it. Matte it and give it a steel glow of its own: it reads as brushed
+	## stainless against the night, which is closer to the real ship than black tiles.
+	if root is MeshInstance3D:
+		var mesh_node := root as MeshInstance3D
+		for surface in mesh_node.get_surface_override_material_count():
+			var source := mesh_node.get_active_material(surface) as StandardMaterial3D
+			if source == null:
+				continue
+			var lit := source.duplicate() as StandardMaterial3D
+			lit.metallic = minf(lit.metallic, 0.2)
+			lit.roughness = maxf(lit.roughness, 0.55)
+			lit.emission_enabled = true
+			lit.emission = Color(0.34, 0.38, 0.45)
+			lit.emission_energy_multiplier = 0.9
+			mesh_node.set_surface_override_material(surface, lit)
+	for child in root.get_children():
+		_lift_dark(child)
 
 
 func _no_shadows(root: Node) -> void:

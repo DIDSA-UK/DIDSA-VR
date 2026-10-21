@@ -224,6 +224,13 @@ func _initialize() -> void:
 	check("every rocket stands 50 m from the user: an arc", distance_ok)
 	var plates: PackedStringArray = garden.plate_texts()
 	check("each rocket has a name plate with its height", plates.size() == 6 and "Saturn V\n110.6 m" in plates[0] and plates[0].ends_with(" m"))
+	var lifted := false
+	for e in garden.entries:
+		if e["id"] == "Starship_SN20_BN4":
+			for m in e["node"].find_children("*", "MeshInstance3D", true, false):
+				var material := (m as MeshInstance3D).get_surface_override_material(0) as StandardMaterial3D
+				lifted = lifted or (material != null and material.emission_enabled and material.metallic <= 0.2)
+	check("the black Starship is lifted (matte, with a steel glow) so it shows against the night sky", lifted)
 	var colliders: int = garden.find_children("*", "CollisionObject3D", true, false).size()
 	var grabbable := 0
 	for n in get_nodes_in_group("grabbable_parts"):
