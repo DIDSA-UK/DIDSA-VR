@@ -5,7 +5,7 @@ Credits and licences: [`CREDITS.md`](CREDITS.md). What the landing does with the
 
 | Folder | What | Needs a server |
 |---|---|---|
-| `rockets/` | Five launch vehicles at full size (glTF, metres, Y up, base on the floor at the origin) | No |
+| `rockets/` | Six launch vehicles at full size (glTF, metres, Y up, base on the floor at the origin) | No |
 | `spacecraft/` | Voyager, Hubble, Pioneer 10, Apollo-Soyuz at full size | No |
 | `assemblies/table/` | The table: `Top_and_frame.didsa` (open this one) over `Frame.didsa`, `Frame_A/B.didsa`, `Table_Top.didsa` | Yes (native files are meshed by the backend) |
 | `assemblies/plate_and_peg/` | `Plate_and_peg.didsa` over a plate and a peg | Yes |

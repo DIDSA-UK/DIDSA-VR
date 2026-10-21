@@ -10,7 +10,7 @@ const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const DimensionCallout := preload("res://scripts/landing/dimension_callout.gd")
 const SLOTS: Array[Vector2] = [ ## (azimuth in degrees from straight ahead, + to the right; distance in metres), in the catalogue's order. All at one distance: an arc round the user,
 	## with the middle 70 degrees left clear for the monolith and the logo.
-	Vector2(40.0, 50.0), Vector2(-40.0, 50.0), Vector2(75.0, 50.0), Vector2(-75.0, 50.0), Vector2(110.0, 50.0),
+	Vector2(38.0, 50.0), Vector2(-38.0, 50.0), Vector2(72.0, 50.0), Vector2(-72.0, 50.0), Vector2(106.0, 50.0), Vector2(-106.0, 50.0),
 ]
 
 signal built ## every rocket is in (or failed and was skipped)

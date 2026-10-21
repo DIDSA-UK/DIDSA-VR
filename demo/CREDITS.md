@@ -1,7 +1,7 @@
 # Demo content: credits and licences
 
 These files ship inside the APK (export include filter `demo/*`, see [`README.md`](README.md)). The landing's **About** page must show
-this list in the headset, because the SLS and Falcon Heavy models' licence (CC BY 4.0) requires visible credit.
+this list in the headset, because the SLS, Falcon Heavy and Falcon 9 models' licence (CC BY 4.0) requires visible credit.
 
 ## Third-party models
 
@@ -12,6 +12,7 @@ this list in the headset, because the SLS and Falcon Heavy models' licence (CC B
 | `rockets/Jupiter-C_Explorer_1.glb` | NASA 3D Resources, "Explorer Jupiter-C Rocket" | NASA media (as above) | Draco compression removed (Godot cannot read it), scaled x1.2135, stood on the floor |
 | `rockets/Delta_II.glb` | NASA 3D Resources, "Delta II" (supplied by the project owner) | NASA media (as above) | Invisible 1 m helper box removed, stood on the floor (scale already 1:1) |
 | `rockets/Falcon_Heavy.glb` | "SpaceX Falcon Heavy" (https://skfb.ly/o6zpZ) by AllThingsSpace, adapted from "SpaceX Falcon 9 Block 5" (https://skfb.ly/oqxxW) by SunnyChen754 | [Creative Commons Attribution 4.0](http://creativecommons.org/licenses/by/4.0/) | Scaled x0.2357 to full size (70 m), stood on the floor, re-saved as plain glTF |
+| `rockets/Falcon_9.glb` | "SpaceX Falcon 9 Block 5" (https://skfb.ly/oqxxW) by SunnyChen754 | [Creative Commons Attribution 4.0](http://creativecommons.org/licenses/by/4.0/) | Scaled x0.986 to full size (70 m), stood on the floor, re-saved as plain glTF |
 | `spacecraft/Voyager.glb` | NASA 3D Resources, "Voyager Probe (A)" | NASA media (as above) | Draco removed, scaled x36.6 |
 | `spacecraft/Hubble_Space_Telescope.glb` | NASA 3D Resources, "Hubble Space Telescope (A)" | NASA media (as above) | Draco removed, scaled x0.0254 (it was modelled in inches) |
 | `spacecraft/Pioneer_10.glb` | NASA 3D Resources, "Pioneer 10" | NASA media (as above) | Draco removed (scale already 1:1) |

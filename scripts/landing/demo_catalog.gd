@@ -15,6 +15,7 @@ const INFO := { ## file base name -> {name, height (metres: the published figure
 	"Saturn_V": {"name": "Saturn V", "height": 110.6},
 	"SLS_Block_1": {"name": "SLS Block 1", "height": 98.1},
 	"Falcon_Heavy": {"name": "Falcon Heavy", "height": 70.0},
+	"Falcon_9": {"name": "Falcon 9", "height": 70.0},
 	"Delta_II": {"name": "Delta II", "height": 40.5},
 	"Jupiter-C_Explorer_1": {"name": "Jupiter-C", "height": 21.2},
 	"Apollo-Soyuz": {"name": "Apollo-Soyuz", "height": 21.6},
@@ -22,7 +23,7 @@ const INFO := { ## file base name -> {name, height (metres: the published figure
 	"Voyager": {"name": "Voyager", "height": 12.3},
 	"Pioneer_10": {"name": "Pioneer 10", "height": 2.74},
 }
-const ORDER: Array[String] = ["Saturn_V", "SLS_Block_1", "Falcon_Heavy", "Delta_II", "Jupiter-C_Explorer_1", "Apollo-Soyuz", "Hubble_Space_Telescope", "Voyager", "Pioneer_10"]
+const ORDER: Array[String] = ["Saturn_V", "SLS_Block_1", "Falcon_Heavy", "Falcon_9", "Delta_II", "Jupiter-C_Explorer_1", "Apollo-Soyuz", "Hubble_Space_Telescope", "Voyager", "Pioneer_10"]
 
 
 static func models(kind: String = "") -> Array[Dictionary]:

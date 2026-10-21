@@ -181,6 +181,7 @@ All 1:1 in metres, Y up, base on the floor and centred at the origin; Draco remo
 | Saturn V | NASA 3D Resources (replaces your upload) | x8.516 (it was about 1:8.5) | 110.6 m tall, body 10.8 m | 110.6 m, 10.1 m | Your file is this NASA model re-exported with its textures lost; NASA's original keeps them. Scaled to height; the body comes out 7% too wide. |
 | Delta II | Your upload (NASA 3D Resources) | x1 (already 1:1) | 40.5 m, core 2.44 m | 38.9-39.0 m, core 2.44 m | Core exact, fairing about 4% long. Three boosters: the 7320 / 7420 version. An invisible 1 m box had a collider; removed. |
 | Falcon Heavy | Your upload (Sketchfab, CC BY 4.0) | x0.2357 | 70 m tall, about 12.2 m wide (core and side boosters) | 69.96 m, 12.37 m wide | Mesh was 297 units long; scaled to the published height. |
+| Falcon 9 Block 5 | Your upload (Sketchfab, CC BY 4.0) | x0.986 | 70 m tall with fairing | 70.0 m, 5.1 m across (legs and fins) | Mesh was 70.99 m at its own scale; scaled to the published height. |
 | Jupiter-C (Explorer 1) | Your upload (NASA 3D Resources) | x1.2135 | 21.2 m, body 1.83 m | 21.2 m, 1.78 m | It was about 82% size. **Draco compressed: as uploaded it would not load in Godot.** |
 | Voyager | NASA 3D Resources | x36.6 | dish 3.66 m, boom tip to tip 12.3 m | dish 3.66 m | It was about 1:37 |
 | Hubble Space Telescope | NASA 3D Resources | x0.0254 | 13.35 m long, 4.27 m | 13.2 m, 4.2 m | Modelled in inches |
@@ -323,7 +324,7 @@ settings in `project.godot` (Meta passthrough, spatial-entity marker tracking). 
 
 ## Decisions (owner, 20 Oct 2026)
 
-1. **Sources:** the models are from NASA 3D Resources except SLS and Falcon Heavy (Sketchfab, CC BY 4.0); `../demo/CREDITS.md` says so.
+1. **Sources:** the models are from NASA 3D Resources except SLS, Falcon Heavy and Falcon 9 (Sketchfab, CC BY 4.0); `../demo/CREDITS.md` says so.
 2. **Saturn V:** scaled to its height (110.6 m), as done. No better free textured model was found: NASA's is the only one downloadable
    here, and the Sketchfab ones need a logged-in download. Swap it if you find a better one; the script makes that one command.
 3. **Headset:** Quest 3, kept up to date, so Horizon OS is past v83 and route A (built-in QR tracking) is the first thing to try.
