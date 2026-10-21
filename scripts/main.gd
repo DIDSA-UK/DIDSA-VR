@@ -828,6 +828,22 @@ func set_msaa(level: int) -> void:
 	get_viewport().msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X][level]
 
 
+func msaa_level() -> int:
+	return {Viewport.MSAA_DISABLED: 0, Viewport.MSAA_2X: 1, Viewport.MSAA_4X: 2}.get(get_viewport().msaa_3d, 1)
+
+
+func foveation_level() -> int:
+	## The OpenXR foveated-rendering level (0 off .. 3 high), or -1 with no headset.
+	if xr_interface and xr_interface.is_initialized() and "foveation_level" in xr_interface:
+		return int(xr_interface.get("foveation_level"))
+	return -1
+
+
+func set_foveation_level(level: int) -> void:
+	if xr_interface and xr_interface.is_initialized() and "foveation_level" in xr_interface:
+		xr_interface.set("foveation_level", level)
+
+
 # --- Environment (View > Environment tab): Light/Dark/Mid rendered presets
 # plus Passthrough (OpenXR mixed reality) — see environment_manager.gd.
 

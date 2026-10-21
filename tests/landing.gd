@@ -257,6 +257,46 @@ func _initialize() -> void:
 	await frames(1)
 	check("...and back from Passthrough the night sky and fog return", env.background_mode == Environment.BG_SKY and env.fog_enabled)
 
+	# --- Settings > Graphics check: the flicker suspects, one switch each ------------------------------------------------------
+	var launcher = main.landing.launcher
+	launcher.show_page("settings")
+	await frames(1)
+	var to_graphics := button_starting(launcher._body, "Graphics check")
+	check("Settings has a Graphics check button", to_graphics != null)
+	to_graphics.pressed.emit()
+	await frames(1)
+	check("...which opens its page on the monolith", launcher.page == "graphics")
+	var sky_switch := button_starting(launcher._body, "Night sky shader")
+	sky_switch.button_pressed = false
+	check("the night sky shader off: a flat colour, the fog still on", env.background_mode == Environment.BG_COLOR and env.fog_enabled and main.landing.stage.plain_sky)
+	button_starting(launcher._body, "Fog").button_pressed = false
+	check("fog off", not env.fog_enabled)
+	main.go_home() # the choices hold while the landing is re-entered
+	await frames(1)
+	check("...and both hold when the landing is entered again", env.background_mode == Environment.BG_COLOR and not env.fog_enabled)
+	launcher.show_page("graphics")
+	await frames(1)
+	button_starting(launcher._body, "Night sky shader").button_pressed = true
+	button_starting(launcher._body, "Fog").button_pressed = true
+	check("both back on: the sky shader and the fog", env.background_mode == Environment.BG_SKY and env.fog_enabled)
+	button_starting(launcher._body, "Glow behind the logo").button_pressed = false
+	check("the logo's glow off", not main.landing._halo.visible)
+	button_starting(launcher._body, "Glow behind the logo").button_pressed = true
+	button_starting(launcher._body, "Rockets").button_pressed = false
+	check("the rockets off", not main.landing.garden.visible)
+	button_starting(launcher._body, "Rockets").button_pressed = true
+	button_starting(launcher._body, "Anti-aliasing").button_pressed = false
+	check("MSAA off", main.get_viewport().msaa_3d == Viewport.MSAA_DISABLED)
+	button_starting(launcher._body, "Anti-aliasing").button_pressed = true
+	check("...and back to 2x", main.get_viewport().msaa_3d == Viewport.MSAA_2X)
+	check("no headset: foveation is not offered, and says so", button_starting(launcher._body, "Foveated") == null and "Foveated rendering: no headset" in _all_text(launcher._body))
+	button_starting(launcher._body, "Passthrough").button_pressed = true
+	check("Passthrough from the page, with its status line under it", main.current_scene() == "Passthrough" and (launcher._body.find_child("PassthroughStatus", true, false) as Label).text != "")
+	button_starting(launcher._body, "Passthrough").button_pressed = false
+	check("...and off again", main.current_scene() == "Mid" and env.background_mode == Environment.BG_SKY)
+	var sky_source := FileAccess.get_file_as_string("res://shaders/landing_sky.gdshader")
+	check("the sky shader has no reversed smoothstep (undefined in GLSL) and wraps its star hash", not sky_source.contains("smoothstep(0.30, 0.0") and sky_source.contains("mod(id, 289.0)"))
+
 	# --- Show the landing on start = off -----------------------------------------------------------------------------------
 	main.set_show_landing_on_start(false)
 	main.queue_free()
@@ -278,6 +318,14 @@ const TRIANGLE_BUDGET := 200000 ## the six rockets in the arc measure about 175k
 
 func d_of(e: Dictionary) -> float:
 	return Vector2(e["position"].x, e["position"].z).length()
+
+
+func button_starting(node: Node, prefix: String) -> Button:
+	## The first Button under `node` whose text begins with `prefix` (the launcher's toggles read "<label>: ON").
+	for b in node.find_children("*", "Button", true, false):
+		if (b as Button).text.begins_with(prefix):
+			return b as Button
+	return null
 
 
 func _all_text(node: Node) -> String:

@@ -109,7 +109,7 @@ func enter() -> void:
 	var forward := _flat_forward()
 	stage.enter(Vector3(_camera.global_position.x, _floor_y(), _camera.global_position.z), forward)
 	logo.visible = true
-	_halo.visible = true
+	_halo.visible = halo_on
 	garden.visible = true
 	if not garden.is_built:
 		garden.build()
@@ -134,6 +134,14 @@ func leave() -> void:
 		model.visible = true
 	_model_hidden = false
 	exited.emit()
+
+
+var halo_on := true ## Settings > Graphics check: the additive glow behind the logo
+
+
+func set_halo_on(on: bool) -> void:
+	halo_on = on
+	_halo.visible = active and on
 
 
 func set_show_tips(on: bool) -> void:

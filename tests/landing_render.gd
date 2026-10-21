@@ -181,6 +181,33 @@ func _initialize() -> void:
 			distinct[garden_img.get_pixel(x, y).to_html(false)] = true
 	check("the garden view is not a flat colour", distinct.size() > 40)
 
+	# --- straight up: the night sky alone (the Quest flicker was above the horizon, docs/quest-first-run-fixes.md B2) --------------------
+	logo.visible = false
+	landing._halo.visible = false
+	landing.garden.visible = false # the rockets' tops are in view too: this is about the sky
+	eye.global_position = Vector3(0.0, 1.6, 0.0)
+	eye.look_at(Vector3(0.0, 100.0, -0.01), Vector3.UP)
+	for i in 6:
+		await process_frame
+	var up_img := root.get_texture().get_image()
+	if dir != "":
+		up_img.save_png(dir.path_join("landing_sky_up.png"))
+	var star_px := 0
+	var sane := true
+	var total := 0
+	for y in range(0, up_img.get_height(), 4):
+		for x in range(0, up_img.get_width(), 4):
+			var c := up_img.get_pixel(x, y)
+			total += 1
+			sane = sane and is_finite(c.r) and is_finite(c.g) and is_finite(c.b)
+			if c.get_luminance() > 0.25:
+				star_px += 1
+	print("SMOKE sky looking up: bright pixels ", star_px, " of ", total)
+	check("looking straight up the sky is dark navy with a scatter of stars, not patches of light (under 2% bright)", sane and star_px > 0 and star_px < total / 50)
+	logo.visible = true
+	landing._halo.visible = true
+	landing.garden.visible = true
+
 	DirAccess.remove_absolute("user://settings_landing_render.cfg")
 	DirAccess.remove_absolute("user://recent_landing_render.cfg")
 	quit()

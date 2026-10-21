@@ -13,6 +13,8 @@ const KEY_COLOUR := Color(0.62, 0.76, 1.0)
 const RIM_COLOUR := Color(1.0, 0.58, 0.30)
 
 var active := false
+var plain_sky := false ## Settings > Graphics check: a flat night colour instead of the sky shader (to find the Quest flicker, docs/quest-first-run-fixes.md B2)
+var fog_on := true ## Settings > Graphics check: the night fog
 var pad: MeshInstance3D
 var rim: DirectionalLight3D
 var _main: Node
@@ -54,6 +56,7 @@ func setup(p_main: Node, world_environment: WorldEnvironment, sun: DirectionalLi
 	sky_material.shader = SKY_SHADER
 	_sky.sky_material = sky_material
 	_sky.radiance_size = Sky.RADIANCE_SIZE_32
+	_sky.process_mode = Sky.PROCESS_MODE_QUALITY # the radiance is made once and whole, not a little each frame
 	if _world_environment != null and _world_environment.has_signal("scene_changed"):
 		_world_environment.scene_changed.connect(_on_scene_changed)
 
@@ -86,6 +89,14 @@ func leave() -> void:
 	_saved = {}
 
 
+func set_look(p_plain_sky: bool, p_fog_on: bool) -> void:
+	## Settings > Graphics check: the sky shader or a flat colour, fog on or off; applied now if the landing is up (passthrough keeps its own look).
+	plain_sky = p_plain_sky
+	fog_on = p_fog_on
+	if active and not _passthrough:
+		_apply()
+
+
 func _toward_user(forward: Vector3) -> Vector3:
 	return Vector3(forward.x, -0.20, forward.z).normalized()
 
@@ -100,12 +111,13 @@ func _apply() -> void:
 		_sun.visible = true
 		env.fog_enabled = false # the night fog would tint virtual parts over the real room
 		return
-	env.background_mode = Environment.BG_SKY
+	env.background_mode = Environment.BG_COLOR if plain_sky else Environment.BG_SKY
+	env.background_color = FOG_COLOUR
 	env.sky = _sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = AMBIENT
 	env.ambient_light_energy = 1.0
-	env.fog_enabled = true
+	env.fog_enabled = fog_on
 	env.fog_light_color = FOG_COLOUR
 	env.fog_density = 0.0065
 	env.fog_sky_affect = 0.0

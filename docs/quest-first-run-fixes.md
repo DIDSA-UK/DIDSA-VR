@@ -29,6 +29,18 @@ and bottom rows are already about 1.8 to 1.9 m off; one step back and they are o
 
 ## B2: flickering colours when looking up (landing sky)
 
+**Third APK (21 Oct, Enable Meta Plugin on):** the headset asked for the spatial-data permission (new: the Meta part is in the APK now), but with Passthrough
+on, each eye showed only flickering black / orange / light, the same colours as B2. In passthrough the landing does **not** draw the sky (the background is a
+clear colour), so the star shader cannot be the whole cause. Note: black, orange and white are also the rockets' colours (Starship, SLS, Saturn V), and the rockets
+are in view when you look up. A render test looking straight up (`tests/landing_render.gd`) shows the sky and the rockets drawn correctly under Mesa, so the fault is
+specific to the Quest.
+
+**Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
+fog, glow behind the logo, rockets, MSAA 2x, foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
+log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the
+switches off one at a time. Note which one stops it, and whether the flicker shows in a Quest screen recording: if it does, Godot drew it; if not, it happens in
+the headset's compositor.
+
 **What is above you on the landing:** only the sky (`shaders/landing_sky.gdshader`), the logo and its additive halo. The one thing in the scene that switches on at
 an angle is the **star field**: `smoothstep(0.06, 0.35, h)` turns stars on above about 3.5 degrees.
 
@@ -104,6 +116,7 @@ every Meta manifest step is gated on the export option **`xr_features/enable_met
 the project setting. `android-build.md` had said that toggle does not exist, so a preset made in the dialog rather than copied from the example has it off. Next:
 check `export_presets.cfg` for `xr_features/enable_meta_plugin=true` and `meta_xr_features/passthrough=1`, rebuild, and run the `aapt2` check (fix 1).
 **Confirmed** by the owner: their `export_presets.cfg` had `xr_features/enable_meta_plugin=false`. Next APK: with it true; passthrough and the QR scan not yet tried with it.
+With it true (the third APK), the spatial-data permission is asked for. Passthrough then gave the B2 flicker instead of the room: see B2.
 
 **What the code does** (`environment_manager.gd` `_enable_passthrough()`): if the runtime offers ALPHA_BLEND it sets that blend mode and a transparent viewport.
 This is the documented way, and the plugin's own sample does the same. Black means the runtime has no camera layer under our transparent frame.

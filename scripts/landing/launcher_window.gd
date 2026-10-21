@@ -128,11 +128,13 @@ func show_page(name: String) -> void:
 			_build_scan()
 		"about":
 			_build_about()
+		"graphics":
+			_build_graphics()
 		_:
 			page = "home"
 			_build_home()
 	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers", "scan": "Scan a QR code",
-		"settings": "Settings", "about": "About"}.get(page, "DIDSA Design Tools VR"))
+		"settings": "Settings", "about": "About", "graphics": "Graphics check"}.get(page, "DIDSA Design Tools VR"))
 	page_changed.emit(page)
 
 
@@ -517,7 +519,50 @@ func _build_settings() -> void:
 	_body.add_child(_toggle("Show the landing on start", main.show_landing_on_start(), func(on: bool) -> void: main.set_show_landing_on_start(on)))
 	_body.add_child(_toggle("Show tips", main.show_tips(), func(on: bool) -> void: main.set_show_tips(on)))
 	_body.add_child(_toggle("Reduce motion (logo sway and pulse)", main.reduce_motion(), func(on: bool) -> void: main.set_reduce_motion(on)))
+	_body.add_child(_action("Graphics check (for a flicker)", show_page.bind("graphics"), 0))
 	_body.add_child(_action("More settings on the wrist tablet", landing.open_tablet_settings, 0))
+
+
+# --- Graphics check: switch the flicker suspects off one at a time on the headset (docs/quest-first-run-fixes.md B2) ---------------
+
+func _build_graphics() -> void:
+	_body.add_child(_hint("If the picture flickers (black, orange or light in either eye), turn these off one at a time and note which one stops it. Each change is written to the log (adb logcat -s godot). Nothing here is saved: a restart puts it all back."))
+	var stage: Node = landing.stage
+	_body.add_child(_toggle("Night sky shader (off: a flat colour)", not stage.plain_sky, func(on: bool) -> void:
+		stage.set_look(not on, stage.fog_on)
+		_log_graphics("night sky shader", on)))
+	_body.add_child(_toggle("Fog", stage.fog_on, func(on: bool) -> void:
+		stage.set_look(stage.plain_sky, on)
+		_log_graphics("fog", on)))
+	_body.add_child(_toggle("Glow behind the logo", landing.halo_on, func(on: bool) -> void:
+		landing.set_halo_on(on)
+		_log_graphics("logo glow", on)))
+	_body.add_child(_toggle("Rockets", landing.garden.visible, func(on: bool) -> void:
+		landing.garden.visible = on
+		_log_graphics("rockets", on)))
+	_body.add_child(_toggle("Anti-aliasing (MSAA 2x)", main.msaa_level() > 0, func(on: bool) -> void:
+		main.set_msaa(1 if on else 0)
+		_log_graphics("MSAA 2x", on)))
+	var foveation: int = main.foveation_level()
+	if foveation >= 0:
+		_body.add_child(_toggle("Foveated rendering", foveation > 0, func(on: bool) -> void:
+			main.set_foveation_level(2 if on else 0)
+			_log_graphics("foveation", on)))
+	else:
+		_body.add_child(_hint("Foveated rendering: no headset, so not offered."))
+	var status := _hint(main.passthrough_status())
+	status.name = "PassthroughStatus"
+	var button := _toggle("Passthrough", main.current_scene() == "Passthrough", func(on: bool) -> void:
+		main.set_scene("Passthrough" if on else "Mid")
+		status.text = main.passthrough_status()
+		_log_graphics("passthrough", on))
+	button.name = "Passthrough"
+	_body.add_child(button)
+	_body.add_child(status)
+
+
+func _log_graphics(what: String, on: bool) -> void:
+	main.say("Graphics check: %s %s" % [what, "on" if on else "off"]) # the status line is printed too, so it is in the log
 
 
 # --- About ------------------------------------------------------------------------------------------------
