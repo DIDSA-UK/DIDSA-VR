@@ -2,7 +2,7 @@ shader_type sky;
 // The landing's night sky: deep navy to a warm band at the horizon, a scatter of stars. Static (no TIME), so the engine renders it once.
 
 uniform vec3 zenith : source_color = vec3(0.008, 0.020, 0.062);
-uniform vec3 mid : source_color = vec3(0.030, 0.075, 0.170);
+uniform vec3 mid : source_color = vec3(0.055, 0.120, 0.260);
 uniform vec3 horizon : source_color = vec3(0.95, 0.42, 0.16);
 uniform vec3 below : source_color = vec3(0.012, 0.022, 0.050);
 uniform float star_cells = 190.0;
@@ -17,8 +17,8 @@ float hash13(vec3 p) {
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	float h = d.y;
-	vec3 col = mix(horizon, mid, smoothstep(0.0, 0.16, h));
-	col = mix(col, zenith, smoothstep(0.08, 0.85, h));
+	vec3 col = mix(horizon, mid, smoothstep(0.0, 0.22, h));
+	col = mix(col, zenith, smoothstep(0.25, 1.0, h));
 	col += horizon * exp(-abs(h) * 16.0) * 0.30; // the glow hugging the horizon
 	if (h < 0.0) {
 		col = mix(horizon * 0.28, below, smoothstep(0.0, 0.12, -h));

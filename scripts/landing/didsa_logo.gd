@@ -7,7 +7,7 @@ extends Node3D
 
 const LOGO_PATH := "res://ui/logo/didsa_logo.glb"
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
-const SWAY_DEGREES := 7.0 ## each way
+const SWAY_DEGREES := 3.0 ## each way
 const SWAY_SECONDS := 14.0 ## one full sway there and back
 const PULSE_SECONDS := 2.6
 const PULSE_SCALE := 0.22 ## the porthole swells by up to this much

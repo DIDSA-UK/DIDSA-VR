@@ -1,17 +1,26 @@
 extends "res://scripts/landing/launcher_window.gd"
-## The landing's own menu: a launch deck, not the tablet. A wide console tilted back towards you below the logo: one big call to action (Demo models), a column of
-## menu lines (Continue, Open, New assembly, Demo assemblies, Servers; the ones that need a server are dimmed with a padlock when there is none), the connection
-## status top right, the tips ticker along the bottom and Settings / About in the corner. Everything is drawn by deck_button.gd and chamfer_box.gd: none of the
-## tablet's theme shows. The inner pages (the demo lists, Servers, Scan, Settings, About) are still launcher_window.gd's, shown in the same frame until they are
-## given the same treatment.
+## The landing's own menu: a monolith. A tall dark slab standing on the pad in front of you, the logo at its head against the sky and the menu down its face: the
+## connection status, one big call to action (Demo models), a column of menu lines (Continue, Open, New assembly, Demo assemblies, Servers; the ones that need a
+## server are dimmed with a padlock when there is none), the tips ticker and Settings / About at the foot. It is fixed where it stands (no grab handle, no resize
+## corners). Everything is drawn by deck_button.gd and monolith_face.gd: none of the tablet's theme shows. The inner pages (the demo lists, Servers, Scan, Settings,
+## About) are still launcher_window.gd's, shown on the same face until they are given the same treatment.
 
 const DeckButton := preload("res://scripts/landing/deck_button.gd")
+const MonolithFace := preload("res://scripts/landing/monolith_face.gd")
 const ChamferBox := preload("res://scripts/landing/chamfer_box.gd")
 const CYAN := Color(0.30, 0.88, 1.0)
 const INK := Color(0.94, 0.98, 1.0)
 const DIM := Color(0.56, 0.68, 0.82)
 const AMBER := Color(1.0, 0.66, 0.30)
-const TILT_BACK_DEGREES := 22.0
+const WIDTH := 1.9 ## metres
+const HEIGHT := 3.2 ## a tall slab: 0.45 m of plain crown above the logo, the logo, then the menu, then 0.3 m of plinth
+const DISTANCE := 1.9 ## metres in front of you
+const LOGO_FROM_TOP := 0.81 ## the logo's centre this far below the top edge
+const LOGO_ZONE_PX := 745.0 ## from the top: the crown and the logo's room
+const PLINTH_PX := 182.0 ## at the foot, clear of the menu
+const PX_PER_METRE := 606.0
+const THICKNESS := 0.14
+const LOGO_STANDOFF := 0.20 ## metres the logo floats in front of the face (its sway must never turn it into the slab)
 const ROW_IDS: Array[String] = ["continue", "open", "new", "assemblies", "servers"]
 const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "assemblies": "tree", "servers": "browser"}
 
@@ -28,32 +37,78 @@ var _ticker_on := true
 
 
 func _init() -> void:
-	launcher_panel_size = Vector2(1.04, 0.56)
-	launcher_viewport_size = Vector2i(1456, 784)
-	corner_hit_reach = -1.0 # the deck is not resized by its corners
+	launcher_panel_size = Vector2(WIDTH, HEIGHT)
+	launcher_viewport_size = Vector2i(roundi(WIDTH * PX_PER_METRE), roundi(HEIGHT * PX_PER_METRE))
+	corner_hit_reach = -1.0 # a monolith is not resized by its corners
 
 
 func _build_corners() -> void:
 	pass # and shows no resize brackets
 
 
+static func logo_position(eye: Vector3, forward: Vector3, floor_y: float) -> Vector3:
+	## Where the logo hangs: on the slab's face near its head. (landing.gd places the logo and its halo from this.)
+	var at := eye + forward * (DISTANCE - LOGO_STANDOFF)
+	return Vector3(at.x, floor_y + HEIGHT - LOGO_FROM_TOP, at.z)
+
+
 func _place_in_front_of_camera() -> void:
-	## Below the logo and tilted back so its face meets your eyes: a console, not a wall.
-	super._place_in_front_of_camera()
-	rotate_object_local(Vector3.RIGHT, -deg_to_rad(TILT_BACK_DEGREES))
+	## Standing on the pad, square to you, DISTANCE ahead: the slab's foot on the floor.
+	var forward := -_camera.global_transform.basis.z
+	forward.y = 0.0
+	forward = Vector3.FORWARD if forward.length() < 0.001 else forward.normalized()
+	var floor_y: float = _camera.get_parent().global_position.y
+	var eye := _camera.global_position
+	global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), Vector3(eye.x, floor_y + HEIGHT * 0.5, eye.z) + forward * DISTANCE)
+
+
+func handle_in_reach(_hand: Node3D) -> bool:
+	return false # no grab handle: the monolith stays where it stands
 
 
 # --- Chrome: no tablet theme, a drawn frame ---------------------------------------------------------------------------
 
-func _build_viewport() -> void:
-	super._build_viewport()
-	_viewport.transparent_bg = true # the frame is chamfered and translucent: what is behind it shows
-
-
 func _build_quad() -> void:
 	super._build_quad()
-	var material := (_quad.mesh as QuadMesh).material as StandardMaterial3D
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# a slab has depth: a dark body behind the face so it reads as a solid from the side, and glowing rim posts down both edges and across the top
+	var body_mesh := BoxMesh.new()
+	body_mesh.size = Vector3(WIDTH, HEIGHT, THICKNESS)
+	var body_material := StandardMaterial3D.new()
+	body_material.albedo_color = Color(0.006, 0.010, 0.022)
+	body_material.roughness = 0.35
+	body_material.metallic = 0.6
+	body_mesh.material = body_material
+	var body := MeshInstance3D.new()
+	body.mesh = body_mesh
+	body.position = Vector3(0.0, 0.0, -THICKNESS * 0.5 - 0.002)
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(body)
+	var rim_material := StandardMaterial3D.new()
+	rim_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rim_material.albedo_color = Color(0.45, 0.92, 1.0)
+	rim_material.disable_fog = true
+	for spec in [[Vector3(0.012, HEIGHT, 0.02), Vector3(-WIDTH * 0.5, 0.0, 0.004)], [Vector3(0.012, HEIGHT, 0.02), Vector3(WIDTH * 0.5, 0.0, 0.004)], [Vector3(WIDTH, 0.014, 0.02), Vector3(0.0, HEIGHT * 0.5, 0.004)]]:
+		var rim_mesh := BoxMesh.new()
+		rim_mesh.size = spec[0]
+		rim_mesh.material = rim_material
+		var rim := MeshInstance3D.new()
+		rim.mesh = rim_mesh
+		rim.position = spec[1]
+		rim.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(rim)
+	var foot_material := StandardMaterial3D.new() # a soft light strip along the floor at its foot
+	foot_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	foot_material.albedo_color = Color(0.30, 0.82, 1.0, 0.55)
+	foot_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	foot_material.disable_fog = true
+	var foot_mesh := BoxMesh.new()
+	foot_mesh.size = Vector3(WIDTH + 0.3, 0.008, 0.10)
+	foot_mesh.material = foot_material
+	var foot := MeshInstance3D.new()
+	foot.mesh = foot_mesh
+	foot.position = Vector3(0.0, -HEIGHT * 0.5 + 0.005, 0.07)
+	foot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(foot)
 
 
 func _build_root_ui() -> Control:
@@ -61,10 +116,10 @@ func _build_root_ui() -> Control:
 	root.theme = tokens.build_theme() # only for the plain Labels and the keyboard-less pages: the deck's own parts draw themselves
 	root.theme.default_font_size = 26
 	root.size = Vector2(viewport_size)
-	var frame := ChamferBox.new()
-	frame.cut = 38.0
-	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.add_child(frame)
+	var face := MonolithFace.new()
+	face.logo_zone = LOGO_ZONE_PX
+	face.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(face)
 	_header = HBoxContainer.new() # the base class keeps these: nothing here is shown
 	_title_label = Label.new()
 	_content_holder = Control.new()
@@ -91,8 +146,8 @@ func _build_content() -> Control:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right"]:
 		margin.add_theme_constant_override("margin_" + side, 46)
-	margin.add_theme_constant_override("margin_top", 34)
-	margin.add_theme_constant_override("margin_bottom", 34)
+	margin.add_theme_constant_override("margin_top", int(LOGO_ZONE_PX) + 30)
+	margin.add_theme_constant_override("margin_bottom", int(PLINTH_PX))
 	var old := super._build_content()
 	old.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(old)
@@ -134,13 +189,13 @@ func _build_home() -> void:
 		tile_by_id[tile["id"]] = tile
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 50)
-	margin.add_theme_constant_override("margin_right", 50)
-	margin.add_theme_constant_override("margin_top", 38)
-	margin.add_theme_constant_override("margin_bottom", 36)
+	margin.add_theme_constant_override("margin_left", 58)
+	margin.add_theme_constant_override("margin_right", 58)
+	margin.add_theme_constant_override("margin_top", int(LOGO_ZONE_PX) + 26)
+	margin.add_theme_constant_override("margin_bottom", int(PLINTH_PX))
 	_home_root.add_child(margin)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 20)
+	column.add_theme_constant_override("separation", 16)
 	margin.add_child(column)
 
 	# top: the name, the connection, close
@@ -149,42 +204,37 @@ func _build_home() -> void:
 	column.add_child(top)
 	var brand := Label.new()
 	brand.text = "DESIGN TOOLS  ·  VR"
-	brand.add_theme_font_size_override("font_size", 24)
+	brand.add_theme_font_size_override("font_size", 28)
 	brand.add_theme_color_override("font_color", CYAN)
 	brand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top.add_child(brand)
 	_home_pill = DeckButton.new()
 	_home_pill.setup("pill", main.connection_text())
-	_home_pill.custom_minimum_size = Vector2(420, 52)
+	_home_pill.custom_minimum_size = Vector2(520, 56)
 	_home_pill.pressed.connect(show_page.bind("servers"))
 	top.add_child(_home_pill)
 	var close_button := DeckButton.new()
 	close_button.setup("close", "Close")
-	close_button.custom_minimum_size = Vector2(52, 52)
+	close_button.custom_minimum_size = Vector2(56, 56)
 	close_button.pressed.connect(close)
 	top.add_child(close_button)
 
-	# body: the call to action, and the menu lines
-	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation", 26)
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(body)
-	var hero_tile: Dictionary = tile_by_id["models"]
+	# the call to action, then the menu lines, one under the other
 	var hero := DeckButton.new()
 	hero.name = "Tile_models"
-	hero.setup("hero", "Demo models", "Stand a Saturn V beside you at full size, or set one on your desk to turn in your hands.", "models")
+	hero.setup("hero", "Demo models", "Stand a rocket beside you at full size, or set one on your desk.", "models")
 	hero.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hero.size_flags_stretch_ratio = 1.15
-	hero.custom_minimum_size = Vector2(560, 0)
 	hero.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hero.size_flags_stretch_ratio = 2.2
+	hero.custom_minimum_size = Vector2(0, 300)
 	hero.pressed.connect(press_tile.bind("models"))
-	body.add_child(hero)
+	column.add_child(hero)
 	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 12)
-	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows.add_theme_constant_override("separation", 10)
 	rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_child(rows)
+	rows.size_flags_stretch_ratio = 3.0
+	column.add_child(rows)
 	for id in ROW_IDS:
 		var tile: Dictionary = tile_by_id[id]
 		var row := DeckButton.new()
@@ -193,31 +243,31 @@ func _build_home() -> void:
 		row.disabled = not tile["enabled"]
 		row.locked = not tile["enabled"] and "server" in str(tile["note"]).to_lower()
 		row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		row.custom_minimum_size = Vector2(500, 64)
+		row.custom_minimum_size = Vector2(0, 72)
 		row.pressed.connect(press_tile.bind(id))
 		rows.add_child(row)
 
-	# status line
+	# the status line, the tips ticker, and Settings / About at the foot
 	_home_status = Label.new()
 	_home_status.text = main.status_text
-	_home_status.add_theme_font_size_override("font_size", 20)
+	_home_status.add_theme_font_size_override("font_size", 22)
 	_home_status.add_theme_color_override("font_color", DIM)
-	_home_status.clip_text = true
+	_home_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_home_status.custom_minimum_size = Vector2(0, 56)
 	column.add_child(_home_status)
-
-	# bottom: tips ticker, Settings, About
+	_ticker = _build_ticker()
+	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(_ticker)
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 14)
 	column.add_child(bottom)
-	_ticker = _build_ticker()
-	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bottom.add_child(_ticker)
 	for id in ["settings", "about"]:
 		var tile: Dictionary = tile_by_id[id]
 		var corner := DeckButton.new()
 		corner.name = "Tile_" + id
 		corner.setup("corner", str(tile["label"]), str(tile["note"]), "settings" if id == "settings" else "help")
-		corner.custom_minimum_size = Vector2(190, 84)
+		corner.custom_minimum_size = Vector2(0, 66)
+		corner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		corner.pressed.connect(press_tile.bind(id))
 		bottom.add_child(corner)
 	_ticker.visible = _ticker_on
@@ -233,7 +283,7 @@ func _build_ticker() -> Control:
 	box.fill = Color(0.02, 0.05, 0.11, 0.70)
 	box.edge = Color(0.30, 0.88, 1.0, 0.40)
 	box.edge_width = 2.0
-	box.custom_minimum_size = Vector2(0, 84)
+	box.custom_minimum_size = Vector2(0, 104)
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.offset_left = 22
@@ -248,11 +298,11 @@ func _build_ticker() -> Control:
 	text_box.add_theme_constant_override("separation", 0)
 	row.add_child(text_box)
 	_ticker_kicker = Label.new()
-	_ticker_kicker.add_theme_font_size_override("font_size", 18)
+	_ticker_kicker.add_theme_font_size_override("font_size", 21)
 	_ticker_kicker.add_theme_color_override("font_color", AMBER)
 	text_box.add_child(_ticker_kicker)
 	_ticker_text = Label.new()
-	_ticker_text.add_theme_font_size_override("font_size", 22)
+	_ticker_text.add_theme_font_size_override("font_size", 27)
 	_ticker_text.add_theme_color_override("font_color", INK)
 	_ticker_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_ticker_text.max_lines_visible = 2
@@ -260,7 +310,7 @@ func _build_ticker() -> Control:
 	for spec in [["prev", "Previous"], ["pause", "Pause"], ["next", "Next"]]:
 		var button := DeckButton.new()
 		button.setup("mini", spec[1], "", spec[0])
-		button.custom_minimum_size = Vector2(54, 54)
+		button.custom_minimum_size = Vector2(62, 62)
 		button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		match spec[0]:
 			"prev":

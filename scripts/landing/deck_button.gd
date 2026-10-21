@@ -174,7 +174,7 @@ func _draw_hero() -> void:
 	# the line of text bottom left, the ENTER chip under it, the garden in miniature bottom right
 	var detail := note if note != "" else text.get_slice("\n", 1) if text.contains("\n") else ""
 	if detail != "":
-		draw_multiline_string(font, Vector2(52, h * 0.52), detail, HORIZONTAL_ALIGNMENT_LEFT, w * 0.50, 25, 4, Color(0.78, 0.88, 1.0, 0.95))
+		draw_multiline_string(font, Vector2(52, h * 0.50), detail, HORIZONTAL_ALIGNMENT_LEFT, w * 0.52, 28, 3, Color(0.78, 0.88, 1.0, 0.95))
 	_draw_lineup(Rect2(w * 0.60, h * 0.40, w * 0.34, h * 0.50))
 	var chip := Rect2(52.0, h - 84.0, 170.0, 54.0)
 	var chip_points := chamfer(chip, 12.0)

@@ -8,8 +8,9 @@ extends Node3D
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const DimensionCallout := preload("res://scripts/landing/dimension_callout.gd")
-const SLOTS: Array[Vector2] = [ ## (azimuth in degrees from straight ahead, + to the right; distance in metres), in the catalogue's order
-	Vector2(24.0, 60.0), Vector2(-22.0, 52.0), Vector2(38.0, 46.0), Vector2(-38.0, 42.0), Vector2(54.0, 40.0),
+const SLOTS: Array[Vector2] = [ ## (azimuth in degrees from straight ahead, + to the right; distance in metres), in the catalogue's order. The monolith fills the middle 55 degrees of the view,
+	## so the rockets stand round it, the tallest closest to it.
+	Vector2(36.0, 60.0), Vector2(-34.0, 52.0), Vector2(58.0, 46.0), Vector2(-56.0, 42.0), Vector2(80.0, 40.0),
 ]
 
 signal built ## every rocket is in (or failed and was skipped)

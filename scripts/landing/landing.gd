@@ -11,7 +11,7 @@ signal exited
 
 const DidsaLogo := preload("res://scripts/landing/didsa_logo.gd")
 const RocketGarden := preload("res://scripts/landing/rocket_garden.gd")
-const LandingDeck := preload("res://scripts/landing/landing_deck.gd")
+const LandingMonolith := preload("res://scripts/landing/landing_monolith.gd")
 const LandingStage := preload("res://scripts/landing/landing_stage.gd")
 const HALO_SHADER := preload("res://shaders/landing_halo.gdshader")
 const TipsReel := preload("res://scripts/landing/tips_reel.gd")
@@ -19,7 +19,7 @@ const QrScanner := preload("res://scripts/landing/qr_scanner.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
 const LOGO_DISTANCE := 3.0 ## metres ahead of the user
-const LOGO_SCALE := 1.5 ## the logo glb is 1.2 m wide: 1.8 m at this scale, a hero
+const LOGO_SCALE := 1.32 ## the logo glb is 1.2 m wide: about 1.6 m at this scale, nearly the width of the monolith it heads
 const LOGO_RISE := 1.05 ## metres above eye height (so the deck below it does not cover it)
 const DESK_DISTANCE := 0.8 ## metres ahead: the plinth for "On the desk"
 const WAIST_FRACTION := 0.55 ## of eye height: where the plinth's top is
@@ -68,7 +68,7 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	plinth = _make_plinth()
 	add_child(plinth)
 	plinth.visible = false
-	launcher = LandingDeck.new()
+	launcher = LandingMonolith.new()
 	launcher.name = "Launcher"
 	add_child(launcher)
 	launcher.setup_launcher(left, right, camera, self)
@@ -147,9 +147,9 @@ func place() -> void:
 	var eye := _camera.global_position
 	var floor_y := _floor_y()
 	var facing := Basis.looking_at(forward, Vector3.UP)
-	var logo_at := eye + forward * LOGO_DISTANCE + Vector3(0.0, LOGO_RISE, 0.0)
+	var logo_at: Vector3 = LandingMonolith.logo_position(eye, forward, floor_y) # at the head of the monolith, on its face
 	logo.global_transform = Transform3D(facing.scaled(Vector3.ONE * LOGO_SCALE), logo_at)
-	_halo.global_transform = Transform3D(facing, logo_at - forward * 0.25)
+	_halo.global_transform = Transform3D(facing, logo_at + forward * (LandingMonolith.LOGO_STANDOFF - 0.06)) # the glow just in front of the face, behind the logo
 	garden.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), Vector3(eye.x, floor_y, eye.z))
 
 
