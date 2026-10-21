@@ -182,7 +182,7 @@ func _enable_passthrough() -> void:
 func _fix_advice() -> String:
 	## What to change when the runtime would not give the camera feed: it depends on whether this is the Quest app itself or a PC link.
 	if OS.get_name() == "Android":
-		return "On the headset itself the app must ask for it: in the Android export preset set Xr Features > Passthrough to Optional (or Required) and re-export (the OpenXR Vendors plugin's Meta options do the same), and leave the headset's own Passthrough setting on."
+		return "On the headset the APK must declare passthrough in its manifest: in the Export dialog, Meta XR Features must show a Passthrough option set to Optional (if there is no such option the editor read the project setting xr/openxr/extensions/meta/passthrough as off; see docs/android-build.md). Re-export, and leave the headset's own Passthrough setting on."
 	return "Over a PC link, turn on Passthrough over Link in the Meta Quest Link / Horizon app (Settings > Beta), or the passthrough setting of your streaming app (Virtual Desktop), then choose Passthrough again."
 
 

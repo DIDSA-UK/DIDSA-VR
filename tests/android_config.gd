@@ -31,10 +31,14 @@ func _initialize() -> void:
 	for k in android_keys:
 		all_on = all_on and project.get_value("xr", k, false) == true
 	check("project.godot turns on Meta passthrough and spatial-entity marker tracking for Android builds", all_on)
+	var export_on := true
+	for k in android_keys:
+		export_on = export_on and project.get_value("xr", str(k).replace(".android", ".editor_hint"), false) == true
+	check("...and for the editor (.editor_hint), which is what the Vendors plugin reads when it writes the APK's manifest (passthrough feature, scene / anchor permissions)", export_on)
 	var plain_off := true
 	for k in ["openxr/extensions/meta/passthrough", "openxr/extensions/spatial_entity/enabled"]:
-		plain_off = plain_off and not project.has_section_key("xr", k)
-	check("...with no plain (desktop) setting beside them, so PC and PC-VR builds ask for nothing new", plain_off)
+		plain_off = plain_off and not project.has_section_key("xr", k) and not project.has_section_key("xr", k + ".editor")
+	check("...with no plain (desktop) or .editor setting beside them, so PC and PC-VR runs (from the editor too) ask for nothing new", plain_off)
 	check("OpenXR itself stays on and Mobile is still the renderer", project.get_value("xr", "openxr/enabled", false) == true and str(project.get_value("rendering", "renderer/rendering_method", "")) == "mobile")
 
 	# --- the example export preset ---------------------------------------------------------------------------------------------

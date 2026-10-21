@@ -245,6 +245,18 @@ func _initialize() -> void:
 	print("SMOKE garden triangles (informational): ", tris)
 	check("the six rockets are within the triangle budget (informational figure printed above)", tris > 0 and tris < TRIANGLE_BUDGET)
 
+	# --- Passthrough on the landing: the night sky and its fog step aside ---------------------------------------------------
+	main.go_home()
+	await frames(2)
+	var env: Environment = main.get_node("WorldEnvironment").environment
+	check("on the landing the night sky and fog are on", main.landing.is_active() and env.background_mode == Environment.BG_SKY and env.fog_enabled)
+	main.set_scene("Passthrough")
+	await frames(1)
+	check("Passthrough on the landing turns the fog off (it would tint virtual parts over the real room) and drops the sky", not env.fog_enabled and env.background_mode == Environment.BG_COLOR)
+	main.set_scene("Mid")
+	await frames(1)
+	check("...and back from Passthrough the night sky and fog return", env.background_mode == Environment.BG_SKY and env.fog_enabled)
+
 	# --- Show the landing on start = off -----------------------------------------------------------------------------------
 	main.set_show_landing_on_start(false)
 	main.queue_free()

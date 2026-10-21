@@ -92,6 +92,12 @@ show black edges; the tablet's Display page (fps, cpu / gpu ms) tells that apart
 
 ## B5: passthrough is black on the Quest
 
+**Status (21 Oct, later):** the owner's status line read *"It offers blend modes: opaque. The headset's passthrough layer is available but failed to
+start"*. So the extension was on in the app (the `.android` override applied), but the runtime would not create the passthrough layer, and so never offered alpha
+blend. That is what an app with no passthrough feature in its manifest gets, which fits the cause below. **Done:** `.editor_hint` overrides in `project.godot` (fix
+2 below, the way that leaves PC runs unchanged), the example preset's note, the Android advice in `passthrough_report`, the landing fog (fix 4), `android-build.md`
+corrected. **Still to do:** rebuild, check the manifest (fix 1), try it on the headset; the `openxr_fb_passthrough_state_changed` listener.
+
 **What the code does** (`environment_manager.gd` `_enable_passthrough()`): if the runtime offers ALPHA_BLEND it sets that blend mode and a transparent viewport.
 This is the documented way, and the plugin's own sample does the same. Black means the runtime has no camera layer under our transparent frame.
 
@@ -110,7 +116,7 @@ also does only through `.android`. So the Scan page would have failed next, even
 1. **Confirm first (no rebuild):** `aapt2 dump xmltree --file AndroidManifest.xml build/didsa-vr-debug.apk | grep -iE "PASSTHROUGH|USE_SCENE|USE_ANCHOR"` (or
    open the APK in Android Studio's APK Analyzer). Expected today: none of the three. Also note the Environment page's status line when Passthrough is picked
    (`passthrough_report`): "Passthrough ON (alpha blend)" means the manifest is the fault; "NOT available" lists what the runtime offered.
-2. **Fix the settings** so the export sees them: set the base keys too (`openxr/extensions/meta/passthrough=true`,
+2. **Fix the settings** so the export sees them (done with `.editor_hint` overrides instead of base keys: the editor sees them, a running game does not). The first idea was to set the base keys too (`openxr/extensions/meta/passthrough=true`,
    `openxr/extensions/spatial_entity/enabled=true` and its two marker-tracking keys). On the PC they only ask a PC runtime for extensions it may offer (Link's
    passthrough uses the same `XR_FB_passthrough`); the existing rule of starting passthrough only once the session has focus stays. If a PC-link test shows trouble,
    the fallback is to keep the keys Android-only and add the three manifest entries through a Gradle-template overlay like `tools/android/apply_cleartext_overlay.sh`.

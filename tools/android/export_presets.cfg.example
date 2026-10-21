@@ -50,7 +50,8 @@ meta_xr_features/quest_2_support=false
 meta_xr_features/quest_1_support=false
 meta_xr_features/quest_pro_support=false
 ; Passthrough: 1 = optional, 2 = required. Optional: the app works without it (the Scan page and View > Environment turn it on). The manifest entry for it is
-; written only while the project setting xr/openxr/extensions/meta/passthrough is on (project.godot turns it on for Android builds).
+; written only while the project setting xr/openxr/extensions/meta/passthrough reads true IN THE EDITOR at export time: project.godot turns it on with
+; .editor_hint (the export) as well as .android (the app on the headset). With only .android the option is hidden and the APK shows black passthrough.
 meta_xr_features/passthrough=1
 ; Spatial entities (the QR scan): the plugin adds com.oculus.permission.USE_SCENE and USE_ANCHOR_API to the manifest by itself while
 ; xr/openxr/extensions/spatial_entity/enabled is on (project.godot does that for Android builds): nothing to tick here.

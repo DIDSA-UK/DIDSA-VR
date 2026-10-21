@@ -56,3 +56,7 @@ openxr/extensions/meta/passthrough.android=true
 openxr/extensions/spatial_entity/enabled.android=true
 openxr/extensions/spatial_entity/enable_marker_tracking.android=true
 openxr/extensions/spatial_entity/enable_builtin_marker_tracking.android=true
+openxr/extensions/meta/passthrough.editor_hint=true
+openxr/extensions/spatial_entity/enabled.editor_hint=true
+openxr/extensions/spatial_entity/enable_marker_tracking.editor_hint=true
+openxr/extensions/spatial_entity/enable_builtin_marker_tracking.editor_hint=true

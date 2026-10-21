@@ -98,6 +98,7 @@ func _apply() -> void:
 		_ground.visible = false # the pad is the floor (its collider stays: teleporting works as before)
 	if _passthrough:
 		_sun.visible = true
+		env.fog_enabled = false # the night fog would tint virtual parts over the real room
 		return
 	env.background_mode = Environment.BG_SKY
 	env.sky = _sky
