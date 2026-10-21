@@ -20,15 +20,17 @@ and locomotion all keep working. It shows on every launch (Settings: "Show the l
 **Home** tile on the wrist tablet and the tool wheel.
 
 ```
-                       [ rocket garden, 1:1, 40-60 m away ]
-                         Saturn V  SLS  Delta II  Jupiter-C ...
+   Saturn V   SLS   Starship  ...                  ...  Falcon Heavy  Falcon 9   (an arc of rockets, 1:1, 50 m round you)
 
-          [ DIDSA logo, 3D, ~1.2 m wide, 2.5 m ahead, eye height ]
-               "Design and assemble parts at full size."
+                       [ DIDSA logo, 3D, ~3.2 m wide, floating above the monolith ]
+                                       (clear sky between)
+                       [ MONOLITH: a dark wall 1.9 m x 2.6 m, 1.9 m ahead, on the floor ]
+                       [   connection pill, close                                    ]
+                       [   DEMO MODELS (the call to action)                          ]
+                       [   Continue / Open / New / Demo assemblies / Servers         ]
+                       [   status line, tips ticker, Settings, About                 ]
 
-   [ tips reel ]        [ launcher panel, arm's reach ]        [ connection pill ]
-   cycles every 8 s     big tiles, laser + trigger             "Offline: demo models"
-                                                               "Connected: Workshop PC"
+   A night sky with stars over a dark pad with a blue grid and rings; the rockets carry dimension lines and their heights.
 ```
 
 1. **Logo** (the hero). The DIDSA emblem and wordmark in 3D, white with the blue porthole, gently animated: the rocket glides a little
@@ -36,7 +38,7 @@ and locomotion all keep working. It shows on every launch (Settings: "Show the l
 2. **One line of introduction** under it, and a "What is this?" tile that opens a short panel: VR client for DIDSA-CAD; your parts at
    full size; the same files as the flat app.
 3. **Launcher panel**: the actions below, on a `diegetic_panel.gd` window like the others (carry it by its handle).
-4. **Tips reel**: see [Tips](#tips).
+4. **Tips ticker** on the monolith: see [Tips](#tips) (the reel keeps the clock; it has no panel of its own now).
 5. **Rocket garden**: the demo rockets standing at true size on the ground behind the logo, each with a name plate and its height.
    A 110 m Saturn V is the single most convincing thing to show a first-time visitor. They are scenery until picked (see below).
 6. **Connection pill**: which server, or "Offline", and a tap opens Servers.
@@ -124,6 +126,15 @@ says the socket API is not expected to honour it. Godot's `HTTPRequest` is nativ
 server very likely works on the Quest already. **First headset test:** connect to a LAN `http://` server (the phone's server, or a PC).
 If it works, no network security config is needed and step L0 is only for the Vendors plugin; if it fails, DIDSA-CAD's
 `HeadsetPairing.headsetAllowsLanHttp` goes false until L0 adds the config.
+
+## The look (night pad and monolith)
+
+Restyled after the first build, at the owner's direction (renders reviewed on a desktop, not on a headset). `landing_stage.gd` swaps the world's
+environment while the landing is up and puts it back on leaving: a static star sky (`shaders/landing_sky.gdshader`), a dark pad with a blue grid, rings and
+spokes (`landing_pad.gdshader`), fog, a rim light, a halo behind the logo (`landing_halo.gdshader`). The menu is `landing_monolith.gd`: a tall slab
+(`monolith_face.gd`) with the custom-drawn `deck_button.gd` items, **not** the wrist tablet's tiles; the inner pages (models, servers, scan, settings,
+about) keep their controls but wear the same dark glass theme. `dimension_callout.gd` draws each rocket's height line. Unmeasured: frame rate of the sky,
+fog and lights on a Quest; how the wall's text reads at 1.9 m in a headset.
 
 ## Tips
 
@@ -256,11 +267,12 @@ Code in `scripts/landing/`: `landing.gd` (the state: enter / leave, placement, w
 - **Demo models:** both **Full size** (1:1, base on the floor, `max(2.5 m, half the width + 3 m)` ahead) and **On the desk**. On the desk is
   1:50, but **brought down so the largest side is 1.5 m** (Saturn V is 1:74: at 1:50 it would be 2.2 m tall on a waist-high plinth); the status
   line says the ratio used. Waist height is 0.55 x eye height. The plinth is scenery (no collider).
-- **Rocket garden:** the five rockets from `demo/rockets/` stand at 40-60 m on an arc, none within 14 degrees of dead ahead (the logo hangs
-  there), loaded one per frame, no colliders, shadows off, about 56k triangles for the five (the nine are 135k; the four spacecraft are not in the
-  garden). Plates show the largest dimension. **Not built:** picking a garden rocket to bring it close.
-- **Logo:** the glb 2.5 m ahead at eye height, facing you; porthole pulse (2.6 s, swells to 1.22x with its glow) and a 7 degree sway (14 s);
-  both frozen, logo straight ahead, by Reduce motion. A caption line sits under it.
+- **Rocket garden:** the first six rockets of `demo/rockets/` stand in an arc round the user, all 50 m out, at 38, 72 and 106 degrees each side of
+  dead ahead (the middle 70 degrees are the monolith and the logo), loaded one per frame, no colliders, shadows off, **about 449k triangles for the six
+  (the scope budgeted 135k for the nine models before the SpaceX models; the Starship alone is large) and unmeasured on a Quest**; the seventh rocket (Jupiter-C)
+  and the four spacecraft are not in the garden. Each rocket has a dimension line and a tag with its name and height. Plates show the largest dimension. **Not built:** picking a garden rocket to bring it close.
+- **Logo:** the glb at 2.64x scale (about 3.2 m wide), floating 1.25 m above the monolith's top edge in its plane, facing you, lit (emission) so it glows on the sky; porthole pulse (2.6 s, swells to 1.22x with its glow) and a 3 degree sway (14 s);
+  both frozen, logo straight ahead, by Reduce motion.
 - **Tips:** the 17 as data in `tips.gd`, 8 s, Previous / Pause / Next, fade (none under Reduce motion), Settings > Show tips. **Offline, the six
   tips about features that need a server are left out** (paint, measure, mates, rooms, scenes, same files). Checked against `controller.gd`,
   `locomotion.gd` and the README: tip 4 (the wheel is trigger and grip **together**, not held), 8 (A / X, B / Y nudge added), 9 (undo covers

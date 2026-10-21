@@ -3,7 +3,13 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
-## Branch `claude/vr-landing-build` (20 Oct, not merged)
+## Branch `claude/vr-landing-build` (20-21 Oct, not merged)
+
+- **Landing restyle** (21 Oct; reviewed as desktop renders only, not on a headset; see `docs/landing-scope.md#the-look-night-pad-and-monolith`).
+  - A night-sky pad (static stars, a dark pad with a blue grid, fog, a rim light) replaces the grey scene while the landing is up (`landing_stage.gd`, restored on leaving).
+  - The launcher is now a **monolith**: a dark wall 1.9 m x 2.6 m standing on the floor 1.9 m ahead, with a bespoke menu on its face (not the tablet's tiles); the DIDSA logo, doubled in size (about 3.2 m wide), floats **above** it, separate. Settings, servers, models, scan and About pages keep their controls in the same dark glass theme. The tips reel is a ticker on the wall.
+  - The rockets stand in an **arc round the user**, all 50 m out, each with a dimension line and a tag. **Pegasus XL dropped; SpaceX Falcon Heavy, Falcon 9 Block 5 and Starship SN20 / BN4 added** (CC BY 4.0, credited in `demo/CREDITS.md` and About): eleven demo models, seven rockets, six in the arc (Jupiter-C is in the list only). The six rockets total about 449k triangles: unmeasured on a Quest, over the original budget.
+  - Tests updated for the new layout (`landing`, `tips_reel`, `servers`, `landing_render`). The porthole's pulse is now measured against an empty-sky render of the same view.
 
 - **The landing, L1 to L3** (`docs/landing-scope.md`; offline demo for handing the APK to friends). Headless- and software-render-tested; not checked on the headset.
   - **L1 shell:** the app starts on a landing state of the world (`scripts/landing/`) instead of importing `res://assembly.didsa` (Settings > **Show the landing on start** off gives the old start back). A launcher window (Continue, Open..., New assembly, Demo models, Demo assemblies, Servers, Settings, About) with a connection pill; anything that needs a server is greyed "Needs a server" offline. **Home** tile on the wrist tablet (12th tile) and wedge on the tool wheel (10th) returns to the landing. Status messages now reach the headset through the launcher's status line (`main.status_changed`). About shows `demo/CREDITS.md` (the SLS model is CC BY). `user://recent.cfg` remembers the last file for Continue. Servers shows the configured server or "Offline" with a "Scan: coming soon" note (real server management is L4).
