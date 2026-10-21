@@ -94,7 +94,7 @@ func _initialize() -> void:
 	check("adding the server switches to it with no restart", main.has_backend() and main.backend_url == url and main.active_server_id == entry["id"])
 	launcher.show_page("home")
 	await frames(2)
-	check("the tiles that need a server come on", not launcher._body.find_child("Tile_new", true, false).disabled and not launcher._body.find_child("Tile_assemblies", true, false).disabled)
+	check("the tiles that need a server come on", not launcher._home_root.find_child("Tile_new", true, false).disabled and not launcher._home_root.find_child("Tile_assemblies", true, false).disabled)
 
 	# --- the demo table --------------------------------------------------------------------------------------------------------------------
 	await _open_demo_assembly("Top_and_frame")
@@ -108,8 +108,8 @@ func _initialize() -> void:
 	# --- Home, Continue ------------------------------------------------------------------------------------------------------------------
 	main.go_home()
 	await frames(3)
-	var cont: Button = launcher._body.find_child("Tile_continue", true, false)
-	check("Home: Continue offers the table and is on (a native file with a server)", landing.is_active() and not cont.disabled and "Top_and_frame.didsa" in cont.text)
+	var cont: Button = launcher._home_root.find_child("Tile_continue", true, false)
+	check("Home: Continue offers the table and is on (a native file with a server)", landing.is_active() and not cont.disabled and "Top_and_frame.didsa" in cont.note)
 	cont.pressed.emit()
 	var again: bool = await _wait_for(func() -> bool: return not landing.is_active() and main._part_count == table_parts and not main._load_busy)
 	check("Continue reopens the same file", again)
@@ -120,7 +120,7 @@ func _initialize() -> void:
 	await frames(3)
 	launcher.show_page("home")
 	await frames(2)
-	check("offline again: the tiles grey out and Continue says it needs a server", launcher._body.find_child("Tile_new", true, false).disabled and launcher._body.find_child("Tile_continue", true, false).disabled and "needs a server" in launcher._body.find_child("Tile_continue", true, false).text)
+	check("offline again: the tiles grey out and Continue says it needs a server", launcher._home_root.find_child("Tile_new", true, false).disabled and launcher._home_root.find_child("Tile_continue", true, false).disabled and "needs a server" in launcher._home_root.find_child("Tile_continue", true, false).note.to_lower())
 	check("switching back to the server", main.switch_server(entry["id"]) and main.has_backend())
 
 	# --- plate and peg, New assembly -----------------------------------------------------------------------------------------------------------
@@ -131,7 +131,7 @@ func _initialize() -> void:
 	await frames(2)
 	launcher.show_page("home")
 	await frames(2)
-	launcher._body.find_child("Tile_new", true, false).pressed.emit()
+	launcher._home_root.find_child("Tile_new", true, false).pressed.emit()
 	var fresh: bool = await _wait_for(func() -> bool: return "New empty assembly" in main.status_text and not main._load_busy)
 	check("the New assembly tile starts an empty assembly on the real backend", fresh and not landing.is_active())
 
