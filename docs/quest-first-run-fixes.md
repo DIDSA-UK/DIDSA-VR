@@ -103,6 +103,7 @@ permission: refused*. Refusal without a prompt means `USE_SCENE` is not in the m
 every Meta manifest step is gated on the export option **`xr_features/enable_meta_plugin`** (XR Features > Enable Meta Plugin, **off by default**), not only on
 the project setting. `android-build.md` had said that toggle does not exist, so a preset made in the dialog rather than copied from the example has it off. Next:
 check `export_presets.cfg` for `xr_features/enable_meta_plugin=true` and `meta_xr_features/passthrough=1`, rebuild, and run the `aapt2` check (fix 1).
+**Confirmed** by the owner: their `export_presets.cfg` had `xr_features/enable_meta_plugin=false`. Next APK: with it true; passthrough and the QR scan not yet tried with it.
 
 **What the code does** (`environment_manager.gd` `_enable_passthrough()`): if the runtime offers ALPHA_BLEND it sets that blend mode and a transparent viewport.
 This is the documented way, and the plugin's own sample does the same. Black means the runtime has no camera layer under our transparent frame.
