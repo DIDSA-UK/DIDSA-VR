@@ -337,6 +337,7 @@ settings in `project.godot` (Meta passthrough, spatial-entity marker tracking). 
 
 ## Decisions (owner, 20 Oct 2026)
 
+- **The arc rockets stay scenery (21 Oct):** no colliders, nothing to grab. To try grab, scale and turn, load the same rocket from Demo models (Full size or On the desk).
 1. **Sources:** the models are from NASA 3D Resources except SLS, Falcon Heavy, Falcon 9 and Starship (Sketchfab, CC BY 4.0); `../demo/CREDITS.md` says so.
 2. **Saturn V:** scaled to its height (110.6 m), as done. No better free textured model was found: NASA's is the only one downloadable
    here, and the Sketchfab ones need a logged-in download. Swap it if you find a better one; the script makes that one command.

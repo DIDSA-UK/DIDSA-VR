@@ -1,9 +1,10 @@
 extends Node3D
 ## The landing: the first screen, a STATE of main.gd's world (not a scene), so entering and leaving it costs no load and the wrist
-## tablet, wheel and locomotion keep working. While it is up: the DIDSA logo hangs 2.5 m ahead at eye height, the demo rockets
-## stand at true size on the ground behind it, the launcher panel is at arm's reach and the tips reel to its left. It is left by
-## loading anything (main.gd's _show_model() tells it) or by the launcher's tiles, and comes back from the Home tile on the wrist
-## tablet and the tool wheel (main.go_home()). The model that was loaded stays loaded, hidden, and comes back with Continue.
+## tablet, wheel and locomotion keep working. While it is up: a night-sky pad, the monolith menu (landing_monolith.gd) standing on the floor
+## ahead with the DIDSA logo floating above it, and the demo rockets in an arc round the user (scenery: no colliders, not grabbable; the same
+## rockets are loaded from Demo models to try grab, scale and turn). It is left by loading anything (main.gd's _show_model() tells it) or by
+## the menu's tiles, and comes back from the Home tile on the wrist tablet and the tool wheel (main.go_home()). The model that was loaded stays
+## loaded, hidden, and comes back with Continue.
 ## Scope: docs/landing-scope.md (L1 to L3).
 
 signal entered
