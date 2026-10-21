@@ -261,7 +261,7 @@ func _initialize() -> void:
 	quit()
 
 
-const TRIANGLE_BUDGET := 500000 ## the six rockets in the arc measure about 449k (the scope budgeted 135k for the nine models, before the SpaceX models). Unmeasured on a Quest: see docs/status.md
+const TRIANGLE_BUDGET := 200000 ## the six rockets in the arc measure about 175k after decimating the Starship and Falcon 9 (the scope budgeted 135k for the nine models, before the SpaceX models). Unmeasured on a Quest: see docs/status.md
 
 
 func d_of(e: Dictionary) -> float:

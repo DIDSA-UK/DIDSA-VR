@@ -191,9 +191,9 @@ All 1:1 in metres, Y up, base on the floor and centred at the origin; Draco remo
 | SLS Block 1 | Your upload (WISEMANmods, CC BY) | x19.66 (it was about 1:20) | 98.1 m tall, core 8.5 m | 98.1 m, core 8.4 m | Boosters come out 5.1 m wide (real 3.7 m): the model's proportions. 912 triangles, colours only, no textures. NASA's own detailed SLS Block 1 is in their library as a 7z, if a better one is wanted. |
 | Saturn V | NASA 3D Resources (replaces your upload) | x8.516 (it was about 1:8.5) | 110.6 m tall, body 10.8 m | 110.6 m, 10.1 m | Your file is this NASA model re-exported with its textures lost; NASA's original keeps them. Scaled to height; the body comes out 7% too wide. |
 | Delta II | Your upload (NASA 3D Resources) | x1 (already 1:1) | 40.5 m, core 2.44 m | 38.9-39.0 m, core 2.44 m | Core exact, fairing about 4% long. Three boosters: the 7320 / 7420 version. An invisible 1 m box had a collider; removed. |
-| Starship SN20 / BN4 | Your upload (Sketchfab, CC BY 4.0) | x2.895 | About 120 m (the full stack, ship on booster) | 120.0 m tall, 10.7 m across, 19 m over the flaps | Scaled to the height, as the owner chose. The mesh is a little squat, so the body is about 19% wider than the real 9 m. Black tiles, so the garden lifts it (matte, a steel glow) to show against the night sky. |
+| Starship SN20 / BN4 | Your upload (Sketchfab, CC BY 4.0) | x2.895 | About 120 m (the full stack, ship on booster) | 120.0 m tall, 10.7 m across, 19 m over the flaps | Scaled to the height, as the owner chose. The mesh is a little squat, so the body is about 19% wider than the real 9 m. Decimated from 192k to 47k triangles. Black tiles, so the garden lifts it (matte, a steel glow) to show against the night sky. |
 | Falcon Heavy | Your upload (Sketchfab, CC BY 4.0) | x0.2357 | 70 m tall, about 12.2 m wide (core and side boosters) | 69.96 m, 12.37 m wide | Mesh was 297 units long; scaled to the published height. |
-| Falcon 9 Block 5 | Your upload (Sketchfab, CC BY 4.0) | x0.986 | 70 m tall with fairing | 70.0 m, 5.1 m across (legs and fins) | Mesh was 70.99 m at its own scale; scaled to the published height. |
+| Falcon 9 Block 5 | Your upload (Sketchfab, CC BY 4.0) | x0.986 | 70 m tall with fairing | 70.0 m, 5.1 m across (legs and fins) | Mesh was 70.99 m at its own scale; scaled to the published height. Decimated from 147k to 44k triangles. |
 | Jupiter-C (Explorer 1) | Your upload (NASA 3D Resources) | x1.2135 | 21.2 m, body 1.83 m | 21.2 m, 1.78 m | It was about 82% size. **Draco compressed: as uploaded it would not load in Godot.** |
 | Voyager | NASA 3D Resources | x36.6 | dish 3.66 m, boom tip to tip 12.3 m | dish 3.66 m | It was about 1:37 |
 | Hubble Space Telescope | NASA 3D Resources | x0.0254 | 13.35 m long, 4.27 m | 13.2 m, 4.2 m | Modelled in inches |
@@ -268,8 +268,8 @@ Code in `scripts/landing/`: `landing.gd` (the state: enter / leave, placement, w
   1:50, but **brought down so the largest side is 1.5 m** (Saturn V is 1:74: at 1:50 it would be 2.2 m tall on a waist-high plinth); the status
   line says the ratio used. Waist height is 0.55 x eye height. The plinth is scenery (no collider).
 - **Rocket garden:** the first six rockets of `demo/rockets/` stand in an arc round the user, all 50 m out, at 38, 72 and 106 degrees each side of
-  dead ahead (the middle 70 degrees are the monolith and the logo), loaded one per frame, no colliders, shadows off, **about 449k triangles for the six
-  (the scope budgeted 135k for the nine models before the SpaceX models; the Starship alone is large) and unmeasured on a Quest**; the seventh rocket (Jupiter-C)
+  dead ahead (the middle 70 degrees are the monolith and the logo), loaded one per frame, no colliders, shadows off, **about 175k triangles for the six
+  (the scope budgeted 135k for the nine models before the SpaceX models; Starship and Falcon 9 were decimated from 192k and 147k to 47k and 44k with `demo/tools/simplify_glb.mjs`) and unmeasured on a Quest**; the seventh rocket (Jupiter-C)
   and the four spacecraft are not in the garden. Each rocket has a dimension line and a tag with its name and height. Plates show the largest dimension. **Not built:** picking a garden rocket to bring it close.
 - **Logo:** the glb at 2.64x scale (about 3.2 m wide), floating 1.25 m above the monolith's top edge in its plane, facing you, lit (emission) so it glows on the sky; porthole pulse (2.6 s, swells to 1.22x with its glow) and a 3 degree sway (14 s);
   both frozen, logo straight ahead, by Reduce motion.

@@ -9,7 +9,7 @@ Credits and licences: [`CREDITS.md`](CREDITS.md). What the landing does with the
 | `spacecraft/` | Voyager, Hubble, Pioneer 10, Apollo-Soyuz at full size | No |
 | `assemblies/table/` | The table: `Top_and_frame.didsa` (open this one) over `Frame.didsa`, `Frame_A/B.didsa`, `Table_Top.didsa` | Yes (native files are meshed by the backend) |
 | `assemblies/plate_and_peg/` | `Plate_and_peg.didsa` over a plate and a peg | Yes |
-| `tools/` | `normalise_glb.mjs`, the script that prepared the glb files (not exported; `.gdignore`) | n/a |
+| `tools/` | `normalise_glb.mjs` and `simplify_glb.mjs` (decimates a heavy model), the scripts that prepared the glb files (not exported; `.gdignore`) | n/a |
 
 ## Rules for these files
 
@@ -26,8 +26,9 @@ Credits and licences: [`CREDITS.md`](CREDITS.md). What the landing does with the
 ## Adding a model
 
 ```
-cd demo/tools && npm i @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions draco3dgltf
+cd demo/tools && npm i @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions draco3dgltf meshoptimizer
 node normalise_glb.mjs in.glb ../rockets/Name.glb <scale> [drop]
+node simplify_glb.mjs ../rockets/Name.glb ../rockets/Name.glb <ratio> [error]   # optional: decimate a heavy model (about 50k triangles is plenty for a rocket seen from afar)
 printf '[remap]\n\nimporter="keep"\n' > ../rockets/Name.glb.import
 ```
 
