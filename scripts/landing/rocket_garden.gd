@@ -50,7 +50,7 @@ func _add_rocket(model: Dictionary, slot: Vector2) -> void:
 	holder.add_child(scene)
 	_no_shadows(scene)
 	var box := DemoCatalog.bounds(scene)
-	var extent := maxf(box.size.y, maxf(box.size.x, box.size.z)) # a rocket's height; Pegasus XL lies horizontal (it is launched from under an aircraft), so its length
+	var extent := maxf(box.size.y, maxf(box.size.x, box.size.z)) # a rocket's height (the largest dimension, in case one lies flat)
 	var callout := DimensionCallout.build(box.size, slot.y, str(model["name"]).to_upper(), "%.1f m" % extent, entries.size())
 	callout.position = Vector3(box.get_center().x, 0.0, box.get_center().z)
 	holder.add_child(callout)

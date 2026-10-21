@@ -11,18 +11,18 @@ const ASSEMBLY_FILES: Array[Dictionary] = [
 const CREDITS_PATH := "res://demo/CREDITS.md"
 const DESK_RATIO := 50.0 ## "On the desk" is 1:50 ...
 const DESK_MAX_SIZE := 1.5 ## ... unless that would stand taller than this (metres), then the largest side is brought down to it
-const INFO := { ## file base name -> {name, height (metres: the published figure the scope checks the glb against; its largest dimension, so Pegasus XL, which lies flat, is its length)}
+const INFO := { ## file base name -> {name, height (metres: the published figure the scope checks the glb against; its largest dimension)}
 	"Saturn_V": {"name": "Saturn V", "height": 110.6},
 	"SLS_Block_1": {"name": "SLS Block 1", "height": 98.1},
+	"Falcon_Heavy": {"name": "Falcon Heavy", "height": 70.0},
 	"Delta_II": {"name": "Delta II", "height": 40.5},
 	"Jupiter-C_Explorer_1": {"name": "Jupiter-C", "height": 21.2},
-	"Pegasus_XL": {"name": "Pegasus XL", "height": 16.6},
 	"Apollo-Soyuz": {"name": "Apollo-Soyuz", "height": 21.6},
 	"Hubble_Space_Telescope": {"name": "Hubble Space Telescope", "height": 13.35},
 	"Voyager": {"name": "Voyager", "height": 12.3},
 	"Pioneer_10": {"name": "Pioneer 10", "height": 2.74},
 }
-const ORDER: Array[String] = ["Saturn_V", "SLS_Block_1", "Delta_II", "Jupiter-C_Explorer_1", "Pegasus_XL", "Apollo-Soyuz", "Hubble_Space_Telescope", "Voyager", "Pioneer_10"]
+const ORDER: Array[String] = ["Saturn_V", "SLS_Block_1", "Falcon_Heavy", "Delta_II", "Jupiter-C_Explorer_1", "Apollo-Soyuz", "Hubble_Space_Telescope", "Voyager", "Pioneer_10"]
 
 
 static func models(kind: String = "") -> Array[Dictionary]:
