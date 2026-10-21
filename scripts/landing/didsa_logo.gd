@@ -19,6 +19,7 @@ var _porthole_centre := Vector3.ZERO ## the porthole's centre in the logo's own 
 var _glow: StandardMaterial3D
 var _clock := 0.0
 var _scene: Node3D
+var night_glow := 0.55 ## emission added to the logo's white so it glows against a dark sky (0 = none)
 
 
 func _ready() -> void:
@@ -37,7 +38,27 @@ func _ready() -> void:
 			_glow = source.duplicate() as StandardMaterial3D # its own copy: the other parts share the glb's material
 			_glow.emission_enabled = true
 			porthole.set_surface_override_material(0, _glow)
+	_glow_parts()
 	apply_pose()
+
+
+func _glow_parts() -> void:
+	## The white parts get an emission of their own colour, so they read as lit signage on a night sky.
+	if night_glow <= 0.0:
+		return
+	for node in _scene.find_children("*", "MeshInstance3D", true, false):
+		var mesh_node := node as MeshInstance3D
+		if mesh_node == porthole or mesh_node.mesh == null:
+			continue
+		for surface in mesh_node.mesh.get_surface_count():
+			var source := mesh_node.get_active_material(surface) as StandardMaterial3D
+			if source == null:
+				continue
+			var lit := source.duplicate() as StandardMaterial3D
+			lit.emission_enabled = true
+			lit.emission = lit.albedo_color
+			lit.emission_energy_multiplier = night_glow
+			mesh_node.set_surface_override_material(surface, lit)
 
 
 static func _load_scene() -> Node3D:

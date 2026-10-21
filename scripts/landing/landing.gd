@@ -11,13 +11,16 @@ signal exited
 
 const DidsaLogo := preload("res://scripts/landing/didsa_logo.gd")
 const RocketGarden := preload("res://scripts/landing/rocket_garden.gd")
-const LauncherWindow := preload("res://scripts/landing/launcher_window.gd")
+const LandingDeck := preload("res://scripts/landing/landing_deck.gd")
+const LandingStage := preload("res://scripts/landing/landing_stage.gd")
+const HALO_SHADER := preload("res://shaders/landing_halo.gdshader")
 const TipsReel := preload("res://scripts/landing/tips_reel.gd")
 const QrScanner := preload("res://scripts/landing/qr_scanner.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
-const LOGO_DISTANCE := 2.5 ## metres ahead of the user
-const LOGO_TAGLINE := "Design and assemble parts at full size."
+const LOGO_DISTANCE := 3.0 ## metres ahead of the user
+const LOGO_SCALE := 1.5 ## the logo glb is 1.2 m wide: 1.8 m at this scale, a hero
+const LOGO_RISE := 1.05 ## metres above eye height (so the deck below it does not cover it)
 const DESK_DISTANCE := 0.8 ## metres ahead: the plinth for "On the desk"
 const WAIST_FRACTION := 0.55 ## of eye height: where the plinth's top is
 
@@ -29,7 +32,8 @@ var reel: Node
 var scanner: Node ## qr_scanner.gd: reads QR codes through the headset's marker tracking; the launcher's Scan page starts and stops it
 var active := false
 var plinth: MeshInstance3D
-var _caption: Label3D
+var stage: Node3D ## landing_stage.gd: the night pad (sky, floor, lights) while the landing is up
+var _halo: MeshInstance3D
 var _camera: XRCamera3D
 var _model_hidden := false ## the loaded model is hidden while the landing is up
 var _placing_demo := false ## show_demo() is mid-load: the plinth it is about to set up must survive on_model_shown()
@@ -42,15 +46,21 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	logo.name = "Logo"
 	add_child(logo)
 	logo.visible = false
-	_caption = Label3D.new()
-	_caption.text = LOGO_TAGLINE
-	_caption.font_size = 48
-	_caption.pixel_size = 0.0011
-	_caption.shaded = false
-	_caption.modulate = Color(0.85, 0.9, 1.0, 0.9)
-	_caption.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_caption.visible = false
-	add_child(_caption)
+	_halo = MeshInstance3D.new()
+	_halo.name = "Halo"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(6.0, 3.6)
+	var halo_material := ShaderMaterial.new()
+	halo_material.shader = HALO_SHADER
+	quad.material = halo_material
+	_halo.mesh = quad
+	_halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_halo.visible = false
+	add_child(_halo)
+	stage = LandingStage.new()
+	stage.name = "Stage"
+	add_child(stage)
+	stage.setup(main, main.get_node("WorldEnvironment"), main.get_node("DirectionalLight3D"), main.get_node("Ground/MeshInstance3D"))
 	garden = RocketGarden.new()
 	garden.name = "RocketGarden"
 	add_child(garden)
@@ -58,7 +68,7 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	plinth = _make_plinth()
 	add_child(plinth)
 	plinth.visible = false
-	launcher = LauncherWindow.new()
+	launcher = LandingDeck.new()
 	launcher.name = "Launcher"
 	add_child(launcher)
 	launcher.setup_launcher(left, right, camera, self)
@@ -95,15 +105,16 @@ func enter() -> void:
 			_model_hidden = true
 		plinth.visible = false
 	place()
+	var forward := _flat_forward()
+	stage.enter(Vector3(_camera.global_position.x, _floor_y(), _camera.global_position.z), forward)
 	logo.visible = true
-	_caption.visible = true
+	_halo.visible = true
 	garden.visible = true
 	if not garden.is_built:
 		garden.build()
 	launcher.open()
 	reel.set_connected(main.has_backend())
-	if main.show_tips():
-		reel.open()
+	launcher.set_ticker_visible(main.show_tips())
 	entered.emit()
 
 
@@ -112,8 +123,9 @@ func leave() -> void:
 		return
 	active = false
 	logo.visible = false
-	_caption.visible = false
+	_halo.visible = false
 	garden.visible = false
+	stage.leave()
 	launcher.close()
 	reel.close()
 	var model := _model_root()
@@ -125,12 +137,8 @@ func leave() -> void:
 
 func set_show_tips(on: bool) -> void:
 	## Settings > Show tips, applied now if the landing is up.
-	if not active:
-		return
-	if on and not reel.is_open():
-		reel.open()
-	elif not on and reel.is_open():
-		reel.close()
+	if active:
+		launcher.set_ticker_visible(on)
 
 
 func place() -> void:
@@ -138,8 +146,10 @@ func place() -> void:
 	var forward := _flat_forward()
 	var eye := _camera.global_position
 	var floor_y := _floor_y()
-	logo.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), Vector3(eye.x, eye.y, eye.z) + forward * LOGO_DISTANCE)
-	_caption.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), logo.global_position + Vector3(0.0, -0.38, 0.0))
+	var facing := Basis.looking_at(forward, Vector3.UP)
+	var logo_at := eye + forward * LOGO_DISTANCE + Vector3(0.0, LOGO_RISE, 0.0)
+	logo.global_transform = Transform3D(facing.scaled(Vector3.ONE * LOGO_SCALE), logo_at)
+	_halo.global_transform = Transform3D(facing, logo_at - forward * 0.25)
 	garden.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), Vector3(eye.x, floor_y, eye.z))
 
 

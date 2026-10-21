@@ -7,17 +7,17 @@ extends Node3D
 ## local space, the tallest nearest the middle (the logo hangs in the gap dead ahead, 14 degrees either side, so no rocket or plate sits behind it).
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
+const DimensionCallout := preload("res://scripts/landing/dimension_callout.gd")
 const SLOTS: Array[Vector2] = [ ## (azimuth in degrees from straight ahead, + to the right; distance in metres), in the catalogue's order
 	Vector2(24.0, 60.0), Vector2(-22.0, 52.0), Vector2(38.0, 46.0), Vector2(-38.0, 42.0), Vector2(54.0, 40.0),
 ]
-const PLATE_PIXEL_SIZE_PER_METRE := 0.00045 ## metres per label pixel for each metre of distance, so a plate reads about as large from the user at 40 m as at 60 m
-const PLATE_CLEARANCE := 3.0 ## metres in front of the rocket's nearest edge
 
 signal built ## every rocket is in (or failed and was skipped)
 
 var entries: Array[Dictionary] = [] ## [{id, name, node, plate, height (the largest dimension), position}] for each rocket that loaded
 var is_built := false
-var _plates: Array[Label3D] = []
+var _plates: Array[Node3D] = [] ## each rocket's dimension callout
+var _plate_texts: PackedStringArray = []
 
 
 func build() -> void:
@@ -50,11 +50,13 @@ func _add_rocket(model: Dictionary, slot: Vector2) -> void:
 	_no_shadows(scene)
 	var box := DemoCatalog.bounds(scene)
 	var extent := maxf(box.size.y, maxf(box.size.x, box.size.z)) # a rocket's height; Pegasus XL lies horizontal (it is launched from under an aircraft), so its length
-	var plate := _make_plate(str(model["name"]), extent, slot.y)
-	plate.position = Vector3(0.0, 1.5, maxf(box.end.z, box.size.x * 0.5) + PLATE_CLEARANCE)
-	holder.add_child(plate)
-	_plates.append(plate)
-	entries.append({"id": model["id"], "name": model["name"], "node": holder, "plate": plate, "height": extent, "position": spot})
+	var callout := DimensionCallout.build(box.size, slot.y, str(model["name"]).to_upper(), "%.1f m" % extent, entries.size())
+	callout.position = Vector3(box.get_center().x, 0.0, box.get_center().z)
+	holder.add_child(callout)
+	holder.add_child(_make_ring(maxf(box.size.x, box.size.z) * 0.5 + 3.5, slot.y))
+	_plates.append(callout)
+	_plate_texts.append("%s\n%.1f m" % [model["name"], extent])
+	entries.append({"id": model["id"], "name": model["name"], "node": holder, "plate": callout, "height": extent, "position": spot})
 
 
 static func load_glb_scene(path: String) -> Node3D:
@@ -68,20 +70,27 @@ static func load_glb_scene(path: String) -> Node3D:
 	return document.generate_scene(state) as Node3D
 
 
-func _make_plate(display_name: String, extent: float, distance: float) -> Label3D:
-	var plate := Label3D.new()
-	plate.text = "%s\n%.1f m" % [display_name, extent]
-	plate.font_size = 64
-	plate.pixel_size = PLATE_PIXEL_SIZE_PER_METRE * distance
-	plate.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y # turns about the vertical to face the user as they walk
-	plate.shaded = false
-	plate.double_sided = true
-	plate.modulate = Color(1, 1, 1, 0.92)
-	plate.outline_size = 12
-	plate.outline_modulate = Color(0.02, 0.03, 0.05, 0.9)
-	plate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	plate.name = "Plate"
-	return plate
+func _make_ring(radius: float, distance: float) -> MeshInstance3D:
+	## A thin glowing ring on the ground round a rocket's foot: it anchors the rocket to the pad. Sized by distance so it is a line, not a thread, from afar.
+	var torus := TorusMesh.new()
+	var half := maxf(distance * 0.0022, 0.05)
+	torus.inner_radius = radius - half
+	torus.outer_radius = radius + half
+	torus.rings = 48
+	torus.ring_segments = 4
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.30, 0.88, 1.0, 0.85)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.disable_fog = true
+	torus.material = material
+	var node := MeshInstance3D.new()
+	node.mesh = torus
+	node.position.y = 0.03
+	node.scale = Vector3(1.0, 0.05, 1.0)
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.name = "Ring"
+	return node
 
 
 func _no_shadows(root: Node) -> void:
@@ -92,10 +101,8 @@ func _no_shadows(root: Node) -> void:
 
 
 func plate_texts() -> PackedStringArray:
-	var out := PackedStringArray()
-	for plate in _plates:
-		out.append(plate.text)
-	return out
+	## "Name\nheight m" for each rocket (what its callout says, in the order the rockets were built).
+	return _plate_texts
 
 
 func triangle_count() -> int:

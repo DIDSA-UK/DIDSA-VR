@@ -31,6 +31,8 @@ var _scan_card: VBoxContainer
 var _card_test_failed := false
 var _scan_last := "Nothing read yet." ## what the last QR code was, in words (never the code itself: it carries the key)
 var _scan_restore_scene := ""
+var launcher_panel_size := Vector2(0.88, 0.66) ## metres (the landing deck sets its own in _init)
+var launcher_viewport_size := Vector2i(880, 660)
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
 
 
@@ -38,8 +40,8 @@ func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamer
 	landing = p_landing
 	main = p_landing.main
 	panel_title = "DIDSA Design Tools VR"
-	panel_size = Vector2(0.88, 0.66)
-	viewport_size = Vector2i(880, 660)
+	panel_size = launcher_panel_size
+	viewport_size = launcher_viewport_size
 	open_distance = 0.85
 	open_lateral_offset = 0.0
 	super.setup(left, right, camera)
