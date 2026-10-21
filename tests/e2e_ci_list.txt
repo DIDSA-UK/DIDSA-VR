@@ -34,3 +34,4 @@ e2e_bug_report
 e2e_appearance
 e2e_scenes
 e2e_moved_files
+e2e_servers

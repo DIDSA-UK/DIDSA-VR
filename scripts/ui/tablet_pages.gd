@@ -121,7 +121,7 @@ func setup(ctx: Dictionary, p_tokens: Resource, p_manager) -> void:
 
 func register(reg) -> void:
 	## One category = one tile on the home screen, in the order the tiles appear (6 x 2):
-	## Design | Assemble | View | Inspect | Files   /   Tree | Calculator | Images | Browser | Settings.
+	## Design | Assemble | View | Inspect | Files   /   Tree | Calculator | Images | Browser | Settings (and Home, which makes 12).
 	## Design and the four window tiles are "action" tiles (they act straight from Home);
 	## View and Settings are hubs (a screen of tiles first); the rest open a tool view.
 	reg.add_category("design", "Design", "design", ACCENT_DESIGN, {
@@ -193,6 +193,7 @@ func register(reg) -> void:
 	reg.add_category("browser", "Browser", "browser", ACCENT_WINDOWS, {"subtitle": "", "action": _open_window.bind("browser")})
 
 	reg.add_category("settings", "Settings", "settings", ACCENT_SETTINGS, {"hub": true})
+	reg.add_category("home", "Home", "home", ACCENT_SETTINGS, {"subtitle": "landing · demos", "action": _on_home_tile})
 	reg.add_tool("settings", "set_movement", "Movement", "movement", _build_settings_movement, {
 		"caption": "steadiness", "help": "How much a held part or the model is steadied against hand shake."})
 	reg.add_tool("settings", "set_display", "Display", "eye_shaded", _build_settings_display, {
@@ -205,6 +206,12 @@ func register(reg) -> void:
 		"caption": "where models live", "help": "An extra folder the Files tool scans for models."})
 	reg.add_tool("settings", "set_table", "Design table", "table", _build_settings_table, {
 		"caption": "turn · zoom limits", "help": "How the design table treats a part sent back to the arena, and how far you can zoom a part on it."})
+
+
+func _on_home_tile() -> void:
+	## Back to the landing (logo, demos, launcher). The UI Lab's stub main has no landing, so it does nothing there.
+	if _main != null and _main.has_method("go_home"):
+		_main.go_home()
 
 
 func refresh() -> void:

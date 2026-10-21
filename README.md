@@ -25,13 +25,13 @@ Every feature is covered by headless tests, software renders and (where noted) a
 | Wrist tablet, tool wheel, themes | Built |
 | Multiplayer / observer client | Not built (idea in the vision brief) |
 
-Tests at the last recorded run: 2512 headless checks, 42 render tests, live-backend rooms test 23/23, all passing.
+Tests at the last recorded run (20 Oct 2026): 3312 headless SMOKE lines, 77 render lines, 452 live-backend lines over 35 tests, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
 
 ## Quick start (desktop, no headset)
 
 1. Install Godot 4.7.x and open this folder as a project.
 2. Copy `secrets.cfg.example` to `secrets.cfg` and fill in your backend `url` and `api_key` (the file is git-ignored). With no `secrets.cfg` the app still starts, ready for a local `.glb`.
-3. Put a saved assembly (a `.didsa` / `.DIDSAprt` whose root Part has occurrences) next to `project.godot` as `assembly.didsa`. A sample is included.
+3. The app starts on the **landing** (logo, rocket garden of demo models, a launcher panel, tips); it no longer imports `assembly.didsa` by itself. To get the old start-up import (a saved assembly whose root Part has occurrences, next to `project.godot` as `assembly.didsa`; a sample is included), turn off Settings > **Show the landing on start**, or open the file from the launcher's Continue / Open... tiles.
 4. Press **F6** in the editor. The console logs the import, the mesh download and the part count; you get a flat 3D preview.
 
 To try the UI without a backend or headset, open `lab/ui_lab.tscn` and press F6.
@@ -56,7 +56,7 @@ Right hand is the laser and the selector; left hand walks.
 | **Left thumbstick** | Walk (speed slider on the tablet: 1.5 to 30 m/s). |
 | **Right thumbstick** X / Y | Snap-turn / aim and blink a teleport (push forward, point at the floor, release). Scrolls a panel when the laser is on one. |
 | **Right thumbstick click** | Numeric keypad pre-filled with the scale; type an exact scale and press OK (undoable). |
-| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo; a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
+| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
 | **Laser at the wrist icon + trigger** | Open the **wrist tablet** (never opens by itself). |
 | **Grip a handle** (centre of a window's or the keyboard's lower edge, a room's move bar, a table's front edge) | Carry it somewhere else. |
 
@@ -65,7 +65,7 @@ Every part move, whole-model move, scale change and Visibility action goes onto 
 
 ## The wrist tablet
 
-A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the top bar shows status chips (active tool, Unsaved, Table open) and **Undo / Redo / Settings / Close**.
+A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** climbs one level; the top bar shows status chips (active tool, Unsaved, Table open) and **Undo / Redo / Settings / Close**.
 
 | Tile | Opens |
 |---|---|
@@ -75,6 +75,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid**. **Back** climbs one level; the
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
+| **Home** | Back to the landing: the demo models, the launcher and the tips. (The tool wheel has a Home wedge too.) |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
 | **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
 
@@ -117,7 +118,7 @@ url="ws://your-relay-host:8100"
 api_key="your-BROWSER_RELAY_API_KEY"
 ```
 
-- **Use an HTTPS URL on Quest** (for example a Cloudflare Tunnel). Android blocks cleartext HTTP except to localhost, and allowing it needs a custom Gradle build. A LAN `http://` URL is fine for desktop preview.
+- **On Quest, prefer an HTTPS URL** (for example a Cloudflare Tunnel). A LAN `http://` URL is fine for desktop preview and probably on Quest too: Android's cleartext-HTTP rule is enforced by its Java networking, and Godot's `HTTPRequest` uses its own sockets. Not yet tried on a headset; see [`docs/landing-scope.md`](docs/landing-scope.md#plain-http-on-the-quest).
 - Without `[browser_relay]` the Browser window says "No browser relay configured".
 - By default each launch uses its own backend document session (`vr-...`) so it never replaces what the flat app has open.
 - Main node, Backend group: `native_file_path` (default `res://assembly.didsa`), `part_id_override` (rarely needed), `quality`, `tier`, `include_hidden`; `local_glb_scale` for local glTF files in millimetres.
@@ -129,7 +130,7 @@ api_key="your-BROWSER_RELAY_API_KEY"
 2. **Project, Export, Add, Android**; set your Android SDK path on first use. Under **Xr Features**: `Xr Mode` = `OpenXR`; `Hand Tracking` = off (controllers only).
 3. Export a debug APK, then `adb install -r path/to/exported.apk`.
 4. Launch **DIDSA Design Tools VR** from the headset's Unknown Sources list. (Renamed from "DIDSA VR Spike", and the name is a placeholder; export presets are git-ignored, so check your local preset's name and package ID.)
-5. Standalone passthrough also needs the OpenXR Vendors plugin, which is not included.
+5. **Standalone passthrough** (and the QR scan's permission) need the OpenXR Vendors plugin in a Gradle build: `tools/install_vendors_plugin.sh`, a ready export preset to copy, and a first-run checklist for the headset are in [`docs/android-build.md`](docs/android-build.md). Prepared without an Android SDK: no APK has been built from it yet.
 
 ## Testing
 
@@ -146,7 +147,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 ## Known limitations
 
 - **No Quest-hardware measurements** yet (load time, frame rate, Quest 2). Headset testing is ongoing and informal.
-- **Cleartext HTTP on Android** (see Configuration).
+- **Plain HTTP on Quest untested** (see Configuration).
 - **Server does not stop cycles or unknown Part ids** when adding occurrences; the client refuses them.
 - **Multi-file assemblies** resolve on Open and Add the way the flat app does (`scripts/native_compose.gd`): each `external_ref` is looked for beside the opened file, then in the project folder and the models folders, under any native extension (`.didsa`, `.DIDSAprt`, `.didsacad`). A file whose Part id clashes with another file's is left out (the flat app re-mints it; not ported) and the status line names it.
 - **Rooms**: 0.5 to 40 m on a side, no overlapping rooms, no rooms inside rooms; the default room limit is 4 (Settings, Display).

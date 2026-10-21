@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allows plain http:// from the app (a DIDSA-CAD server on the local network). Only needed if a headset test shows Android blocking it:
+  Godot's HTTPRequest uses its own sockets, which Android's cleartext rule is not expected to cover, so try without this first
+  (docs/landing-scope.md, "Plain http on the Quest"). Applied by tools/android/apply_cleartext_overlay.sh.
+  The app itself still refuses plain http to anything that is not a local-network address (scripts/landing/server_address.gd).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

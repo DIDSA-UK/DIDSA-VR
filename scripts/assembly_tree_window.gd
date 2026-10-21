@@ -354,6 +354,8 @@ func _list_occurrences(part_id: String) -> Dictionary:
 func _get_json(path: String) -> Dictionary:
 	## Same fresh-HTTPRequest-per-call pattern as appearance_tool.gd/mates_tool.gd's
 	## own _api_request - see either for the docstring this mirrors.
+	if backend_url.is_empty() or api_key.is_empty(): # the server was switched away while a fetch was still going
+		return {"ok": false, "json": null, "error": "no backend configured"}
 	var req := HTTPRequest.new()
 	add_child(req)
 	var headers := BackendSession.headers(api_key)

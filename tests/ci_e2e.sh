@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 LOG="${RUN_LOG:-e2e.log}"
 export DIDSA_SETTINGS_PATH="user://settings_test.cfg"
+export DIDSA_RECENT_PATH="user://recent_test.cfg"
+export DIDSA_SERVERS_PATH="user://servers_test.cfg" # the servers list: a test run never reads or writes the real one
+export DIDSA_NO_LANDING=1 # main.gd starts without the landing: the old start-up import (the e2e tests rely on it)
 mkdir -p logs
 : > "$LOG"
 fail=0

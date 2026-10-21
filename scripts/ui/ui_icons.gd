@@ -34,6 +34,7 @@ const _ICONS := {
 	"movement": '<path d="M24 6V42M6 24H42"/><path d="M19 11L24 6L29 11M19 37L24 42L29 37M11 19L6 24L11 29M37 19L42 24L37 29"/>',
 	"comfort": '<path d="M6 19H14L26 9V39L14 29H6Z"/><path d="M32 17A10 10 0 0 1 32 31M37 12A17 17 0 0 1 37 36"/>',
 	"back": '<path d="M30 9L15 24L30 39"/>',
+	"home": '<path d="M6 24L24 8L42 24"/><path d="M11 21V40H21V30H27V40H37V21"/>',
 	# utility cluster
 	"undo": '<path d="M17 11L8 20L17 29"/><path d="M8 20H28a10 10 0 0 1 0 20H20"/>',
 	"redo": '<path d="M31 11L40 20L31 29"/><path d="M40 20H20a10 10 0 0 0 0 20H28"/>',

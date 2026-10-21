@@ -2158,6 +2158,8 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	## call (mirroring main.gd's _import_external_file's own await-per-step
 	## pattern) rather than one shared node, so overlapping calls (e.g. a
 	## list refresh while a solve is in flight) never collide.
+	if backend_url.is_empty() or api_key.is_empty(): # the server was switched away (or to none) while a refresh was still going
+		return {"ok": false, "code": 0, "json": null, "error": "no backend configured"}
 	stat_requests += 1
 	var req := HTTPRequest.new()
 	add_child(req)

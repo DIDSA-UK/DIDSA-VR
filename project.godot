@@ -52,3 +52,7 @@ openxr/reference_space=1
 openxr/foveation_level=2
 openxr/startup_alert=false
 shaders/enabled=true
+openxr/extensions/meta/passthrough.android=true
+openxr/extensions/spatial_entity/enabled.android=true
+openxr/extensions/spatial_entity/enable_marker_tracking.android=true
+openxr/extensions/spatial_entity/enable_builtin_marker_tracking.android=true
