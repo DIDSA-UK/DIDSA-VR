@@ -14,7 +14,7 @@ const DESK_MAX_SIZE := 1.5 ## ... unless that would stand taller than this (metr
 const INFO := { ## file base name -> {name, height (metres: the published figure the scope checks the glb against; its largest dimension)}
 	"Saturn_V": {"name": "Saturn V", "height": 110.6},
 	"SLS_Block_1": {"name": "SLS Block 1", "height": 98.1},
-	"Starship_SN20_BN4": {"name": "Starship SN20 / BN4", "height": 101.1},
+	"Starship_SN20_BN4": {"name": "Starship SN20 / BN4", "height": 120.0},
 	"Falcon_Heavy": {"name": "Falcon Heavy", "height": 70.0},
 	"Falcon_9": {"name": "Falcon 9", "height": 70.0},
 	"Delta_II": {"name": "Delta II", "height": 40.5},
