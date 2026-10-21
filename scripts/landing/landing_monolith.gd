@@ -160,7 +160,7 @@ func _build_content() -> Control:
 
 func _page_theme() -> Theme:
 	## The inner pages (models, servers, scan, settings, about) keep their controls but wear the monolith's look: dark glass buttons with a cyan hairline.
-	var theme := tokens.build_theme()
+	var theme: Theme = tokens.build_theme()
 	theme.default_font_size = 26
 	var states := {"normal": [Color(0.02, 0.06, 0.13, 0.92), Color(0.30, 0.88, 1.0, 0.40)], "hover": [Color(0.04, 0.12, 0.24, 0.96), Color(0.30, 0.88, 1.0, 0.95)],
 		"pressed": [Color(0.30, 0.88, 1.0, 0.28), Color(1.0, 0.66, 0.30, 1.0)], "focus": [Color(0.04, 0.12, 0.24, 0.96), Color(0.30, 0.88, 1.0, 0.95)],
