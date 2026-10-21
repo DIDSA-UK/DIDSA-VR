@@ -148,6 +148,7 @@ func _build_content() -> Control:
 		margin.add_theme_constant_override("margin_" + side, 46)
 	margin.add_theme_constant_override("margin_top", int(LOGO_ZONE_PX) + 30)
 	margin.add_theme_constant_override("margin_bottom", int(PLINTH_PX))
+	margin.theme = _page_theme()
 	var old := super._build_content()
 	old.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(old)
@@ -155,6 +156,40 @@ func _build_content() -> Control:
 	_page_view.visible = false
 	stack.add_child(_page_view)
 	return stack
+
+
+func _page_theme() -> Theme:
+	## The inner pages (models, servers, scan, settings, about) keep their controls but wear the monolith's look: dark glass buttons with a cyan hairline.
+	var theme := tokens.build_theme()
+	theme.default_font_size = 26
+	var states := {"normal": [Color(0.02, 0.06, 0.13, 0.92), Color(0.30, 0.88, 1.0, 0.40)], "hover": [Color(0.04, 0.12, 0.24, 0.96), Color(0.30, 0.88, 1.0, 0.95)],
+		"pressed": [Color(0.30, 0.88, 1.0, 0.28), Color(1.0, 0.66, 0.30, 1.0)], "focus": [Color(0.04, 0.12, 0.24, 0.96), Color(0.30, 0.88, 1.0, 0.95)],
+		"disabled": [Color(0.015, 0.03, 0.07, 0.85), Color(0.56, 0.68, 0.82, 0.18)]}
+	for state in states:
+		var box := StyleBoxFlat.new()
+		box.bg_color = states[state][0]
+		box.border_color = states[state][1]
+		box.set_border_width_all(2)
+		box.set_corner_radius_all(4)
+		box.content_margin_left = 18
+		box.content_margin_right = 18
+		box.content_margin_top = 8
+		box.content_margin_bottom = 8
+		theme.set_stylebox(state, "Button", box)
+	theme.set_color("font_color", "Button", INK)
+	theme.set_color("font_hover_color", "Button", Color.WHITE)
+	theme.set_color("font_pressed_color", "Button", AMBER)
+	theme.set_color("font_disabled_color", "Button", DIM)
+	theme.set_color("font_color", "Label", INK)
+	theme.set_type_variation(&"LabelDim", &"Label")
+	theme.set_color("font_color", "LabelDim", DIM)
+	theme.set_type_variation(&"LabelSmall", &"Label")
+	theme.set_color("font_color", "LabelSmall", DIM)
+	theme.set_font_size("font_size", "LabelSmall", 22)
+	theme.set_type_variation(&"LabelTitle", &"Label")
+	theme.set_color("font_color", "LabelTitle", CYAN)
+	theme.set_font_size("font_size", "LabelTitle", 32)
+	return theme
 
 
 func show_page(page_name: String) -> void:
