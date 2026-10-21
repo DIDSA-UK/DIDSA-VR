@@ -56,7 +56,11 @@ fetches it, pinned to one release and checked against its SHA-256.
    - **Use Gradle Build** on; **arm64-v8a** only; package `uk.didsa.vr` (change it if you want another id).
    - **XR Mode: OpenXR**. With the plugin installed, the Export dialog (Options tab) gains **Android XR Features**, **Meta XR Features** (Quest 1 / 2 / 3 / Pro
      support, boundary mode, overlay keyboard, instant splash screen, experimental features) and **Pico XR Features**: leave Quest 2, Quest 3 and Quest Pro on for
-     a Quest 3. **Meta XR Features > Passthrough must show, set to Optional.** The plugin shows that option only while the editor reads
+     a Quest 3. **XR Features > Enable Meta Plugin must be ticked** (it is off by default; `xr_features/enable_meta_plugin=true` in `export_presets.cfg`).
+     It sits in the **XR Features** group next to XR Mode, not in Meta XR Features, which shows its options whether the plugin is on or not. Untick it and the
+     plugin writes **nothing** Meta into the APK (no passthrough feature, no scene or anchor permission, not its Meta library), with no warning: the plugin's
+     export code returns early on every Meta step (`meta_export_plugin.cpp`). Never tick a second vendor (Pico, Android XR...) in the same preset.
+     **Meta XR Features > Passthrough must also show, set to Optional.** The plugin shows that option only while the editor reads
      `xr/openxr/extensions/meta/passthrough` as true. If it is missing, the APK will have black passthrough: see [the trap](#the-android-only-setting-trap). (The first
      APK, 21 Oct 2026, was built while the setting was Android-only, and the option did not show.)
    - A project named with spaces gives the warning "the project name does not meet the requirement for the package name format": the package name above clears it.
@@ -105,7 +109,8 @@ and Horizon OS refused it.
 `project.godot` now also sets each key with **`.editor_hint`**. Checked with Godot 4.7.2 here: an `.editor_hint` override reads true in the editor itself and
 false when the game runs, whether from the editor (that is `editor_runtime`), on the desktop or on the headset (there `.android` turns it on). A plain `.editor`
 override would also be true for a game run from the editor, so PC-VR would change too. PC and PC-VR runs are unchanged. `tests/android_config.gd` checks both
-overrides. **Checking an APK:** `aapt2 dump xmltree --file AndroidManifest.xml <apk> | grep -iE "PASSTHROUGH|USE_SCENE|USE_ANCHOR"` should print all three.
+overrides. **Then the second trap, Enable Meta Plugin** (step 4 above): the second APK, with the settings fixed, still showed *blend modes: opaque* and
+*Scene permission refused*, which is what an APK built with the Meta part switched off gets. **Checking an APK:** `aapt2 dump xmltree --file AndroidManifest.xml <apk> | grep -iE "PASSTHROUGH|USE_SCENE|USE_ANCHOR"` should print all three.
 
 ## If plain http is blocked: the cleartext overlay
 

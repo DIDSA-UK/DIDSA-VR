@@ -98,6 +98,12 @@ blend. That is what an app with no passthrough feature in its manifest gets, whi
 2 below, the way that leaves PC runs unchanged), the example preset's note, the Android advice in `passthrough_report`, the landing fog (fix 4), `android-build.md`
 corrected. **Still to do:** rebuild, check the manifest (fix 1), try it on the headset; the `openxr_fb_passthrough_state_changed` listener.
 
+**Second APK (21 Oct, later still):** the same *blend modes: opaque*, and the Scan page said *Marker tracking present: yes, QR codes supported: no, Scene
+permission: refused*. Refusal without a prompt means `USE_SCENE` is not in the manifest either, so the Meta part wrote nothing at all. In the plugin's source
+every Meta manifest step is gated on the export option **`xr_features/enable_meta_plugin`** (XR Features > Enable Meta Plugin, **off by default**), not only on
+the project setting. `android-build.md` had said that toggle does not exist, so a preset made in the dialog rather than copied from the example has it off. Next:
+check `export_presets.cfg` for `xr_features/enable_meta_plugin=true` and `meta_xr_features/passthrough=1`, rebuild, and run the `aapt2` check (fix 1).
+
 **What the code does** (`environment_manager.gd` `_enable_passthrough()`): if the runtime offers ALPHA_BLEND it sets that blend mode and a transparent viewport.
 This is the documented way, and the plugin's own sample does the same. Black means the runtime has no camera layer under our transparent frame.
 
