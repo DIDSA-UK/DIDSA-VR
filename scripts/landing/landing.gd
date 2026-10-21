@@ -147,9 +147,9 @@ func place() -> void:
 	var eye := _camera.global_position
 	var floor_y := _floor_y()
 	var facing := Basis.looking_at(forward, Vector3.UP)
-	var logo_at: Vector3 = LandingMonolith.logo_position(eye, forward, floor_y) # at the head of the monolith, on its face
+	var logo_at: Vector3 = LandingMonolith.logo_position(eye, forward, floor_y) # above the monolith, separate from it
 	logo.global_transform = Transform3D(facing.scaled(Vector3.ONE * LOGO_SCALE), logo_at)
-	_halo.global_transform = Transform3D(facing, logo_at + forward * (LandingMonolith.LOGO_STANDOFF - 0.06)) # the glow just in front of the face, behind the logo
+	_halo.global_transform = Transform3D(facing, logo_at + forward * 0.25) # the glow a little behind the logo
 	garden.global_transform = Transform3D(Basis.looking_at(forward, Vector3.UP), Vector3(eye.x, floor_y, eye.z))
 
 

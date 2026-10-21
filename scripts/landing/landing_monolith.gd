@@ -13,14 +13,14 @@ const INK := Color(0.94, 0.98, 1.0)
 const DIM := Color(0.56, 0.68, 0.82)
 const AMBER := Color(1.0, 0.66, 0.30)
 const WIDTH := 1.9 ## metres
-const HEIGHT := 3.2 ## a tall slab: 0.45 m of plain crown above the logo, the logo, then the menu, then 0.3 m of plinth
+const HEIGHT := 2.6 ## a tall slab: a plain crown, the menu, then 0.3 m of plinth. The logo does not sit on it: it floats above the top edge
 const DISTANCE := 1.9 ## metres in front of you
-const LOGO_FROM_TOP := 0.81 ## the logo's centre this far below the top edge
-const LOGO_ZONE_PX := 745.0 ## from the top: the crown and the logo's room
+const LOGO_RISE := 0.80 ## the logo's centre this far above the slab's top edge (clear air between them, the logo against the sky)
+const LOGO_ZONE_PX := 70.0 ## from the top: the plain crown
 const PLINTH_PX := 182.0 ## at the foot, clear of the menu
 const PX_PER_METRE := 606.0
 const THICKNESS := 0.14
-const LOGO_STANDOFF := 0.20 ## metres the logo floats in front of the face (its sway must never turn it into the slab)
+const LOGO_STANDOFF := 0.0 ## metres the logo floats in front of the slab's plane (it is above the slab, so it can sway freely)
 const ROW_IDS: Array[String] = ["continue", "open", "new", "assemblies", "servers"]
 const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "assemblies": "tree", "servers": "browser"}
 
@@ -47,9 +47,9 @@ func _build_corners() -> void:
 
 
 static func logo_position(eye: Vector3, forward: Vector3, floor_y: float) -> Vector3:
-	## Where the logo hangs: on the slab's face near its head. (landing.gd places the logo and its halo from this.)
+	## Where the logo hangs: above the slab, separate from it, in the slab's plane. (landing.gd places the logo and its halo from this.)
 	var at := eye + forward * (DISTANCE - LOGO_STANDOFF)
-	return Vector3(at.x, floor_y + HEIGHT - LOGO_FROM_TOP, at.z)
+	return Vector3(at.x, floor_y + HEIGHT + LOGO_RISE, at.z)
 
 
 func _place_in_front_of_camera() -> void:
