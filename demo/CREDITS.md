@@ -24,3 +24,10 @@ The NASA insignia and mission markings that appear on some textures may not be u
 `assemblies/table/` (the owner's table top on a four-bar frame) and `assemblies/plate_and_peg/` (the plate and peg sample) are
 DIDSA files made with DIDSA-CAD. They are copies of `DIDSA-CAD/backend/tests/data/table_top_frame/` and of this repo's
 `assembly.didsa` and `tests/fixtures/`.
+
+## Software in the Android (Quest) build
+
+The standalone Quest build (`docs/android-build.md`) includes the **Godot OpenXR Vendors plugin** (MIT licence, Copyright (c) 2022-present Godot XR contributors,
+https://github.com/GodotVR/godot_openxr_vendors), which carries Meta's **OpenXR loader** (Apache License 2.0) and parts of the **Meta (Oculus) SDK** (Copyright (c)
+Facebook Technologies, LLC and its affiliates; use is subject to the Oculus SDK License Agreement, https://developer.oculus.com/licenses/oculussdk/). Built with the
+**Godot Engine** (MIT licence, https://godotengine.org).

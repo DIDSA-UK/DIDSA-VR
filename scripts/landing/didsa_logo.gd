@@ -22,11 +22,10 @@ var _scene: Node3D
 
 
 func _ready() -> void:
-	var packed := load(LOGO_PATH) as PackedScene
-	if packed == null:
+	_scene = _load_scene()
+	if _scene == null:
 		push_warning("DIDSA VR: couldn't load %s" % LOGO_PATH)
 		return
-	_scene = packed.instantiate()
 	add_child(_scene)
 	porthole = _scene.find_child("Porthole", true, false) as MeshInstance3D
 	for node in _scene.find_children("*", "MeshInstance3D", true, false):
@@ -39,6 +38,16 @@ func _ready() -> void:
 			_glow.emission_enabled = true
 			porthole.set_surface_override_material(0, _glow)
 	apply_pose()
+
+
+static func _load_scene() -> Node3D:
+	## The imported scene (the editor, an exported build). A checkout that has not been imported (headless CI, `--script` runs) has no imported copy, so the raw
+	## glb is read instead, the way the demo models are; the glb is not packed into an export, which is why the imported one comes first.
+	if ResourceLoader.exists(LOGO_PATH, "PackedScene"):
+		var packed := load(LOGO_PATH) as PackedScene
+		if packed != null:
+			return packed.instantiate() as Node3D
+	return preload("res://scripts/landing/rocket_garden.gd").load_glb_scene(LOGO_PATH)
 
 
 func part_names() -> PackedStringArray:

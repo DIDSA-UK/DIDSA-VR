@@ -11,6 +11,8 @@ GODOT=/path/to/godot tests/run_all.sh        # from the project root (it points 
 "$GODOT" --headless --path . --script res://tests/grab_and_scale.gd    # one test
 ```
 
+**One at a time:** every test shares the app's one `user://` folder (settings, recent file, servers list), so two Godot test runs at once corrupt each other's state: run them one after another. **A fresh checkout has no import cache** (CI does not run `--import`): a test must not `load()` an imported asset such as a `.glb` scene (read the raw file with `GLTFDocument`, as `scripts/landing/didsa_logo.gd` does); check with a copy of the tree that has no `.godot/` folder.
+
 **Landing:** `main.gd` starts on the landing (logo, rocket garden, launcher) unless `landing_enabled` is false, and its default is false
 when the environment variable `DIDSA_NO_LANDING` is set. `run_all.sh`, `ci_e2e.sh` and `ci_render.sh` set it, so every test sees the old start
 (no landing; with a backend, the start-up import the `e2e_*` tests wait for). **Running an `e2e_*` test by hand needs

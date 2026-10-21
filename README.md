@@ -25,7 +25,7 @@ Every feature is covered by headless tests, software renders and (where noted) a
 | Wrist tablet, tool wheel, themes | Built |
 | Multiplayer / observer client | Not built (idea in the vision brief) |
 
-Tests at the last recorded run: 2512 headless checks, 42 render tests, live-backend rooms test 23/23, all passing.
+Tests at the last recorded run (20 Oct 2026): 3312 headless SMOKE lines, 77 render lines, 452 live-backend lines over 35 tests, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
 
 ## Quick start (desktop, no headset)
 
@@ -56,7 +56,7 @@ Right hand is the laser and the selector; left hand walks.
 | **Left thumbstick** | Walk (speed slider on the tablet: 1.5 to 30 m/s). |
 | **Right thumbstick** X / Y | Snap-turn / aim and blink a teleport (push forward, point at the floor, release). Scrolls a panel when the laser is on one. |
 | **Right thumbstick click** | Numeric keypad pre-filled with the scale; type an exact scale and press OK (undoable). |
-| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo; a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
+| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
 | **Laser at the wrist icon + trigger** | Open the **wrist tablet** (never opens by itself). |
 | **Grip a handle** (centre of a window's or the keyboard's lower edge, a room's move bar, a table's front edge) | Carry it somewhere else. |
 

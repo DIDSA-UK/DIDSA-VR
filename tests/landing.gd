@@ -87,6 +87,7 @@ func _initialize() -> void:
 	var about_text := _all_text(landing.launcher._body)
 	check("About shows the SLS credit and its licence", "WISEMANmods" in about_text and "Creative Commons Attribution 4.0" in about_text)
 	check("About lists every shipped model's credit", about_text.count("NASA 3D Resources") >= 8)
+	check("About credits the software in the Quest build (the OpenXR Vendors plugin, Meta's loader and SDK licence, Godot)", "OpenXR Vendors" in about_text and "Oculus SDK License" in about_text and "Godot Engine" in about_text)
 	check("About has no markdown pipes or backticks", not ("|" in about_text) and not ("`" in about_text))
 
 	# --- Settings ------------------------------------------------------------------------------------------------------
