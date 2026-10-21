@@ -40,6 +40,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 ## Open items that matter most
 
+0. **First native Quest 3 run (21 Oct 2026, owner's report):** the APK starts on the landing and demo models feel smooth; five bugs found (monolith laser too short, colour flicker looking up on the landing, Open leaves the monolith for the tablet, an unsaved-changes prompt on a handled demo offered only on the tablet, passthrough black, so no QR scan yet). Causes and plan: [`quest-first-run-fixes.md`](quest-first-run-fixes.md). Not fixed yet.
 1. **Quest-native numbers.** Load time and frame rate on Quest hardware; informal headset testing continues on everything else.
 2. **Plain HTTP on the Quest: untested.** Long assumed blocked by Android, but its cleartext rule applies to Java networking and Godot's `HTTPRequest` uses its own sockets, so a LAN `http://` server probably works. Try it on the headset first ([`landing-scope.md`](landing-scope.md#plain-http-on-the-quest)); HTTPS (e.g. a Cloudflare Tunnel) remains the safe choice.
 3. **Server does not guard cycles or unknown Part ids** on `POST /parts/{id}/occurrences`; the client refuses them (see [`backend-api-notes.md`](backend-api-notes.md)).
