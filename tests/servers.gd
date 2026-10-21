@@ -198,7 +198,7 @@ func _initialize() -> void:
 	check("the landing follows: the connection pill and the tiles that need a server", "192.168.1.5:8000" in launcher._pill.text)
 	launcher.show_page("home")
 	await frames(2)
-	check("with a server the New assembly and Demo assemblies tiles are on", not launcher._body.find_child("Tile_new", true, false).disabled and not launcher._body.find_child("Tile_assemblies", true, false).disabled)
+	check("with a server the New assembly and Demo assemblies tiles are on", not launcher._home_root.find_child("Tile_new", true, false).disabled and not launcher._home_root.find_child("Tile_assemblies", true, false).disabled)
 	check("...and the tips reel holds all 17", main.landing.reel.tip_count() == 17)
 	launcher.show_page("servers")
 	await frames(2)
@@ -211,7 +211,7 @@ func _initialize() -> void:
 	check("Use no server goes offline and the tiles grey out again", not main.has_backend() and launcher._body.find_child("Server_" + main.server_store.servers[0]["id"], true, false) != null)
 	launcher.show_page("home")
 	await frames(2)
-	check("...New assembly greyed again, the reel back to the offline tips", launcher._body.find_child("Tile_new", true, false).disabled and main.landing.reel.tip_count() < 17)
+	check("...New assembly greyed again, the reel back to the offline tips", launcher._home_root.find_child("Tile_new", true, false).disabled and main.landing.reel.tip_count() < 17)
 	launcher.show_page("servers")
 	await frames(2)
 	var forget: Button = null

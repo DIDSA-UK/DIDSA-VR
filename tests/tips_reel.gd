@@ -58,7 +58,7 @@ func _initialize() -> void:
 	main.get_node("XROrigin3D/XRCamera3D").position = Vector3(0.0, 1.6, 0.0)
 	await frames(3)
 	var reel = main.landing.reel
-	check("the reel is open on the landing and starts at the first offline tip", reel.is_open() and reel.index == 0 and reel.current()["id"] == offline[0]["id"])
+	check("the monolith's ticker is showing on the landing and the reel starts at the first offline tip", main.landing.launcher._ticker.visible and reel.index == 0 and reel.current()["id"] == offline[0]["id"])
 	check("offline the reel holds only the offline tips", reel.tip_count() == offline.size())
 	reel.next() # restart the clock (the frames above ran it a little, in real time)
 	reel.previous()
@@ -98,12 +98,12 @@ func _initialize() -> void:
 
 	# --- Show tips setting ---------------------------------------------------------------------------------------------------
 	main.set_show_tips(false)
-	check("Show tips off closes the reel", not reel.is_open())
+	check("Show tips off hides the ticker", not main.landing.launcher._ticker.visible)
 	main.landing.enter()
 	await frames(2)
-	check("...and the landing does not reopen it", not reel.is_open())
+	check("...and the landing does not show it again", not main.landing.launcher._ticker.visible)
 	main.set_show_tips(true)
-	check("Show tips on opens it again", reel.is_open())
+	check("Show tips on shows it again", main.landing.launcher._ticker.visible)
 
 	# --- logo animation ---------------------------------------------------------------------------------------------------------
 	var logo = main.landing.logo
@@ -113,7 +113,7 @@ func _initialize() -> void:
 	logo.set_clock(0.0)
 	check("...and is at rest at the start", absf(logo.pulse_amount()) < 0.001 and absf(logo._scene.rotation.y) < 1e-6)
 	logo.set_clock(3.5) # a quarter of the 14 s sway
-	check("the whole logo sways (about 7 degrees at the most)", absf(rad_to_deg(logo._scene.rotation.y)) > 6.5 and absf(rad_to_deg(logo._scene.rotation.y)) <= 7.001)
+	check("the whole logo sways (about 3 degrees at the most)", absf(rad_to_deg(logo._scene.rotation.y)) > 2.8 and absf(rad_to_deg(logo._scene.rotation.y)) <= 3.001)
 	logo.set_clock(0.0)
 	await frames(30) # the logo's own _process advances its clock
 	check("with motion on, it animates by itself", logo._clock > 0.0)
