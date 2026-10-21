@@ -18,17 +18,47 @@ fetches it, pinned to one release and checked against its SHA-256.
 
 ## One-time set-up
 
-1. **Tools:** JDK 17, the Android SDK (Android Studio, or the command-line tools with `platform-tools`, `build-tools` and a platform), and Godot 4.7.2 with its
-   **export templates** (Editor > Manage Export Templates). Editor Settings > Export > Android: set the **Android SDK path** and **Java SDK path**, and a debug
-   keystore (the editor can make one; for a headless export use the environment variables `GODOT_ANDROID_KEYSTORE_DEBUG_PATH`, `..._USER`, `..._PASSWORD`).
+1. **Tools:** JDK 17, the Android SDK (Android Studio, or the command-line tools with `sdkmanager`), and Godot 4.7.2 with its **export templates**
+   (Editor > Manage Export Templates; the Android ones are `android_debug.apk`, `android_release.apk` and `android_source.zip`). Godot installs none of the JDK or
+   the SDK. Versions, from Godot's 4.7 "Exporting for Android" page (check it for newer ones): **Platform-Tools 35.0.0+, Build-Tools 35.0.1, Platform
+   android-35, Command-line Tools (latest), CMake 3.10.2.4988404, NDK 28.1.13356709**; `sdkmanager "platform-tools" "build-tools;35.0.1" "platforms;android-35"
+   "cmdline-tools;latest" "cmake;3.10.2.4988404" "ndk;28.1.13356709"`. Godot's page recommends OpenJDK 17 and says newer is supported; a newer JDK may be refused
+   by the Gradle version in the build template (then use 17). A debug APK was built from this set-up on Windows with JDK 17 and Android Studio's SDK (21 Oct 2026).
+   In the editor: **Editor > Editor Settings > Export > Android**: set the **Android SDK path** (Android Studio's SDK Location, the folder that holds
+   `platform-tools`), the **Java SDK path** (the JDK folder that holds `bin`) and a **debug keystore** (a file, not a folder: make one with
+   `keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 9999 -storepass android -keypass android
+   -dname "CN=Android Debug,O=Android,C=US"` and set the user `androiddebugkey`, password `android`). For a headless export use the environment variables
+   `GODOT_ANDROID_KEYSTORE_DEBUG_PATH`, `..._USER`, `..._PASSWORD`.
 2. **Gradle build template:** open the project in the editor, **Project > Install Android Build Template**. It writes `android/` (git-ignored).
-3. **The plugin:** `tools/install_vendors_plugin.sh` (needs `curl` and `unzip`; or `VENDORS_ZIP=...` with the file from
+3. **The plugin:** `tools/install_vendors_plugin.sh` (needs bash, `curl` and `unzip`; or `VENDORS_ZIP=...` with the file from
    `https://github.com/GodotVR/godot_openxr_vendors/releases/tag/5.1.0-stable`, `godotopenxrvendorsaddon.zip`). Then **open the project in the editor once** so
    it imports the extension. (5.x is a GDExtension: there is no "enable plugin" tick.) Needs Godot 4.6 or later.
+   **On Windows** `bash` is usually the WSL launcher, which fails ("execvpe(/bin/bash) failed") when no Linux distribution is installed, and Git Bash has no
+   `unzip`. Do the same steps in PowerShell from the project folder (close the editor first; the last line should print `True`):
+   ```
+   $ver = "5.1.0-stable"
+   $want = "6a838dbdf4115549e4511ebee0da9a5dcc8f9f6258d4cc2f2ee57a907a3e2911"   # the SHA-256 pinned in tools/install_vendors_plugin.sh
+   $url = "https://github.com/GodotVR/godot_openxr_vendors/releases/download/$ver/godotopenxrvendorsaddon.zip"
+   $zip = "$env:TEMP\vendors.zip"
+   Invoke-WebRequest $url -OutFile $zip
+   $got = (Get-FileHash $zip -Algorithm SHA256).Hash
+   if ($got -ine $want) { throw "SHA-256 mismatch: expected $want, got $got. Not installing." }
+   Remove-Item -Recurse -Force "$env:TEMP\vendors_x" -ErrorAction SilentlyContinue
+   Expand-Archive $zip -DestinationPath "$env:TEMP\vendors_x"
+   New-Item -ItemType Directory -Force addons | Out-Null
+   Remove-Item -Recurse -Force addons\godotopenxrvendors -ErrorAction SilentlyContinue
+   Copy-Item -Recurse "$env:TEMP\vendors_x\asset\addons\godotopenxrvendors" addons\godotopenxrvendors
+   Set-Content addons\godotopenxrvendors\.installed-version $ver
+   Test-Path addons\godotopenxrvendors\plugin.gdextension
+   ```
 4. **The export preset:** copy `tools/android/export_presets.cfg.example` to `export_presets.cfg` (git-ignored: it can hold signing details; never commit it), or
    make the same choices in Project > Export. The choices that matter:
    - **Use Gradle Build** on; **arm64-v8a** only; package `uk.didsa.vr` (change it if you want another id).
-   - **XR Mode: OpenXR**; **Enable Meta Plugin** on (and no other vendor: the plugin refuses two); Quest 3 supported; **Passthrough: Optional**.
+   - **XR Mode: OpenXR**. With the plugin installed, the Export dialog (Options tab) gains **Android XR Features**, **Meta XR Features** (Quest 1 / 2 / 3 / Pro
+     support, boundary mode, overlay keyboard, instant splash screen, experimental features) and **Pico XR Features**: leave Quest 2, Quest 3 and Quest Pro on for
+     a Quest 3. **There is no Passthrough or "Enable Meta Plugin" toggle in that dialog** (an earlier version of this page said there was; that was written from the
+     plugin's source, not from the dialog): passthrough comes from the Android-only project setting `xr/openxr/extensions/meta/passthrough` in `project.godot`.
+   - A project named with spaces gives the warning "the project name does not meet the requirement for the package name format": the package name above clears it.
    - Resources: **include filter `demo/*`**, **exclude `demo/tools/*, tests/*`**. **Never put `secrets.cfg` in an include filter**: the APK would carry your API key
      to everyone you give it to. (A pack export with this preset, 20 Oct 2026, contained the demo models and native files, the logo and the scripts, and no
      `secrets.cfg` or `export_presets.cfg`.)
@@ -59,7 +89,7 @@ In this order; each answers an open question in the scope. Write the answers int
    a phone browser on that Wi-Fi, apply the overlay below and rebuild.
 6. **`adb push` of `servers.cfg`:** the Servers page prints the data folder at its foot. Push a file there and restart (`docs/servers.md`). Correct that page if the
    folder or the permissions are different.
-7. **Frame rate and load time:** the landing's garden (about 56k triangles, loaded one rocket per frame), a 110 m Saturn V at full size, the tablet's Display page
+7. **Frame rate and load time:** the landing's garden (about 175k triangles for the six rockets, loaded one rocket per frame), a 110 m Saturn V at full size, the tablet's Display page
    (fps, cpu / gpu ms).
 
 ## If plain http is blocked: the cleartext overlay
@@ -91,8 +121,8 @@ Checked (`tests/android_config.gd`, headless, plus by hand in a scratch copy of 
 
 **Not checked:**
 
-- **No APK was built.** No Android SDK, no export templates (a download of Google's SDK is blocked from the build environment), no headset. Whether the Gradle build
-  succeeds, whether the plugin's AARs and manifest entries land in the APK, and the real manifest are all unseen.
+- **No APK was built in the build session.** No Android SDK, no export templates (a download of Google's SDK is blocked from the build environment), no headset.
+  (The owner has since built a debug APK from this page on Windows, 21 Oct 2026. The manifest and the plugin's contents in it were not inspected here.)
 - Passthrough, marker tracking, the permission prompt and plain http on an actual Quest.
 - The preset's option names were taken from the plugin's source and Godot's usual Android options, not from the editor's Export dialog: open the preset once and
   check nothing was dropped (Godot ignores a key it does not know, and fills defaults).
