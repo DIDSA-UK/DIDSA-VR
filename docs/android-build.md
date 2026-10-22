@@ -119,6 +119,14 @@ image is drawn. On the Quest 3 (22 Oct 2026) each eye showed one flat colour, wh
 turns it off ([`quest-first-run-fixes.md`](quest-first-run-fixes.md) B2). Unlike the Meta manifest entries, it does not depend on Enable Meta Plugin: it runs
 whenever the plugin's library is in the APK.
 
+## Trying graphics settings without a rebuild
+
+`user://graphics.cfg` is read once at startup (`scripts/graphics_overrides.gd`): foveation level, the viewport's VRS mode, MSAA, and the landing's sky,
+fog, logo glow and rockets. Start from `tools/android/graphics.cfg.example` (it says how to push it with `adb shell run-as`, which needs a **debug** APK). The
+log always has one line with what rendering ended up with, `DIDSA VR: rendering: foveation ..., vrs ..., msaa ..., render size ...`, and one more,
+`DIDSA VR: graphics.cfg: ...`, when the file was read. Made for the Quest 3's one-colour-per-eye fault ([`quest-first-run-fixes.md`](quest-first-run-fixes.md)
+B2), where the menu that has the same switches could not be seen.
+
 ## If plain http is blocked: the cleartext overlay
 
 ```

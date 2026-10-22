@@ -77,6 +77,7 @@ const Landing := preload("res://scripts/landing/landing.gd") ## the first screen
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
 const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
+const GraphicsOverrides := preload("res://scripts/graphics_overrides.gd") ## user://graphics.cfg: switches for finding a headset rendering fault without a rebuild
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
@@ -178,6 +179,7 @@ func _ready() -> void:
 	# with no way to see the menu that turns it off. Turn it on again from View > Environment or the landing's Scan / Graphics check pages.
 	_world_environment.apply_saved_scene(startup_scene(_settings.last_scene))
 	_add_landing()
+	_apply_graphics_overrides()
 	if landing_enabled and _settings.show_landing:
 		_set_status(startup_status())
 		_enter_landing_at_start() # no start-up import: the landing offers Continue, Open and the demos
@@ -832,6 +834,27 @@ func set_msaa(level: int) -> void:
 
 func msaa_level() -> int:
 	return {Viewport.MSAA_DISABLED: 0, Viewport.MSAA_2X: 1, Viewport.MSAA_4X: 2}.get(get_viewport().msaa_3d, 1)
+
+
+func _apply_graphics_overrides() -> void:
+	## user://graphics.cfg (graphics_overrides.gd), then one log line with what rendering ended up with, so a headset log says it either way.
+	var overrides := GraphicsOverrides.new()
+	if overrides.load_from_disk():
+		if overrides.has("foveation"):
+			set_foveation_level(clampi(int(overrides.get_value("foveation")), 0, 3))
+		if overrides.has("vrs"):
+			get_viewport().vrs_mode = Viewport.VRS_XR if str(overrides.get_value("vrs")) == "xr" else Viewport.VRS_DISABLED
+		if overrides.has("msaa"):
+			set_msaa(clampi(int(overrides.get_value("msaa")), 0, 2))
+		if landing != null:
+			if overrides.has("sky") or overrides.has("fog"):
+				landing.stage.set_look(str(overrides.get_value("sky", "plain" if landing.stage.plain_sky else "shader")) == "plain", bool(overrides.get_value("fog", landing.stage.fog_on)))
+			if overrides.has("glow"):
+				landing.set_halo_on(bool(overrides.get_value("glow")))
+			if overrides.has("rockets"):
+				landing.set_rockets_on(bool(overrides.get_value("rockets")))
+		print("DIDSA VR: graphics.cfg: ", overrides.describe())
+	print("DIDSA VR: rendering: foveation %d, vrs %s, msaa %d, render size %s" % [foveation_level(), "xr" if get_viewport().vrs_mode == Viewport.VRS_XR else str(get_viewport().vrs_mode), msaa_level(), str(xr_interface.get_render_target_size()) if xr_interface and xr_interface.is_initialized() else "no headset"])
 
 
 func foveation_level() -> int:

@@ -52,8 +52,15 @@ on time: `VrApi FPS=72/72, Stale=0, App=7.4 ms` (GPU), `LCnt=2`, `SF=1.00`, `Fov
 So it is not a hang or dropped frames: the frames themselves are wrong. The owner still saw nothing. Not known yet whether that APK had dynamic resolution off.
 The app runs at 72 Hz (the Quest 3 default) while physics runs at 90 Hz; unrelated, but worth setting the refresh rate later.
 
+**Startup log (22 Oct, `adb logcat` from launch):** frames on time again (72/72, about 7.7 ms GPU), eye buffers 1680 x 1760 (both eyes in one array
+image), `XR_FB_passthrough` no longer skipped (the manifest fix works), and **foveated rendering through Vulkan's fragment density map**: `Vulkan FFR is
+supported`, `ImportTextureResourcesFoveationVulkan: Imported foveation resources`, `Fov=2`. The density map sets how coarsely each part of the image is shaded; a
+wrong one can shade a whole eye from a few samples, which would give one flat colour per eye. **Top suspect now: foveation** (`openxr/foveation_level=2`); then
+MSAA (the project's `msaa_3d = 2` is **4x**, not 2x as these notes first said). Because nothing can be seen in the headset, **`user://graphics.cfg`** now sets
+these at startup, pushed with adb (`android-build.md`, Trying graphics settings without a rebuild), and the log says what rendering ended up with.
+
 **Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
-fog, glow behind the logo, rockets, MSAA 2x, foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
+fog, glow behind the logo, rockets, MSAA (4x: `msaa_3d = 2` in `project.godot` is 4x, not 2x), foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
 log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the
 switches off one at a time. Note which one stops it, and whether the flicker shows in a Quest screen recording: if it does, Godot drew it; if not, it happens in
 the headset's compositor.
@@ -70,7 +77,7 @@ an angle is the **star field**: `smoothstep(0.06, 0.35, h)` turns stars on above
 - Neither shows on the PC (desktop GPUs run full precision and return the "expected" value for a reversed smoothstep), which fits it never being seen before.
 
 **Other suspects, to rule out if the fix above does not cure it:** the sky's radiance cubemap being regenerated (the "cleared up after a bit" clue; the metallic
-monolith body reflects it), fog (`landing_stage.gd` turns it on), MSAA 2x, foveation level 2. A frame-rate drop would make the compositor reproject, which can
+monolith body reflects it), fog (`landing_stage.gd` turns it on), MSAA 4x, foveation level 2. A frame-rate drop would make the compositor reproject, which can
 show black edges; the tablet's Display page (fps, cpu / gpu ms) tells that apart.
 
 **Fix.**

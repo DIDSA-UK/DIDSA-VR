@@ -537,12 +537,13 @@ func _build_graphics() -> void:
 	_body.add_child(_toggle("Glow behind the logo", landing.halo_on, func(on: bool) -> void:
 		landing.set_halo_on(on)
 		_log_graphics("logo glow", on)))
-	_body.add_child(_toggle("Rockets", landing.garden.visible, func(on: bool) -> void:
-		landing.garden.visible = on
+	_body.add_child(_toggle("Rockets", landing.rockets_on, func(on: bool) -> void:
+		landing.set_rockets_on(on)
 		_log_graphics("rockets", on)))
-	_body.add_child(_toggle("Anti-aliasing (MSAA 2x)", main.msaa_level() > 0, func(on: bool) -> void:
-		main.set_msaa(1 if on else 0)
-		_log_graphics("MSAA 2x", on)))
+	var msaa_on_level: int = main.msaa_level() if main.msaa_level() > 0 else clampi(int(ProjectSettings.get_setting("rendering/anti_aliasing/quality/msaa_3d", 2)), 1, 2) # what "on" goes back to
+	_body.add_child(_toggle("Anti-aliasing (MSAA %dx)" % [2 if msaa_on_level == 1 else 4], main.msaa_level() > 0, func(on: bool) -> void:
+		main.set_msaa(msaa_on_level if on else 0)
+		_log_graphics("MSAA", on)))
 	var foveation: int = main.foveation_level()
 	if foveation >= 0:
 		_body.add_child(_toggle("Foveated rendering", foveation > 0, func(on: bool) -> void:

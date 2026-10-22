@@ -288,7 +288,7 @@ func _initialize() -> void:
 	button_starting(launcher._body, "Anti-aliasing").button_pressed = false
 	check("MSAA off", main.get_viewport().msaa_3d == Viewport.MSAA_DISABLED)
 	button_starting(launcher._body, "Anti-aliasing").button_pressed = true
-	check("...and back to 2x", main.get_viewport().msaa_3d == Viewport.MSAA_2X)
+	check("...and back to the project's own level (msaa_3d = 2: 4x)", main.get_viewport().msaa_3d == Viewport.MSAA_4X)
 	check("no headset: foveation is not offered, and says so", button_starting(launcher._body, "Foveated") == null and "Foveated rendering: no headset" in _all_text(launcher._body))
 	button_starting(launcher._body, "Passthrough").button_pressed = true
 	check("Passthrough from the page, with its status line under it", main.current_scene() == "Passthrough" and (launcher._body.find_child("PassthroughStatus", true, false) as Label).text != "")

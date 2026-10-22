@@ -110,8 +110,8 @@ func enter() -> void:
 	stage.enter(Vector3(_camera.global_position.x, _floor_y(), _camera.global_position.z), forward)
 	logo.visible = true
 	_halo.visible = halo_on
-	garden.visible = true
-	if not garden.is_built:
+	garden.visible = rockets_on
+	if rockets_on and not garden.is_built:
 		garden.build()
 	launcher.open()
 	reel.set_connected(main.has_backend())
@@ -137,6 +137,14 @@ func leave() -> void:
 
 
 var halo_on := true ## Settings > Graphics check: the additive glow behind the logo
+var rockets_on := true ## Settings > Graphics check and graphics.cfg: the rocket garden (off: not even loaded)
+
+
+func set_rockets_on(on: bool) -> void:
+	rockets_on = on
+	garden.visible = active and on
+	if active and on and not garden.is_built:
+		garden.build()
 
 
 func set_halo_on(on: bool) -> void:
