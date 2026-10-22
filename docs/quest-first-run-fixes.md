@@ -59,6 +59,11 @@ wrong one can shade a whole eye from a few samples, which would give one flat co
 MSAA (the project's `msaa_3d = 2` is **4x**, not 2x as these notes first said). Because nothing can be seen in the headset, **`user://graphics.cfg`** now sets
 these at startup, pushed with adb (`android-build.md`, Trying graphics settings without a rebuild), and the log says what rendering ended up with.
 
+**Cause confirmed (22 Oct):** the owner toggled foveation with `graphics.cfg`: off cures it, on brings it back. **Fix:** `openxr/foveation_level=0`
+in `project.godot` (checked by `tests/android_config.gd`). To get foveation back (it saves GPU time): Godot needs the viewport's VRS mode set to XR
+(`Viewport.VRS_XR`) to use the headset's foveation map on Vulkan, and this app never set it (the Vendors plugin's start script does). Next test:
+`graphics.cfg` with `foveation=2` and `vrs="xr"`. If that is clean, turn foveation back on with `VRS_XR` set in `main.gd` `_start_xr()`.
+
 **Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
 fog, glow behind the logo, rockets, MSAA (4x: `msaa_3d = 2` in `project.godot` is 4x, not 2x), foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
 log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the

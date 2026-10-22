@@ -6,8 +6,9 @@
 ; To go back to normal:  adb shell run-as uk.didsa.vr rm files/graphics.cfg
 ; The log says what was applied:  adb logcat -d | findstr "DIDSA"   (PowerShell / cmd)   or   | grep DIDSA
 [graphics]
-foveation=0
-;vrs="xr"
+; Foveation is off in project.godot since 22 Oct (it broke the picture). To test whether it works with the viewport using the foveation map:
+foveation=2
+vrs="xr"
 ;msaa=0
 ;sky="plain"
 ;fog=false
