@@ -428,20 +428,25 @@ func _refresh_scan() -> void:
 	_scan_passthrough.text = "Passthrough: %s" % ("ON (tap to turn off)" if main.current_scene() == "Passthrough" else "off (tap to turn on)")
 	_scan_report.text = scanner.report() + ("\n" + status if status != "" else "")
 	_scan_read.text = _scan_last
-	_scan_step.text = scan_step_text(main.current_scene() == "Passthrough", not _pending.is_empty())
+	var in_view: int = scanner.codes_in_view() if scanner.running else 0
+	_scan_step.text = scan_step_text(main.current_scene() == "Passthrough", not _pending.is_empty(), in_view)
+	if _scan_step.text.ends_with("Searching"):
+		_scan_step.text += ".".repeat(1 + (Time.get_ticks_msec() / 500) % 3) # moving dots: it is looking (the page refreshes twice a second)
 	_scan_step.add_theme_color_override("font_color", Color(0.45, 0.95, 0.55) if not _pending.is_empty() else AMBER_PROMPT)
 
 
 const AMBER_PROMPT := Color(1.0, 0.78, 0.35)
 
 
-static func scan_step_text(passthrough_on: bool, code_read: bool) -> String:
+static func scan_step_text(passthrough_on: bool, code_read: bool, codes_in_view: int = 0) -> String:
 	## What to do now on the Scan page, in one line (pure, for the test).
 	if code_read:
 		return "Step 3 of 3: code read. Check the details below, then press Connect."
 	if not passthrough_on:
 		return "Step 1 of 3: turn passthrough on (the button below) so you can see your screen."
-	return "Step 2 of 3: look at the QR code on your screen now, about an arm's length away, and hold still until it is read."
+	if codes_in_view > 0:
+		return "Step 2 of 3: a code is in view (it has brackets round it). Reading it: hold still."
+	return "Step 2 of 3: look at the QR code on your screen now, about an arm's length away, and hold still until it is read. Searching"
 
 
 func _on_code_seen(text: String) -> void:

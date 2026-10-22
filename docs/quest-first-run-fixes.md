@@ -209,6 +209,26 @@ The Servers form shows the key as *set, N characters (hidden)*. `tests/pairing_f
 *Step 2 of 3: look at the QR code on your screen now* (also on the status line as passthrough comes on), then in green *Step 3 of 3: code read. Check the
 details below, then press Connect*; Cancel goes back to step 2. `tests/scan_page.gd`.
 
+## B7: QR reading hit and miss across restarts, and no sign that it was reading (22 Oct)
+
+**Report:** the code was not read, then after a restart it was, then after another restart it was not; as a user it was not clear the app was reading at
+all. Asked for: feedback, perhaps an AR reticle round the code.
+
+**Cause, from Godot 4.7.2's source** (`modules/openxr/extensions/spatial_entities/openxr_spatial_marker_tracking.cpp`): the built-in marker tracking
+(`enable_builtin_marker_tracking`) creates its spatial context **once, in `on_session_created()`**, at app start, and asks the runtime to discover markers
+only then and when the runtime sends *discovery recommended*. Our app asked for the scene permission only when the Scan page opened. So the first run
+after install could never read (the context was made without the permission), and in later runs a code that came into view was found only if the runtime
+happened to recommend a fresh discovery. Also, `OS.request_permission()` returns true when the permission is already granted and then no result event
+follows, which the scanner ignored (the page could say *asked* for ever).
+
+**Fix (not yet run on a headset):** `qr_scanner.gd` makes a QR spatial context of its own once the permission is granted (at once when it already is,
+or as the result arrives) and runs a discovery every second while listening (`start_entity_discovery` on the capability, one at a time), freeing the
+context when it stops; the built-in path still runs too. The report gains *Searching every 1 s* and *Codes in view now*. **Feedback:** `qr_reticle.gd`
+draws corner brackets on every tracked code in passthrough: amber and breathing (*Reading...*), green with the server's name (*press Connect*), grey (not a
+DIDSA code), red (refused); the Scan page's step 2 line has moving dots while it searches and says *a code is in view* when one is. `tests/qr_reticle.gd`.
+**Unverified:** that the brackets lie flat on the code (the plane of the marker pose; if they stand at right angles, it is X / Z, one line in `_frame()`),
+and that the headset accepts a second spatial context. Tip for the owner: the monolith can stand between you and your screen; turn to face the screen.
+
 ## Order of work
 
 | # | Fix | Size | Needs the headset to confirm |

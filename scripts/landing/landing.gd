@@ -17,6 +17,7 @@ const LandingStage := preload("res://scripts/landing/landing_stage.gd")
 const HALO_SHADER := preload("res://shaders/landing_halo.gdshader")
 const TipsReel := preload("res://scripts/landing/tips_reel.gd")
 const QrScanner := preload("res://scripts/landing/qr_scanner.gd")
+const QrReticle := preload("res://scripts/landing/qr_reticle.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
 const LOGO_DISTANCE := 3.0 ## metres ahead of the user
@@ -31,6 +32,7 @@ var garden: Node3D
 var launcher: Node
 var reel: Node
 var scanner: Node ## qr_scanner.gd: reads QR codes through the headset's marker tracking; the launcher's Scan page starts and stops it
+var reticle: Node3D ## qr_reticle.gd: brackets round each code the headset tracks while the scanner listens (under the XROrigin3D)
 var active := false
 var plinth: MeshInstance3D
 var stage: Node3D ## landing_stage.gd: the night pad (sky, floor, lights) while the landing is up
@@ -81,6 +83,10 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	scanner.name = "QrScanner"
 	add_child(scanner)
 	launcher.attach_scanner(scanner)
+	reticle = QrReticle.new()
+	reticle.name = "QrReticle"
+	reticle.scanner = scanner
+	camera.get_parent().add_child.call_deferred(reticle) # marker poses are in the origin's space; deferred: the origin may still be setting up its children
 	main.status_changed.connect(launcher.set_status)
 	main.server_changed.connect(_on_server_changed)
 
