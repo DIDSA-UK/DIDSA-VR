@@ -22,7 +22,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 - `scripts/motion/`: constrained-drag projector and benchmarks. `shaders/`: clip, grid, glass-wall and effect shaders.
 - `demo/`: models and assemblies shipped in the APK (1:1 glb, `importer="keep"`; credits in `demo/CREDITS.md`, rules in `demo/README.md`).
 - `ui/logo/`: the DIDSA logo traced from the artwork (SVG, 3D glb; how to redo it in `ui/logo/source/`). `icon.svg` is its emblem.
-- `tools/`: `install_vendors_plugin.sh` (the pinned OpenXR Vendors plugin) and `android/` (the Quest export preset example, the optional cleartext overlay). The Quest APK: `docs/android-build.md`.
+- `tools/`: `setup_test_env.sh` (Godot, Xvfb/Mesa, the backend's conda env, Flutter: everything the test suites need) and `start_backend.sh` (a throwaway local backend for e2e), `install_vendors_plugin.sh` (the pinned OpenXR Vendors plugin) and `android/` (the Quest export preset example, the optional cleartext overlay). The Quest APK: `docs/android-build.md`.
 - `ui/themes/`: theme presets. `lab/ui_lab.tscn`: UI sandbox (F6, no headset). `tests/`: headless, render and live-backend tests.
 
 ## Commands

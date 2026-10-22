@@ -24,6 +24,7 @@ Start with [`status.md`](status.md) (what is built, what is verified, what is op
 | [`android-build.md`](android-build.md) | Building the standalone Quest APK (step L0): the OpenXR Vendors plugin, the export preset, passthrough, the first-run checklist for the headset. |
 | [`quest-first-run-fixes.md`](quest-first-run-fixes.md) | The owner's first native Quest 3 run (21 Oct 2026): five bugs (monolith laser reach, sky flicker looking up, Open going to the tablet, the unsaved-changes prompt on demos, black passthrough), their traced causes and the fix plan. |
 | [`servers.md`](servers.md) | Servers: `servers.cfg`, the Servers page, switching, address rules, pre-loading with `adb push`, scanning a QR code. |
+| [`gears-and-motion-plan.md`](gears-and-motion-plan.md) | Next work (2026-10-22): gear tools on the design table, coupler mates (gear, rack and pinion, screw) in both apps and the backend, the Drive tool; milestones M1-M9 with test gates, test tooling and the baseline. |
 | [`landing-scope.md`](landing-scope.md) | The landing (first screen): launcher, QR server pairing, tips, 3D logo, demo models (scope, 2026-10-20; L1 to L3, the offline demo, built; servers and QR not). |
 
 ## Gaps and live trackers
