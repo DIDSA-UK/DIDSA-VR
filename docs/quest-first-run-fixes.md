@@ -40,6 +40,13 @@ scene, and the previous run had ended in Passthrough, so this one started in it.
 remembered Passthrough starts as Mid), so a broken passthrough can no longer leave you blind at launch. Also noted: every Meta passthrough sample in the Vendors
 plugin (5.1.0) uses the Compatibility renderer, not Mobile, so Mobile + alpha-blend passthrough on a Quest is less well trodden.
 
+**Each eye one flat colour (22 Oct):** the owner described the flicker more exactly: each eye shows a single colour at a time (navy, orange or light, the
+landing's sky colours). That is what a tiny rendered region stretched over the whole eye looks like. **Suspect:** the Vendors plugin's Meta **dynamic
+resolution** (`xr/openxr/extensions/meta/dynamic_resolution`, **on by default** in the plugin's `register_types.cpp`). Each frame it asks the runtime for a
+recommended size (`XR_META_recommended_layer_resolution`) and calls `set_render_region()` with it. It is registered whenever the plugin's library loads on
+the headset, whether or not Enable Meta Plugin is ticked, so it could explain the first run's flicker too. **Turned off** in `project.godot` (fixed full
+resolution; also steadier for the frame-rate numbers still to be measured), checked by `tests/android_config.gd`. Not yet tried on the headset.
+
 **Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
 fog, glow behind the logo, rockets, MSAA 2x, foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
 log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the

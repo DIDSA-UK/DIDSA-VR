@@ -39,6 +39,7 @@ func _initialize() -> void:
 	for k in ["openxr/extensions/meta/passthrough", "openxr/extensions/spatial_entity/enabled"]:
 		plain_off = plain_off and not project.has_section_key("xr", k) and not project.has_section_key("xr", k + ".editor")
 	check("...with no plain (desktop) or .editor setting beside them, so PC and PC-VR runs (from the editor too) ask for nothing new", plain_off)
+	check("Meta dynamic resolution is off (the Vendors plugin turns it on by default; suspect for one flat colour per eye on the Quest 3, docs/quest-first-run-fixes.md B2)", project.get_value("xr", "openxr/extensions/meta/dynamic_resolution", true) == false)
 	check("OpenXR itself stays on and Mobile is still the renderer", project.get_value("xr", "openxr/enabled", false) == true and str(project.get_value("rendering", "renderer/rendering_method", "")) == "mobile")
 
 	# --- the example export preset ---------------------------------------------------------------------------------------------

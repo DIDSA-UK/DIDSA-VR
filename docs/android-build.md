@@ -112,6 +112,13 @@ override would also be true for a game run from the editor, so PC-VR would chang
 overrides. **Then the second trap, Enable Meta Plugin** (step 4 above): the second APK, with the settings fixed, still showed *blend modes: opaque* and
 *Scene permission refused*, which is what an APK built with the Meta part switched off gets. **Checking an APK:** `aapt2 dump xmltree --file AndroidManifest.xml <apk> | grep -iE "PASSTHROUGH|USE_SCENE|USE_ANCHOR"` should print all three.
 
+## Meta dynamic resolution is off
+
+The plugin turns on `xr/openxr/extensions/meta/dynamic_resolution` by default: each frame the headset recommends a render size and only that region of each eye's
+image is drawn. On the Quest 3 (22 Oct 2026) each eye showed one flat colour, which is what a tiny region stretched over the eye looks like, so `project.godot`
+turns it off ([`quest-first-run-fixes.md`](quest-first-run-fixes.md) B2). Unlike the Meta manifest entries, it does not depend on Enable Meta Plugin: it runs
+whenever the plugin's library is in the APK.
+
 ## If plain http is blocked: the cleartext overlay
 
 ```
