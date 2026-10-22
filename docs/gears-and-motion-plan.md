@@ -19,7 +19,7 @@ Update this table at every gate (date, test counts, commit hashes in both repos)
 | # | Milestone | Repos | Status | Gate result |
 |---|---|---|---|---|
 | M0 | Tooling and baseline | both | Done 2026-10-22 (planning session) | see "Baseline" below |
-| M1 | Gear bore (backend + flat app field) | BE, FA | Not started | |
+| M1 | Gear bore (backend + flat app field) | BE, FA | Done 2026-10-22 | CAD `9066f7f`. BE core 2546 passed; BE gears 398 passed (392 + 6 new in `test_gear_bore.py`) + planetary jobs 8 passed; FA `flutter test` 2927 passed / 38 skipped (2925 + 2 new); `flutter analyze --no-fatal-infos` 192 infos, 0 errors, 0 warnings (the baseline deprecation). VR untouched. |
 | M2 | Gear tools on the design table | VR | Not started | **PAUSE** after the gate |
 | M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Not started | |
 | M4 | Coupler mates in the flat app | FA | Not started | |
@@ -507,3 +507,22 @@ Recorded 2026-10-22 so they are not lost; **none is to be built in M1-M9**. Each
 - All baseline rows in §2.3 were run in the planning session's container with the tools from `tools/setup_test_env.sh`. Not run there:
   BE bevel pair (very long) and `tests/test_planetary_gear_jobs.py` (serial). Flutter master moves daily: if `flutter analyze` shows new
   kinds of infos on untouched code, that is the channel, not this work; note it and compare against `main`.
+
+### M1 notes (2026-10-22)
+
+- **422 shape.** The plan says `{"type", "message"}`; the gear code uses `{"type", "detail"}` (`_invalid_gear_parameters`), so the three bore
+  errors (`invalid_bore`, `bore_on_internal_gear`, `bore_too_large`) use `{"type": ..., "detail": ...}`. Clients should read `detail`.
+- **Where the checks live.** Not in `_validate_gear_feature_payload` (the root diameter needs the resolved geometry): `validate_bore` in
+  `gear.py` is called from `resolve_gear_from_bodies`, the coarse resolver, and (bevel) `resolve_bevel_gear_from_bodies` and its coarse
+  resolver. `cut_axial_bore` is shared by the spur and bevel builders. Root diameter is `2 * dedendum_radius` (spur) and
+  `2 * inner_cone_distance * sin(root_cone_angle)` at the toe (bevel).
+- **Coarse preview gets the bore too** (a cheap cut on the stand-in cylinder / cone), so the VR coarse preview in M2 shows the hole. The
+  coarse path with `bore_diameter == 0` is unchanged.
+- **Native format.** `bore_diameter` is written only when > 0 and read with default 0.0, so a file without a bore is byte-identical.
+- **AI plan schema** was not touched (it does not list gear fields).
+- **FA.** The Bore diameter field is in `gear_design_screen.dart` (External only, blank = none) and `bevel_design_screen.dart` (single gear and
+  crown modes). Presets store it under `boreDiameter` (a missing key loads as blank). Edit mode reads `bore_diameter` back from the PATCH response.
+- **Not run:** BE bevel pair suite (`-m bevel_pair`, very long). `bevel.py` changed only by an added bore branch that is skipped at 0 and
+  an import of `validate_bore` / `cut_axial_bore` from `gear.py`; the bevel *pair* path does not call `resolve_bevel_gear_from_bodies`.
+  `test_bevel_gear_feature.py` ran in the gears leg. Worth running once at the end (M8).
+- **Not verified:** no hand check of the bore in the flat app UI (widget tests only). The motion-vector check is not part of M1's gate and was not run.
