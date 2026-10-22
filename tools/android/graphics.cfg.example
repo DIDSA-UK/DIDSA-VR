@@ -1,0 +1,16 @@
+; Graphics switches for finding a rendering fault on the headset without a rebuild (scripts/graphics_overrides.gd, docs/android-build.md).
+; Copy to graphics.cfg, keep only the lines you want to try (a ; turns a line off), then with a DEBUG APK installed:
+;   adb push graphics.cfg /data/local/tmp/graphics.cfg
+;   adb shell run-as uk.didsa.vr cp /data/local/tmp/graphics.cfg files/graphics.cfg
+;   adb shell am force-stop uk.didsa.vr      (then start the app again)
+; To go back to normal:  adb shell run-as uk.didsa.vr rm files/graphics.cfg
+; The log says what was applied:  adb logcat -d | findstr "DIDSA"   (PowerShell / cmd)   or   | grep DIDSA
+[graphics]
+; Foveation is off in project.godot since 22 Oct (it broke the picture). To test whether it works with the viewport using the foveation map:
+foveation=2
+vrs="xr"
+;msaa=0
+;sky="plain"
+;fog=false
+;rockets=false
+;glow=false

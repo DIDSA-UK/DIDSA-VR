@@ -31,10 +31,16 @@ func _initialize() -> void:
 	for k in android_keys:
 		all_on = all_on and project.get_value("xr", k, false) == true
 	check("project.godot turns on Meta passthrough and spatial-entity marker tracking for Android builds", all_on)
+	var export_on := true
+	for k in android_keys:
+		export_on = export_on and project.get_value("xr", str(k).replace(".android", ".editor_hint"), false) == true
+	check("...and for the editor (.editor_hint), which is what the Vendors plugin reads when it writes the APK's manifest (passthrough feature, scene / anchor permissions)", export_on)
 	var plain_off := true
 	for k in ["openxr/extensions/meta/passthrough", "openxr/extensions/spatial_entity/enabled"]:
-		plain_off = plain_off and not project.has_section_key("xr", k)
-	check("...with no plain (desktop) setting beside them, so PC and PC-VR builds ask for nothing new", plain_off)
+		plain_off = plain_off and not project.has_section_key("xr", k) and not project.has_section_key("xr", k + ".editor")
+	check("...with no plain (desktop) or .editor setting beside them, so PC and PC-VR runs (from the editor too) ask for nothing new", plain_off)
+	check("Meta dynamic resolution is off (the Vendors plugin turns it on by default; suspect for one flat colour per eye on the Quest 3, docs/quest-first-run-fixes.md B2)", project.get_value("xr", "openxr/extensions/meta/dynamic_resolution", true) == false)
+	check("foveated rendering is off (on the Quest 3 it showed one flat colour per eye, confirmed by toggling it, docs/quest-first-run-fixes.md B2)", int(project.get_value("xr", "openxr/foveation_level", 2)) == 0)
 	check("OpenXR itself stays on and Mobile is still the renderer", project.get_value("xr", "openxr/enabled", false) == true and str(project.get_value("rendering", "renderer/rendering_method", "")) == "mobile")
 
 	# --- the example export preset ---------------------------------------------------------------------------------------------
@@ -43,6 +49,7 @@ func _initialize() -> void:
 	var o := "preset.0.options"
 	check("an Android preset with the Gradle build, OpenXR mode and the Meta plugin", preset.get_value("preset.0", "platform", "") == "Android" and preset.get_value(o, "gradle_build/use_gradle_build", false) == true and preset.get_value(o, "xr_features/xr_mode", 0) == 1 and preset.get_value(o, "xr_features/enable_meta_plugin", false) == true)
 	check("one architecture only (arm64: every Quest), Quest 3 supported", preset.get_value(o, "architectures/arm64-v8a", false) == true and preset.get_value(o, "architectures/armeabi-v7a", true) == false and preset.get_value(o, "architectures/x86_64", true) == false and preset.get_value(o, "meta_xr_features/quest_3_support", false) == true)
+	check("the Internet permission is on (Godot's default is off: then no server can be reached)", preset.get_value(o, "permissions/internet", false) == true)
 	check("passthrough is optional (1), not required", preset.get_value(o, "meta_xr_features/passthrough", 0) == 1)
 	var include := str(preset.get_value("preset.0", "include_filter", ""))
 	var exclude := str(preset.get_value("preset.0", "exclude_filter", ""))

@@ -25,6 +25,7 @@ var _server_result: Label
 var scanner: Node ## qr_scanner.gd, from landing.gd
 var _scan_report: Label
 var _scan_read: Label
+var _scan_step: Label ## the Scan page's one-line "what to do now": passthrough on, look at the code, confirm it
 var _scan_passthrough: Button
 var _pending: Dictionary = {} ## a pairing code that was read and is waiting for Connect / Cancel (PairingPayload.parse's result)
 var _scan_card: VBoxContainer
@@ -34,6 +35,7 @@ var _scan_restore_scene := ""
 var launcher_panel_size := Vector2(0.88, 0.66) ## metres (the landing deck sets its own in _init)
 var launcher_viewport_size := Vector2i(880, 660)
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
+var _page_before_discard := "" ## the page the "Unsaved changes" choice replaced, to go back to once it is decided
 
 
 func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamera3D, p_landing: Node) -> void:
@@ -45,6 +47,7 @@ func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamer
 	open_distance = 0.85
 	open_lateral_offset = 0.0
 	super.setup(left, right, camera)
+	main.discard_prompt_changed.connect(_on_discard_prompt)
 
 
 func _place_in_front_of_camera() -> void:
@@ -128,11 +131,17 @@ func show_page(name: String) -> void:
 			_build_scan()
 		"about":
 			_build_about()
+		"graphics":
+			_build_graphics()
+		"discard":
+			_build_discard()
+		"open":
+			_build_open()
 		_:
 			page = "home"
 			_build_home()
 	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers", "scan": "Scan a QR code",
-		"settings": "Settings", "about": "About"}.get(page, "DIDSA Design Tools VR"))
+		"settings": "Settings", "about": "About", "graphics": "Graphics check", "discard": "Unsaved changes", "open": "Open a file"}.get(page, "DIDSA Design Tools VR"))
 	page_changed.emit(page)
 
 
@@ -207,7 +216,7 @@ func press_tile(id: String) -> void:
 		"continue":
 			landing.continue_last()
 		"open":
-			landing.open_files()
+			show_page("open") # the file list is on the monolith itself (Quest 3 report: Open used to throw you onto the wrist tablet)
 		"new":
 			landing.new_assembly()
 		"models", "assemblies", "servers", "settings", "about":
@@ -320,7 +329,7 @@ func _scan_button() -> Button:
 
 func _form_button(field: String, title: String) -> Button:
 	var value := str(_form[field])
-	var shown := "•".repeat(mini(value.length(), 12)) if field == "api_key" else value
+	var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field == "api_key" else value
 	var button := _action("%s: %s" % [title, shown if shown != "" else "tap to type"], func() -> void:
 		main.open_keyboard_for(str(_form[field]), func(text: String) -> void:
 			_form[field] = text.strip_edges()
@@ -364,6 +373,9 @@ func attach_scanner(p_scanner: Node) -> void:
 
 
 func _build_scan() -> void:
+	_scan_step = _info("")
+	_scan_step.name = "ScanStep"
+	_body.add_child(_scan_step)
 	_body.add_child(_hint("On your PC or phone open DIDSA-CAD and choose Connect a VR headset. Turn passthrough on so you can see the screen, then look at the code, close enough that it fills a good part of your view."))
 	_scan_passthrough = _action("", _toggle_scan_passthrough, 0)
 	_scan_passthrough.name = "Passthrough"
@@ -401,6 +413,8 @@ func _toggle_scan_passthrough() -> void:
 	if _scan_restore_scene == "":
 		_scan_restore_scene = main.current_scene() if main.current_scene() != "Passthrough" else "Mid"
 		main.set_scene("Passthrough")
+		if _pending.is_empty():
+			main.say("Now look at the QR code on your screen.")
 	else:
 		main.set_scene(_scan_restore_scene)
 		_scan_restore_scene = ""
@@ -414,6 +428,25 @@ func _refresh_scan() -> void:
 	_scan_passthrough.text = "Passthrough: %s" % ("ON (tap to turn off)" if main.current_scene() == "Passthrough" else "off (tap to turn on)")
 	_scan_report.text = scanner.report() + ("\n" + status if status != "" else "")
 	_scan_read.text = _scan_last
+	var in_view: int = scanner.codes_in_view() if scanner.running else 0
+	_scan_step.text = scan_step_text(main.current_scene() == "Passthrough", not _pending.is_empty(), in_view)
+	if _scan_step.text.ends_with("Searching"):
+		_scan_step.text += ".".repeat(1 + (Time.get_ticks_msec() / 500) % 3) # moving dots: it is looking (the page refreshes twice a second)
+	_scan_step.add_theme_color_override("font_color", Color(0.45, 0.95, 0.55) if not _pending.is_empty() else AMBER_PROMPT)
+
+
+const AMBER_PROMPT := Color(1.0, 0.78, 0.35)
+
+
+static func scan_step_text(passthrough_on: bool, code_read: bool, codes_in_view: int = 0) -> String:
+	## What to do now on the Scan page, in one line (pure, for the test).
+	if code_read:
+		return "Step 3 of 3: code read. Check the details below, then press Connect."
+	if not passthrough_on:
+		return "Step 1 of 3: turn passthrough on (the button below) so you can see your screen."
+	if codes_in_view > 0:
+		return "Step 2 of 3: a code is in view (it has brackets round it). Reading it: hold still."
+	return "Step 2 of 3: look at the QR code on your screen now, about an arm's length away, and hold still until it is read. Searching"
 
 
 func _on_code_seen(text: String) -> void:
@@ -422,10 +455,16 @@ func _on_code_seen(text: String) -> void:
 	if PairingPayload.looks_like_pairing(text):
 		var parsed := PairingPayload.parse(text)
 		if parsed["ok"]:
+			var fresh: bool = _pending.is_empty() or _pending["url"] != parsed["url"] or _pending["api_key"] != parsed["api_key"]
 			_pending = parsed # waits for Connect: nothing is saved or switched until then
 			_card_test_failed = false
 			_refresh_card()
-			UiFeedback.haptic(_right, "confirm")
+			if fresh: # the tracker reports the same code many times a second: one tick and one status line per new code
+				UiFeedback.haptic(_right, "confirm")
+				UiFeedback.play("confirm", self)
+				main.say("QR code read: %s, with its API key. Check the card and press Connect." % parsed["name"])
+		else:
+			UiFeedback.haptic(_right, "error")
 	_refresh_scan()
 
 
@@ -442,6 +481,15 @@ func _refresh_card() -> void:
 	var title := _info("Connect to %s?" % _pending["name"])
 	title.name = "CardTitle"
 	_scan_card.add_child(title)
+	var checks := VBoxContainer.new() # what the code gave, line by line, so it is plain that the read worked and the key came with it
+	checks.name = "CardChecks"
+	checks.add_child(_check_row(true, "QR code read"))
+	checks.add_child(_check_row(true, "Server: %s" % _pending["name"]))
+	checks.add_child(_check_row(str(_pending["warning"]) == "", "Address: %s" % ServerAddress.default_name(str(_pending["url"]))))
+	checks.add_child(_check_row(true, "API key received (%d characters, kept hidden)" % str(_pending["api_key"]).length()))
+	if str(_pending.get("document_session", "")) != "":
+		checks.add_child(_check_row(true, "Document session included"))
+	_scan_card.add_child(checks)
 	var detail := _hint(str(_pending["url"]) + ("\n" + str(_pending["warning"]) if _pending["warning"] != "" else ""))
 	detail.name = "CardDetail"
 	_scan_card.add_child(detail)
@@ -479,7 +527,7 @@ func _connect_pending() -> void:
 		for button in _scan_card.find_children("Card*", "Button", true, false):
 			(button as Button).disabled = true # one request at a time
 		if result_label != null:
-			result_label.text = "Asking %s ..." % chosen["url"]
+			result_label.text = "Testing the server and the API key at %s ..." % chosen["url"]
 		var answer: Dictionary = await main.test_server(str(chosen["url"]), str(chosen["api_key"]))
 		if not is_instance_valid(self) or _pending != chosen:
 			return # cancelled, or another code arrived, while it was asking
@@ -489,6 +537,8 @@ func _connect_pending() -> void:
 			var failed_label: Label = _scan_card.find_child("CardResult", true, false)
 			if failed_label != null:
 				failed_label.text = "The server did not answer: %s Save it anyway, or cancel." % answer["message"]
+			UiFeedback.haptic(_right, "error")
+			main.say("Pairing: the server did not answer. %s" % answer["message"])
 			return
 	var entry: Dictionary = main.add_server({"name": chosen["name"], "url": chosen["url"], "api_key": chosen["api_key"],
 		"document_session": chosen["document_session"], "relay_url": chosen["relay_url"], "relay_api_key": chosen["relay_api_key"]}, true)
@@ -496,9 +546,14 @@ func _connect_pending() -> void:
 		if result_label != null:
 			result_label.text = "Couldn't save that server (is the list full? Forget one under Servers)."
 		return
+	var tested := not _card_test_failed # false: the user chose Save anyway after a failed test
 	_pending = {}
 	_card_test_failed = false
 	show_page("servers")
+	if _server_result != null and is_instance_valid(_server_result):
+		_server_result.text = ("Connected to %s: the server answered and accepted the API key." if tested else "Saved %s without a working test: it may not connect.") % entry["name"]
+	UiFeedback.haptic(_right, "confirm")
+	UiFeedback.play("confirm", self)
 	main.say("Connected to %s." % entry["name"])
 
 
@@ -511,13 +566,132 @@ static func describe_code(text: String) -> String:
 	return "Read a DIDSA pairing code for %s (%s)." % [parsed["name"], ServerAddress.default_name(parsed["url"])]
 
 
+# --- Open a file: the same list as the tablet's Files page, on the monolith -----------------------------------------------------
+
+const OPEN_ROWS_MAX := 40 ## more than this and the rest are on the wrist tablet's Files page (the page scrolls with the stick)
+
+
+func _build_open() -> void:
+	var last := RecentFile.last()
+	if not last.is_empty():
+		_body.add_child(_hint("Last opened"))
+		_body.add_child(_file_row(str(last["path"]), "Recent"))
+	var files: PackedStringArray = main.list_model_files() # scanned once, when the page opens (a project folder may be a network mount)
+	_body.add_child(_hint("%d model file(s) in the models folders and your project folder." % files.size() if files.size() > 0 else "No model files found. Put .glb, .didsa or STEP files in the models folder, or set a project folder on the wrist tablet (Settings)."))
+	for i in mini(files.size(), OPEN_ROWS_MAX):
+		_body.add_child(_file_row(files[i], ""))
+	if files.size() > OPEN_ROWS_MAX:
+		_body.add_child(_hint("And %d more: see the wrist tablet's Files page." % (files.size() - OPEN_ROWS_MAX)))
+	if not main.has_backend():
+		_body.add_child(_hint(".didsa and STEP files need a server (Servers); .glb files open offline."))
+	var more := _action("Save, references and the project folder: on the wrist tablet", landing.open_files, 0)
+	more.name = "OpenOnTablet"
+	_body.add_child(more)
+
+
+func _file_row(path: String, note: String) -> Control:
+	var box := HBoxContainer.new()
+	box.name = "File_" + path.get_file().validate_node_name()
+	box.add_theme_constant_override("separation", 8)
+	var label := Label.new()
+	label.text = "%s\n%s" % [path.get_file(), (note + "  " if note != "" else "") + path.get_extension().to_upper()]
+	label.theme_type_variation = &"LabelSmall"
+	label.clip_text = true
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(label)
+	var needs_server: bool = path.get_extension().to_lower() not in ["glb", "gltf"] and not main.has_backend()
+	var open := _action("Needs a server" if needs_server else "Open", func() -> void: main.load_model_file(path), 200)
+	open.name = "Open"
+	open.disabled = needs_server
+	box.add_child(open)
+	return box
+
+
+# --- Unsaved changes: the choice is made where you are (Quest 3 report: it was only on the wrist tablet) ---------------------------
+
+func _on_discard_prompt() -> void:
+	## main.gd has a replace waiting on unsaved changes (or no longer has one). While this menu is open the choice is shown here.
+	if main.pending_discard() != "":
+		if is_open():
+			if page != "discard":
+				_page_before_discard = page
+			show_page("discard")
+	elif page == "discard":
+		var back := _page_before_discard if _page_before_discard != "" else "home"
+		_page_before_discard = ""
+		show_page(back)
+
+
+func _build_discard() -> void:
+	var what: String = main.pending_discard()
+	_body.add_child(_info("You have unsaved changes"))
+	_body.add_child(_hint("\"%s\" would replace what is open and lose them." % what))
+	var discard := _action("Discard them and continue", func() -> void: main.discard_and_continue(), 0)
+	discard.name = "DiscardContinue"
+	discard.theme_type_variation = &"ButtonDanger"
+	_body.add_child(discard)
+	var save := _action("Save first, then continue", func() -> void: main.save_and_continue(), 0)
+	save.name = "DiscardSave"
+	save.disabled = not main.has_backend()
+	_body.add_child(save)
+	if save.disabled:
+		_body.add_child(_hint("Saving needs a server (Servers)."))
+	var cancel := _action("Cancel: keep my changes", func() -> void: main.cancel_discard(), 0)
+	cancel.name = "DiscardCancel"
+	_body.add_child(cancel)
+
+
 # --- Settings ---------------------------------------------------------------------------------------------
 
 func _build_settings() -> void:
 	_body.add_child(_toggle("Show the landing on start", main.show_landing_on_start(), func(on: bool) -> void: main.set_show_landing_on_start(on)))
 	_body.add_child(_toggle("Show tips", main.show_tips(), func(on: bool) -> void: main.set_show_tips(on)))
 	_body.add_child(_toggle("Reduce motion (logo sway and pulse)", main.reduce_motion(), func(on: bool) -> void: main.set_reduce_motion(on)))
+	_body.add_child(_action("Graphics check (for a flicker)", show_page.bind("graphics"), 0))
 	_body.add_child(_action("More settings on the wrist tablet", landing.open_tablet_settings, 0))
+
+
+# --- Graphics check: switch the flicker suspects off one at a time on the headset (docs/quest-first-run-fixes.md B2) ---------------
+
+func _build_graphics() -> void:
+	_body.add_child(_hint("If the picture flickers (black, orange or light in either eye), turn these off one at a time and note which one stops it. Each change is written to the log (adb logcat -s godot). Nothing here is saved: a restart puts it all back."))
+	var stage: Node = landing.stage
+	_body.add_child(_toggle("Night sky shader (off: a flat colour)", not stage.plain_sky, func(on: bool) -> void:
+		stage.set_look(not on, stage.fog_on)
+		_log_graphics("night sky shader", on)))
+	_body.add_child(_toggle("Fog", stage.fog_on, func(on: bool) -> void:
+		stage.set_look(stage.plain_sky, on)
+		_log_graphics("fog", on)))
+	_body.add_child(_toggle("Glow behind the logo", landing.halo_on, func(on: bool) -> void:
+		landing.set_halo_on(on)
+		_log_graphics("logo glow", on)))
+	_body.add_child(_toggle("Rockets", landing.rockets_on, func(on: bool) -> void:
+		landing.set_rockets_on(on)
+		_log_graphics("rockets", on)))
+	var msaa_on_level: int = main.msaa_level() if main.msaa_level() > 0 else clampi(int(ProjectSettings.get_setting("rendering/anti_aliasing/quality/msaa_3d", 2)), 1, 2) # what "on" goes back to
+	_body.add_child(_toggle("Anti-aliasing (MSAA %dx)" % [2 if msaa_on_level == 1 else 4], main.msaa_level() > 0, func(on: bool) -> void:
+		main.set_msaa(msaa_on_level if on else 0)
+		_log_graphics("MSAA", on)))
+	var foveation: int = main.foveation_level()
+	if foveation >= 0:
+		_body.add_child(_toggle("Foveated rendering", foveation > 0, func(on: bool) -> void:
+			main.set_foveation_level(2 if on else 0)
+			_log_graphics("foveation", on)))
+	else:
+		_body.add_child(_hint("Foveated rendering: no headset, so not offered."))
+	var status := _hint(main.passthrough_status())
+	status.name = "PassthroughStatus"
+	var button := _toggle("Passthrough", main.current_scene() == "Passthrough", func(on: bool) -> void:
+		main.set_scene("Passthrough" if on else "Mid")
+		status.text = main.passthrough_status()
+		_log_graphics("passthrough", on))
+	button.name = "Passthrough"
+	_body.add_child(button)
+	_body.add_child(status)
+
+
+func _log_graphics(what: String, on: bool) -> void:
+	main.say("Graphics check: %s %s" % [what, "on" if on else "off"]) # the status line is printed too, so it is in the log
 
 
 # --- About ------------------------------------------------------------------------------------------------
@@ -536,6 +710,24 @@ func _build_about() -> void:
 
 
 # --- Small builders ------------------------------------------------------------------------------------------
+
+func _check_row(ok: bool, text: String) -> HBoxContainer:
+	## One line of a checklist: a tick (or a warning sign) and the words.
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	var icon := TextureRect.new()
+	icon.texture = UiIcons.texture("check" if ok else "warn", 32)
+	icon.modulate = Color(0.45, 0.95, 0.55) if ok else Color(1.0, 0.72, 0.30)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.custom_minimum_size = Vector2(36, 36)
+	row.add_child(icon)
+	var label := Label.new()
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	return row
+
 
 func _hint(text: String) -> Label:
 	var label := Label.new()

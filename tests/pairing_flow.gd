@@ -85,6 +85,14 @@ func _initialize() -> void:
 	check("it offers Connect and Cancel", card("CardConnect").text == "Connect" and card("CardCancel").text == "Cancel")
 	check("nothing is saved or switched yet", main.server_store.servers.is_empty() and not main.has_backend() and asked.is_empty())
 	check("neither the key nor the relay key is on screen", not ("TOPSECRETKEY" in _all_text(launcher._body)) and not ("RELAYSECRET" in _all_text(launcher._body)))
+	var checks := _all_text(card("CardChecks"))
+	check("the card lists what the code gave, with a tick each: read, server, address, the key received (its length, not its value), the session", "QR code read" in checks and "Server: Workshop PC" in checks and "Address: cad.example.net" in checks and "API key received (12 characters, kept hidden)" in checks and "Document session included" in checks and card("CardChecks").find_children("*", "TextureRect", true, false).size() == 5)
+	check("the status line says the code was read with its key", "QR code read: Workshop PC, with its API key" in main.status_text)
+	main.say("something else")
+	scanner._last_seen_ms -= 5000
+	scanner.feed(code("Workshop PC", "https://cad.example.net", "TOPSECRETKEY", "&s=vr-shared&r=" + "https://relay.example.net".uri_encode() + "&rk=RELAYSECRET"))
+	await frames(2)
+	check("the same code seen again does not repeat the status line (the tracker reports it many times a second)", main.status_text == "something else")
 
 	# --- Connect: asks, saves, switches ------------------------------------------------------------------------------------------
 	card("CardConnect").pressed.emit()
@@ -94,6 +102,7 @@ func _initialize() -> void:
 	check("it saved the server and switched to it", entry.get("url", "") == "https://cad.example.net" and main.has_backend() and main.backend_url == "https://cad.example.net" and main.active_server_id == entry.get("id", "x"))
 	check("the document session and the relay came with it", entry["document_session"] == "vr-shared" and entry["relay_url"] == "https://relay.example.net" and entry["relay_api_key"] == "RELAYSECRET" and main.relay_url == "https://relay.example.net")
 	check("every tool follows (no restart)", main._mates_tool.api_key == "TOPSECRETKEY" and main._measure_tool.backend_url == "https://cad.example.net" and main.room_manager._backend_url == "https://cad.example.net")
+	check("the Servers page says the server answered and accepted the key", "accepted the API key" in (launcher._body.find_child("TestResult", true, false) as Label).text)
 	check("the Servers page is shown with it in use, the scanner stopped, and the status says connected", launcher.page == "servers" and not scanner.running and "Connected to Workshop PC" in main.status_text and launcher._body.find_child("Server_" + entry["id"], true, false) != null)
 	var on_disk := ServerStore.new()
 	on_disk.load_from_disk()
@@ -107,6 +116,7 @@ func _initialize() -> void:
 	scanner.feed(code("Phone", "http://192.168.1.9:8000", "phonekey"))
 	await frames(2)
 	check("plain http on the LAN shows the unencrypted warning on the card", "unencrypted" in card("CardDetail").text and "http://192.168.1.9:8000" in card("CardDetail").text)
+	check("...and its address line carries a warning sign, not a tick", card("CardChecks").get_child(2).get_child(0).modulate.r > 0.9)
 	card("CardConnect").pressed.emit()
 	await frames(3)
 	check("a server that does not answer is not saved yet; the card says why and offers Save anyway", main.server_store.find_by_url("http://192.168.1.9:8000").is_empty() and "did not answer" in card("CardResult").text and card("CardConnect").text == "Save anyway")

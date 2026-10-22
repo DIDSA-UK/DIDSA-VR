@@ -1420,6 +1420,7 @@ func _update_laser_visual() -> void:
 	var longest := laser_length
 	if ui_distance >= 0.0:
 		distance = ui_distance
+		longest = maxf(laser_length, ui_distance) # the monolith can be pressed from 5 m: the laser must reach what it presses
 	elif _hover_panel_distance >= 0.0:
 		distance = _hover_panel_distance # stops on a window it's aimed at, even a far one
 		longest = maxf(laser_length, _hover_panel_distance)

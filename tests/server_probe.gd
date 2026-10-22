@@ -53,6 +53,9 @@ func _initialize() -> void:
 
 	check("timeouts are described", "No answer" in ServerProbe.describe(HTTPRequest.RESULT_TIMEOUT, 0)["message"])
 	check("a TLS failure mentions the certificate", "certificate" in ServerProbe.describe(HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR, 0)["message"])
+	check("on Android a connect or resolve failure names the Internet permission (Godot's export leaves it off)", "Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_CONNECT, 0, true)["message"] and "Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_RESOLVE, 0, true)["message"])
+	check("...not on a PC, and not for a timeout", not ("Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_CONNECT, 0, false)["message"]) and not ("Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_TIMEOUT, 0, true)["message"]))
+	check("a name that does not resolve says so", "did not resolve" in ServerProbe.describe(HTTPRequest.RESULT_CANT_RESOLVE, 0, false)["message"])
 	check("any 2xx is fine", ServerProbe.describe(HTTPRequest.RESULT_SUCCESS, 204)["ok"])
 	_finish()
 

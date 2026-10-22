@@ -110,7 +110,7 @@ What step L5 has to answer (write the answers into this page and the scope):
 - Does *QR codes supported* say yes on your Quest 3 and Horizon OS version? (A forum report says it works on a Quest 3 with Horizon OS v83 and Godot 4.6, not
   4.5.)
 - Which Android permission is needed? The OpenXR Vendors plugin writes `com.oculus.permission.USE_SCENE` (and `USE_ANCHOR_API`) into the manifest by itself while
-  `xr/openxr/extensions/spatial_entity/enabled` is on (its source says so), and the scanner asks for the scene permission at run time. **Whether marker tracking
+  `xr/openxr/extensions/spatial_entity/enabled` reads true in the editor at export time (its source says so; `project.godot` has it with `.editor_hint` for that since 21 Oct, see `android-build.md`, the Android-only setting trap), and the scanner asks for the scene permission at run time. **Whether marker tracking
   needs exactly that one is still unknown**; the Scan page says what the headset answered.
 - Does the runtime create a marker tracker for a code on a monitor at all, and how large must it be on screen?
 - Is the tracker delivered through the XRServer's `tracker_added` / `tracker_updated` (what the scanner listens to, plus a 0.5 s poll)?

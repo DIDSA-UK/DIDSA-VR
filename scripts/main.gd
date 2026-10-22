@@ -64,6 +64,7 @@ var _reference_review: Dictionary = {"root": "", "relinked": [], "review": [], "
 var _references_left: Dictionary = {} ## review keys the user chose to leave missing (hidden on the References page until the next open)
 var _dirty_from_relink := false ## the only unsaved change is a moved file's corrected path: picking another reference re-opens without asking
 var last_saved_path := "" ## the .didsa the last save wrote
+var document_is_demo := false ## what is shown is a demo model shipped in the APK (res://demo/): read-only, so replacing it never asks (Quest 3 report, 21 Oct 2026)
 var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
 var _discard_armed_for := ""
 var _discard_armed_until_ms := 0
@@ -77,6 +78,7 @@ const Landing := preload("res://scripts/landing/landing.gd") ## the first screen
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
 const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
+const GraphicsOverrides := preload("res://scripts/graphics_overrides.gd") ## user://graphics.cfg: switches for finding a headset rendering fault without a rebuild
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
@@ -174,8 +176,11 @@ func _ready() -> void:
 	_apply_backend()
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
-	_world_environment.apply_saved_scene(_settings.last_scene)
+	# Never start in Passthrough: if it misbehaves on a headset (Quest 3, 21 Oct: a flicker in both eyes from the first frame) you would start blind,
+	# with no way to see the menu that turns it off. Turn it on again from View > Environment or the landing's Scan / Graphics check pages.
+	_world_environment.apply_saved_scene(startup_scene(_settings.last_scene))
 	_add_landing()
+	_apply_graphics_overrides()
 	if landing_enabled and _settings.show_landing:
 		_set_status(startup_status())
 		_enter_landing_at_start() # no start-up import: the landing offers Continue, Open and the demos
@@ -828,11 +833,52 @@ func set_msaa(level: int) -> void:
 	get_viewport().msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X][level]
 
 
+func msaa_level() -> int:
+	return {Viewport.MSAA_DISABLED: 0, Viewport.MSAA_2X: 1, Viewport.MSAA_4X: 2}.get(get_viewport().msaa_3d, 1)
+
+
+func _apply_graphics_overrides() -> void:
+	## user://graphics.cfg (graphics_overrides.gd), then one log line with what rendering ended up with, so a headset log says it either way.
+	var overrides := GraphicsOverrides.new()
+	if overrides.load_from_disk():
+		if overrides.has("foveation"):
+			set_foveation_level(clampi(int(overrides.get_value("foveation")), 0, 3))
+		if overrides.has("vrs"):
+			get_viewport().vrs_mode = Viewport.VRS_XR if str(overrides.get_value("vrs")) == "xr" else Viewport.VRS_DISABLED
+		if overrides.has("msaa"):
+			set_msaa(clampi(int(overrides.get_value("msaa")), 0, 2))
+		if landing != null:
+			if overrides.has("sky") or overrides.has("fog"):
+				landing.stage.set_look(str(overrides.get_value("sky", "plain" if landing.stage.plain_sky else "shader")) == "plain", bool(overrides.get_value("fog", landing.stage.fog_on)))
+			if overrides.has("glow"):
+				landing.set_halo_on(bool(overrides.get_value("glow")))
+			if overrides.has("rockets"):
+				landing.set_rockets_on(bool(overrides.get_value("rockets")))
+		print("DIDSA VR: graphics.cfg: ", overrides.describe())
+	print("DIDSA VR: rendering: foveation %d, vrs %s, msaa %d, render size %s" % [foveation_level(), "xr" if get_viewport().vrs_mode == Viewport.VRS_XR else str(get_viewport().vrs_mode), msaa_level(), str(xr_interface.get_render_target_size()) if xr_interface and xr_interface.is_initialized() else "no headset"])
+
+
+func foveation_level() -> int:
+	## The OpenXR foveated-rendering level (0 off .. 3 high), or -1 with no headset.
+	if xr_interface and xr_interface.is_initialized() and "foveation_level" in xr_interface:
+		return int(xr_interface.get("foveation_level"))
+	return -1
+
+
+func set_foveation_level(level: int) -> void:
+	if xr_interface and xr_interface.is_initialized() and "foveation_level" in xr_interface:
+		xr_interface.set("foveation_level", level)
+
+
 # --- Environment (View > Environment tab): Light/Dark/Mid rendered presets
 # plus Passthrough (OpenXR mixed reality) — see environment_manager.gd.
 
 func available_scenes() -> Array[String]:
 	return _world_environment.SCENES
+
+
+static func startup_scene(saved: String) -> String:
+	return "Mid" if saved == "Passthrough" else saved
 
 
 func current_scene() -> String:
@@ -1552,17 +1598,20 @@ func reload_world_model(dirty: bool = true) -> bool:
 	return shown
 
 
-func load_glb_file(path: String) -> bool:
-	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown.
+func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bool:
+	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown. `run_after_discard` is what
+	## "Discard and continue" runs if unsaved changes stop it (default: this load again); the landing passes its own demo placing, so the demo
+	## is still placed full size or on the desk after a discard.
 	if not FileAccess.file_exists(path):
 		_set_status("No such file: %s" % path)
 		return false
-	if not confirm_discard("Open " + path.get_file(), load_glb_file.bind(path)):
+	if not confirm_discard("Open " + path.get_file(), run_after_discard if run_after_discard.is_valid() else load_glb_file.bind(path)):
 		return false
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
 		return false
+	document_is_demo = path.begins_with("res://demo/")
 	RecentFile.remember(path)
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR: ", _load_summary)
@@ -1734,6 +1783,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	if scene == null:
 		_set_status("glTF parsed but produced no scene.")
 		return false
+	document_is_demo = false # the old model is going; load_glb_file() sets this again for a demo
 	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 	_appearance_tool.forget() # the glb's materials are the looks now; the tool reads the lists again when it is next used
 	scenes_tool.forget() # a shown scene's nodes are about to go
@@ -1810,7 +1860,7 @@ func confirm_discard(what: String, run: Callable = Callable()) -> bool:
 	## `what` again within DISCARD_CONFIRM_MS goes ahead and discards them. Different actions don't share a confirmation.
 	## With `run` (the action itself, to call again) the warning is also a choice on the Files page: discard_and_continue() runs it,
 	## save_and_continue() saves first, cancel_discard() drops it (owner's report, Oct 2026: a bare refusal read as an error).
-	if not document_dirty:
+	if not document_dirty or document_is_demo: # a demo is read-only and can't be saved offline: moving or painting it is not work to lose
 		_clear_pending_discard()
 		return true
 	var now := Time.get_ticks_msec()
@@ -1823,7 +1873,7 @@ func confirm_discard(what: String, run: Callable = Callable()) -> bool:
 	if run.is_valid():
 		_pending_discard = {"what": what, "run": run}
 		discard_prompt_changed.emit()
-		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (Files page)." % what)
+		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (%s)." % [what, "on the monolith" if landing != null and landing.is_active() else "Files page"])
 	else:
 		_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
 	return false

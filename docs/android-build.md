@@ -8,8 +8,8 @@ checked, and what was not, is at the end.
 
 | Need | How |
 |---|---|
-| Passthrough on a standalone Quest (to see the screen with the pairing QR code, and mixed reality in general) | the **OpenXR Vendors plugin** (Meta part) in a **Gradle** Android build; project setting `xr/openxr/extensions/meta/passthrough` (on for Android builds, in `project.godot`) |
-| The QR scan's Android permission | the plugin adds `com.oculus.permission.USE_SCENE` and `USE_ANCHOR_API` to the manifest by itself while `xr/openxr/extensions/spatial_entity/enabled` is on (it is, for Android builds). The app asks for the permission at run time when the Scan page starts |
+| Passthrough on a standalone Quest (to see the screen with the pairing QR code, and mixed reality in general) | the **OpenXR Vendors plugin** (Meta part) in a **Gradle** Android build; project setting `xr/openxr/extensions/meta/passthrough`, on in `project.godot` for Android (`.android`, the app on the headset) **and** for the editor (`.editor_hint`, which is when the plugin writes the manifest; see [the trap](#the-android-only-setting-trap)) |
+| The QR scan's Android permission | the plugin adds `com.oculus.permission.USE_SCENE` and `USE_ANCHOR_API` to the manifest by itself while `xr/openxr/extensions/spatial_entity/enabled` reads true in the editor at export time (`.editor_hint`, as above). The app asks for the permission at run time when the Scan page starts |
 | Plain `http://` to a LAN server | probably already works (Godot's `HTTPRequest` uses its own sockets). **Only if a headset test says it is blocked:** `tools/android/apply_cleartext_overlay.sh` |
 | QR route B (camera + decoder) | not built; see [Route B](#route-b-if-route-a-fails) |
 
@@ -54,10 +54,17 @@ fetches it, pinned to one release and checked against its SHA-256.
 4. **The export preset:** copy `tools/android/export_presets.cfg.example` to `export_presets.cfg` (git-ignored: it can hold signing details; never commit it), or
    make the same choices in Project > Export. The choices that matter:
    - **Use Gradle Build** on; **arm64-v8a** only; package `uk.didsa.vr` (change it if you want another id).
+   - **Permissions > Internet on.** Godot leaves it **off** by default, and then the app cannot reach any server: every Test or pairing says "Could not reach
+     the server" (the first pairing on a Quest 3, 22 Oct 2026). The example preset has `permissions/internet=true`; on Android the app's message now names it.
    - **XR Mode: OpenXR**. With the plugin installed, the Export dialog (Options tab) gains **Android XR Features**, **Meta XR Features** (Quest 1 / 2 / 3 / Pro
      support, boundary mode, overlay keyboard, instant splash screen, experimental features) and **Pico XR Features**: leave Quest 2, Quest 3 and Quest Pro on for
-     a Quest 3. **There is no Passthrough or "Enable Meta Plugin" toggle in that dialog** (an earlier version of this page said there was; that was written from the
-     plugin's source, not from the dialog): passthrough comes from the Android-only project setting `xr/openxr/extensions/meta/passthrough` in `project.godot`.
+     a Quest 3. **XR Features > Enable Meta Plugin must be ticked** (it is off by default; `xr_features/enable_meta_plugin=true` in `export_presets.cfg`).
+     It sits in the **XR Features** group next to XR Mode, not in Meta XR Features, which shows its options whether the plugin is on or not. Untick it and the
+     plugin writes **nothing** Meta into the APK (no passthrough feature, no scene or anchor permission, not its Meta library), with no warning: the plugin's
+     export code returns early on every Meta step (`meta_export_plugin.cpp`). Never tick a second vendor (Pico, Android XR...) in the same preset.
+     **Meta XR Features > Passthrough must also show, set to Optional.** The plugin shows that option only while the editor reads
+     `xr/openxr/extensions/meta/passthrough` as true. If it is missing, the APK will have black passthrough: see [the trap](#the-android-only-setting-trap). (The first
+     APK, 21 Oct 2026, was built while the setting was Android-only, and the option did not show.)
    - A project named with spaces gives the warning "the project name does not meet the requirement for the package name format": the package name above clears it.
    - Resources: **include filter `demo/*`**, **exclude `demo/tools/*, tests/*`**. **Never put `secrets.cfg` in an include filter**: the APK would carry your API key
      to everyone you give it to. (A pack export with this preset, 20 Oct 2026, contained the demo models and native files, the logo and the scripts, and no
@@ -91,6 +98,36 @@ In this order; each answers an open question in the scope. Write the answers int
    folder or the permissions are different.
 7. **Frame rate and load time:** the landing's garden (about 175k triangles for the six rockets, loaded one rocket per frame), a 110 m Saturn V at full size, the tablet's Display page
    (fps, cpu / gpu ms).
+
+## The Android-only setting trap
+
+Found on the first headset run (21 Oct 2026; [`quest-first-run-fixes.md`](quest-first-run-fixes.md) B5): Passthrough reported *"It offers blend modes: opaque.
+The headset's passthrough layer is available but failed to start"*. The Vendors plugin writes `com.oculus.feature.PASSTHROUGH`, `USE_SCENE` and
+`USE_ANCHOR_API` into the manifest only when it reads the project settings as true, with `get_setting_with_override()`, **in the editor while it exports**. A
+`.android` override applies when the *running* OS is Android, not when the editor exports *for* Android, so with only `.android` the plugin read false: the manifest
+had no passthrough feature (and the scan would have had no scene permission). On the headset the `.android` override does apply, so the app asked for passthrough
+and Horizon OS refused it.
+
+`project.godot` now also sets each key with **`.editor_hint`**. Checked with Godot 4.7.2 here: an `.editor_hint` override reads true in the editor itself and
+false when the game runs, whether from the editor (that is `editor_runtime`), on the desktop or on the headset (there `.android` turns it on). A plain `.editor`
+override would also be true for a game run from the editor, so PC-VR would change too. PC and PC-VR runs are unchanged. `tests/android_config.gd` checks both
+overrides. **Then the second trap, Enable Meta Plugin** (step 4 above): the second APK, with the settings fixed, still showed *blend modes: opaque* and
+*Scene permission refused*, which is what an APK built with the Meta part switched off gets. **Checking an APK:** `aapt2 dump xmltree --file AndroidManifest.xml <apk> | grep -iE "PASSTHROUGH|USE_SCENE|USE_ANCHOR"` should print all three.
+
+## Meta dynamic resolution is off
+
+The plugin turns on `xr/openxr/extensions/meta/dynamic_resolution` by default: each frame the headset recommends a render size and only that region of each eye's
+image is drawn. On the Quest 3 (22 Oct 2026) each eye showed one flat colour, which is what a tiny region stretched over the eye looks like, so `project.godot`
+turns it off ([`quest-first-run-fixes.md`](quest-first-run-fixes.md) B2). Unlike the Meta manifest entries, it does not depend on Enable Meta Plugin: it runs
+whenever the plugin's library is in the APK.
+
+## Trying graphics settings without a rebuild
+
+`user://graphics.cfg` is read once at startup (`scripts/graphics_overrides.gd`): foveation level, the viewport's VRS mode, MSAA, and the landing's sky,
+fog, logo glow and rockets. Start from `tools/android/graphics.cfg.example` (it says how to push it with `adb shell run-as`, which needs a **debug** APK). The
+log always has one line with what rendering ended up with, `DIDSA VR: rendering: foveation ..., vrs ..., msaa ..., render size ...`, and one more,
+`DIDSA VR: graphics.cfg: ...`, when the file was read. Made for the Quest 3's one-colour-per-eye fault ([`quest-first-run-fixes.md`](quest-first-run-fixes.md)
+B2), where the menu that has the same switches could not be seen.
 
 ## If plain http is blocked: the cleartext overlay
 

@@ -17,6 +17,7 @@ const LandingStage := preload("res://scripts/landing/landing_stage.gd")
 const HALO_SHADER := preload("res://shaders/landing_halo.gdshader")
 const TipsReel := preload("res://scripts/landing/tips_reel.gd")
 const QrScanner := preload("res://scripts/landing/qr_scanner.gd")
+const QrReticle := preload("res://scripts/landing/qr_reticle.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
 const LOGO_DISTANCE := 3.0 ## metres ahead of the user
@@ -31,6 +32,7 @@ var garden: Node3D
 var launcher: Node
 var reel: Node
 var scanner: Node ## qr_scanner.gd: reads QR codes through the headset's marker tracking; the launcher's Scan page starts and stops it
+var reticle: Node3D ## qr_reticle.gd: brackets round each code the headset tracks while the scanner listens (under the XROrigin3D)
 var active := false
 var plinth: MeshInstance3D
 var stage: Node3D ## landing_stage.gd: the night pad (sky, floor, lights) while the landing is up
@@ -81,6 +83,10 @@ func setup(p_main: Node, left: XRController3D, right: XRController3D, camera: XR
 	scanner.name = "QrScanner"
 	add_child(scanner)
 	launcher.attach_scanner(scanner)
+	reticle = QrReticle.new()
+	reticle.name = "QrReticle"
+	reticle.scanner = scanner
+	camera.get_parent().add_child.call_deferred(reticle) # marker poses are in the origin's space; deferred: the origin may still be setting up its children
 	main.status_changed.connect(launcher.set_status)
 	main.server_changed.connect(_on_server_changed)
 
@@ -109,9 +115,9 @@ func enter() -> void:
 	var forward := _flat_forward()
 	stage.enter(Vector3(_camera.global_position.x, _floor_y(), _camera.global_position.z), forward)
 	logo.visible = true
-	_halo.visible = true
-	garden.visible = true
-	if not garden.is_built:
+	_halo.visible = halo_on
+	garden.visible = rockets_on
+	if rockets_on and not garden.is_built:
 		garden.build()
 	launcher.open()
 	reel.set_connected(main.has_backend())
@@ -134,6 +140,22 @@ func leave() -> void:
 		model.visible = true
 	_model_hidden = false
 	exited.emit()
+
+
+var halo_on := true ## Settings > Graphics check: the additive glow behind the logo
+var rockets_on := true ## Settings > Graphics check and graphics.cfg: the rocket garden (off: not even loaded)
+
+
+func set_rockets_on(on: bool) -> void:
+	rockets_on = on
+	garden.visible = active and on
+	if active and on and not garden.is_built:
+		garden.build()
+
+
+func set_halo_on(on: bool) -> void:
+	halo_on = on
+	_halo.visible = active and on
 
 
 func set_show_tips(on: bool) -> void:
@@ -191,7 +213,7 @@ func show_demo(model: Dictionary, desk: bool) -> void:
 	## A demo glb at full size (1:1) in front of the user, or small (1:50) on a plinth at waist height. Loaded like any glb from
 	## the Files tab (local_glb_scale 1.0), then placed.
 	_placing_demo = true
-	var loaded: bool = main.load_glb_file(str(model["path"]))
+	var loaded: bool = main.load_glb_file(str(model["path"]), show_demo.bind(model, desk)) # after "Discard and continue", place it the same way
 	_placing_demo = false
 	if not loaded:
 		return

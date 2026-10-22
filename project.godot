@@ -49,10 +49,15 @@ anti_aliasing/quality/msaa_3d=2
 
 openxr/enabled=true
 openxr/reference_space=1
-openxr/foveation_level=2
+openxr/foveation_level=0
 openxr/startup_alert=false
 shaders/enabled=true
+openxr/extensions/meta/dynamic_resolution=false
 openxr/extensions/meta/passthrough.android=true
 openxr/extensions/spatial_entity/enabled.android=true
 openxr/extensions/spatial_entity/enable_marker_tracking.android=true
 openxr/extensions/spatial_entity/enable_builtin_marker_tracking.android=true
+openxr/extensions/meta/passthrough.editor_hint=true
+openxr/extensions/spatial_entity/enabled.editor_hint=true
+openxr/extensions/spatial_entity/enable_marker_tracking.editor_hint=true
+openxr/extensions/spatial_entity/enable_builtin_marker_tracking.editor_hint=true
