@@ -1,0 +1,490 @@
+# Gears and motion mates: implementation plan (DIDSA-VR + DIDSA-CAD)
+
+Written 2026-10-22 as the spec for an implementing session (a cheaper model working alone). The owner chose this after a review of
+the vision brief, DIDSA-CAD `docs/roadmap.md` ("DIDSA-VR: parity gap review and rollout order", step 3: gears on the table) and the
+brainstorm's "assembly animation" item. Outcome: gears are made on the design table in VR; gears, racks and screws can be **coupled**
+by new mates so that turning one turns the others; and a **Drive** tool in VR turns a part continuously so the whole mechanism runs.
+
+Repos: **BE** = DIDSA-CAD `backend/`, **FA** = DIDSA-CAD `client/` (Flutter flat app), **VR** = DIDSA-VR (Godot 4.7.2).
+GitHub: `DIDSA-UK/DIDSA-VR`, `DIDSA-UK/DIDSA-CAD`. Both checked out side by side (`../DIDSA-CAD` from VR's root).
+
+**Branch:** one branch, the same name in both repos: **`ccr-5a6eceb9-yzobvb`** (already created from `main` on 2026-10-22, both repos;
+every earlier branch is merged, nothing else is open). All milestones land on it, in order. Do not open a pull request unless the
+owner asks for one.
+
+## Progress
+
+Update this table at every gate (date, test counts, commit hashes in both repos). "PAUSE" rows: stop there and report to the owner.
+
+| # | Milestone | Repos | Status | Gate result |
+|---|---|---|---|---|
+| M0 | Tooling and baseline | both | Done 2026-10-22 (planning session) | see "Baseline" below |
+| M1 | Gear bore (backend + flat app field) | BE, FA | Not started | |
+| M2 | Gear tools on the design table | VR | Not started | **PAUSE** after the gate |
+| M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Not started | |
+| M4 | Coupler mates in the flat app | FA | Not started | |
+| M5 | Coupler mates in VR | VR | Not started | **PAUSE** after the gate |
+| M6 | Constraint model v5 (analytic coupler rows, three ports) | BE, FA, VR | Not started | |
+| M7 | Drive tool (VR) | VR | Not started | **PAUSE** after the gate |
+| M8 | Gear train demo, docs, final full run | both | Not started | **PAUSE** (end) |
+| M9 | Limit mates (stretch: only with the owner's go) | BE, FA, VR | Not planned to start | |
+
+## Rules for the implementing session
+
+1. **Do the work yourself.** No subagents. Read, edit, run and test directly.
+2. **Read first** (VR): `CLAUDE.md`, `docs/status.md`, `docs/backend-api-notes.md`, `tests/README.md`, `docs/design-table.md`. (CAD):
+   `CLAUDE.md` if present, `docs/width-mate-plan.md` (the last mate type added end to end: copy its shape), `docs/mate-solution-choice-plan.md`
+   ("branch" and "Constraint model" parts), `docs/motion/projector-spec.md` §4b, `docs/gear-design/README.md`. Each milestone below adds
+   its own reading list.
+3. **The code wins.** This plan was written from reading, not running, the new code paths. When a file, function or field here does not
+   match the code, follow the code, keep to the intent, and write the difference into "Implementation notes" at the bottom. Never guess a
+   route or field name: `grep` for it.
+4. **Copy the neighbours.** New code reads like the code around it: same naming, comment density, error shapes (`HTTPException` with a
+   `{"type": ..., "message": ...}` detail as the router already does), test style (`SMOKE <text>: <bool>` lines in Godot tests, pytest
+   functions in BE, `flutter_test` widgets in FA). No refactors outside what a milestone needs.
+5. **Compatibility:** a file without the new fields must load and save **byte-identically** (write a new key only when it is not the
+   default, the `helix_angle_degrees` / `midplane` precedent). Older clients may not understand new mate types; that is accepted, but
+   the current flat app and VR must never crash on one.
+6. **Units:** backend and files are millimetres and degrees; Godot shows metres (`spawn_scale` 0.001). Coupler residuals use radians
+   (rotation rows) and millimetres (translation rows), see §3.3.
+7. **Tests with every change.** New Godot test file: add it to `tests/run_all.sh` and a row in `tests/README.md`; live-backend tests also
+   in `tests/e2e_ci_list.txt`. A Godot test that instantiates `scenes/main.tscn` sets `main.secrets_file_path` to a nonexistent file
+   first and `await process_frame` after `add_child`. New pytest files: name them so `tests/conftest.py`'s marker rules put gear tests in
+   the `gears` leg (read it).
+8. **Gates.** Each milestone ends with its gate: run every command listed, all must pass, then commit and push both repos (§2.4), then
+   fill the Progress row. A failing gate is fixed before moving on; never skip, disable or loosen a test to pass one. If a pre-existing
+   test fails on untouched code, re-run it once; if it still fails, record it in the notes and tell the owner at the next PAUSE.
+9. **PAUSE** means: stop, post a short report to the owner (what was built, the gate results, what could not be verified, what to try on
+   the headset), and wait for their go before the next milestone.
+10. **Honesty rules** (VR `CLAUDE.md`): say what you could not verify. Headless tests cannot judge feel, fake a real grip press or render for
+    real. Never write "works on the headset" unless the owner says so.
+11. Never commit `secrets.cfg`, `export_presets.cfg`, anything under `models/`, `__pycache__/`, or tool downloads.
+12. Commit messages: short imperative subject naming the milestone (`M3: coupler mates - residual rows in the group model`), body says what
+    was tested. End every commit message with the attribution lines the session's system prompt gives (if any).
+
+## 1. Scope and decisions
+
+### 1.1 What "motion mates" means here
+
+The owner asked for "motion mates with gear mates folded in". This plan reads that as: mates that **couple motion** between parts rather
+than placing them, plus a way to **drive** a mechanism. Recorded as a decision for the owner to confirm at the first PAUSE:
+
+| Mate | References (in this order) | `value` | Relation it keeps while things move |
+|---|---|---|---|
+| **Gear** (`gear`) | A: axis of gear A; B: axis of gear B | ratio r > 0 = turns of B per turn of A (= z_A / z_B) | Δθ_B = k · r · Δθ_A |
+| **Rack and pinion** (`rack_pinion`) | A: axis of the pinion; B: a straight edge along the rack | travel p > 0, mm of rack per pinion turn (= π · pitch diameter) | Δs_B = k · (p / 2π) · Δθ_A |
+| **Screw** (`screw`) | A: axis of the screw; B: axis of the nut | lead L > 0, mm per turn | (Δs_B − Δs_A) = k · (L / 2π) · (Δθ_B − Δθ_A) |
+
+`k` is +1 or −1 (the "Reverse" switch, §3.3.3). Δθ is a member's turn about the axis, Δs its travel along it, both measured from the pose
+the current solve started from (§3.3.4). Hinge and slider are not new types (concentric + coincident already make them). **Limit** mates
+(stop a hinge between two angles) are M9, a stretch, because they need inequality handling the solver does not have.
+
+### 1.2 Decisions (all recorded; the owner can overturn any at a PAUSE)
+
+- **D1. Couplers are incremental, not absolute.** They hold the relation for every *move* from an accepted pose; they never pull parts
+  into a "phase". Creating a coupler mate, Enforce all, Solve and the mate preview **never move anything** because of a coupler. This is
+  how mainstream CAD gear mates behave and it avoids storing an unwrapped turn count. Consequence, documented in the UI help: line the
+  teeth up before making the gear mate (turn one gear by hand with the mate absent or suppressed).
+- **D2. Gear chain, planetary and bevel pair features stay off the VR table** for now: each builds several gears inside ONE part, and
+  mates join occurrences, so those gears could never be coupled or driven. The VR table gets single gears: spur (external and internal,
+  straight, helical, herringbone), rack, and single bevel gear. A later "split bodies into parts" helper would open the rest.
+- **D3. A bore on the gear** (new `bore_diameter` on `GearFeature` and `BevelGearFeature`): without it a gear has no round face to mate
+  concentric to a shaft, and the VR user would need a sketch and a cut for every gear.
+- **D4. Ratio and sense are filled in for you.** When `value` is left empty on create, the backend reads the tooth counts of the gear
+  features in the two parts (gear, rack and pinion); the default `k` comes from the gear kinds and the geometry (§3.3.3). The screw has
+  no default lead.
+- **D5. Coupled motion first goes through the existing projector** (the backend `basis` already spans only the coupled motions once the
+  rows are in the group model). The local retraction (flat app default, GDScript copy unused in the app) gets the coupler rows in M6;
+  until then `constraint_model` is `null` for a group with a coupler, which both clients already treat as "keep projecting".
+- **D6. World frame.** Δθ and Δs are measured in the assembly frame. Correct when the axes do not move during a drag (gears on a fixed
+  frame, the normal case). A planetary arrangement whose carrier turns is not modelled correctly; documented limit.
+- **D7. The Drive tool spins the part about the axis of the round face you pick** (or slides it along a straight edge), fed through the
+  same constrained-drag path a hand drag uses; one undo step per drive.
+
+## 2. Test tooling (M0, done in the planning session)
+
+### 2.1 Install
+
+From VR's root, with DIDSA-CAD at `../DIDSA-CAD`:
+
+```
+tools/setup_test_env.sh            # Godot 4.7.2, Xvfb + Mesa, micromamba + the backend conda env, Flutter master; idempotent
+source /opt/tools/env.sh           # GODOT, CAD_PY, flutter on PATH (TOOLS_DIR=/opt/tools by default)
+tools/start_backend.sh             # throwaway backend on 127.0.0.1:8000, writes secrets.cfg if missing; `restart` after BE edits
+```
+
+Notes found while setting this up:
+- No Docker daemon in the cloud container, so the backend runs from the micromamba env, not the CI image. Same packages
+  (`backend/environment.yml`).
+- `micro.mamba.pm` is blocked by the sandbox proxy; the script uses the GitHub release of micromamba.
+- Flutter comes from the `master` channel, as CI does (`client-verify.yml` explains why).
+- `tools/motion_vectors/generate.py --check` must run under the **system** `python3` (numpy 2.x); it fails in the backend env even on
+  untouched `main` (known float rounding, `docs/width-mate-plan.md` "Environment note").
+- The backend keeps documents in memory per session. **Restart it after every backend code change** before VR e2e tests.
+- `tests/ci_e2e.sh` uses whatever `secrets.cfg` names. Make sure it points at `127.0.0.1:8000` with the throwaway key, never the owner's server.
+
+### 2.2 The suites
+
+| Suite | Command (from the repo root) | Time here |
+|---|---|---|
+| VR headless | `tests/ci.sh` (needs `GODOT`) | ~25 min |
+| VR render | `tests/ci_render.sh` (Xvfb + llvmpipe) | ~3 min |
+| VR live backend | `tools/start_backend.sh` then `tests/ci_e2e.sh` | ~15 min |
+| BE core | `cd backend && $CAD_PY -m pytest tests/ -q -m "not gears" -n 4 --dist=worksteal -p no:cacheprovider` | ~3 min |
+| BE gears | `cd backend && $CAD_PY -m pytest tests/ -q -m "gears and not bevel_pair" -n 3 --dist=worksteal -p no:cacheprovider --ignore=tests/test_planetary_gear_jobs.py` then `$CAD_PY -m pytest tests/test_planetary_gear_jobs.py -q` | long |
+| BE bevel pair | `cd backend && $CAD_PY -m pytest tests/ -q -m bevel_pair -n 3 --dist=worksteal` | very long (100-280 s per test); run only when bevel code changes |
+| BE one file | `cd backend && $CAD_PY -m pytest tests/test_x.py -q` | |
+| Motion vectors | `cd DIDSA-CAD && python3 tools/motion_vectors/generate.py --check` | seconds |
+| FA | `cd client && flutter analyze && flutter test` (or one file: `flutter test test/x_test.dart`) | ~10 min full |
+
+### 2.3 Baseline (2026-10-22, `main` = VR `bd0178e`, CAD `1496c7f`, this container)
+
+| Suite | Result |
+|---|---|
+| VR headless `tests/ci.sh` | 3401 SMOKE lines, 0 failures (matches `docs/status.md`) |
+| VR render `tests/ci_render.sh` | 80 SMOKE lines, 0 failures |
+| VR e2e `tests/ci_e2e.sh` (35 tests) | 449 SMOKE lines, 0 failures (the pairing part of `e2e_servers` is skipped without `DIDSA_E2E_PAIR_HOST`, hence 449 not 452) |
+| BE core | 2546 passed |
+| BE gears (without bevel pair) | see the Baseline note at the bottom (run started in the planning session) |
+| FA | `flutter test test/width_mate_test.dart` 20 passed; full `analyze` / `test`: see the Baseline note at the bottom |
+| Motion vectors `--check` | system python: pass; backend env: fails (known, above) |
+
+### 2.4 Commit and push at a gate
+
+```
+git -C ../DIDSA-CAD add -A && git -C ../DIDSA-CAD commit -m "..." && git -C ../DIDSA-CAD push -u origin ccr-5a6eceb9-yzobvb
+git add -A && git commit -m "..." && git push -u origin ccr-5a6eceb9-yzobvb
+```
+Check `git status` first: nothing from §Rules 11 may be staged. If a push fails for the network, retry up to 4 times (2, 4, 8, 16 s).
+
+## 3. Design (normative)
+
+### 3.1 Gear bore (M1)
+
+- New field `bore_diameter: float = 0.0` (mm) on `GearFeature` and `BevelGearFeature` (`backend/app/document/models.py`), on their
+  create / update / response schemas (`schemas.py`, `GearFeatureCreate` and its PATCH and response siblings, the same for bevel), in
+  `native_format.py` (written **only when > 0**), and in the AI plan schema only if the gear step already lists every field (check; else leave it).
+- Geometry (`gear.py`, `bevel.py`): after the gear solid is built (and after the root fillet), cut a through cylinder of that diameter on
+  the gear's own axis (the plane's origin and normal), length = the gear's full extent along the axis plus a margin. `0.0` takes the old
+  code path untouched.
+- Validation (router, next to `_validate_gear_feature_payload`): `bore_diameter < 0` -> 422 `invalid_bore`; internal gear with a bore
+  -> 422 `bore_on_internal_gear`; `bore_diameter >= 0.9 * root diameter` (dedendum diameter; for a bevel gear, the smallest root
+  diameter at the toe) -> 422 `bore_too_large`. Find the root diameter in `gear_math` (`spur_gear_geometry(...)`) / `bevel_math`.
+- The bore's cylindrical face is a normal face: concentric mates and coupler mates pick it like any hole.
+- FA: a "Bore Ø" field on `client/lib/gear/gear_design_screen.dart` (External only) and `bevel_design_screen.dart`, with the existing
+  `standard_value_field.dart` / validation banner pattern, sent in the create / PATCH body; `document_api_client.dart` DTOs gain the field.
+  Presets (`gear_preset_store.dart`) store it (missing key reads 0).
+
+### 3.2 Gear tools on the design table (M2)
+
+Reading: `scripts/design_table/table_tools.gd`, `features/feature_tool.gd` (the tool interface), `features/feature_tools.gd` (the
+registry), `features/revolve_tool.gd` and `features/create_plane_tool.gd` (a tool with a plane pick), `part_features.gd`,
+`table_preview.gd` / `feature_preview.gd` (coarse preview), `scripts/ui/ui_icons.gd`, `tests/design_table_feature_tools.gd`,
+`tests/dock_panels_render.gd`, `tests/e2e_loft_sweep.gd` (an e2e with coarse preview).
+
+- **Deck:** a fourth group on the Feature tab in `table_tools.gd` `FEATURE_GROUPS`: `["gears", "Gears", <a new colour, e.g. Color(0.55, 0.85, 0.45)>,
+  ["gear", "rack", "bevel_gear"]]`; entries in `FEATURE_TOOLS` (`["gear", "Gear", "tool_gear"]`, `["rack", "Rack", "tool_rack"]`,
+  `["bevel_gear", "Bevel", "tool_bevel_gear"]`); `HINTS` for each; three line-art icons in `ui_icons.gd` in the same 48-unit SVG style.
+- **`features/gear_tool.gd`** (registered in `feature_tools.gd`):
+  - options (two-column dock, the Phase 7 layout): Kind External / Internal; Module; Teeth; Face width; Pressure angle (cycles 20 /
+    14.5 / 25); Helix angle (0 = straight); Herringbone (toggle, disabled at helix 0); Bore Ø (External only; 0 = none); Outer Ø (Internal
+    only, required); Backlash; Root fillet; Profile shift (Auto, or a typed value). Numbers are typed on the popup keyboard, the way
+    Extrude's depth is (copy that code path). Defaults: External, module 2, 20 teeth, face width 10, 20°, straight, bore 8.
+  - plane: `wants_plane_pick()` true; `on_plane_picked` stores the plane spec; none picked = the part's XY plane (`plane_ref` omitted, the
+    backend's default). The dock shows which plane is used.
+  - readout line under the options, from `POST /document/gear/preview` (check the prefix in `gears_routes.py` and `backend-api-notes.md`;
+    debounce like other live calls): pitch Ø, tip Ø, root Ø, and "Centre distance to a gear of N teeth: m·(z + N)/2" with N = the same
+    teeth by default (a keyboard field "Mate teeth" changes N). This is how the user knows where to put the shaft holes.
+  - `preview_mode()` "coarse", `preview_route()` `/parts/%s/gear-features/coarse-preview`; `request()` -> route
+    `/parts/%s/gear-features`, Boss, `target_body_ids` [] (a new body).
+- **`features/rack_tool.gd`**: module, teeth, face width, pressure angle, backing height (Auto / value), backlash, plane pick. No
+  coarse-preview route exists for racks: `preview_mode()` "eager" (create, PATCH while options change, Cancel deletes), as other eager tools do.
+- **`features/bevel_gear_tool.gd`**: module, teeth, face width, pitch cone angle (a "Mate teeth" helper fills it for a 90° pair:
+  atan(z / z_mate)), pressure angle, spiral angle (0 = straight) and hand, bore Ø. Coarse preview `/parts/%s/bevel-gear-features/coarse-preview`.
+- **Edit:** the Build tree's Edit on a gear / rack / bevel feature opens the same tool filled with its values and PATCHes
+  (`/parts/%s/gear-features/{id}` etc.). Find how Edit works for an existing tool (grep `build_tree.gd` and `table_editor.gd` for the
+  edit path of e.g. revolve) and follow it. Long builds: helical gears can take seconds; show the existing "building" state.
+- **Undo / Redo:** the same as other features (redo covers features).
+- **Tests:** `tests/design_table_gears.gd` (headless, fake HTTP like the other `design_table_*` tests: deck shows the group and tools;
+  options and their enabling rules; request bodies exactly as above for each kind; plane pick; readout parsing; edit fills the options);
+  `tests/e2e_gears.gd` (live backend: new part, make an external gear with a bore, an internal gear, a rack and a bevel gear; each makes a
+  body with triangles; Edit changes the teeth and the body changes; the gear's bore face is found by a concentric pick of the mates
+  tool's face picking helper, or at least the mesh has a cylindrical face); add the three tools to `tests/dock_panels_render.gd`.
+
+### 3.3 Coupler mates (M3 backend, M4 flat app, M5 VR, M6 constraint model)
+
+#### 3.3.1 Data and wire
+
+- `MateType` (`models.py`) gains `GEAR = "gear"`, `RACK_PINION = "rack_pinion"`, `SCREW = "screw"`. Add a module constant
+  `COUPLER_TYPES = (MateType.GEAR, MateType.RACK_PINION, MateType.SCREW)` and use it everywhere below instead of repeating the list.
+- `Mate.value` holds r / p / L (§1.1), always > 0. `Mate.secondary_flip` holds the sense: **`False` -> k = −1, `True` -> k = +1**,
+  `None` on create means "fill in the default" (§3.3.3) and is never stored as `None` for a coupler. `alignment` stays `None`;
+  `allow_rotation` is ignored; `flipped` stays False. `branch_source` is "auto" for a default sense and "user" when the request set it.
+- `MateCreate.type` (`schemas.py`) Literal gains the three names; `MateResponse` already carries `value` and `secondary_flip`.
+- `native_format.py`: nothing new to write (`type`, `value`, `secondary_flip` are already written); check `_mate_from_dict` accepts the
+  new types and does not apply the DISTANCE / ANGLE legacy rules to them.
+- AI plan schema (`ai_plan_schemas.py`, `ai_plan.py`): leave unchanged (an AI plan cannot make a coupler); note it in the docs.
+
+#### 3.3.2 Validation on create / PATCH (`router.py`, next to `_validate_mate_create` / `_validate_mate_entity_ref`)
+
+- Exactly two references, on two different top-level occurrences (or one may be the root's own geometry, `occurrence_id == ""`).
+- Each reference must resolve to an **axis** (a cylindrical face, a circular edge or a straight edge: what CONCENTRIC accepts today, see
+  `_resolve_local_geometry`) except rack and pinion's B, which must be a **straight edge or a planar face's in-plane direction**: accept a
+  straight edge only in v1 (422 `rack_reference_not_straight_edge` otherwise). Wrong kind -> the existing `_unsupported_mate_geometry`
+  422 shape.
+- `value`: `None` allowed for gear and rack and pinion (auto, §3.3.3), required for screw (422 `screw_lead_required`); when given,
+  `value > 0` and finite (422 `invalid_coupler_value`).
+- A midplane reference on a coupler -> 422 (reuse the existing midplane-type check).
+- PATCH may change `value` (> 0), `secondary_flip` (sets `branch_source` "user") and `suppressed`; changing `type` or references is not
+  supported (the existing PATCH rules for other types: follow them).
+
+#### 3.3.3 Defaults (create only, when the request leaves them empty)
+
+Resolve each reference's part (the leaf part under the occurrence path; reuse `_target_part_and_transform` / the helpers the solver
+uses) and its **tooth features**: the non-suppressed `GearFeature`, `BevelGearFeature` and `RackFeature`s in that part. Exactly one
+tooth feature per side is needed for an auto value; otherwise 422 `gear_ratio_required` ("Type the ratio: the part has no gear, or
+several").
+
+- **Gear ratio:** r = z_A / z_B (tooth counts).
+- **Rack travel:** p = π × pitch diameter of A's gear. Take the pitch diameter from `gear_math` (the same function the gear build and
+  `/gear/preview` use, so helical gears get their transverse pitch diameter); B's part should hold a `RackFeature` with the same module
+  (if not, still allowed: no check in v1).
+- **Gear sense:** d_A, d_B = the world axis directions of the two references at the stored poses (the resolved `direction` placed in
+  world, as `mate_world_geometries` gives them). If |d_A · d_B| > 0.9 (parallel axes): c = sign(d_A · d_B); when both tooth features are
+  external, k = −c (they turn opposite ways in the world); when one is internal (an internal `GearFeature`), k = +c. Non-parallel axes
+  (bevel): k = −1. No tooth features (typed ratio): use the external rule.
+- **Rack sense:** n = the vector from A's axis point to B's edge midpoint, made perpendicular to d_A and normalised; the rack moves along
+  t = d_A × n for a positive turn of A; k = sign(t · d_B) (d_B = B's resolved edge direction in world); if |t · d_B| < 0.5 use k = +1.
+- **Screw sense:** k = +1 (right-hand thread). The UI calls the switch "Left-hand" for the screw, "Reverse" for the others.
+
+#### 3.3.4 The residual (the heart of it)
+
+The group model (`backend/app/document/assembly_group.py`, `GroupModel`) evaluates residuals at candidate poses; `model.base_transforms`
+are the poses the solve started from (the stored poses, or the client's `reference` poses: `solve_group` replaces them, see its warm-start
+lines). A coupler's rows compare a candidate pose with that base:
+
+For a member with base pose (R₀, t₀) and candidate pose (R, t), and a world unit axis d (taken at the **base** pose):
+
+- **Turn about d.** Q = R · R₀ᵀ as a unit quaternion (w, v) with w ≥ 0 (negate it if w < 0). Δθ = 2 · atan2(v · d, w) ∈ [−π, π]
+  (the twist part of a swing-twist split). A frozen side (fixed occurrence, root geometry) has Δθ = 0.
+- **Travel along d.** For the side's point p (its axis point, or a straight edge's midpoint) in the member's local frame:
+  Δs = ((R · p + t) − (R₀ · p + t₀)) · d. Frozen: 0.
+
+Rows (one each):
+
+- gear: `Δθ_B − k · r · Δθ_A` (radians)
+- rack and pinion: `Δs_B − k · (p / 2π) · Δθ_A` (mm), with Δs_B along B's edge direction d_B
+- screw: `(Δs_B − Δs_A) − k · (L / 2π) · (Δθ_B − Δθ_A)` (mm), all four along / about **A's** axis d_A
+
+Here A and B are **the mate's references in stored order**. `build_group_model` may swap a mate's sides (`swapped`: "reference 1 is the
+mover", see `resolve_oriented_branch`): keep the swap flag per side, or do not swap couplers at all; the tests in M3 must include a group
+where reference 2 is grabbed.
+
+At the base pose every coupler row is 0, so (D1) a solve that only re-satisfies other mates never sees a coupler pull. The Δθ wrap is
+safe because a single solve's steps are capped (`ROT_CAP`) and clients re-anchor every ~150 ms; a wish more than ~170° away from the base
+in one request is not supported (the VR Drive tool caps its speed, §3.5).
+
+**Where the rows go:**
+
+- `GroupModel.residual`: for a coupler mate, append `_coupler_rows(mate, a, b, placed)` instead of `_mate_residual_vector(...)`.
+- `build_group_model`: skip the branch resolution (`resolve_oriented_branch`) and the final "unsupported geometry" check
+  (`if not _mate_residual_vector(...)`) for couplers; validate their geometry with the coupler's own rule instead (each side resolves
+  to a direction, and a point when it needs Δs).
+- **Consumer audit** (do it first and write the list into the notes, as `docs/width-mate-plan.md` W1 did): every reader of mates or
+  of `_mate_residual_vector`: `rg "_mate_residual_vector|_mate_residual_satisfied|_add_mate_constraints|_applicable_mates|branch_fields|resolve_branch|search_branch_changes|branch_options|branch_alternatives|constraint_status|hinge_swing_state|_seed_poses|_predicted_seed|preview_mate_solve|mate_world_geometries" backend/app`.
+  Expected outcome per reader: py-slvs paths (`assembly_solver._add_mate_constraints`, `_applicable_mates`, the single-occurrence
+  fallback seed) skip couplers; branch machinery returns "no branch" for them; `_mate_residual_satisfied` treats them as satisfied;
+  `constraint_status` (mate health) reports them ok; `_seed_poses` ignores them; preview of a new coupler mate returns the current poses
+  unchanged; `discover_component` keeps them (they join two gears into one group: that is the point).
+- `GroupModel.jacobian`: `export_constraint_model` returns `None` for a coupler (its type is not in `SUPPORTED_TYPES`), so the
+  central-difference fallback is used. Correct, slower; M6 makes it analytic.
+- `analyze_model` / basis / `dof`: unchanged; the coupler rows remove one freedom each, so two gears on fixed shafts give DOF 1.
+
+#### 3.3.5 Constraint model v5 (M6)
+
+- `constraint_model.py`: `COUPLER_MODEL_VERSION = 5`, emitted only when the model has a coupler (else the old 3 / 4, unchanged files and
+  vectors). A coupler entry carries `type`, `value`, `k` (+1 / −1), and per side: `member`, optional `frozen`, `axis_origin`/`point`,
+  `direction` (local, as today) plus **`anchor`**: the side member's base pose `{"r": 3x3, "t": 3}`. `SUPPORTED_TYPES` gains the three.
+- `ConstraintModel.residual` evaluates the rows of §3.3.4 with analytic Jacobians in the existing chart (`t += δt`, `R = exp(ω) R`):
+  - turn: with Q = R · R₀ᵀ = (w, v), w ≥ 0, a = v · d, the gradient of Δθ with respect to ω is
+    `g = (w² d + w (v × d) + a v) / (w² + a²)` (at Q = identity this is d); with respect to δt it is 0. (Checked numerically in the
+    planning session: 200 random poses up to ±170°, worst relative error 2e-9 against central differences.)
+  - travel: with q = R · p (the rotated local point), ∂Δs/∂δt = d and ∂Δs/∂ω = q × d.
+  - **A test must check both against central differences** (1e-6 relative) at random poses, including near Δθ = ±150°.
+- `tools/motion_vectors/generate.py`: add `local_retract` cases with a gear pair (1:2, both on fixed shafts), a rack and pinion, and a
+  screw; regenerate `docs/motion/vectors.json`; `--check` passes under system python. Update `docs/motion/projector-spec.md` §4b with the
+  v5 entry shape and the two gradient formulas.
+- **Dart** `client/lib/motion/local_retraction.dart`: parse version 5 and the coupler entries, same rows and gradients; its test runs the
+  new vectors. **GDScript** `scripts/motion/local_retraction.gd`: the same; copy the regenerated vectors to
+  `tests/fixtures/motion_vectors.json` and record the CAD commit in the test header, as before. (The GDScript solver stays unused in
+  the app: `docs/local-retraction-benchmark.md`.)
+
+### 3.4 Flat app (M4)
+
+Reading: `client/lib/viewport3d/mate_panel.dart`, `width_pick.dart`, `part_screen.dart` (mate flows), `assembly_tree_panel.dart`,
+`api/document_api_client.dart` (`MateDto`), `motion/constrained_drag_session.dart`, `test/mate_panel_test.dart`, `test/width_mate_test.dart`.
+
+- `kMateTypes` gains `gear`, `rack_pinion`, `screw` with labels "Gear", "Rack and pinion", "Screw"; picks are two axis picks like
+  Concentric (rack: an axis then a straight edge); the value field is "Ratio (B turns per A turn)" / "Travel per turn (mm)" /
+  "Lead (mm per turn)", empty allowed for gear and rack ("Auto from the teeth"); the branch toggle reads "Reverse" (screw: "Left-hand").
+- The mate list / tree shows the type, value and sense; edit changes value and Reverse; delete as usual.
+- Drag: nothing to change for M4 (`constraint_model` is null -> projection); check by a test that a gear-coupled anchor without a model
+  keeps projecting.
+- Tests: `client/test/coupler_mate_test.dart` (panel flow, payloads, edit, labels, a DTO round trip with each new type).
+
+### 3.5 VR (M5 mates tool, M7 Drive)
+
+Reading: `scripts/mates_tool.gd` (types, picks, `build_create_payload`, `update_mate`, anchors), `scripts/ui/tablet_pages.gd` (the
+Mates page), `scripts/ui/wheel_flows.gd` (the wheel's Mates ring and type ring), `scripts/design_table/mate_health.gd`,
+`scripts/topology_pick.gd` / `laser_pick.gd` (what a pick knows about a face or edge), `tests/width_mate.gd`, `tests/mates_tool.gd`,
+`tests/fake_mates_tool.gd`, `tests/e2e_mates_motion.gd`, `tests/data/make_rooms_fixture.py`.
+
+**M5, the mates tool:**
+- `MATE_TYPES` gains `gear`, `rack_pinion`, `screw`; labels as the flat app. Two picks; each must be an axis kind (round face, circular
+  edge, straight edge; rack's second: a straight edge), with the existing per-type pick hints on the wheel. Value: the keyboard, with an
+  empty entry meaning Auto (gear, rack); the hint says so. "Reverse" / "Left-hand" uses the existing secondary-flip toggle and label
+  machinery (`toggle_secondary_flip`, `branch_text`). No ghost preview for couplers (nothing moves): the preview call is skipped and the
+  status line says "Turning one will turn the other".
+- Mate list on the tablet: type, value ("1 : 2.00", "62.8 mm per turn", "lead 2 mm"), Reverse; edit value and Reverse via `update_mate`.
+- `mate_health.gd`: couplers show as healthy unless the backend says otherwise.
+- Dragging: unchanged code; the backend basis couples the motion. Turning a gear by hand (grip and twist) turns its partner.
+- Fixture: `tests/data/make_gear_fixture.py`, run against the live backend (`tools/start_backend.sh` first), writes
+  `tests/data/gear_pair.didsa`: a plate (fixed) with two holes 60 mm apart; gear A (module 2, 20 teeth, bore 8) and gear B (module 2, 40
+  teeth, bore 8) in their own parts; each gear concentric to its hole and coincident face to the plate; **no** gear mate (the tests make
+  it). Use the backend's routes (create parts, features, occurrences, mates; export native) and write with Python's json (see
+  `make_rooms_fixture.py` for why not Godot). Centre distance check: m (z_A + z_B) / 2 = 60 mm.
+- Tests: `tests/gear_mates.gd` (headless with the fake backend: types on the tablet and the wheel, pick validation, payloads incl. empty
+  value, Reverse toggling, list labels); `tests/e2e_gear_mates.gd` (live: open the fixture with `DIDSA_NO_LANDING=1`, create the gear mate
+  with an empty value, read back r = 0.5 and the k that §3.3.3 gives for the two resolved axis directions (do not assume they point the
+  same way: OCCT may orient either cylinder's axis either way); a `mate-motion` request with gear A turned 90° about the world plate
+  normal returns B turned 45° ± 0.5° **the opposite way about the same world normal**, both still on their holes; commit and reload: poses kept;
+  Reverse flips the sense; a rack-and-pinion and a screw case on simple blocks in the same file or a second fixture).
+
+**M7, the Drive tool** (`scripts/drive_tool.gd`, a tool like `measure_tool.gd`):
+- On the tablet's Assemble page and as a wedge on the wheel's Mates ring ("Drive").
+- Pick: laser + trigger on a **round face or circular edge** (drive axis = its axis, spin) or a **straight edge** (slide along it). Not
+  an axis kind -> "Pick a round face to turn it, or a straight edge to slide it". Fixed part -> the existing locked message.
+- Run: thumbstick X (dead zone 0.15) sets speed, −1..1 -> −30..30 rpm (slide: −50..50 mm/s); A toggles "keep running" at the current
+  speed; B stops. Each frame the wished pose = the part's current displayed pose turned about (or moved along) the world drive axis by
+  speed × delta, passed to `mates_tool.constrain_drag(part, wished_global)` exactly as a hand drag does (read how a drag begins and
+  ends: `has_drag`, `constrain_drag`, `end_drag`); stopping calls `end_drag` (one commit, one undo step). Cap: 60 rpm.
+- Readout on the wrist / status line: the driven part's rpm and, for every other member that turns, its name and rpm (from the frame-to-frame
+  rotation of its node about its own turning axis; sign relative to the drive axis), e.g. "Gear A 30 rpm · Gear B −15 rpm".
+  Nothing moves -> "Held: nothing can turn" (DOF 0 from the first anchor).
+- Tests: `tests/drive_tool.gd` (headless with the fake mates tool: pick rules, stick to speed mapping, cap, wish generation per frame,
+  one `end_drag` per run, readout text); `tests/e2e_drive.gd` (live, gear fixture with the gear mate: drive A at 30 rpm for 60 simulated
+  frames at 90 Hz -> A turned 120° ± 2°, B 60° ± 2° the opposite way in the world, one undo entry, poses committed).
+
+### 3.6 Limit mates (M9, stretch, needs the owner's go)
+
+Types `limit_angle` (two axis-and-direction references like an ANGLE about a hinge) and `limit_distance` (like DISTANCE), with new fields
+`limit_min` / `limit_max`. Inequalities in `solve_group`: solve without them; any violated limit joins as an equality at its nearest bound;
+re-solve; at most 3 rounds; the basis is built with the active limits. Clients need nothing new (the basis stops at the bound; a re-anchor
+frees it when the wish pulls away). Write its own short scope note before building.
+
+## 4. Milestones
+
+Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" commands are those of §2.2.
+
+### M1 Gear bore (BE, FA)
+1. BE: fields, schemas, native format (only when > 0), geometry cut, validation (§3.1).
+2. BE tests: `backend/tests/test_gear_bore.py` (gears marker): an external gear with bore 8 has a cylindrical face of radius 4 on the
+   axis and its volume drops by π·4²·face width (1e-3 relative); bore 0 builds byte-identical mesh / volume to before; native round trip;
+   a file without the key loads as 0 and saves without it; the three 422s; a helical gear with a bore; a bevel gear with a bore.
+3. FA: field on both screens, DTOs, presets; test in the existing gear screen tests (find them: `rg -l GearDesignScreen client/test`).
+4. **Gate:** BE core, BE gears; `flutter analyze` + the gear screen tests + `flutter test` (full). Commit, push (CAD only).
+
+### M2 Gear tools on the design table (VR) -> **PAUSE**
+1. Deck group, icons, hints. 2. `gear_tool.gd`. 3. `rack_tool.gd`. 4. `bevel_gear_tool.gd`. 5. Edit from the Build tree. 6. Tests (§3.2).
+7. Docs: `docs/design-table.md` (tool list; move "gears" out of "Not built"), `docs/design-table-gaps.md` item 7, `docs/status.md`
+   capability row and test counts, `CHANGELOG.md`, `tests/README.md` rows.
+8. **Gate:** `tools/start_backend.sh restart`; VR headless (count rises, 0 failures), VR render, VR e2e (all 36+). Commit, push (VR; CAD too
+   if anything changed). **PAUSE**: report; ask the owner to try the gear tool on the headset (layout, reading the readout, build time of a
+   helical gear on a Quest-connected backend).
+
+### M3 Coupler mates in the backend (BE)
+1. Consumer audit (§3.3.4), written into the notes.
+2. Model, schema, validation, defaults (§3.3.1-3.3.3).
+3. Residual rows and the group-model changes (§3.3.4).
+4. Tests, new file `backend/tests/test_coupler_mates.py` (not a gears-marker file unless it builds gear features; if it does, split the
+   gear-feature cases into `test_coupler_mates_gears.py` so the markers stay right):
+   - create / list / PATCH / delete each type; every 422 of §3.3.2; native round trip (and an old file still byte-identical);
+   - auto ratio from two gear parts (20 and 40 teeth -> 0.5), auto rack travel (π × 40 for module 2, 20 teeth), default senses
+     (external pair parallel same-direction axes -> k = −1; an internal + external pair -> k = +1; flipped axis direction -> the sign follows);
+   - creating a coupler moves nothing; Enforce all / Solve with a coupler present moves nothing a coupler-free file would not;
+   - `mate-motion`: plate fixed, A and B concentric to holes, gear mate r = 0.5 with its default sense: DOF 1; wish A +90° about the
+     world plate normal -> B turned 45° the opposite way about that normal (0.1° tolerance; measure in world terms, since either
+     cylinder's resolved axis may point either way), B's axis still on its hole; the same with **B grabbed** (+60° on B -> A −120°); with `reference` poses from a
+     previous anchor (warm start) after a total turn of 400° in 150 ms-sized steps -> B has turned −200° in total (the unwrap works);
+   - rack: pinion +360° -> rack moved p mm along its edge; screw: nut +720° about a fixed screw with lead 2 -> nut moved 4 mm (right-hand
+     sign);
+   - the central-difference Jacobian is used (`export_constraint_model` is `None` with a coupler) and the group still converges;
+   - DOF / `constraint_status` for a coupler group.
+5. Docs: CAD `docs/status.md` dated entry, `docs/roadmap.md` rollout step 3 progress line, VR `docs/backend-api-notes.md` (the new types,
+   value meanings, sense, the 422s).
+6. **Gate:** BE core, BE gears, motion vectors `--check` (system python; unchanged so far). Commit, push (CAD; VR docs).
+
+### M4 Coupler mates in the flat app (FA)
+1. `MateDto` and the panel (§3.4). 2. Tree / list labels. 3. Tests. 4. Docs: CAD `docs/status.md`.
+5. **Gate:** `flutter analyze` (no new warnings), `flutter test` (full). Commit, push.
+
+### M5 Coupler mates in VR -> **PAUSE**
+1. Fixture script and `gear_pair.didsa` (§3.5). 2. Mates tool types, picks, value, Reverse, labels, health. 3. Wheel entries. 4. Tests.
+5. Docs: `docs/status.md` (capability row, counts), `CHANGELOG.md`, `tests/README.md`, `docs/backend-api-notes.md` if anything changed.
+6. **Gate:** restart backend; VR headless, VR render, VR e2e (incl. `e2e_gear_mates`); BE core. Commit, push both. **PAUSE**: report; ask the
+   owner to open the fixture (or their own gears) on the headset, make the gear mate and turn a gear by hand: does the partner follow
+   smoothly through the projector, is the sense right, do the teeth stay meshed?
+
+### M6 Constraint model v5 (BE, FA, VR)
+1. BE `constraint_model.py` v5 (§3.3.5) and the analytic Jacobian; `GroupModel.jacobian` now takes the analytic path for couplers;
+   tests in `backend/tests/test_constraint_model.py` (export shape, version 5 only with a coupler, gradients vs. central differences,
+   backend `sqp_nearest` on a gear pair lands on the relation).
+2. Generator cases, regenerate `vectors.json`, spec §4b text.
+3. Dart parser and rows; `client/test/local_retraction_test.dart` runs the new cases.
+4. GDScript parser and rows; fixture copy; `tests/local_retraction.gd` and `tests/motion_vectors.gd` run the new cases.
+5. **Gate:** motion vectors `--check` (system python), BE core, BE gears, `flutter test` (full), VR headless, VR e2e. Commit, push both.
+
+### M7 Drive tool (VR) -> **PAUSE**
+1. `drive_tool.gd`, tablet entry, wheel wedge (§3.5). 2. Readout. 3. Tests. 4. Docs (`status.md`, `CHANGELOG.md`, `tests/README.md`,
+   README's feature list).
+5. **Gate:** restart backend; VR headless, VR render, VR e2e. Commit, push. **PAUSE**: report; ask the owner to drive the gear pair on
+   the headset (speed feel, readout, does a 30 rpm drive stay smooth over Wi-Fi to the backend, frame rate).
+
+### M8 Gear train demo, docs, final run -> **PAUSE (end)**
+1. `demo/assemblies/gear_train/Gear_train.didsa`: plate, a 20-tooth pinion driving a 40-tooth gear, a rack driven by the pinion, all
+   mated, made by a script next to the fixture script (same approach), with a crank handle on the pinion. Row in `demo/README.md`;
+   offered with the other demo assemblies on the landing (find where `plate_and_peg` is listed: `rg -n plate_and_peg scripts`).
+2. Docs pass, both repos: VR `docs/status.md` (capability rows, open items, counts), `README.md`, `docs/README.md` index, `CHANGELOG.md`
+   (map M1-M8 to dates), `docs/design-table.md`; CAD `docs/roadmap.md` (rollout step 3 done; brainstorm "Gear Design in VR" and "assembly
+   animation" updated), CAD `docs/status.md`. This plan's Progress table complete.
+3. **Gate (full):** every suite of §2.2 including BE bevel pair if M1 touched bevel code (it does: the bore). Commit, push both.
+   **PAUSE**: final report with every count, what was verified where, and what only the headset can tell.
+
+## 5. Risks and open questions (for the owner)
+
+- **Sense stability.** The default sense uses the resolved axis direction of a picked face. If OCCT resolves a cylinder's axis the other
+  way after a rebuild, the stored k would now mean the opposite rotation. M3 tests a native round trip and a feature rebuild; if that fails,
+  store the sense relative to the world directions at creation instead and note it.
+- **Teeth phase (D1).** Gears do not line their teeth up on their own. If that annoys in use, a later "Mesh teeth" button can turn gear B
+  about its axis to the nearest meshing phase (it knows both gear features), once.
+- **Network round trips.** The coupled drag and Drive both live on the projector and re-anchors; a slow backend link shows up as lag, not
+  as error. Measured only on the headset.
+- **Planetary carriers (D6)** and gear chains / planetaries inside one part (D2) are out of scope.
+- **Older apps.** A file with a coupler mate opened by an older backend fails to import (unknown mate type); current apps read it.
+
+## 6. Kick-off prompt for the implementing session
+
+> You are implementing `docs/gears-and-motion-plan.md` in DIDSA-VR (with DIDSA-CAD checked out next to it as `../DIDSA-CAD`), on the
+> branch `ccr-5a6eceb9-yzobvb` in both repos. Read the plan's "Rules for the implementing session" and follow them exactly. Run
+> `tools/setup_test_env.sh`, `source /opt/tools/env.sh` and `tools/start_backend.sh`, then start at the first milestone whose Progress row is
+> not Done. Work task by task, run the milestone's gate, commit and push both repos, fill in the Progress row, and stop at every PAUSE with
+> a short report. When the code disagrees with the plan, follow the code and write the difference under "Implementation notes".
+
+## Implementation notes
+
+(The implementing session writes here: the consumer audit of M3, every place the code differed from this plan, and anything left unverified.)
+
+### Baseline note (planning session, 2026-10-22)
+
+- BE gears (without bevel pair) and the full FA `analyze` / `test` were started in the planning session; their results are recorded here
+  when they finish.
