@@ -174,7 +174,9 @@ func _ready() -> void:
 	_apply_backend()
 	_start_xr()
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
-	_world_environment.apply_saved_scene(_settings.last_scene)
+	# Never start in Passthrough: if it misbehaves on a headset (Quest 3, 21 Oct: a flicker in both eyes from the first frame) you would start blind,
+	# with no way to see the menu that turns it off. Turn it on again from View > Environment or the landing's Scan / Graphics check pages.
+	_world_environment.apply_saved_scene(startup_scene(_settings.last_scene))
 	_add_landing()
 	if landing_enabled and _settings.show_landing:
 		_set_status(startup_status())
@@ -849,6 +851,10 @@ func set_foveation_level(level: int) -> void:
 
 func available_scenes() -> Array[String]:
 	return _world_environment.SCENES
+
+
+static func startup_scene(saved: String) -> String:
+	return "Mid" if saved == "Passthrough" else saved
 
 
 func current_scene() -> String:

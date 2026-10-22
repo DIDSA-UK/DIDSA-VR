@@ -35,6 +35,11 @@ clear colour), so the star shader cannot be the whole cause. Note: black, orange
 are in view when you look up. A render test looking straight up (`tests/landing_render.gd`) shows the sky and the rockets drawn correctly under Mesa, so the fault is
 specific to the Quest.
 
+**Correction (22 Oct):** the owner never saw the room or the menu in that run; the flicker filled the view from the start. The app remembers the last Environment
+scene, and the previous run had ended in Passthrough, so this one started in it. **The app now never starts in Passthrough** (`main.startup_scene()`: a
+remembered Passthrough starts as Mid), so a broken passthrough can no longer leave you blind at launch. Also noted: every Meta passthrough sample in the Vendors
+plugin (5.1.0) uses the Compatibility renderer, not Mobile, so Mobile + alpha-blend passthrough on a Quest is less well trodden.
+
 **Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
 fog, glow behind the logo, rockets, MSAA 2x, foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
 log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the

@@ -297,6 +297,14 @@ func _initialize() -> void:
 	var sky_source := FileAccess.get_file_as_string("res://shaders/landing_sky.gdshader")
 	check("the sky shader has no reversed smoothstep (undefined in GLSL) and wraps its star hash", not sky_source.contains("smoothstep(0.30, 0.0") and sky_source.contains("mod(id, 289.0)"))
 
+	# --- Passthrough is never where the app starts (a broken one would leave you blind, with no menu to turn it off) ------------------
+	main.set_scene("Passthrough") # remembered as the last scene
+	main.queue_free()
+	await frames(2)
+	await make_main(true)
+	check("left in Passthrough, the next start is in Mid with the landing up", main.current_scene() == "Mid" and main.landing.is_active() and main.get_node("WorldEnvironment").environment.background_mode == Environment.BG_SKY)
+	check("...and every other remembered scene is kept", main.startup_scene("Dark") == "Dark" and main.startup_scene("Light") == "Light")
+
 	# --- Show the landing on start = off -----------------------------------------------------------------------------------
 	main.set_show_landing_on_start(false)
 	main.queue_free()
