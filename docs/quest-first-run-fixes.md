@@ -205,6 +205,10 @@ same code seen again many times a second does not repeat them; a refused code gi
 on success the Servers page says *Connected to <name>: the server answered and accepted the API key*; a failure buzzes and puts the reason on the status line.
 The Servers form shows the key as *set, N characters (hidden)*. `tests/pairing_flow.gd`.
 
+**Prompted steps (owner's request, 22 Oct):** the Scan page's first line now says what to do now, in amber: *Step 1 of 3: turn passthrough on*, then
+*Step 2 of 3: look at the QR code on your screen now* (also on the status line as passthrough comes on), then in green *Step 3 of 3: code read. Check the
+details below, then press Connect*; Cancel goes back to step 2. `tests/scan_page.gd`.
+
 ## Order of work
 
 | # | Fix | Size | Needs the headset to confirm |

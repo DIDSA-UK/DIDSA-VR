@@ -43,7 +43,21 @@ func _initialize() -> void:
 	check("the page says what the headset answered, step by step", "OpenXR running: no" in launcher._scan_report.text and "Listening: yes" in launcher._scan_report.text and "OpenXR is not running" in launcher._scan_report.text)
 	check("it tells you to turn passthrough on and to look at DIDSA-CAD's Connect a VR headset", "Connect a VR headset" in _all_text(launcher._body) and "passthrough" in _all_text(launcher._body).to_lower())
 
+	var step: Label = launcher._body.find_child("ScanStep", true, false)
+	check("the first line says what to do now: turn passthrough on", step != null and step.text.begins_with("Step 1 of 3") and "passthrough" in step.text and launcher._body.get_child(0) == step)
+	launcher._body.find_child("Passthrough", true, false).pressed.emit()
+	await frames(1)
+	check("with passthrough on it says to look at the QR code, on the monolith and the status line", step.text.begins_with("Step 2 of 3") and "look at the QR code" in step.text and "look at the QR code" in main.status_text)
 	var valid := "didsa-vr:1?n=Workshop+PC&u=https%3A%2F%2Fcad.example.net&k=TOPSECRETKEY"
+	scanner.feed(valid)
+	await frames(1)
+	check("once a code is read it says so and asks you to confirm with Connect (in green)", step.text.begins_with("Step 3 of 3") and "Connect" in step.text and step.get_theme_color("font_color").g > 0.9)
+	launcher._body.find_child("CardCancel", true, false).pressed.emit()
+	await frames(1)
+	check("Cancel goes back to looking at the code", step.text.begins_with("Step 2 of 3"))
+	launcher._body.find_child("Passthrough", true, false).pressed.emit()
+	await frames(1)
+	scanner._last_seen_ms -= 5000
 	scanner.feed(valid)
 	await frames(1)
 	check("a good code is described by name and host", "Read a DIDSA pairing code for Workshop PC (cad.example.net)" in launcher._scan_read.text)
@@ -54,7 +68,7 @@ func _initialize() -> void:
 	scanner.feed("didsa-vr:1?u=http%3A%2F%2Fexample.com&k=k")
 	await frames(1)
 	check("our code with a refused address says why", "refused" in launcher._scan_read.text and "https" in launcher._scan_read.text)
-	check("the report counts what was read", "QR codes read: 3" in launcher._scan_report.text)
+	check("the report counts what was read (the good code twice, around a Cancel)", "QR codes read: 4" in launcher._scan_report.text)
 
 	# passthrough toggle
 	var before: String = main.current_scene()

@@ -25,6 +25,7 @@ var _server_result: Label
 var scanner: Node ## qr_scanner.gd, from landing.gd
 var _scan_report: Label
 var _scan_read: Label
+var _scan_step: Label ## the Scan page's one-line "what to do now": passthrough on, look at the code, confirm it
 var _scan_passthrough: Button
 var _pending: Dictionary = {} ## a pairing code that was read and is waiting for Connect / Cancel (PairingPayload.parse's result)
 var _scan_card: VBoxContainer
@@ -372,6 +373,9 @@ func attach_scanner(p_scanner: Node) -> void:
 
 
 func _build_scan() -> void:
+	_scan_step = _info("")
+	_scan_step.name = "ScanStep"
+	_body.add_child(_scan_step)
 	_body.add_child(_hint("On your PC or phone open DIDSA-CAD and choose Connect a VR headset. Turn passthrough on so you can see the screen, then look at the code, close enough that it fills a good part of your view."))
 	_scan_passthrough = _action("", _toggle_scan_passthrough, 0)
 	_scan_passthrough.name = "Passthrough"
@@ -409,6 +413,8 @@ func _toggle_scan_passthrough() -> void:
 	if _scan_restore_scene == "":
 		_scan_restore_scene = main.current_scene() if main.current_scene() != "Passthrough" else "Mid"
 		main.set_scene("Passthrough")
+		if _pending.is_empty():
+			main.say("Now look at the QR code on your screen.")
 	else:
 		main.set_scene(_scan_restore_scene)
 		_scan_restore_scene = ""
@@ -422,6 +428,20 @@ func _refresh_scan() -> void:
 	_scan_passthrough.text = "Passthrough: %s" % ("ON (tap to turn off)" if main.current_scene() == "Passthrough" else "off (tap to turn on)")
 	_scan_report.text = scanner.report() + ("\n" + status if status != "" else "")
 	_scan_read.text = _scan_last
+	_scan_step.text = scan_step_text(main.current_scene() == "Passthrough", not _pending.is_empty())
+	_scan_step.add_theme_color_override("font_color", Color(0.45, 0.95, 0.55) if not _pending.is_empty() else AMBER_PROMPT)
+
+
+const AMBER_PROMPT := Color(1.0, 0.78, 0.35)
+
+
+static func scan_step_text(passthrough_on: bool, code_read: bool) -> String:
+	## What to do now on the Scan page, in one line (pure, for the test).
+	if code_read:
+		return "Step 3 of 3: code read. Check the details below, then press Connect."
+	if not passthrough_on:
+		return "Step 1 of 3: turn passthrough on (the button below) so you can see your screen."
+	return "Step 2 of 3: look at the QR code on your screen now, about an arm's length away, and hold still until it is read."
 
 
 func _on_code_seen(text: String) -> void:
