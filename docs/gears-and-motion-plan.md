@@ -8,8 +8,8 @@ by new mates so that turning one turns the others; and a **Drive** tool in VR tu
 Repos: **BE** = DIDSA-CAD `backend/`, **FA** = DIDSA-CAD `client/` (Flutter flat app), **VR** = DIDSA-VR (Godot 4.7.2).
 GitHub: `DIDSA-UK/DIDSA-VR`, `DIDSA-UK/DIDSA-CAD`. Both checked out side by side (`../DIDSA-CAD` from VR's root).
 
-**Branch:** one branch, the same name in both repos: **`ccr-5a6eceb9-yzobvb`** (already created from `main` on 2026-10-22, both repos;
-every earlier branch is merged, nothing else is open). All milestones land on it, in order. Do not open a pull request unless the
+**Branch:** one branch, the same name in both repos: **`claude/gears-and-motion`** (created from `main` on 2026-10-22 in both repos,
+after this plan was merged; every earlier branch is merged, nothing else is open). All milestones land on it, in order. Do not open a pull request unless the
 owner asks for one.
 
 ## Progress
@@ -153,8 +153,8 @@ Notes found while setting this up:
 ### 2.4 Commit and push at a gate
 
 ```
-git -C ../DIDSA-CAD add -A && git -C ../DIDSA-CAD commit -m "..." && git -C ../DIDSA-CAD push -u origin ccr-5a6eceb9-yzobvb
-git add -A && git commit -m "..." && git push -u origin ccr-5a6eceb9-yzobvb
+git -C ../DIDSA-CAD add -A && git -C ../DIDSA-CAD commit -m "..." && git -C ../DIDSA-CAD push -u origin claude/gears-and-motion
+git add -A && git commit -m "..." && git push -u origin claude/gears-and-motion
 ```
 Check `git status` first: nothing from §Rules 11 may be staged. If a push fails for the network, retry up to 4 times (2, 4, 8, 16 s).
 
@@ -461,6 +461,23 @@ Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" comman
 3. **Gate (full):** every suite of §2.2 including BE bevel pair if M1 touched bevel code (it does: the bore). Commit, push both.
    **PAUSE**: final report with every count, what was verified where, and what only the headset can tell.
 
+## 5a. Future motion features (not in this plan)
+
+Recorded 2026-10-22 so they are not lost; **none is to be built in M1-M9**. Each needs the owner's go and its own short scope first.
+
+| Feature | What it does | How it would fit |
+|---|---|---|
+| Belt / pulley, chain / sprocket | Two pulleys turn the same way at a diameter (or teeth) ratio | A gear mate with the other default sense; its own type for the right default and labels |
+| Worm and wheel | Worm starts / wheel teeth, axes at right angles | A gear mate between non-parallel axes (already allowed); its own type for the auto ratio |
+| Linear-to-linear coupler | Lever, rope over a pulley, hydraulic pair: one slides x, the other k·x | Coupler row with two travel terms |
+| Generic rotation coupler | Any two turns at a set ratio, no teeth | The gear mate without tooth counts |
+| Angle limit | A hinge that stops between two angles (door, lid) | With the distance limit, M9's active set |
+| Path / slot mate | A point stays on a curve or edge of another part (pin in a curved slot, roller on a track) | New equality residual: point-to-curve distance and tangent from OCCT edges, plus the constraint model in three ports |
+| Slot ends | Travel limits at each end of a path mate | Path mate plus M9's limits |
+| Cam and follower | The follower stays in contact with a turning cam profile | A path mate whose curve turns with the cam |
+| Universal joint | Two shafts at an angle joined by a cross | Possible today with concentric + angle mates on a cross part; a dedicated mate is convenience |
+| Contact / collision, springs, dampers, torque motors, Geneva drives, ratchets | Dynamics and intermittent motion | Need a physics or contact solver: a separate project (a motion study) |
+
 ## 5. Risks and open questions (for the owner)
 
 - **Sense stability.** The default sense uses the resolved axis direction of a picked face. If OCCT resolves a cylinder's axis the other
@@ -476,7 +493,7 @@ Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" comman
 ## 6. Kick-off prompt for the implementing session
 
 > You are implementing `docs/gears-and-motion-plan.md` in DIDSA-VR (with DIDSA-CAD checked out next to it as `../DIDSA-CAD`), on the
-> branch `ccr-5a6eceb9-yzobvb` in both repos. Read the plan's "Rules for the implementing session" and follow them exactly. Run
+> branch `claude/gears-and-motion` in both repos. Read the plan's "Rules for the implementing session" and follow them exactly. Run
 > `tools/setup_test_env.sh`, `source /opt/tools/env.sh` and `tools/start_backend.sh`, then start at the first milestone whose Progress row is
 > not Done. Work task by task, run the milestone's gate, commit and push both repos, fill in the Progress row, and stop at every PAUSE with
 > a short report. When the code disagrees with the plan, follow the code and write the difference under "Implementation notes".
