@@ -133,6 +133,10 @@ show black edges; the tablet's Display page (fps, cpu / gpu ms) tells that apart
 
 ## B5: passthrough is black on the Quest
 
+**Working (22 Oct):** the owner reports passthrough working on the Quest 3 in the run with foveation off. The fixes that got there: `.editor_hint`
+overrides so the export sees the Meta settings, **Enable Meta Plugin** ticked in the export preset, and foveated rendering off (B2). Still to try: the QR scan
+and pairing (the spatial-data permission is now asked for).
+
 **Status (21 Oct, later):** the owner's status line read *"It offers blend modes: opaque. The headset's passthrough layer is available but failed to
 start"*. So the extension was on in the app (the `.android` override applied), but the runtime would not create the passthrough layer, and so never offered alpha
 blend. That is what an app with no passthrough feature in its manifest gets, which fits the cause below. **Done:** `.editor_hint` overrides in `project.godot` (fix
