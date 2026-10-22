@@ -24,7 +24,7 @@ const NativeCompose := preload("res://scripts/native_compose.gd") ## which file 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
 const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
 const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
@@ -369,7 +369,8 @@ func _mode_toggle(label: String, apply: Callable, default_on: bool = true) -> Bu
 	return button
 
 
-func _choice_row(title: String, options: Array, selected: int, on_pick: Callable) -> Control:
+func _choice_row(title: String, options: Array, selected: int, on_pick: Callable, per_row := 0) -> Control:
+	## One of several choices as toggle buttons sharing a group. `per_row` > 0 wraps them into lines of that many (a long list would otherwise widen the page).
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	box.add_child(_hint(title))
@@ -377,6 +378,9 @@ func _choice_row(title: String, options: Array, selected: int, on_pick: Callable
 	box.add_child(row)
 	var group := ButtonGroup.new()
 	for i in options.size():
+		if per_row > 0 and i > 0 and i % per_row == 0:
+			row = _row()
+			box.add_child(row)
 		var button := Button.new()
 		button.text = str(options[i])
 		button.toggle_mode = true
@@ -654,7 +658,7 @@ func _build_mates_page() -> Control:
 	page.add_child(_choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
 		if _mates_tool:
 			_mates_tool.mate_type = _mates_tool.MATE_TYPES[i]
-	))
+	, 5))
 	var toggles := _row()
 	page.add_child(toggles)
 	var allow_rot := Button.new()
@@ -779,7 +783,9 @@ func _refresh_mates_branch_controls() -> void:
 	_mates_alignment_button.visible = tool.branch_controls.has("alignment")
 	_mates_alignment_button.text = "%s: %s" % [_MatesTool.alignment_title(tool.mate_type), _MatesTool.alignment_label(tool.mate_type, tool.shown_alignment())]
 	_mates_flip_button.visible = tool.branch_controls.has("secondary_flip")
-	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.shown_secondary_flip() == 1 else "off"]
+	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.flip_is_on() else "off"]
+	if _mates_value_label != null and tool.is_coupler():
+		_mates_value_label.text = _coupler_value_label(tool)
 	var steps: int = tool.branch_alternatives.size()
 	_mates_next_button.visible = steps > 1
 	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
@@ -797,8 +803,30 @@ func _mates_status() -> String:
 	return _mates_tool.status_text() if _mates_tool else ""
 
 
+func _coupler_value_label(tool) -> String:
+	## The value line of a coupler mate: what the value is, what it is now ("Auto" shows what the backend would take from the teeth).
+	var shown := ""
+	if tool.mate_value > 0.0:
+		shown = _trim_mate_value(tool.mate_value)
+	elif tool.mate_type == "screw":
+		shown = "(set it)"
+	else:
+		shown = "Auto" if tool.preview_coupler_value <= 0.0 else "Auto = %s" % _MatesTool.coupler_value_text(tool.mate_type, tool.preview_coupler_value)
+	return "%s: %s" % [_MatesTool.value_prompt(tool.mate_type).split(" (")[0], shown]
+
+
 func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
+		return
+	if _mates_tool.is_coupler():
+		_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value) if _mates_tool.mate_value > 0.0 else "", func(text: String) -> void:
+			var parsed: Dictionary = _MatesTool.parse_value(_mates_tool.mate_type, text)
+			if not parsed["ok"]:
+				toast.emit(str(parsed["error"]), "error")
+				return
+			_mates_tool.mate_value = float(parsed["value"])
+			_mates_value_label.text = _coupler_value_label(_mates_tool)
+		, {"title": _MatesTool.value_prompt(_mates_tool.mate_type)})
 		return
 	_main.open_keyboard_for(_trim_mate_value(_mates_tool.width_offset if _mates_tool.is_width() else _mates_tool.mate_value), func(text: String) -> void:
 		# A Width mate's value is its offset from the centre: a distance (never negative; empty / 0 = centred exactly).
@@ -838,16 +866,19 @@ func _mates_rows() -> Array:
 				is_width_mate = true
 		var refs_list: Array = mate.get("references", [])
 		var is_symmetric_mate: bool = refs_list.size() == 2 and refs_list[0] is Dictionary and refs_list[0].get("midplane") != null and refs_list[1] is Dictionary and refs_list[1].get("midplane") == null
-		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else type_str.capitalize())
-		var has_value: bool = mate.get("value") != null
+		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else _MatesTool.type_label(type_str))
+		var is_coupler_mate: bool = type_str in _MatesTool.COUPLER_TYPES
+		var has_value: bool = mate.get("value") != null and not is_coupler_mate
 		var mate_id := str(mate.get("id", ""))
 		var free_spin := bool(mate.get("allow_rotation", true))
 		var alignment = mate.get("alignment")
 		var secondary = mate.get("secondary_flip")
 		var notes := []
+		if is_coupler_mate:
+			notes.append(_MatesTool.coupler_value_text(type_str, mate.get("value"))) # (the raw sense means nothing on its own: only the Reverse action shows it)
 		if alignment != null:
 			notes.append(("swing %s" % _MatesTool.alignment_label(type_str, str(alignment))) if type_str == "angle" else ("aligned" if str(alignment) == "aligned" else "anti-aligned"))
-		if secondary != null:
+		if secondary != null and not is_coupler_mate:
 			notes.append("%s %s" % [_MatesTool.secondary_flip_label(type_str).to_lower(), "on" if bool(secondary) else "off"])
 		if type_str == "concentric":
 			notes.append("free to spin" if free_spin else "rotation locked")
@@ -859,7 +890,7 @@ func _mates_rows() -> Array:
 			actions.append({"label": _MatesTool.secondary_flip_label(type_str), "callback": _on_edit_mate.bind(mate_id, {"secondary_flip": not bool(secondary)})})
 		if type_str == "concentric":
 			actions.append({"label": "Lock rotation" if free_spin else "Free rotation", "callback": _on_edit_mate.bind(mate_id, {"allow_rotation": not free_spin})})
-		if type_str in ["distance", "angle"]:
+		if type_str in ["distance", "angle"] or is_coupler_mate:
 			actions.append({"label": "Value", "callback": _on_edit_mate_value.bind(mate_id, mate.get("value"))})
 		actions.append({"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)})
 		rows.append({
@@ -888,7 +919,7 @@ func _on_edit_mate_value(mate_id: String, current) -> void:
 		for mate in _mates_tool.mates:
 			if str(mate.get("id", "")) == mate_id:
 				type_str = str(mate.get("type", ""))
-		var parsed: Dictionary = _MatesTool.parse_value(type_str, text)
+		var parsed: Dictionary = _MatesTool.parse_value(type_str, text, false) # an existing mate has no Auto
 		if not parsed["ok"]:
 			toast.emit(str(parsed["error"]), "error")
 			return

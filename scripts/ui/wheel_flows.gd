@@ -16,7 +16,7 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
@@ -25,6 +25,9 @@ const MATE_TYPE_HINTS := {
 	"angle": "A set angle (you type it)",
 	"width": "Centre between two faces (4 picks)",
 	"symmetric": "Mirror two faces about a plane (3 picks)",
+	"gear": "Turning one turns the other (2 round things)",
+	"rack_pinion": "A gear turns a rack along its edge",
+	"screw": "A nut climbs a screw as it turns (you type the lead)",
 }
 
 var tokens: Resource
@@ -377,6 +380,8 @@ func _set_mate_type(type: String) -> void:
 	if type == "distance" or type == "angle":
 		var unit := "mm" if type == "distance" else "degrees"
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
+	elif type == "screw":
+		_main.open_keyboard_for("", _apply_mate_value.bind(type, "mm per turn"), {"title": _mates.value_prompt(type)})
 	elif type == "width":
 		# The optional offset from the centre (0 = centred exactly); the tablet's Set value button does the same.
 		_main.open_keyboard_for(("%.3f" % _mates.width_offset).rstrip("0").rstrip("."), _apply_width_offset, {"title": "Width offset from centre (mm, 0 = centred)"})

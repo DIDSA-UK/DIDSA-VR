@@ -62,7 +62,12 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric"]
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw"]
+## The coupler ("motion") mates (docs/gears-and-motion-plan.md): they place nothing, they keep a relation between how far the two parts MOVE, so turning
+## one turns the other. Two axis picks (a round face, a circular edge or a straight edge; the rack's second a straight edge), a value (gear: ratio, B
+## turns per A turn; rack and pinion: mm of rack per pinion turn; screw: mm per turn) and a sense ("Reverse" / "Left-hand"). `mate_value` 0 is Auto for
+## gear and rack and pinion (the backend reads the teeth); a screw needs its lead.
+const COUPLER_TYPES: Array[String] = ["gear", "rack_pinion", "screw"]
 ## The UI-only mate type of a Width mate (docs/width-mate-plan.md in DIDSA-CAD): four faces - the gap's two, then the two of the part(s) to
 ## centre in it - sent as a plain coincident (centred) or distance (offset from the centre) mate whose two references are mid-planes.
 ## Nothing is created for the mid-plane: it is worked out by the backend on every solve and never drawn.
@@ -82,6 +87,8 @@ var command_stack = null ## set via setup(); shared undo/redo history
 var mate_type := "coincident":
 	set(v):
 		var crosses := (v in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type) or (mate_type in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type)
+		if v != mate_type and (v in COUPLER_TYPES or mate_type in COUPLER_TYPES):
+			mate_value = 0.0 # a distance typed for another kind of mate is not a ratio, a travel or a lead (0 = Auto)
 		mate_type = v
 		if crosses and not _picks.is_empty():
 			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
@@ -151,6 +158,8 @@ var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the
 var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
 var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
 var _branch_notice := "" ## the sentence telling the user so (branch_notice())
+var _flip_base := -1 ## a coupler: the sense (0 / 1) the backend chose by default, which "Reverse" / "Left-hand" is measured from (-1 = not known yet)
+var preview_coupler_value := -1.0 ## a coupler: the ratio / travel / lead the latest preview says the mate would be made with (-1 = none)
 var _pending_edit: Dictionary = {} ## "mate_id|fields" -> the branch changes an edit was refused for; repeating that exact edit confirms them
 var _busy := false
 var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
@@ -212,6 +221,10 @@ func is_symmetric() -> bool:
 	return mate_type == SYMMETRIC_TYPE
 
 
+func is_coupler() -> bool:
+	return mate_type in COUPLER_TYPES
+
+
 func is_multi() -> bool:
 	## A Width or Symmetric mate: picked as several faces rather than two entities.
 	return is_width() or is_symmetric()
@@ -271,12 +284,21 @@ func status_text() -> String:
 			return symmetric_progress_text(_picks.size()) if is_symmetric() else width_progress_text(_picks.size())
 	match _picks.size():
 		0:
-			return "Pick a face, edge or corner on the first part."
+			return "Pick a round face, a circular edge or a straight edge (the axis) on the first part." if is_coupler() else "Pick a face, edge or corner on the first part."
 		1:
-			return "Pick a face, edge or corner on the second part."
+			if mate_type == "rack_pinion":
+				return "Pick a straight edge along the rack on the second part."
+			return "Pick a round face, a circular edge or a straight edge (the axis) on the second part." if is_coupler() else "Pick a face, edge or corner on the second part."
 		_:
 			if _branch_notice != "":
 				return _branch_notice
+			if mate_type == "screw" and mate_value <= 0.0:
+				return "A screw needs its lead (mm per turn): press Set value."
+			if is_coupler():
+				var value_note := ""
+				if mate_value <= 0.0 and preview_coupler_value > 0.0:
+					value_note = " (%s, from the teeth)" % coupler_value_text(mate_type, preview_coupler_value)
+				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			return "Ready — choose a mate type and Create."
@@ -323,6 +345,8 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		rejection = "The last two faces are not parallel: press Undo pick first."
 	if rejection == "" and is_multi() and kind != "face":
 		rejection = "A Symmetric mate is made from faces." if is_symmetric() else "A Width mate is made from faces."
+	if rejection == "" and is_coupler():
+		rejection = coupler_rejection(mate_type, _picks.size(), TopologyPick.axis_kind(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)))
 	if rejection == "" and not TopologyPick.is_mateable(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)):
 		rejection = "A mate can only use a plane, a cylinder, a straight or circular edge, or a corner - this surface is none of those."
 	if rejection != "":
@@ -491,11 +515,68 @@ func reset_branch_choice() -> void:
 	## Back to Closest, without re-running the preview (the caller does).
 	_alignment_choice = ""
 	_flip_choice = -1
+	_flip_base = -1
+	preview_coupler_value = -1.0
+
+
+static func type_label(type: String) -> String:
+	## Pure - the name of a mate type in lists.
+	match type:
+		"rack_pinion":
+			return "Rack and pinion"
+		"width", "symmetric", "gear", "screw":
+			return type.capitalize()
+	return type.capitalize()
+
+
+static func coupler_value_text(type: String, value) -> String:
+	## Pure - a coupler's value as the lists show it: gear "1 : 2" (A turns for one of B), rack and pinion "62.832 mm per turn", screw "lead 2 mm";
+	## "" for another type or no value.
+	if value == null or float(value) <= 0.0 or not type in COUPLER_TYPES:
+		return ""
+	var v := float(value)
+	var trim := func(x: float) -> String: return ("%.3f" % x).rstrip("0").rstrip(".")
+	match type:
+		"gear":
+			return "1 : %s" % trim.call(1.0 / v)
+		"rack_pinion":
+			return "%s mm per turn" % trim.call(v)
+	return "lead %s mm" % trim.call(v)
+
+
+static func value_prompt(type: String) -> String:
+	## Pure - what the value of `type` is called (the keyboard's title and the tablet's label).
+	match type:
+		"gear":
+			return "Ratio (B turns per A turn; empty = Auto from the teeth)"
+		"rack_pinion":
+			return "Travel per turn (mm of rack per pinion turn; empty = Auto from the teeth)"
+		"screw":
+			return "Lead (mm per turn)"
+		"angle":
+			return "Angle (degrees)"
+	return "Distance (mm)"
+
+
+static func coupler_rejection(type: String, slot: int, kind: String) -> String:
+	## Pure - why an entity of backend `kind` (TopologyPick.axis_kind) cannot be pick number `slot` (0 / 1) of a `type` coupler, or "". An unknown
+	## kind ("") passes: the backend has the last word.
+	if kind == "":
+		return ""
+	if type == "rack_pinion" and slot == 1:
+		return "" if kind == "line" else "The rack side is a straight edge along the rack: pick one of its straight edges."
+	if kind in ["cylinder", "circle", "line"]:
+		return ""
+	return "%s needs an axis: pick a round face, a circular edge or a straight edge." % type_label(type)
 
 
 static func secondary_flip_label(type: String) -> String:
 	## Pure — what the secondary flag means for a mate of `type`.
 	match type:
+		"gear", "rack_pinion":
+			return "Reverse"
+		"screw":
+			return "Left-hand"
 		"distance":
 			return "Flip side"
 		"concentric":
@@ -505,10 +586,17 @@ static func secondary_flip_label(type: String) -> String:
 	return "Flip"
 
 
-static func parse_value(type: String, text: String) -> Dictionary:
+static func parse_value(type: String, text: String, allow_auto := true) -> Dictionary:
 	## Pure — a typed mate value: {"ok", "value", "error"}. Not a number is refused, and so is a negative DISTANCE (the side of a distance
 	## is the Flip side control; the backend refuses a negative one, which used to leave the ghost blank with no word why). An angle may be negative.
+	## A coupler's value is above zero; empty (value 0) means Auto for a gear and a rack and pinion when `allow_auto` (a new mate; an edit has no Auto).
 	var trimmed := text.strip_edges()
+	if type in COUPLER_TYPES:
+		if trimmed == "" and allow_auto and type != "screw":
+			return {"ok": true, "value": 0.0, "error": ""}
+		if not trimmed.is_valid_float() or trimmed.to_float() <= 0.0:
+			return {"ok": false, "value": 0.0, "error": "A %s value must be a number above zero%s" % [type_label(type).to_lower(), "" if type == "screw" or not allow_auto else " (or empty for Auto)"]}
+		return {"ok": true, "value": trimmed.to_float(), "error": ""}
 	if not trimmed.is_valid_float():
 		return {"ok": false, "value": 0.0, "error": "\"%s\" is not a number" % trimmed}
 	var value := trimmed.to_float()
@@ -582,6 +670,15 @@ func toggle_alignment() -> void:
 		mate_alignment = "anti_aligned" if shown == "aligned" else "aligned"
 
 
+func flip_is_on() -> bool:
+	## What the secondary-flip control shows as "on": the raw flag, except for a coupler, where it is "differs from the sense the backend chose by default"
+	## (the raw flag depends on which way each axis happens to point, so it means nothing on its own).
+	var shown := shown_secondary_flip()
+	if is_coupler() and _flip_base >= 0:
+		return shown >= 0 and shown != _flip_base
+	return shown == 1
+
+
 func toggle_secondary_flip() -> void:
 	var shown := shown_secondary_flip()
 	if shown >= 0:
@@ -615,7 +712,7 @@ func branch_text() -> String:
 		parts.append("%s%s" % [alignment_label(mate_type, alignment), " (auto)" if mate_alignment == "" else ""])
 	var flip := shown_secondary_flip()
 	if flip >= 0:
-		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip == 1 else "off", " (auto)" if mate_secondary_flip < 0 else ""])
+		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip_is_on() else "off", " (auto)" if mate_secondary_flip < 0 and not is_coupler() else ""])
 	if branch_alternatives.size() > 1:
 		var index := alternative_index(branch_alternatives, alignment, flip)
 		parts.append("solution %s of %d" % [str(index + 1) if index >= 0 else "-", branch_alternatives.size()])
@@ -639,10 +736,16 @@ func _run_preview(seq: int) -> void:
 		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
 		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
 		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
+		if is_coupler():
+			preview_coupler_value = float(json["coupler_value"]) if json.get("coupler_value") != null else -1.0
+			if _flip_choice < 0 and branch_resolved.get("secondary_flip") != null:
+				_flip_base = 1 if branch_resolved["secondary_flip"] == true else 0 # the default sense: Reverse is measured from it
 		var found = json.get("branch_changes", [])
 		_branch_changes = found if found is Array else []
 		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
 	_clear_ghost()
+	if is_coupler():
+		members = [] # a coupler places nothing: no ghost (the preview only brings the default value and sense)
 	for member in members:
 		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
 		if part != null:
@@ -688,7 +791,7 @@ func _clear_ghost() -> void:
 
 
 func can_create() -> bool:
-	return _picks.size() == pick_target() and _width_error == "" and not _busy
+	return _picks.size() == pick_target() and _width_error == "" and not _busy and not (mate_type == "screw" and mate_value <= 0.0)
 
 
 func build_create_payload(with_branch_changes := false) -> Dictionary:
@@ -719,6 +822,8 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 		pass # a plain coincident mate: no value
 	elif mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
+	elif is_coupler() and mate_value > 0.0:
+		payload["value"] = mate_value # left out for Auto (gear, rack and pinion): the backend reads the teeth
 	if with_branch_changes and not _branch_changes.is_empty():
 		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload

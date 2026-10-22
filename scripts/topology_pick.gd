@@ -138,6 +138,24 @@ static func is_mateable(part: Node3D, entity: Dictionary) -> bool:
 	return str(face_kinds[face_id]) in ["plane", "cylinder"]
 
 
+static func axis_kind(part: Node3D, entity: Dictionary) -> String:
+	## What the backend says one picked entity is, for a coupler mate that needs an axis: "vertex", or for a face "plane" / "cylinder" / "other", or for an
+	## edge "line" / "circle" / "other". "" when the part carries no kinds (an older backend): the solver then has the last word.
+	if entity.is_empty():
+		return ""
+	var kind := str(entity.get("kind", "face"))
+	if kind == "vertex":
+		return "vertex"
+	if part == null or not part.has_meta("topology"):
+		return ""
+	var body: Dictionary = (part.get_meta("topology") as Dictionary).get(str(entity.get("body_id", "")), {})
+	var index := int(entity.get("index", -1))
+	if kind == "edge":
+		return str((body.get("edge_kinds", {}) as Dictionary).get(index, ""))
+	var kinds: Array = body.get("face_kinds", [])
+	return str(kinds[index]) if index >= 0 and index < kinds.size() else ""
+
+
 static func edge_points(part: Node3D, body_id: String, index: int) -> PackedVector3Array:
 	## Part-local segment endpoints (consecutive pairs) of one edge, for drawing its highlight.
 	if part == null or not part.has_meta("topology"):
