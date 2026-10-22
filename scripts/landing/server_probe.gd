@@ -20,16 +20,23 @@ func check(url: String, api_key: String) -> Dictionary:
 	return describe(int(answer[0]), int(answer[1]))
 
 
-static func describe(result_code: int, response_code: int) -> Dictionary:
-	## The words for an HTTPRequest outcome (pure, so a test can check each case).
+const NO_INTERNET_HINT := " If every server fails like this, this build may lack Android's Internet permission: Permissions > Internet in the export preset, then rebuild."
+
+
+static func describe(result_code: int, response_code: int, on_android: bool = OS.get_name() == "Android") -> Dictionary:
+	## The words for an HTTPRequest outcome (pure, so a test can check each case). On Android a failure to resolve or connect also names the Internet
+	## permission: Godot's Android export leaves it off by default, and then nothing can connect (the first Quest 3 pairing, 22 Oct 2026).
+	var hint := NO_INTERNET_HINT if on_android else ""
 	if result_code != HTTPRequest.RESULT_SUCCESS:
 		match result_code:
 			HTTPRequest.RESULT_TIMEOUT:
 				return {"ok": false, "code": 0, "message": "No answer in %d seconds. Is it running, and are you on the same network?" % int(TIMEOUT_SECONDS)}
 			HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
 				return {"ok": false, "code": 0, "message": "The secure connection failed (the certificate may not be trusted by the headset)."}
+			HTTPRequest.RESULT_CANT_RESOLVE:
+				return {"ok": false, "code": 0, "message": "Could not find that address (the name did not resolve). Check the spelling, or use the server's IP address." + hint}
 			_:
-				return {"ok": false, "code": 0, "message": "Could not reach the server. Is it running, and is the address right?"}
+				return {"ok": false, "code": 0, "message": "Could not reach the server. Is it running, and is the address right?" + hint}
 	if response_code == 401 or response_code == 403:
 		return {"ok": false, "code": response_code, "message": "The server refused the API key."}
 	if response_code < 200 or response_code >= 300:

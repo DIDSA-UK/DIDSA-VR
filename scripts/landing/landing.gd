@@ -207,7 +207,7 @@ func show_demo(model: Dictionary, desk: bool) -> void:
 	## A demo glb at full size (1:1) in front of the user, or small (1:50) on a plinth at waist height. Loaded like any glb from
 	## the Files tab (local_glb_scale 1.0), then placed.
 	_placing_demo = true
-	var loaded: bool = main.load_glb_file(str(model["path"]))
+	var loaded: bool = main.load_glb_file(str(model["path"]), show_demo.bind(model, desk)) # after "Discard and continue", place it the same way
 	_placing_demo = false
 	if not loaded:
 		return

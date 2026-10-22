@@ -64,6 +64,7 @@ var _reference_review: Dictionary = {"root": "", "relinked": [], "review": [], "
 var _references_left: Dictionary = {} ## review keys the user chose to leave missing (hidden on the References page until the next open)
 var _dirty_from_relink := false ## the only unsaved change is a moved file's corrected path: picking another reference re-opens without asking
 var last_saved_path := "" ## the .didsa the last save wrote
+var document_is_demo := false ## what is shown is a demo model shipped in the APK (res://demo/): read-only, so replacing it never asks (Quest 3 report, 21 Oct 2026)
 var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
 var _discard_armed_for := ""
 var _discard_armed_until_ms := 0
@@ -1597,17 +1598,20 @@ func reload_world_model(dirty: bool = true) -> bool:
 	return shown
 
 
-func load_glb_file(path: String) -> bool:
-	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown.
+func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bool:
+	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown. `run_after_discard` is what
+	## "Discard and continue" runs if unsaved changes stop it (default: this load again); the landing passes its own demo placing, so the demo
+	## is still placed full size or on the desk after a discard.
 	if not FileAccess.file_exists(path):
 		_set_status("No such file: %s" % path)
 		return false
-	if not confirm_discard("Open " + path.get_file(), load_glb_file.bind(path)):
+	if not confirm_discard("Open " + path.get_file(), run_after_discard if run_after_discard.is_valid() else load_glb_file.bind(path)):
 		return false
 	var started_ms := Time.get_ticks_msec()
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
 		return false
+	document_is_demo = path.begins_with("res://demo/")
 	RecentFile.remember(path)
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR: ", _load_summary)
@@ -1779,6 +1783,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	if scene == null:
 		_set_status("glTF parsed but produced no scene.")
 		return false
+	document_is_demo = false # the old model is going; load_glb_file() sets this again for a demo
 	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 	_appearance_tool.forget() # the glb's materials are the looks now; the tool reads the lists again when it is next used
 	scenes_tool.forget() # a shown scene's nodes are about to go
@@ -1855,7 +1860,7 @@ func confirm_discard(what: String, run: Callable = Callable()) -> bool:
 	## `what` again within DISCARD_CONFIRM_MS goes ahead and discards them. Different actions don't share a confirmation.
 	## With `run` (the action itself, to call again) the warning is also a choice on the Files page: discard_and_continue() runs it,
 	## save_and_continue() saves first, cancel_discard() drops it (owner's report, Oct 2026: a bare refusal read as an error).
-	if not document_dirty:
+	if not document_dirty or document_is_demo: # a demo is read-only and can't be saved offline: moving or painting it is not work to lose
 		_clear_pending_discard()
 		return true
 	var now := Time.get_ticks_msec()
@@ -1868,7 +1873,7 @@ func confirm_discard(what: String, run: Callable = Callable()) -> bool:
 	if run.is_valid():
 		_pending_discard = {"what": what, "run": run}
 		discard_prompt_changed.emit()
-		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (Files page)." % what)
+		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (%s)." % [what, "on the monolith" if landing != null and landing.is_active() else "Files page"])
 	else:
 		_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
 	return false

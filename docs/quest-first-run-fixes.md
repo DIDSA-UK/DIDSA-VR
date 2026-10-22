@@ -1,8 +1,8 @@
 # Quest 3 first native run: bug report and fix plan (21 Oct 2026)
 
 The owner's first run of the standalone APK on a Quest 3 (the L0 build from [`android-build.md`](android-build.md)). The app started on the landing and ran
-natively; with demo models loaded it felt smooth. Five problems, each traced to the code below, then the plan. Nothing here has been fixed yet, and the causes of
-B2 and B5 are the most likely ones found by reading the code and the OpenXR Vendors plugin's source (5.1.0-stable): **not yet confirmed on the headset**.
+natively; with demo models loaded it felt smooth. Five problems, each traced to the code below, then the plan. **Status (22 Oct):** all five fixed in
+code (B2 and B5 confirmed on the headset by the owner; B1, B3 and B4 headless-tested, not yet tried on the headset), plus B6 below (pairing could not connect).
 
 ## The report
 
@@ -15,6 +15,8 @@ B2 and B5 are the most likely ones found by reading the code and the OpenXR Vend
 5. **B5** Passthrough turns the scene black. So a QR scan and adding a server could not be tried.
 
 ## B1: laser range on the monolith
+
+**Done (22 Oct):** `REACH` 5 m in `landing_monolith.gd`, and the controller draws the laser to a UI hit beyond its 3 m `laser_length` (it was cut at 3 m). `tests/landing.gd`: a press from 3.5 m lands, the laser is drawn 3.5 m, from 6 m nothing.
 
 **Cause.** The monolith (`landing_monolith.gd`) extends `launcher_window.gd`, which extends `diegetic_panel.gd`, where `max_point_distance` is **2.0 m**
 (`scripts/diegetic_panel.gd:69`, passed to `laser_surface.gd`). The monolith stands 1.9 m from the eyes and is 2.6 m tall, so from a hand about 1.5 m away its top
@@ -99,6 +101,8 @@ show black edges; the tablet's Display page (fps, cpu / gpu ms) tells that apart
 
 ## B3: Open on the monolith goes to the tablet
 
+**Done (22 Oct):** an **Open a file** page on the monolith: the last opened file, then `main.list_model_files()` (the same list as the tablet's Files page) with Open on each (greyed *Needs a server* for .didsa / STEP offline), up to 40 rows, and a link to the tablet for saving, references and the project folder. `tests/landing_unsaved.gd`.
+
 **Cause.** `landing.gd` `open_files()` is `main.open_tablet_at("files")`; Settings does the same (`open_tablet_settings`). The monolith has no file list of its own.
 
 **Fix.**
@@ -110,6 +114,8 @@ show black edges; the tablet's Display page (fps, cpu / gpu ms) tells that apart
 - Test: `tests/landing.gd`: pressing Open shows the monolith's Files page and leaves the tablet closed; pressing a row loads that file.
 
 ## B4: unsaved-changes prompt on a demo, and only on the tablet
+
+**Done (22 Oct):** `main.document_is_demo` (a demo model from `res://demo/`; demo assemblies still ask, they can be saved as new files) and `confirm_discard()` never asks for one; an **Unsaved changes** page on the monolith (Discard and continue / Save first, greyed offline / Cancel) whenever a replace waits while it is open, going back to the page you were on; `load_glb_file(path, run_after_discard)` so a discarded demo is still placed. `tests/landing_unsaved.gd`.
 
 **Causes (three).**
 1. **A demo becomes "unsaved" just by being handled.** Any move goes through the undo stack, and `command_stack.changed` calls `mark_dirty()`
@@ -181,6 +187,23 @@ also does only through `.android`. So the Scan page would have failed next, even
    `tests/landing.gd` / an environment test: fog is off while Passthrough is on the landing and back on after.
 6. Rebuild the APK, check the manifest (step 1), then on the headset: Passthrough on the Environment page and on the Scan page, then a QR scan of DIDSA-CAD's code
    (the `android-build.md` checklist, items 2 to 4).
+
+## B6: pairing read the code but could not connect (22 Oct)
+
+**Report:** the QR code was read on the Scan page, but connecting failed ("Couldn't connect to the server"); also wanted: clearer feedback that the code was
+read and the API key came with it.
+
+**Most likely cause:** the export preset had no **Internet permission**. Godot's Android export leaves `permissions/internet` off by default (the example
+preset did not set it either), and without it the app can open no connection at all, so every server fails the same way whatever its address. **Fix:**
+`permissions/internet=true` in `tools/android/export_presets.cfg.example` (checked by `tests/android_config.gd`), `android-build.md` step 4, and on Android a
+failure to resolve or connect now says the permission may be missing (`server_probe.gd`; a name that does not resolve now says so separately). **To do on the
+PC:** tick Permissions > Internet in the real `export_presets.cfg` and rebuild. Not yet confirmed on the headset.
+
+**Feedback:** the Connect card now lists, each with a tick (or a warning sign): QR code read, Server, Address, *API key received (N characters, kept
+hidden)*, Document session included. A new code gives one haptic tick, the confirm sound and a status line (*QR code read: <name>, with its API key*); the
+same code seen again many times a second does not repeat them; a refused code gives the error buzz. Connect says *Testing the server and the API key at ...*;
+on success the Servers page says *Connected to <name>: the server answered and accepted the API key*; a failure buzzes and puts the reason on the status line.
+The Servers form shows the key as *set, N characters (hidden)*. `tests/pairing_flow.gd`.
 
 ## Order of work
 

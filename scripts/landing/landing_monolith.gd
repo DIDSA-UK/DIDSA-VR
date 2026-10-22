@@ -20,6 +20,7 @@ const LOGO_ZONE_PX := 70.0 ## from the top: the plain crown
 const PLINTH_PX := 182.0 ## at the foot, clear of the menu
 const PX_PER_METRE := 606.0
 const THICKNESS := 0.14
+const REACH := 5.0 ## metres: how far a laser can press the menu from (a step or two back still works)
 const LOGO_STANDOFF := 0.0 ## metres the logo floats in front of the slab's plane (it is above the slab, so it can sway freely)
 const ROW_IDS: Array[String] = ["continue", "open", "new", "assemblies", "servers"]
 const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "assemblies": "tree", "servers": "browser"}
@@ -40,6 +41,7 @@ func _init() -> void:
 	launcher_panel_size = Vector2(WIDTH, HEIGHT)
 	launcher_viewport_size = Vector2i(roundi(WIDTH * PX_PER_METRE), roundi(HEIGHT * PX_PER_METRE))
 	corner_hit_reach = -1.0 # a monolith is not resized by its corners
+	max_point_distance = REACH # the windows' 2 m was too short: the slab stands 1.9 m away and 2.6 m tall (Quest 3 report, 21 Oct 2026)
 
 
 func _build_corners() -> void:

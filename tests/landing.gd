@@ -257,6 +257,27 @@ func _initialize() -> void:
 	await frames(1)
 	check("...and back from Passthrough the night sky and fog return", env.background_mode == Environment.BG_SKY and env.fog_enabled)
 
+	# --- the monolith's reach (Quest 3 report: the laser was too short) ---------------------------------------------------------
+	main.go_home()
+	await frames(2)
+	var slab: Node3D = main.landing.launcher
+	var right: XRController3D = main.get_node("XROrigin3D/RightController")
+	var aim_from := func(metres: float) -> void:
+		var face: Vector3 = slab.global_position
+		var from: Vector3 = face + slab.global_transform.basis.z.normalized() * metres
+		right.global_transform = Transform3D(Basis.looking_at(face - from, Vector3.UP), from)
+	aim_from.call(3.5)
+	await frames(3)
+	check("the monolith's menu answers a laser from 3.5 m (the windows' 2 m was too short)", slab.surface.hovering)
+	var laser: MeshInstance3D = right.get("_laser")
+	check("...and the laser is drawn all the way to it (not cut at 3 m)", absf((laser.mesh as CylinderMesh).height - 3.5) < 0.05)
+	aim_from.call(6.0)
+	await frames(3)
+	check("from 6 m it does not", not slab.surface.hovering)
+	right.position = Vector3(0.3, 1.2, -0.3)
+	right.rotation = Vector3.ZERO
+	await frames(2)
+
 	# --- Settings > Graphics check: the flicker suspects, one switch each ------------------------------------------------------
 	var launcher = main.landing.launcher
 	launcher.show_page("settings")

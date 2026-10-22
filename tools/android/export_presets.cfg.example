@@ -41,6 +41,8 @@ package/name="DIDSA Design Tools VR"
 package/signed=true
 version/code=1
 version/name="0.1.0"
+; Internet: Godot leaves it OFF by default, and without it every server fails with "Could not reach the server" (Quest 3, 22 Oct 2026)
+permissions/internet=true
 ; XR Mode: 1 = OpenXR
 xr_features/xr_mode=1
 ; the Meta part of the OpenXR Vendors plugin (never tick two vendors in one preset)

@@ -54,6 +54,8 @@ fetches it, pinned to one release and checked against its SHA-256.
 4. **The export preset:** copy `tools/android/export_presets.cfg.example` to `export_presets.cfg` (git-ignored: it can hold signing details; never commit it), or
    make the same choices in Project > Export. The choices that matter:
    - **Use Gradle Build** on; **arm64-v8a** only; package `uk.didsa.vr` (change it if you want another id).
+   - **Permissions > Internet on.** Godot leaves it **off** by default, and then the app cannot reach any server: every Test or pairing says "Could not reach
+     the server" (the first pairing on a Quest 3, 22 Oct 2026). The example preset has `permissions/internet=true`; on Android the app's message now names it.
    - **XR Mode: OpenXR**. With the plugin installed, the Export dialog (Options tab) gains **Android XR Features**, **Meta XR Features** (Quest 1 / 2 / 3 / Pro
      support, boundary mode, overlay keyboard, instant splash screen, experimental features) and **Pico XR Features**: leave Quest 2, Quest 3 and Quest Pro on for
      a Quest 3. **XR Features > Enable Meta Plugin must be ticked** (it is off by default; `xr_features/enable_meta_plugin=true` in `export_presets.cfg`).
