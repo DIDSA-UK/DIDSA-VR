@@ -47,6 +47,11 @@ recommended size (`XR_META_recommended_layer_resolution`) and calls `set_render_
 the headset, whether or not Enable Meta Plugin is ticked, so it could explain the first run's flicker too. **Turned off** in `project.godot` (fixed full
 resolution; also steadier for the frame-rate numbers still to be measured), checked by `tests/android_config.gd`. Not yet tried on the headset.
 
+**First log (22 Oct, 13 s of `adb logcat -d`, taken after the app had started, so none of Godot's own lines):** the app was drawing and handing over frames
+on time: `VrApi FPS=72/72, Stale=0, App=7.4 ms` (GPU), `LCnt=2`, `SF=1.00`, `Fov=2`, and the passthrough service listed `uk.didsa.vr, PT=0` (not in passthrough).
+So it is not a hang or dropped frames: the frames themselves are wrong. The owner still saw nothing. Not known yet whether that APK had dynamic resolution off.
+The app runs at 72 Hz (the Quest 3 default) while physics runs at 90 Hz; unrelated, but worth setting the refresh rate later.
+
 **Built for this (21 Oct):** the star fixes (1 and 2 below) and **Settings > Graphics check** on the monolith (3 below), with live switches: night sky shader,
 fog, glow behind the logo, rockets, MSAA 2x, foveated rendering (headset only) and Passthrough with its status line. Each change goes to the status line and the
 log (`adb logcat -s godot`, "Graphics check: ..."). Nothing is saved. **How to use it:** reproduce the flicker (Passthrough on, or looking up), then turn the
