@@ -21,7 +21,7 @@ Update this table at every gate (date, test counts, commit hashes in both repos)
 | M0 | Tooling and baseline | both | Done 2026-10-22 (planning session) | see "Baseline" below |
 | M1 | Gear bore (backend + flat app field) | BE, FA | Done 2026-10-22 | CAD `9066f7f`. BE core 2546 passed; BE gears 398 passed (392 + 6 new in `test_gear_bore.py`) + planetary jobs 8 passed; FA `flutter test` 2927 passed / 38 skipped (2925 + 2 new); `flutter analyze --no-fatal-infos` 192 infos, 0 errors, 0 warnings (the baseline deprecation). VR untouched. |
 | M2 | Gear tools on the design table | VR | Done 2026-10-22, **PAUSE** (waiting for the owner) | VR `fb0a2ab`; CAD unchanged (`9066f7f`). `tests/ci.sh` 3462 SMOKE lines, 0 failures (3401 + 61 new in `design_table_gears`, plus one changed line in `design_table_logic`); `tests/ci_render.sh` 80 lines, 0 failures; `tests/ci_e2e.sh` 467 lines, 0 failures (449 + 18 new in `e2e_gears`, run against the restarted local backend with the M1 code). |
-| M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Not started | |
+| M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Done 2026-10-22 | CAD `6d1981e`. BE core 2559 passed (2546 + 13 in `test_coupler_mates.py`); BE gears 404 (398 + 6 in `test_coupler_mates_gears.py`) + planetary jobs 8; motion vectors `--check` ok (system python). VR docs only. |
 | M4 | Coupler mates in the flat app | FA | Not started | |
 | M5 | Coupler mates in VR | VR | Not started | **PAUSE** after the gate |
 | M6 | Constraint model v5 (analytic coupler rows, three ports) | BE, FA, VR | Not started | |
@@ -538,3 +538,24 @@ Recorded 2026-10-22 so they are not lost; **none is to be built in M1-M9**. Each
 - **Build row summaries** (second line): `External 20 teeth, module 2, bore 8`, `Internal 60 teeth, module 1.5, herringbone 15 deg`, rack `10 teeth, module 2`, bevel `20 teeth, module 2, cone 45 deg`.
 - **Not done / not verified.** The `.uid` files for the new scripts are not committed (the headless runs do not create them; Godot writes them when the editor opens the project). Nothing was tried in a headset: the panel layout was only looked at in the llvmpipe dock render (`tests/dock_panels_render.gd` now also shoots the three tools). The coarse previews (gear with and without a bore, bevel) and a helical gear with a bore were run against the real backend; a spiral bevel and a herringbone gear were not, and build times on a Quest are unknown. The shaft-hole advice is the readout only: no hole is cut for the user.
 - **Try on the headset:** Feature > Gears: make a 20-tooth gear with the default 8 mm bore, read the centre distance, Edit it to 24 teeth, make a second gear and a rack beside it on another plane (pull on the plane first), try Helix 15 and Herringbone, Internal (the Outer value fills itself), and a bevel pair with Mate teeth + Cone from mate.
+
+### M3 notes (2026-10-22)
+
+**Consumer audit** (every reader of mates / `_mate_residual_vector` in `backend/app`, and what a coupler does there):
+- `assembly_group.GroupModel.residual`: the only place couplers get rows (`_coupler_rows`); `_mate_residual_vector` is never called for one.
+- `assembly_group.build_group_model`: no swap, no branch resolution (`model.branches[id] = (None, secondary_flip)`), final check is "an axis on each side".
+- `assembly_group._seed_poses` (both loops), `branch_options` (and so `search_branch_changes` and `branch_alternatives`): skip couplers. `mate_branch_controls` says `("secondary_flip",)`.
+- `assembly_group.validate_mate_geometry`, `mate_with_flipped_alias`: return early for a coupler (`coupler.prepare_coupler` validates instead).
+- `assembly_solver._applicable_mates`: skips couplers, so the py-slvs single-occurrence solve (`/solve` fallback seed, `solve_occurrence_from_guess`) and `_mate_residual_satisfied` never see one.
+- `constraint_model.export_constraint_model`: `None` for a group with a coupler (not in `SUPPORTED_TYPES`): the Jacobian is central differences; `constraint_model` is null in `mate-motion` (D5).
+- `discover_component` / `constraint_status` / `analyze_model`: unchanged and correct (the coupler joins the two shafts into one group, DOF 1; no over-constraint reported).
+- `router`: `create_mate` (prepare_coupler instead of geometry validation + branch fields), `update_mate` (`_update_coupler`: value / secondary_flip / suppressed, no solve), `preview_mate_solve_endpoint` (current pose + `coupler_value`, new field), occurrence delete cascade (by `mate_tops`, unchanged). `ai_plan.py`: a coupler step is refused (`invalid_step_payload`). `native_format`: nothing needed (`type`, `value`, `secondary_flip`, `branch_source` already written; `_mate_from_dict` has no legacy rule for the new types).
+
+**Differences from the plan**
+- A straight edge's resolved point is a point on its line (`axis_origin`), not its midpoint; the travel row uses it (any point on the line gives the same travel for a pure slide).
+- 422 bodies are `{"type", "detail"}` (the code's shape), as for M1.
+- A concave face (a ring gear's inside) can report its axis the other way round, so the default sense of an internal + external pair depends on the picked faces' axis signs (`k = c`, c the sign of the axes' dot product); the test measures the axes instead of assuming. The residual is right either way.
+- The preview answer has a new field `coupler_value` so a panel can show the auto ratio.
+- `test_coupler_mates.py` uses shaft cylinders concentric to hole plates (plates fixed), which gives each shaft one spin; a rack and a nut plate stand in for the rack and the screw.
+
+**Not verified:** the analytic model (M6) and the clients are untouched. Large single-request turns (over about 170 degrees from the anchor) are not supported by design; the unwrap was tested with 40-degree steps (400 degrees total) and 90-degree steps for the screw (two turns).

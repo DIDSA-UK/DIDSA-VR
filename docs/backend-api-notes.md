@@ -555,6 +555,25 @@ POST  /document/gear/preview                               gear_kind external | 
 ```
 No sketch: the numbers are the feature (`module`, `tooth_count`, `face_width`, `pressure_angle_degrees`, `helix_angle_degrees`, `herringbone`, ...), `gear_type` / `rack_type` / `bevel_type` `"boss"` with `target_body_ids: []` makes a new body, `plane_ref` (omitted = the XY plane) says where it stands. Millimetres and degrees. **`bore_diameter`** (gear and bevel gear, mm, default 0 = none, written to a `.didsa` file only when above 0) cuts a through bore on the gear's axis: negative -> 422 `invalid_bore`, on an internal gear -> `bore_on_internal_gear`, 0.9 x the root diameter or more -> `bore_too_large`. Those 422 bodies are `{"type": ..., "detail": ...}`. A PATCH cannot turn an explicit `profile_shift` back into auto. The route of an update is `<type with - for _>-features`, which is how `PartFeatures.update_feature` builds it.
 
+## Coupler mates (gear, rack and pinion, screw)
+
+```
+POST   /document/parts/{part_id}/mates          {"type": "gear" | "rack_pinion" | "screw", "references": [A, B], "value"?, "secondary_flip"?}
+PATCH  /document/parts/{part_id}/mates/{id}     {"value"?, "secondary_flip"?, "suppressed"?}     (never moves anything)
+POST   .../occurrences/{id}/preview-mate-solve  -> converged, the CURRENT pose, resolved.secondary_flip, controls ["secondary_flip"], coupler_value
+```
+They keep a relation between the *moves* of two parts, never a placement (creating one, Solve and Enforce all move nothing). References, in this order: A = an axis
+(a cylindrical face, a circular or a straight edge), B = an axis, except rack and pinion's B, which must be a straight **edge** (the rack). The two must be on different top-level
+occurrences (or one the root part's own geometry); no Width reference. `value` is the ratio (turns of B per turn of A, `z_A / z_B`), the travel per pinion turn (mm,
+`pi x pitch diameter`) or the lead (mm per turn); always above zero. `secondary_flip` is the sense, **True = k +1, False = k -1** (the UI says Reverse; Left-hand for a screw). Left out on
+create the backend fills both in: the value from the tooth counts of the one gear / rack feature in each part (none, or several, and no value: 422 `gear_ratio_required`; a screw
+always needs its lead: `screw_lead_required`), the sense from the axis directions at the stored poses (`branch_source` "auto"; a sent one is "user"). Rows (about / along each side's axis
+at the pose the solve started from; for a screw all along A's axis): gear `dtheta_B - k r dtheta_A`, rack `ds_B - k (p / 2 pi) dtheta_A`, screw `(ds_B - ds_A) - k (L / 2 pi)(dtheta_B - dtheta_A)`.
+Other 422s: `invalid_coupler_value`, `rack_reference_not_straight_edge`, the usual unsupported-geometry one. A group holding a coupler has `constraint_model: null` in `mate-motion`
+(keep projecting on the backend). A concave face (the inside of a ring gear) may report its axis the other way round; the default sense already accounts for it.
+`alignment` stays null and `allow_rotation` / `flipped` mean nothing for a coupler. One turn per request is the limit: a wish more than about 170 degrees from the anchor in a single `mate-motion` is not
+supported (clients re-anchor every ~150 ms and send `reference` poses).
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.
