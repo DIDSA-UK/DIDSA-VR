@@ -22,7 +22,7 @@ Update this table at every gate (date, test counts, commit hashes in both repos)
 | M1 | Gear bore (backend + flat app field) | BE, FA | Done 2026-10-22 | CAD `9066f7f`. BE core 2546 passed; BE gears 398 passed (392 + 6 new in `test_gear_bore.py`) + planetary jobs 8 passed; FA `flutter test` 2927 passed / 38 skipped (2925 + 2 new); `flutter analyze --no-fatal-infos` 192 infos, 0 errors, 0 warnings (the baseline deprecation). VR untouched. |
 | M2 | Gear tools on the design table | VR | Done 2026-10-22, **PAUSE** (waiting for the owner) | VR `fb0a2ab`; CAD unchanged (`9066f7f`). `tests/ci.sh` 3462 SMOKE lines, 0 failures (3401 + 61 new in `design_table_gears`, plus one changed line in `design_table_logic`); `tests/ci_render.sh` 80 lines, 0 failures; `tests/ci_e2e.sh` 467 lines, 0 failures (449 + 18 new in `e2e_gears`, run against the restarted local backend with the M1 code). |
 | M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Done 2026-10-22 | CAD `6d1981e`. BE core 2559 passed (2546 + 13 in `test_coupler_mates.py`); BE gears 404 (398 + 6 in `test_coupler_mates_gears.py`) + planetary jobs 8; motion vectors `--check` ok (system python). VR docs only. |
-| M4 | Coupler mates in the flat app | FA | Not started | |
+| M4 | Coupler mates in the flat app | FA | Done 2026-10-22 | CAD `19e0355`. `flutter test` 2942 passed / 38 skipped (2927 + 15 in `coupler_mate_test.dart`); `flutter analyze --no-fatal-infos` 193 infos, all the baseline `material.dart` deprecation (the new test file imports it), 0 errors / warnings. |
 | M5 | Coupler mates in VR | VR | Not started | **PAUSE** after the gate |
 | M6 | Constraint model v5 (analytic coupler rows, three ports) | BE, FA, VR | Not started | |
 | M7 | Drive tool (VR) | VR | Not started | **PAUSE** after the gate |
@@ -559,3 +559,11 @@ Recorded 2026-10-22 so they are not lost; **none is to be built in M1-M9**. Each
 - `test_coupler_mates.py` uses shaft cylinders concentric to hole plates (plates fixed), which gives each shaft one spin; a rack and a nut plate stand in for the rack and the screw.
 
 **Not verified:** the analytic model (M6) and the clients are untouched. Large single-request turns (over about 170 degrees from the anchor) are not supported by design; the unwrap was tested with 40-degree steps (400 degrees total) and 90-degree steps for the screw (two turns).
+
+### M4 notes (2026-10-22)
+
+- The sense control is **relative**: "Reverse" / "Left-hand" is checked when the sense differs from the one the backend chose by default (new mate: the preview's `resolved.secondary_flip` when the user has not chosen; edit: the sense the mate had when the dialog opened). The raw `secondary_flip` is not shown because it depends on which way each axis points. M5 should do the same.
+- The preview returns the ratio / travel the mate would take (`coupler_value`); the panel shows it as "Auto: ..." while the value field is empty.
+- The mate row shows only the value ("1 : 2", "62.832 mm per turn", "lead 2 mm"); no sense word (same reason).
+- Not done: the panel does not restrict picks to axis kinds (a wrong pick shows the backend's 422); the plan's "drag keeps projecting without a model" check is covered by the existing `constrained_drag_local_test.dart` (`sendModel: false`), not duplicated.
+- Not verified: on a device / emulator (widget tests only).
