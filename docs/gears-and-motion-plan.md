@@ -20,7 +20,7 @@ Update this table at every gate (date, test counts, commit hashes in both repos)
 |---|---|---|---|---|
 | M0 | Tooling and baseline | both | Done 2026-10-22 (planning session) | see "Baseline" below |
 | M1 | Gear bore (backend + flat app field) | BE, FA | Done 2026-10-22 | CAD `9066f7f`. BE core 2546 passed; BE gears 398 passed (392 + 6 new in `test_gear_bore.py`) + planetary jobs 8 passed; FA `flutter test` 2927 passed / 38 skipped (2925 + 2 new); `flutter analyze --no-fatal-infos` 192 infos, 0 errors, 0 warnings (the baseline deprecation). VR untouched. |
-| M2 | Gear tools on the design table | VR | Done 2026-10-22, **PAUSE** (waiting for the owner) | VR commit in the git log ("M2: ..."); CAD unchanged (`9066f7f`). `tests/ci.sh` 3462 SMOKE lines, 0 failures (3401 + 61 new in `design_table_gears`, plus one changed line in `design_table_logic`); `tests/ci_render.sh` 80 lines, 0 failures; `tests/ci_e2e.sh` 467 lines, 0 failures (449 + 18 new in `e2e_gears`, run against the restarted local backend with the M1 code). |
+| M2 | Gear tools on the design table | VR | Done 2026-10-22, **PAUSE** (waiting for the owner) | VR `fb0a2ab`; CAD unchanged (`9066f7f`). `tests/ci.sh` 3462 SMOKE lines, 0 failures (3401 + 61 new in `design_table_gears`, plus one changed line in `design_table_logic`); `tests/ci_render.sh` 80 lines, 0 failures; `tests/ci_e2e.sh` 467 lines, 0 failures (449 + 18 new in `e2e_gears`, run against the restarted local backend with the M1 code). |
 | M3 | Coupler mates in the backend (gear, rack and pinion, screw) | BE | Not started | |
 | M4 | Coupler mates in the flat app | FA | Not started | |
 | M5 | Coupler mates in VR | VR | Not started | **PAUSE** after the gate |
