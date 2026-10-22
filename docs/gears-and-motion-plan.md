@@ -135,7 +135,7 @@ Notes found while setting this up:
 | BE bevel pair | `cd backend && $CAD_PY -m pytest tests/ -q -m bevel_pair -n 3 --dist=worksteal` | very long (100-280 s per test); run only when bevel code changes |
 | BE one file | `cd backend && $CAD_PY -m pytest tests/test_x.py -q` | |
 | Motion vectors | `cd DIDSA-CAD && python3 tools/motion_vectors/generate.py --check` | seconds |
-| FA | `cd client && flutter analyze && flutter test` (or one file: `flutter test test/x_test.dart`) | ~10 min full |
+| FA | `cd client && flutter analyze --no-fatal-infos && flutter test` (or one file: `flutter test test/x_test.dart`) | ~5 min full |
 
 ### 2.3 Baseline (2026-10-22, `main` = VR `bd0178e`, CAD `1496c7f`, this container)
 
@@ -145,8 +145,9 @@ Notes found while setting this up:
 | VR render `tests/ci_render.sh` | 80 SMOKE lines, 0 failures |
 | VR e2e `tests/ci_e2e.sh` (35 tests) | 449 SMOKE lines, 0 failures (the pairing part of `e2e_servers` is skipped without `DIDSA_E2E_PAIR_HOST`, hence 449 not 452) |
 | BE core | 2546 passed |
-| BE gears (without bevel pair) | see the Baseline note at the bottom (run started in the planning session) |
-| FA | `flutter test test/width_mate_test.dart` 20 passed; full `analyze` / `test`: see the Baseline note at the bottom |
+| BE gears (without bevel pair, without the serial planetary jobs file) | 392 passed (4 min 48 s, 3 workers) |
+| FA `flutter test` | 2925 passed, 38 skipped, all passed (4.5 min) |
+| FA `flutter analyze` | 0 errors, 0 warnings, 192 infos, **all** the same new deprecation (`package:flutter/material.dart` deprecated in Flutter master 3.50.0-0.1.pre, revision 84abdf7372 of 2026-10-22). It exits 1 on infos: gate with `flutter analyze --no-fatal-infos` and require no new error / warning and no info other than that deprecation |
 | Motion vectors `--check` | system python: pass; backend env: fails (known, above) |
 
 ### 2.4 Commit and push at a gate
@@ -392,7 +393,7 @@ Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" comman
    axis and its volume drops by π·4²·face width (1e-3 relative); bore 0 builds byte-identical mesh / volume to before; native round trip;
    a file without the key loads as 0 and saves without it; the three 422s; a helical gear with a bore; a bevel gear with a bore.
 3. FA: field on both screens, DTOs, presets; test in the existing gear screen tests (find them: `rg -l GearDesignScreen client/test`).
-4. **Gate:** BE core, BE gears; `flutter analyze` + the gear screen tests + `flutter test` (full). Commit, push (CAD only).
+4. **Gate:** BE core, BE gears; `flutter analyze --no-fatal-infos` + `flutter test` (full). Commit, push (CAD only).
 
 ### M2 Gear tools on the design table (VR) -> **PAUSE**
 1. Deck group, icons, hints. 2. `gear_tool.gd`. 3. `rack_tool.gd`. 4. `bevel_gear_tool.gd`. 5. Edit from the Build tree. 6. Tests (§3.2).
@@ -426,7 +427,7 @@ Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" comman
 
 ### M4 Coupler mates in the flat app (FA)
 1. `MateDto` and the panel (§3.4). 2. Tree / list labels. 3. Tests. 4. Docs: CAD `docs/status.md`.
-5. **Gate:** `flutter analyze` (no new warnings), `flutter test` (full). Commit, push.
+5. **Gate:** `flutter analyze --no-fatal-infos` (no new error / warning, §2.3), `flutter test` (full). Commit, push.
 
 ### M5 Coupler mates in VR -> **PAUSE**
 1. Fixture script and `gear_pair.didsa` (§3.5). 2. Mates tool types, picks, value, Reverse, labels, health. 3. Wheel entries. 4. Tests.
@@ -486,5 +487,6 @@ Each milestone: reading list (above, §3.x), tasks in order, gate. "Gate" comman
 
 ### Baseline note (planning session, 2026-10-22)
 
-- BE gears (without bevel pair) and the full FA `analyze` / `test` were started in the planning session; their results are recorded here
-  when they finish.
+- All baseline rows in §2.3 were run in the planning session's container with the tools from `tools/setup_test_env.sh`. Not run there:
+  BE bevel pair (very long) and `tests/test_planetary_gear_jobs.py` (serial). Flutter master moves daily: if `flutter analyze` shows new
+  kinds of infos on untouched code, that is the channel, not this work; note it and compare against `main`.
