@@ -7,6 +7,8 @@ extends SceneTree
 ## axes are refused before anything is sent; a rack and pinion and a screw are made and deleted (the motion of those is tested in the backend).
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_gear_mates.gd  (needs secrets.cfg and a running backend)
 
+const Local := preload("res://scripts/motion/local_retraction.gd")
+
 var main
 var mt
 var owner_id := ""
@@ -158,7 +160,9 @@ func _initialize() -> void:
 	var answer := await motion("gear-a", wish)
 	var pose_a := member_pose(answer, "gear-a")
 	var pose_b := member_pose(answer, "gear-b")
-	print("SMOKE the motion contract for a coupled pair: converged, group DOF 1, no analytic model (the clients keep projecting): ", bool(answer.get("converged", false)) and int(answer.get("dof", -1)) == 1 and answer.get("constraint_model") == null, " dof ", answer.get("dof"))
+	var model = answer.get("constraint_model")
+	var parsed = Local.try_parse(model, 8) if model is Dictionary else null
+	print("SMOKE the motion contract for a coupled pair: converged, group DOF 1, a version-5 analytic model with a coupler row that parses and that the pose satisfies: ", bool(answer.get("converged", false)) and int(answer.get("dof", -1)) == 1 and model is Dictionary and int(model.get("version", 0)) == 5 and parsed != null and parsed.has_coupler(), " dof ", answer.get("dof"), " version ", model.get("version") if model is Dictionary else null)
 	print("SMOKE gear A turned 90 degrees about the plate normal gives gear B 45 degrees the OPPOSITE way about the same normal (0.5 degrees): ", not pose_b.is_empty() and absf(z_turn(pose_a) - 90.0) < 0.5 and absf(z_turn(pose_b) + 45.0) < 0.5, " A ", z_turn(pose_a), " B ", z_turn(pose_b))
 	var on_holes := true
 	for pair in [[pose_a, start["gear-a"]], [pose_b, start["gear-b"]]]:

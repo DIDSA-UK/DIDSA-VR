@@ -569,8 +569,8 @@ occurrences (or one the root part's own geometry); no Width reference. `value` i
 create the backend fills both in: the value from the tooth counts of the one gear / rack feature in each part (none, or several, and no value: 422 `gear_ratio_required`; a screw
 always needs its lead: `screw_lead_required`), the sense from the axis directions at the stored poses (`branch_source` "auto"; a sent one is "user"). Rows (about / along each side's axis
 at the pose the solve started from; for a screw all along A's axis): gear `dtheta_B - k r dtheta_A`, rack `ds_B - k (p / 2 pi) dtheta_A`, screw `(ds_B - ds_A) - k (L / 2 pi)(dtheta_B - dtheta_A)`.
-Other 422s: `invalid_coupler_value`, `rack_reference_not_straight_edge`, the usual unsupported-geometry one. A group holding a coupler has `constraint_model: null` in `mate-motion`
-(keep projecting on the backend). A concave face (the inside of a ring gear) may report its axis the other way round; the default sense already accounts for it.
+Other 422s: `invalid_coupler_value`, `rack_reference_not_straight_edge`, the usual unsupported-geometry one. A group holding a coupler has a **version 5** `constraint_model` in `mate-motion`: the coupler mates carry `k` and a member side an `anchor {r, t}`; the rows are relative to the anchor, so a client
+must replace the anchors by the accepted poses at every anchor (`LocalRetractor.setAnchors` in Dart, `set_anchors` in `local_retraction.gd`). A concave face (the inside of a ring gear) may report its axis the other way round; the default sense already accounts for it.
 `alignment` stays null and `allow_rotation` / `flipped` mean nothing for a coupler. One turn per request is the limit: a wish more than about 170 degrees from the anchor in a single `mate-motion` is not
 supported (clients re-anchor every ~150 ms and send `reference` poses).
 

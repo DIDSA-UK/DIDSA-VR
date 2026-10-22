@@ -60,6 +60,8 @@ func _initialize() -> void:
 	_num(Local.ACCEPT_DISTANCE, float(c["local_accept_distance"]), "const local_accept_distance", 1e-300)
 	_num(Local.PAIR_MODEL_VERSION, float(c["local_pair_model_version"]), "const local_pair_model_version", 0.5)
 	_num(Local.MODEL_VERSION, float(c["local_model_version"]), "const local_model_version", 0.5)
+	if c.has("local_coupler_model_version"):
+		_num(Local.COUPLER_MODEL_VERSION, float(c["local_coupler_model_version"]), "const local_coupler_model_version", 0.5)
 	print("SMOKE GDScript local-retraction constants equal the vectors' constants: ", failures == 0)
 	var width_cases := cases.filter(func(x): return str(x["id"]).begins_with("local-width-"))
 	print("SMOKE local_retract cases in the fixture: ", cases.size(), " (>= 12: ", cases.size() >= 12, "); local-width-*: ", width_cases.size(), " (>= 17: ", width_cases.size() >= 17, ")")
@@ -130,11 +132,11 @@ func _initialize() -> void:
 	var base: Dictionary = (cases[0]["input"]["model"] as Dictionary).duplicate(true)
 	var ok_parse := Local.try_parse(base) != null
 	var bad_version: Dictionary = base.duplicate(true)
-	bad_version["version"] = Local.PAIR_MODEL_VERSION + 1
+	bad_version["version"] = Local.COUPLER_MODEL_VERSION + 1
 	var old_version: Dictionary = base.duplicate(true)
 	old_version["version"] = 1 # the pre-branch model (sign-agnostic residuals) is not evaluated
 	var bad_type: Dictionary = base.duplicate(true)
-	bad_type["mates"][0]["type"] = "gear"
+	bad_type["mates"][0]["type"] = "weld"
 	var missing: Dictionary = base.duplicate(true)
 	missing["mates"][0]["a"].erase("axis_origin")
 	var bad_member: Dictionary = base.duplicate(true)
@@ -170,9 +172,13 @@ func _initialize() -> void:
 		for m in mdl["mates"]:
 			if m["a"].has("pair") or m["b"].has("pair"):
 				has_pair = true
-		if int(mdl["version"]) != (4 if has_pair else 3):
+		var has_coupler := false
+		for m in mdl["mates"]:
+			if ["gear", "rack_pinion", "screw"].has(m["type"]):
+				has_coupler = true
+		if int(mdl["version"]) != (5 if has_coupler else (4 if has_pair else 3)):
 			versions_ok = false
-	print("SMOKE every golden model is version 4 exactly when a side has a pair: ", versions_ok)
+	print("SMOKE every golden model is version 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
 	if not versions_ok:
 		failures += 1
 
