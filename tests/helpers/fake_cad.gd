@@ -98,6 +98,11 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({"id": path.get_file()})
 	if verb == "POST" and path.contains("/coarse-preview"):
 		return _ok(coarse_bodies)
+	if verb == "POST" and path == "/document/gear/preview" and body is Dictionary: # the standard-tooth circles of a gear (zero profile shift)
+		var m := float(body["module"])
+		var z := float(body["tooth_count"])
+		var sign := -1.0 if str(body["gear_kind"]) == "internal" else 1.0
+		return _ok({"gear_kind": body["gear_kind"], "pitch_radius": m * z / 2.0, "addendum_radius": m * (z + 2.0 * sign) / 2.0, "dedendum_radius": m * (z - 2.5 * sign) / 2.0, "warnings": []})
 	if verb == "PATCH" and path.contains("-features/"):
 		var rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 		for row in rows:

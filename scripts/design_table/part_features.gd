@@ -235,6 +235,95 @@ static func delete_body_request(body_ids: Array) -> Dictionary:
 	return _good("delete-body-features", {"body_ids": body_ids})
 
 
+static func gear_request(g: Dictionary, plane_ref: Dictionary) -> Dictionary:
+	## One spur gear (a Boss: a new body) built from its numbers: external or internal, straight, helical (`helix` degrees, negative the other hand) or herringbone,
+	## with an optional through bore (external only). `g`: {internal, module, teeth, face, pressure_angle, helix, herringbone, bore, outer, backlash, fillet, shift (null = auto)}.
+	## `plane_ref` {} = the backend's default (the part's XY plane).
+	if float(g["module"]) <= 0.0:
+		return _bad("The module has to be bigger than zero.")
+	if int(g["teeth"]) < 3:
+		return _bad("A gear needs at least 3 teeth.")
+	if float(g["face"]) <= 0.0:
+		return _bad("The face width has to be bigger than zero.")
+	if absf(float(g["helix"])) >= 90.0:
+		return _bad("The helix angle has to be under 90 degrees.")
+	if bool(g["internal"]) and float(g["outer"]) <= 0.0:
+		return _bad("An internal gear needs its outer diameter.")
+	var internal := bool(g["internal"])
+	var helix := float(g["helix"])
+	var body := {
+		"gear_type": "boss",
+		"is_internal": internal,
+		"module": float(g["module"]),
+		"tooth_count": int(g["teeth"]),
+		"face_width": float(g["face"]),
+		"pressure_angle_degrees": float(g["pressure_angle"]),
+		"backlash": float(g["backlash"]),
+		"root_fillet_radius": float(g["fillet"]),
+		"helix_angle_degrees": helix,
+		"herringbone": bool(g["herringbone"]) and not is_zero_approx(helix),
+		"bore_diameter": 0.0 if internal else float(g["bore"]),
+		"target_body_ids": []}
+	if internal:
+		body["outer_diameter"] = float(g["outer"])
+	if g["shift"] != null:
+		body["profile_shift"] = float(g["shift"])
+	if not plane_ref.is_empty():
+		body["plane_ref"] = plane_ref
+	return _good("gear-features", body)
+
+
+static func rack_request(r: Dictionary, plane_ref: Dictionary) -> Dictionary:
+	## One straight rack (a Boss: a new body). `r`: {module, teeth, face, pressure_angle, backlash, backing (0 = the backend's default, 2 x module)}.
+	if float(r["module"]) <= 0.0:
+		return _bad("The module has to be bigger than zero.")
+	if int(r["teeth"]) < 1:
+		return _bad("A rack needs at least one tooth.")
+	if float(r["face"]) <= 0.0:
+		return _bad("The face width has to be bigger than zero.")
+	var body := {
+		"rack_type": "boss",
+		"module": float(r["module"]),
+		"tooth_count": int(r["teeth"]),
+		"face_width": float(r["face"]),
+		"pressure_angle_degrees": float(r["pressure_angle"]),
+		"backlash": float(r["backlash"]),
+		"target_body_ids": []}
+	if float(r["backing"]) > 0.0:
+		body["backing_height"] = float(r["backing"])
+	if not plane_ref.is_empty():
+		body["plane_ref"] = plane_ref
+	return _good("rack-features", body)
+
+
+static func bevel_gear_request(b: Dictionary, plane_ref: Dictionary) -> Dictionary:
+	## One straight (or spiral) bevel gear (a Boss: a new body) with an optional through bore. `b`: {module, teeth, face, cone, pressure_angle, spiral, hand, bore}.
+	if float(b["module"]) <= 0.0:
+		return _bad("The module has to be bigger than zero.")
+	if int(b["teeth"]) < 3:
+		return _bad("A gear needs at least 3 teeth.")
+	if float(b["face"]) <= 0.0:
+		return _bad("The face width has to be bigger than zero.")
+	if float(b["cone"]) <= 0.0 or float(b["cone"]) > 90.0:
+		return _bad("The pitch cone angle has to be more than 0 and at most 90 degrees.")
+	if float(b["spiral"]) < 0.0 or float(b["spiral"]) >= 90.0:
+		return _bad("The spiral angle has to be at least 0 and under 90 degrees.")
+	var body := {
+		"bevel_type": "boss",
+		"module": float(b["module"]),
+		"tooth_count": int(b["teeth"]),
+		"face_width": float(b["face"]),
+		"pitch_cone_angle_degrees": float(b["cone"]),
+		"pressure_angle_degrees": float(b["pressure_angle"]),
+		"spiral_angle_degrees": float(b["spiral"]),
+		"spiral_hand": str(b["hand"]),
+		"bore_diameter": float(b["bore"]),
+		"target_body_ids": []}
+	if not plane_ref.is_empty():
+		body["plane_ref"] = plane_ref
+	return _good("bevel-gear-features", body)
+
+
 static func fillet_request(edges: Array, radius: float) -> Dictionary:
 	if edges.is_empty():
 		return _bad("Pick the edges to round first.")
@@ -340,6 +429,9 @@ static func _plain(error: String) -> String:
 	var known := {
 		"non_planar_reference": "That face isn't flat.",
 		"missing_reference": "An edge or face it needs isn't there any more.",
+		"bore_too_large": "The bore is too big for the gear: it has to stay under 90% of the root diameter.",
+		"bore_on_internal_gear": "An internal gear is a ring already and takes no bore.",
+		"invalid_bore": "The bore can't be negative.",
 		"delete_face_failed": "That face can't be deleted: there is nothing to heal the gap into. Delete Face removes fillets, chamfers, holes and bosses, not a plain wall.",
 	}
 	for key in known:

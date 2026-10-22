@@ -543,6 +543,18 @@ Single-part and whole-assembly export in classic CAD formats. No current
 use case in the VR client, but useful if a future tool needs to hand
 geometry back out.
 
+## Gear features (the design table's Gear, Rack and Bevel tools)
+
+```
+POST  /document/parts/{part_id}/gear-features              GearFeatureCreate  -> {id, ...}
+PATCH /document/parts/{part_id}/gear-features/{feature_id}  (every field optional)
+POST  /document/parts/{part_id}/gear-features/coarse-preview?quality=  -> [{body_id, source, mesh}]  (nothing stored)
+POST  /document/parts/{part_id}/rack-features              (no coarse preview)
+POST  /document/parts/{part_id}/bevel-gear-features        (+ /coarse-preview)
+POST  /document/gear/preview                               gear_kind external | internal | ... -> pitch_radius, addendum_radius, dedendum_radius, ...
+```
+No sketch: the numbers are the feature (`module`, `tooth_count`, `face_width`, `pressure_angle_degrees`, `helix_angle_degrees`, `herringbone`, ...), `gear_type` / `rack_type` / `bevel_type` `"boss"` with `target_body_ids: []` makes a new body, `plane_ref` (omitted = the XY plane) says where it stands. Millimetres and degrees. **`bore_diameter`** (gear and bevel gear, mm, default 0 = none, written to a `.didsa` file only when above 0) cuts a through bore on the gear's axis: negative -> 422 `invalid_bore`, on an internal gear -> `bore_on_internal_gear`, 0.9 x the root diameter or more -> `bore_too_large`. Those 422 bodies are `{"type": ..., "detail": ...}`. A PATCH cannot turn an explicit `profile_shift` back into auto. The route of an update is `<type with - for _>-features`, which is how `PartFeatures.update_feature` builds it.
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.
