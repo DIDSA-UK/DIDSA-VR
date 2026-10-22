@@ -1896,6 +1896,12 @@ func end_drag(part: Node3D) -> bool:
 	return true
 
 
+func drag_member_nodes(part: Node3D) -> Dictionary:
+	## The nodes of the members the drag in progress on `part` moves (occurrence id -> Node3D; the grabbed part's followers once an anchor has named them): the Drive tool reads their turning.
+	var state: Dictionary = _drag.get(part, {})
+	return {} if state.is_empty() else (state["nodes"] as Dictionary).duplicate()
+
+
 func drag_model_ready(part: Node3D) -> bool:
 	## True once an anchor has been accepted for this part's drag (tests wait on it).
 	var state: Dictionary = _drag.get(part, {})

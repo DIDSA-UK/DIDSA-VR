@@ -77,6 +77,8 @@ var mates_tool_active := false ## wrist tablet's Mates tab: trigger picks a mate
 var mates_tool = null ## set by main.gd; a shared mates_tool.gd instance
 var measure_tool_active := false ## wrist tablet's Measure tab: trigger picks a measure entity instead of selecting/hiding
 var measure_tool = null ## set by main.gd; a shared measure_tool.gd instance
+var drive_tool_active := false ## the Drive tool (tablet / wheel): trigger picks the axis to turn a part about; on the tool hand (wheel_enabled) the stick is the throttle, A keeps it going, B stops
+var drive_tool = null ## set by main.gd; the shared drive_tool.gd instance
 var paint_active := false ## the Appearance tool (tool wheel / tablet): a trigger click paints the body under the laser, a hold opens the paint breadcrumb
 var appearance_tool = null ## set by main.gd; the shared appearance_tool.gd instance (what to paint with, where it goes)
 var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
@@ -212,6 +214,8 @@ func _physics_process(delta: float) -> void:
 		_sel_group.follow() # last frame's thumbstick / nudge moved the anchor: the rest of the group goes with it
 	if held_node != null:
 		_update_held_part(delta)
+	if drive_tool_active and drive_tool != null and wheel_enabled and held_node == null and not bool(get_meta("ui_hover", false)) and not wheel_is_open():
+		drive_tool.feed(get_vector2("primary"), is_button_pressed("ax_button"), is_button_pressed("by_button"))
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
 	if selected_node == null or _table_owns_input() or wheel_is_open():
@@ -308,7 +312,7 @@ func is_manipulating() -> bool:
 	## Lets locomotion.gd know this hand's thumbstick is busy rotating a
 	## selected part (or the part on the design table) right now, so it doesn't
 	## also drive movement/turning.
-	return selected_node != null or _table_owns_input() or wheel_is_open()
+	return selected_node != null or _table_owns_input() or wheel_is_open() or (drive_tool_active and drive_tool != null and wheel_enabled and drive_tool.owns_stick())
 
 
 func set_parts_enabled(on: bool) -> void:
@@ -382,6 +386,8 @@ func _on_button_pressed(action_name: String) -> void:
 			_try_pick_mate_entity()
 		elif measure_tool_active:
 			_try_pick_measure_entity()
+		elif drive_tool_active:
+			_try_pick_drive_axis()
 		elif hide_tool_active:
 			# Its own tool, independent of "Individual part manipulation" mode.
 			_try_shoot_hide()
@@ -1138,6 +1144,15 @@ func _try_pick_measure_entity() -> void:
 	measure_tool.try_pick(part, hit.get("face_index", -1), _measure_entity(hit), hit.get("point", Vector3.INF))
 
 
+func _try_pick_drive_axis() -> void:
+	## Drive tool on: the same ray test; the pick (a round face, circular edge or straight edge) is the axis the stick turns / slides the part along.
+	var hit := _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
+	var part: Node3D = hit.get("part")
+	if part == null or drive_tool == null:
+		return
+	drive_tool.try_pick(part, hit.get("face_index", -1), _mate_entity(hit), hit.get("point", Vector3.INF))
+
+
 func _mate_entity(hit: Dictionary) -> Dictionary:
 	## What a Mates pick on this ray hit would take: a corner, a straight / circular edge, or the face.
 	return LaserPick.entity_for(hit.get("part"), hit, global_position, true)
@@ -1205,14 +1220,14 @@ func _update_aim_hover() -> void:
 	## select right now, so you know what a trigger pull will pick before
 	## you commit to it.
 	var hit := {}
-	if ((parts_enabled and laser_select_enabled) or hide_tool_active or paint_active or mates_tool_active or measure_tool_active) and held_node == null:
+	if ((parts_enabled and laser_select_enabled) or hide_tool_active or paint_active or mates_tool_active or measure_tool_active or drive_tool_active) and held_node == null:
 		hit = _raycast_part(global_transform.origin, -global_transform.basis.z.normalized(), select_max_distance)
-	if face_highlight != null and paint_active and not mates_tool_active and not measure_tool_active:
+	if face_highlight != null and paint_active and not mates_tool_active and not measure_tool_active and not drive_tool_active:
 		# The Appearance tool: outline the body a click would paint (the outline only, no colour, so sweeping across a model doesn't flicker).
 		_set_aim_hover(null, Vector3.ZERO)
 		var paint_part: Node3D = hit.get("part")
 		face_highlight.set_hover_entity(self, paint_part, TopologyPick.body_entity(paint_part, int(hit.get("face_index", -1))) if paint_part != null else {})
-	elif face_highlight != null and (mates_tool_active or measure_tool_active):
+	elif face_highlight != null and (mates_tool_active or measure_tool_active or drive_tool_active):
 		# A pick takes one CAD face (Mates) or face / edge / vertex (Measure), so light up just that, not the
 		# whole mesh (which says nothing about what the trigger is about to take).
 		_set_aim_hover(null, Vector3.ZERO)

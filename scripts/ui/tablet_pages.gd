@@ -137,6 +137,10 @@ func register(reg) -> void:
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
+	reg.add_tool("assemble", "drive", "Drive", "movement", _build_drive_page, {
+		"kind": "mode", "on_activate": _set_drive.bind(true), "on_deactivate": _set_drive.bind(false), "status": _drive_status,
+		"caption": "turn a part, run the mechanism", "hint": "Point at a round face (or a straight edge) of a mated part and pull the trigger.",
+		"help": "Switch the tool on, then pull the right trigger on a round face or circular edge of a part held by mates (a gear, say) to turn it about that axis, or on a straight edge to slide it along it. Push the right stick sideways to run: full deflection is 30 rpm (50 mm/s when sliding), either way. A keeps it running at that speed with the stick at rest, B (or Stop) stops it. Everything the mates couple to it moves too; the readout shows each turning part's rpm. Stopping stores the pose as one undo step."})
 	reg.add_tool("assemble", "scenes", "Scenes", "scenes", _build_scenes_page, {
 		"caption": "show · save · back to default",
 		"help": "A scene is a named arrangement of the assembly (parts moved, hidden or painted, and where you look from) that changes nothing in the model. Show relaxes the mates and arranges the parts as the scene says; anything you move or paint then is temporary. Update scene keeps what is on screen in the shown scene; Save as new names a new one (from the default too: relax, move, paint, save). Back to default puts every part back, and asks first if the scene has unsaved changes. View on Show turns and places the model to the scene's viewpoint at the scale you have."})
@@ -309,6 +313,14 @@ func _set_mates(on: bool) -> void:
 	_right.mates_tool_active = on
 	if _mates_tool:
 		_mates_tool.set_active(on)
+
+
+func _set_drive(on: bool) -> void:
+	var drive = _main.get("drive_tool") if _main != null else null
+	_left.drive_tool_active = on
+	_right.drive_tool_active = on
+	if drive != null:
+		drive.set_active(on)
 
 
 func _set_sections(on: bool) -> void:
@@ -963,6 +975,26 @@ func _sections_status() -> String:
 	if not _section_tool or not _section_tool.active:
 		return "Off — switch the tool on to place the plane"
 	return "Sectioning%s — grip the plane to move it" % (" (flipped)" if _section_tool.flipped else "")
+
+
+# --- Assembly: Drive ---------------------------------------------------------------------
+
+func _build_drive_page() -> Control:
+	var page := _page()
+	page.add_child(_hint("Right stick sideways: speed. A: keep running. B: stop.", true))
+	page.add_child(_button("Stop", func() -> void:
+		var drive = _main.get("drive_tool") if _main != null else null
+		if drive != null:
+			drive.stop()
+	))
+	return page
+
+
+func _drive_status() -> String:
+	var drive = _main.get("drive_tool") if _main != null else null
+	if drive == null or not drive.active:
+		return "Off: switch the tool on, then pick the round face to turn."
+	return drive.status_text()
 
 
 # --- Assembly: Measure -----------------------------------------------------------------

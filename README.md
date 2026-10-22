@@ -56,7 +56,7 @@ Right hand is the laser and the selector; left hand walks.
 | **Left thumbstick** | Walk (speed slider on the tablet: 1.5 to 30 m/s). |
 | **Right thumbstick** X / Y | Snap-turn / aim and blink a teleport (push forward, point at the floor, release). Scrolls a panel when the laser is on one. |
 | **Right thumbstick click** | Numeric keypad pre-filled with the scale; type an exact scale and press OK (undoable). |
-| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
+| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, **Drive**, Visibility, Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
 | **Laser at the wrist icon + trigger** | Open the **wrist tablet** (never opens by itself). |
 | **Grip a handle** (centre of a window's or the keyboard's lower edge, a room's move bar, a table's front edge) | Carry it somewhere else. |
 
@@ -71,7 +71,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** c
 |---|---|
 | **Design** | Summons the design table, or brings it to you. |
 | **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
-| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
+| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Gear / Rack and pinion / Screw (turning one part turns the other), Drive (turn a mated part with the stick so its mechanism runs), Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
@@ -152,7 +152,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 - **Multi-file assemblies** resolve on Open and Add the way the flat app does (`scripts/native_compose.gd`): each `external_ref` is looked for beside the opened file, then in the project folder and the models folders, under any native extension (`.didsa`, `.DIDSAprt`, `.didsacad`). A file whose Part id clashes with another file's is left out (the flat app re-mints it; not ported) and the status line names it.
 - **Rooms**: 0.5 to 40 m on a side, no overlapping rooms, no rooms inside rooms; the default room limit is 4 (Settings, Display).
 - **Sections** are one client-side plane; the backend's section endpoint is too slow for real-time dragging.
-- **Design table, not built**: surfacing, curves, gears, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Current list: [`docs/design-table.md`](docs/design-table.md), [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
+- **Design table, not built**: surfacing, curves, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Current list: [`docs/design-table.md`](docs/design-table.md), [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 - **"DIDSA-CAD as a flat window"** is not attempted; it needs a web build of the Flutter client.
 
 Roadmap and cross-repo order: DIDSA-CAD `docs/roadmap.md`; product vision: [`docs/vision-brief.md`](docs/vision-brief.md); what changed when: [`CHANGELOG.md`](CHANGELOG.md).

@@ -66,6 +66,9 @@ func setup(ctx: Dictionary, p_tokens: Resource) -> void:
 	if _mates.has_signal("sandbox_changed"):
 		_mates.sandbox_changed.connect(func(_on: bool) -> void: refresh_prompt())
 	_measure.picks_changed.connect(refresh_prompt)
+	var drive = _main.get("drive_tool")
+	if drive != null:
+		drive.status_changed.connect(refresh_prompt)
 	_measure.result_changed.connect(refresh_prompt)
 
 
@@ -104,6 +107,9 @@ func prompt_text() -> String:
 			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
 			return "Section\nGrip the plane to move it. Wheel: Flip."
+		"drive":
+			var drive = _main.get("drive_tool")
+			return "Drive\n%s" % (drive.status_text() if drive != null else "")
 	if _mates != null and _mates.relaxed:
 		return "Mates relaxed\nMoves are temporary. Wheel: Return parts (under the ring) puts everything back."
 	return ""
@@ -157,6 +163,8 @@ func entries() -> Array:
 			return _mates_entries()
 		"measure":
 			return _measure_entries()
+		"drive":
+			return _drive_entries()
 		"paint":
 			return _colour_entries()
 	return root_entries()
@@ -212,6 +220,8 @@ func ring_title() -> String:
 			return "Mates"
 		"measure":
 			return "Measure"
+		"drive":
+			return "Drive"
 		"paint":
 			return "Appearance"
 	return "Tools"
@@ -226,6 +236,7 @@ func root_entries() -> Array:
 		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Paint colour, see-through, shine, glow"),
 		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
+		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
 		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
@@ -422,6 +433,22 @@ func _measure_entries() -> Array:
 		_action("measure_clear", "Clear", "clear_picks", Color(0.96, 0.69, 0.25), "Start a new measurement", _measure.clear_picks),
 		_action("measure_tablet", "Tablet", "tablet", Color(0.77, 0.55, 1.00), "Volume, area, mass", open_measure_tablet),
 	]
+
+
+func _drive_entries() -> Array:
+	var drive = _main.get("drive_tool")
+	var running: bool = drive != null and drive.running
+	return [
+		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
+		_action("drive_stop", "Stop", "close", Color(0.96, 0.69, 0.25), "Stop the drive (B does the same)", drive.stop if drive != null else Callable(), running, false, "Nothing is running"),
+		_action("drive_tablet", "Tablet", "tablet", Color(0.37, 0.76, 1.00), "The Drive page", open_drive_tablet),
+	]
+
+
+func open_drive_tablet() -> void:
+	if not _tablet.is_open():
+		_tablet.open_tablet()
+	_tablet.ui.select_tool("drive")
 
 
 func _colour_entries() -> Array:

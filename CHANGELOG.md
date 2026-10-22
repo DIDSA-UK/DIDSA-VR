@@ -3,6 +3,14 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## Branch `claude/gears-and-motion` (22 Oct, not merged; plan: `docs/gears-and-motion-plan.md`)
+
+- **Gears that move together** (M1-M7; needs the DIDSA-CAD backend on the same branch). Headless- and live-backend-tested; not checked on the headset.
+  - **Gear bore** (M1/M2): an optional centre bore on spur, helical and bevel gears, not internal ones (backend `bore_diameter`, the flat app's field, the design table's gear tools).
+  - **Gear, Rack and pinion and Screw mates** (M3-M5): the mates tool, the tablet and the wheel make them from two axis picks (empty value = Auto from the teeth); turning one part turns the other. Reverse / Left-hand, list rows such as "1 : 2".
+  - **Constraint model version 5** (M6): the motion model carries the coupler rows (analytic, relative to the pose a solve started from); Dart and GDScript read it and match the shared golden vectors.
+  - **Drive tool** (M7): `scripts/drive_tool.gd`. Pick a round face (turn) or a straight edge (slide) of a mated part on the tablet's Assemble page or the wheel's new **Drive** wedge; the right stick sets the speed (30 rpm at full, 60 rpm cap), A keeps it running, B stops; the whole run is one undo step, and a readout lists every turning part's rpm. The wheel's root ring has eleven wedges now. Tests: `drive_tool`, `e2e_drive`. Not tried on a headset: speed feel, frame rate, smoothness over Wi-Fi.
+
 ## Branch `claude/vr-landing-build` (20-21 Oct, not merged)
 
 - **Landing restyle** (21 Oct; reviewed as desktop renders only, not on a headset; see `docs/landing-scope.md#the-look-night-pad-and-monolith`).
