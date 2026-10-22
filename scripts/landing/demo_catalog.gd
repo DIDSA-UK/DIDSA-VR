@@ -7,6 +7,7 @@ const MODEL_DIRS := {"rocket": "res://demo/rockets", "spacecraft": "res://demo/s
 const ASSEMBLY_FILES: Array[Dictionary] = [
 	{"name": "Table top and frame", "path": "res://demo/assemblies/table/Top_and_frame.didsa"},
 	{"name": "Plate and peg", "path": "res://demo/assemblies/plate_and_peg/Plate_and_peg.didsa"},
+	{"name": "Gear train", "path": "res://demo/assemblies/gear_train/Gear_train.didsa"},
 ]
 const CREDITS_PATH := "res://demo/CREDITS.md"
 const DESK_RATIO := 50.0 ## "On the desk" is 1:50 ...

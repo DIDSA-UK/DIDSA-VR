@@ -51,7 +51,7 @@ and locomotion all keep working. It shows on every launch (Settings: "Show the l
 | **Open...** | The tablet's Files page, at the landing | Depends on file | existing Files page |
 | **New assembly** | Empty assembly, then the usual workspace | Yes | existing `new_document` |
 | **Demo models** | Grid of rockets and spacecraft with thumbnails. Pick one: **Full size** (stands it in front of you) or **On the desk** (1:50 on a plinth at waist height, so it can be grabbed and turned). | No | `load_glb_file()`; `demo/` |
-| **Demo assemblies** | The table, plate and peg. Greyed with "Needs a server" when offline. | Yes | `open_native_file()`; `demo/assemblies/` |
+| **Demo assemblies** | The table, plate and peg, the gear train. Greyed with "Needs a server" when offline. | Yes | `open_native_file()`; `demo/assemblies/` |
 | **Servers** | Add (scan a QR code), list, test, pick, forget. See [Adding a server](#adding-a-server). | n/a | new |
 | **Tour** (suggested) | Two minutes, offline, on a demo rocket: grab it, two-hand scale it, open the wheel, teleport. Each step waits for the action. | No | `wrist_hint.gd` |
 | **Mixed reality** (suggested) | Passthrough on or off. On a standalone Quest this also needs the OpenXR Vendors plugin, which is not in the project yet. | No | `environment_manager.gd` |
@@ -215,7 +215,7 @@ measured; the garden may need shadows off or lower detail at distance.
 
 ### Demo assemblies
 
-`demo/assemblies/table/` (your table: open `Top_and_frame.didsa`) and `demo/assemblies/plate_and_peg/`. Native files are meshed by the
+`demo/assemblies/table/` (your table: open `Top_and_frame.didsa`) `demo/assemblies/plate_and_peg/` and `demo/assemblies/gear_train/` (a single file: a pinion, a gear, a rack and a crank, all mated; made by `tests/data/make_gear_train_demo.py`). Native files are meshed by the
 backend, so offline they cannot be shown. Option: also ship a glb of each, made once from the backend's `assembly-mesh.glb`, so that
 offline the table opens **view only** and with a server it opens as the real assembly. The Files tab today scans only the top of
 `res://models`, `user://models` and the project folder, so the demo folders are listed by the landing's own pages, not the Files tab.

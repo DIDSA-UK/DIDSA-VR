@@ -25,7 +25,7 @@ Every feature is covered by headless tests, software renders and (where noted) a
 | Wrist tablet, tool wheel, themes | Built |
 | Multiplayer / observer client | Not built (idea in the vision brief) |
 
-Tests at the last recorded run (20 Oct 2026): 3312 headless SMOKE lines, 77 render lines, 452 live-backend lines over 35 tests, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
+Tests at the last recorded run (22 Oct 2026): 3519 headless SMOKE lines, 80 render lines, 508 live-backend lines, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
 
 ## Quick start (desktop, no headset)
 

@@ -202,8 +202,8 @@ func _initialize() -> void:
 				if c is Button:
 					open_buttons += 1
 					all_greyed = all_greyed and c.disabled and c.text == "Needs a server"
-	check("Demo assemblies: both greyed with Needs a server offline", open_buttons == 2 and all_greyed)
-	check("the two demo native files ship", DemoCatalog.assemblies().all(func(a: Dictionary) -> bool: return a["exists"]))
+	check("Demo assemblies: all greyed with Needs a server offline", open_buttons == 3 and all_greyed)
+	check("the demo native files ship", DemoCatalog.assemblies().all(func(a: Dictionary) -> bool: return a["exists"]))
 
 	# --- the garden ---------------------------------------------------------------------------------------------------------
 	var garden = landing.garden

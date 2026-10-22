@@ -9,6 +9,7 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
   - **Gear bore** (M1/M2): an optional centre bore on spur, helical and bevel gears, not internal ones (backend `bore_diameter`, the flat app's field, the design table's gear tools).
   - **Gear, Rack and pinion and Screw mates** (M3-M5): the mates tool, the tablet and the wheel make them from two axis picks (empty value = Auto from the teeth); turning one part turns the other. Reverse / Left-hand, list rows such as "1 : 2".
   - **Constraint model version 5** (M6): the motion model carries the coupler rows (analytic, relative to the pose a solve started from); Dart and GDScript read it and match the shared golden vectors.
+  - **Gear train demo** (M8): `demo/assemblies/gear_train/Gear_train.didsa` (pinion, gear, rack, crank; listed under Demo assemblies; made by `tests/data/make_gear_train_demo.py`). Milestones M1-M8 were all done on 22 Oct.
   - **Drive tool** (M7): `scripts/drive_tool.gd`. Pick a round face (turn) or a straight edge (slide) of a mated part on the tablet's Assemble page or the wheel's new **Drive** wedge; the right stick sets the speed (30 rpm at full, 60 rpm cap), A keeps it running, B stops; the whole run is one undo step, and a readout lists every turning part's rpm. The wheel's root ring has eleven wedges now. Tests: `drive_tool`, `e2e_drive`. Not tried on a headset: speed feel, frame rate, smoothness over Wi-Fi.
 
 ## Branch `claude/vr-landing-build` (20-21 Oct, not merged)
