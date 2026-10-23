@@ -1,11 +1,11 @@
 {
  "schema_version": 1,
  "document": {
-  "id": "1257e1a4-481b-445a-8636-465a09fee9fb",
-  "root_part_id": "e92a75c1-4af4-4948-9e6d-e7cfdf3e62e6",
+  "id": "d99d9899-6f26-4bf3-ba3a-f009ea3cb0fa",
+  "root_part_id": "23fe6059-ac1e-42ba-b0f5-2d0c53af88c8",
   "parts": [
    {
-    "id": "e92a75c1-4af4-4948-9e6d-e7cfdf3e62e6",
+    "id": "23fe6059-ac1e-42ba-b0f5-2d0c53af88c8",
     "name": "Gear train",
     "features": [],
     "part_number": null,
@@ -19,8 +19,8 @@
     "occurrences": [
      {
       "id": "plate",
-      "external_ref": "parts/6fccd0e3-b5b5-4931-9185-88220a4b234a.didsa",
-      "resolved_part_id": "6fccd0e3-b5b5-4931-9185-88220a4b234a",
+      "external_ref": "parts/14f095e0-9542-42a6-9c7d-95db929a2d40.didsa",
+      "resolved_part_id": "14f095e0-9542-42a6-9c7d-95db929a2d40",
       "name_override": "Plate",
       "transform": {
        "translation": [
@@ -39,12 +39,12 @@
       "hidden": false,
       "fixed": true,
       "color": null,
-      "ref_part_id": "6fccd0e3-b5b5-4931-9185-88220a4b234a"
+      "ref_part_id": "14f095e0-9542-42a6-9c7d-95db929a2d40"
      },
      {
       "id": "pinion",
-      "external_ref": "parts/1d261f90-e111-4d1f-a9c6-c9887ce260e6.didsa",
-      "resolved_part_id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6",
+      "external_ref": "parts/187359fc-e878-400f-8a8c-a77f963f9ec4.didsa",
+      "resolved_part_id": "187359fc-e878-400f-8a8c-a77f963f9ec4",
       "name_override": "Pinion (20 teeth)",
       "transform": {
        "translation": [
@@ -63,12 +63,12 @@
       "hidden": false,
       "fixed": false,
       "color": null,
-      "ref_part_id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6"
+      "ref_part_id": "187359fc-e878-400f-8a8c-a77f963f9ec4"
      },
      {
       "id": "gear",
-      "external_ref": "parts/eb719b77-9e28-4bdf-b7a4-300bea5329a7.didsa",
-      "resolved_part_id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7",
+      "external_ref": "parts/4debd054-c6bf-4bdc-8386-dc0c3a519760.didsa",
+      "resolved_part_id": "4debd054-c6bf-4bdc-8386-dc0c3a519760",
       "name_override": "Gear (40 teeth)",
       "transform": {
        "translation": [
@@ -87,12 +87,12 @@
       "hidden": false,
       "fixed": false,
       "color": null,
-      "ref_part_id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7"
+      "ref_part_id": "4debd054-c6bf-4bdc-8386-dc0c3a519760"
      },
      {
       "id": "guide",
-      "external_ref": "parts/fe8722e0-5826-4433-bb23-0935fe40494c.didsa",
-      "resolved_part_id": "fe8722e0-5826-4433-bb23-0935fe40494c",
+      "external_ref": "parts/1bb1b3b1-4dbe-4394-98cc-850543f40c64.didsa",
+      "resolved_part_id": "1bb1b3b1-4dbe-4394-98cc-850543f40c64",
       "name_override": "Rack guide",
       "transform": {
        "translation": [
@@ -111,12 +111,12 @@
       "hidden": false,
       "fixed": true,
       "color": null,
-      "ref_part_id": "fe8722e0-5826-4433-bb23-0935fe40494c"
+      "ref_part_id": "1bb1b3b1-4dbe-4394-98cc-850543f40c64"
      },
      {
       "id": "rack",
-      "external_ref": "parts/70bcee71-07c2-4c26-bb92-76638d4abd51.didsa",
-      "resolved_part_id": "70bcee71-07c2-4c26-bb92-76638d4abd51",
+      "external_ref": "parts/1e16f0ed-3628-4162-9b19-fc40554bc168.didsa",
+      "resolved_part_id": "1e16f0ed-3628-4162-9b19-fc40554bc168",
       "name_override": "Rack",
       "transform": {
        "translation": [
@@ -135,12 +135,12 @@
       "hidden": false,
       "fixed": false,
       "color": null,
-      "ref_part_id": "70bcee71-07c2-4c26-bb92-76638d4abd51"
+      "ref_part_id": "1e16f0ed-3628-4162-9b19-fc40554bc168"
      },
      {
       "id": "crank",
-      "external_ref": "parts/bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e.didsa",
-      "resolved_part_id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e",
+      "external_ref": "parts/cba1a624-d8bf-4dc6-b1a4-51b37fc2470c.didsa",
+      "resolved_part_id": "cba1a624-d8bf-4dc6-b1a4-51b37fc2470c",
       "name_override": "Crank handle",
       "transform": {
        "translation": [
@@ -159,18 +159,18 @@
       "hidden": false,
       "fixed": false,
       "color": null,
-      "ref_part_id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e"
+      "ref_part_id": "cba1a624-d8bf-4dc6-b1a4-51b37fc2470c"
      }
     ],
     "mates": [
      {
-      "id": "d69600cf-5d2c-4ddf-8533-014439980aca",
+      "id": "a5b73edc-6eb5-43af-871d-ac6b5537d2d6",
       "type": "concentric",
       "references": [
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 82
         },
@@ -180,7 +180,7 @@
        {
         "occurrence_id": "plate",
         "subshape_ref": {
-         "body_id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
          "shape_type": "face",
          "index": 6
         },
@@ -197,13 +197,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "3b2e6e50-305d-47fe-ad26-0f75f09f251c",
+      "id": "75f76d59-69a8-4c6a-a0be-87d0fc13f702",
       "type": "coincident",
       "references": [
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 3
         },
@@ -213,7 +213,7 @@
        {
         "occurrence_id": "plate",
         "subshape_ref": {
-         "body_id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
          "shape_type": "face",
          "index": 4
         },
@@ -230,13 +230,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "11557b83-676f-439a-b110-e96ee6b66d1c",
+      "id": "1210e760-1deb-4990-a456-3befe0311b9d",
       "type": "concentric",
       "references": [
        {
         "occurrence_id": "gear",
         "subshape_ref": {
-         "body_id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
+         "body_id": "2748f490-9556-431b-ab11-ef66c3d33330",
          "shape_type": "face",
          "index": 162
         },
@@ -246,7 +246,7 @@
        {
         "occurrence_id": "plate",
         "subshape_ref": {
-         "body_id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
          "shape_type": "face",
          "index": 7
         },
@@ -263,13 +263,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "23ffa741-88db-45c9-9e97-ac8d7926d02d",
+      "id": "08523b53-bb18-4fd2-91f3-c2a95b64135d",
       "type": "coincident",
       "references": [
        {
         "occurrence_id": "gear",
         "subshape_ref": {
-         "body_id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
+         "body_id": "2748f490-9556-431b-ab11-ef66c3d33330",
          "shape_type": "face",
          "index": 3
         },
@@ -279,7 +279,7 @@
        {
         "occurrence_id": "plate",
         "subshape_ref": {
-         "body_id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
          "shape_type": "face",
          "index": 4
         },
@@ -296,13 +296,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "152f7bcc-8b85-44b0-9add-e6b227c394af",
+      "id": "271104e8-c93c-4784-8d88-49d034356592",
       "type": "coincident",
       "references": [
        {
         "occurrence_id": "rack",
         "subshape_ref": {
-         "body_id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
+         "body_id": "3c3caafd-8fd8-400e-87fa-10570a1aba43",
          "shape_type": "face",
          "index": 42
         },
@@ -312,7 +312,7 @@
        {
         "occurrence_id": "plate",
         "subshape_ref": {
-         "body_id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
          "shape_type": "face",
          "index": 4
         },
@@ -329,13 +329,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "cccfd9c4-dc73-4b4f-bd57-c74c15219e57",
+      "id": "72eec68e-07a2-46e9-8686-1151d29080f6",
       "type": "coincident",
       "references": [
        {
         "occurrence_id": "rack",
         "subshape_ref": {
-         "body_id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
+         "body_id": "3c3caafd-8fd8-400e-87fa-10570a1aba43",
          "shape_type": "face",
          "index": 40
         },
@@ -345,7 +345,7 @@
        {
         "occurrence_id": "guide",
         "subshape_ref": {
-         "body_id": "a08e3205-5057-4f83-99fe-f6d6f26dfd23",
+         "body_id": "fcb75485-6e47-425f-9d2d-7c1101f9cb45",
          "shape_type": "face",
          "index": 2
         },
@@ -362,13 +362,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "864d3d15-ebf6-4c67-858b-677036754bdd",
+      "id": "e5e07613-6266-404c-898d-71183d86258a",
       "type": "concentric",
       "references": [
        {
         "occurrence_id": "crank",
         "subshape_ref": {
-         "body_id": "0772de0d-9aef-4613-b546-0fe46373ba46#0",
+         "body_id": "0f07a98d-563f-4601-999d-493a9d60484c#0",
          "shape_type": "face",
          "index": 2
         },
@@ -378,7 +378,7 @@
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 82
         },
@@ -395,13 +395,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "4dbe9022-f133-4fe6-98fd-110e86c88f60",
+      "id": "c821e11b-19ca-47a6-b383-d2b125258769",
       "type": "coincident",
       "references": [
        {
         "occurrence_id": "crank",
         "subshape_ref": {
-         "body_id": "0772de0d-9aef-4613-b546-0fe46373ba46#0",
+         "body_id": "0f07a98d-563f-4601-999d-493a9d60484c#0",
          "shape_type": "face",
          "index": 1
         },
@@ -411,7 +411,7 @@
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 4
         },
@@ -428,13 +428,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "79f8daf4-7ba9-4251-9936-647b3651b0cf",
+      "id": "c6694629-e626-487d-8925-f6d96044d624",
       "type": "gear",
       "references": [
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 82
         },
@@ -444,7 +444,7 @@
        {
         "occurrence_id": "gear",
         "subshape_ref": {
-         "body_id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
+         "body_id": "2748f490-9556-431b-ab11-ef66c3d33330",
          "shape_type": "face",
          "index": 162
         },
@@ -461,13 +461,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "a47db5d7-8a1b-4938-87f4-0ebee61e67d9",
+      "id": "4b2ae6df-46f9-43fd-9037-1dc094676fce",
       "type": "rack_pinion",
       "references": [
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 82
         },
@@ -477,7 +477,7 @@
        {
         "occurrence_id": "rack",
         "subshape_ref": {
-         "body_id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
+         "body_id": "3c3caafd-8fd8-400e-87fa-10570a1aba43",
          "shape_type": "edge",
          "index": 122
         },
@@ -494,13 +494,13 @@
       "branch_source": "auto"
      },
      {
-      "id": "6f9d789c-fcfe-452e-b8e0-1181ffae239d",
+      "id": "c6f88dbd-a1c6-47e9-bc55-ca9576b2464d",
       "type": "gear",
       "references": [
        {
         "occurrence_id": "crank",
         "subshape_ref": {
-         "body_id": "0772de0d-9aef-4613-b546-0fe46373ba46#0",
+         "body_id": "0f07a98d-563f-4601-999d-493a9d60484c#0",
          "shape_type": "face",
          "index": 2
         },
@@ -510,7 +510,7 @@
        {
         "occurrence_id": "pinion",
         "subshape_ref": {
-         "body_id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+         "body_id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
          "shape_type": "face",
          "index": 82
         },
@@ -525,24 +525,59 @@
       "alignment": null,
       "secondary_flip": false,
       "branch_source": "user"
+     },
+     {
+      "id": "9f2ad250-aa66-4df7-9d4f-cc69ae0a4dc0",
+      "type": "limit_distance",
+      "references": [
+       {
+        "occurrence_id": "rack",
+        "subshape_ref": {
+         "body_id": "3c3caafd-8fd8-400e-87fa-10570a1aba43",
+         "shape_type": "face",
+         "index": 39
+        },
+        "plane_ref": null,
+        "point_ref": null
+       },
+       {
+        "occurrence_id": "plate",
+        "subshape_ref": {
+         "body_id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
+         "shape_type": "face",
+         "index": 2
+        },
+        "plane_ref": null,
+        "point_ref": null
+       }
+      ],
+      "value": null,
+      "flipped": false,
+      "suppressed": false,
+      "allow_rotation": true,
+      "alignment": null,
+      "secondary_flip": null,
+      "branch_source": "auto",
+      "limit_min": -137.245,
+      "limit_max": -91.245
      }
     ],
     "component_patterns": []
    },
    {
-    "id": "6fccd0e3-b5b5-4931-9185-88220a4b234a",
+    "id": "14f095e0-9542-42a6-9c7d-95db929a2d40",
     "name": "Plate",
     "features": [
      {
       "type": "sketch",
-      "id": "e22781e5-d91d-490f-bcab-576279591a0a",
-      "sketch_id": "154e6733-a4da-45dc-be53-04199d58d725",
+      "id": "ef2d51f2-b796-4cba-a8fc-13a2a1ca1bf2",
+      "sketch_id": "9e4b07c4-e616-4958-9240-f28deaae3208",
       "plane_feature_id": null
      },
      {
       "type": "extrude",
-      "id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
-      "sketch_feature_id": "e22781e5-d91d-490f-bcab-576279591a0a",
+      "id": "91b850ea-0bd8-4215-aae5-c68582c2917d",
+      "sketch_feature_id": "ef2d51f2-b796-4cba-a8fc-13a2a1ca1bf2",
       "extrude_type": "boss",
       "start_distance": 0.0,
       "end_distance": 10.0,
@@ -555,19 +590,19 @@
      },
      {
       "type": "sketch",
-      "id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
-      "sketch_id": "4cefe5ce-682e-4ca3-acb8-df8c768de875",
+      "id": "a3886422-ea68-47a8-b419-6cdb0197bf28",
+      "sketch_id": "acb7345f-eb39-47f2-8986-b8195ec31fe1",
       "plane_feature_id": null
      },
      {
       "type": "extrude",
-      "id": "e754cfa5-24ca-4561-81b2-a47132235727",
-      "sketch_feature_id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
+      "id": "10e2b5af-1d04-4e4c-a2fc-8c1a19308b4f",
+      "sketch_feature_id": "a3886422-ea68-47a8-b419-6cdb0197bf28",
       "extrude_type": "cut",
       "start_distance": 0.0,
       "end_distance": 10.0,
       "target_body_ids": [
-       "f9873ebb-688f-495c-be8c-552ebd3e0f9f"
+       "91b850ea-0bd8-4215-aae5-c68582c2917d"
       ],
       "profile_refs": [],
       "thickness": null,
@@ -589,12 +624,12 @@
     "component_patterns": []
    },
    {
-    "id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6",
+    "id": "187359fc-e878-400f-8a8c-a77f963f9ec4",
     "name": "Pinion (20 teeth)",
     "features": [
      {
       "type": "gear",
-      "id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+      "id": "e5be4ad1-6371-4837-b1cd-e6a9b3f8910c",
       "plane_ref": {
        "face_ref": null,
        "fixed_plane": "XY",
@@ -630,12 +665,12 @@
     "component_patterns": []
    },
    {
-    "id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7",
+    "id": "4debd054-c6bf-4bdc-8386-dc0c3a519760",
     "name": "Gear (40 teeth)",
     "features": [
      {
       "type": "gear",
-      "id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
+      "id": "2748f490-9556-431b-ab11-ef66c3d33330",
       "plane_ref": {
        "face_ref": null,
        "fixed_plane": "XY",
@@ -671,12 +706,12 @@
     "component_patterns": []
    },
    {
-    "id": "70bcee71-07c2-4c26-bb92-76638d4abd51",
+    "id": "1e16f0ed-3628-4162-9b19-fc40554bc168",
     "name": "Rack (10 teeth)",
     "features": [
      {
       "type": "rack",
-      "id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
+      "id": "3c3caafd-8fd8-400e-87fa-10570a1aba43",
       "plane_ref": {
        "face_ref": null,
        "fixed_plane": "XY",
@@ -705,19 +740,19 @@
     "component_patterns": []
    },
    {
-    "id": "fe8722e0-5826-4433-bb23-0935fe40494c",
+    "id": "1bb1b3b1-4dbe-4394-98cc-850543f40c64",
     "name": "Rack guide",
     "features": [
      {
       "type": "sketch",
-      "id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
-      "sketch_id": "7a1df4be-9d13-463a-b14d-0804ab889d2e",
+      "id": "66e8623b-83e1-4911-974f-2f0e01e20d0c",
+      "sketch_id": "5779a62e-7951-4bce-ac0f-4604dfb1bfc6",
       "plane_feature_id": null
      },
      {
       "type": "extrude",
-      "id": "a08e3205-5057-4f83-99fe-f6d6f26dfd23",
-      "sketch_feature_id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
+      "id": "fcb75485-6e47-425f-9d2d-7c1101f9cb45",
+      "sketch_feature_id": "66e8623b-83e1-4911-974f-2f0e01e20d0c",
       "extrude_type": "boss",
       "start_distance": 0.0,
       "end_distance": 10.0,
@@ -742,19 +777,19 @@
     "component_patterns": []
    },
    {
-    "id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e",
+    "id": "cba1a624-d8bf-4dc6-b1a4-51b37fc2470c",
     "name": "Crank handle",
     "features": [
      {
       "type": "sketch",
-      "id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
-      "sketch_id": "c2f39475-b962-45f9-a6e7-083e88ec752a",
+      "id": "f13b7cd8-f834-4381-b0d9-d313d1021b20",
+      "sketch_id": "6675a740-b51a-4c43-9560-54645a3afbf6",
       "plane_feature_id": null
      },
      {
       "type": "extrude",
-      "id": "0772de0d-9aef-4613-b546-0fe46373ba46",
-      "sketch_feature_id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
+      "id": "0f07a98d-563f-4601-999d-493a9d60484c",
+      "sketch_feature_id": "f13b7cd8-f834-4381-b0d9-d313d1021b20",
       "extrude_type": "boss",
       "start_distance": 0.0,
       "end_distance": 6.0,
@@ -767,19 +802,19 @@
      },
      {
       "type": "sketch",
-      "id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
-      "sketch_id": "da6e8fa5-abe7-4bf0-b5a3-a3a8b4629c20",
+      "id": "422e71ff-c7d5-4dc1-82ff-06e265b704be",
+      "sketch_id": "20f5253c-db67-42f3-a460-3d091b690d71",
       "plane_feature_id": null
      },
      {
       "type": "extrude",
-      "id": "487601ec-3714-4761-9f01-3c8708ab78b5",
-      "sketch_feature_id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
+      "id": "172b44d0-1345-4720-91d5-ca3df254398f",
+      "sketch_feature_id": "422e71ff-c7d5-4dc1-82ff-06e265b704be",
       "extrude_type": "cut",
       "start_distance": 0.0,
       "end_distance": 6.0,
       "target_body_ids": [
-       "0772de0d-9aef-4613-b546-0fe46373ba46"
+       "0f07a98d-563f-4601-999d-493a9d60484c"
       ],
       "profile_refs": [],
       "thickness": null,
@@ -804,506 +839,39 @@
  },
  "sketches": [
   {
-   "id": "154e6733-a4da-45dc-be53-04199d58d725",
+   "id": "20f5253c-db67-42f3-a460-3d091b690d71",
    "plane": "XY",
    "origin_point_id": null,
    "flip": false,
    "rotation_quarter_turns": 0,
    "points": [
     {
-     "id": "a6a64b3c-b742-4400-a6de-89b1df0c351b",
-     "x": 0.0,
-     "y": 0.0
-    },
-    {
-     "id": "e4fa772d-1fc6-464e-b2af-3d9061b8c305",
-     "x": 170.0,
-     "y": 0.0
-    },
-    {
-     "id": "0ab1b529-b022-4b2d-8591-96fcb08bc075",
-     "x": 170.0,
-     "y": 100.0
-    },
-    {
-     "id": "301886bb-0850-4e63-8aa9-2077b5c325c4",
-     "x": 0.0,
-     "y": 100.0
-    }
-   ],
-   "entities": [
-    {
-     "type": "line",
-     "id": "39ccab7d-5aed-4010-bf14-d4208bac060f",
-     "construction": false,
-     "start_point_id": "a6a64b3c-b742-4400-a6de-89b1df0c351b",
-     "end_point_id": "e4fa772d-1fc6-464e-b2af-3d9061b8c305"
-    },
-    {
-     "type": "line",
-     "id": "4634ca27-4216-4cef-aa30-a4d9be600bbc",
-     "construction": false,
-     "start_point_id": "e4fa772d-1fc6-464e-b2af-3d9061b8c305",
-     "end_point_id": "0ab1b529-b022-4b2d-8591-96fcb08bc075"
-    },
-    {
-     "type": "line",
-     "id": "0965f6c3-dee3-43b4-bef4-f387dc158d43",
-     "construction": false,
-     "start_point_id": "0ab1b529-b022-4b2d-8591-96fcb08bc075",
-     "end_point_id": "301886bb-0850-4e63-8aa9-2077b5c325c4"
-    },
-    {
-     "type": "line",
-     "id": "5e3824cf-6d6e-403c-89fe-fce1246175be",
-     "construction": false,
-     "start_point_id": "301886bb-0850-4e63-8aa9-2077b5c325c4",
-     "end_point_id": "a6a64b3c-b742-4400-a6de-89b1df0c351b"
-    }
-   ],
-   "constraints": [],
-   "external_references": [],
-   "pattern_instances": [],
-   "mirror_instances": []
-  },
-  {
-   "id": "4cefe5ce-682e-4ca3-acb8-df8c768de875",
-   "plane": "XY",
-   "origin_point_id": null,
-   "flip": false,
-   "rotation_quarter_turns": 0,
-   "points": [
-    {
-     "id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "x": 50.0,
-     "y": 55.0
-    },
-    {
-     "id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "x": 56.0,
-     "y": 55.0
-    },
-    {
-     "id": "fab63185-496a-484c-a8ab-ef6c9a4a0544",
-     "x": 50.0,
-     "y": 61.0
-    },
-    {
-     "id": "8dfa15b4-2159-4fcd-93a4-b064d1a762d6",
-     "x": 56.0,
-     "y": 55.0
-    },
-    {
-     "id": "4e790001-9347-4435-bf19-90392ae46f13",
-     "x": 50.0,
-     "y": 49.0
-    },
-    {
-     "id": "963c673b-1c0e-4764-95c3-7049d40313ca",
-     "x": 44.0,
-     "y": 55.0
-    },
-    {
-     "id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "x": 110.0,
-     "y": 55.0
-    },
-    {
-     "id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "x": 116.0,
-     "y": 55.0
-    },
-    {
-     "id": "2f964ae4-6927-4488-9b9f-02bab241ed54",
-     "x": 110.0,
-     "y": 61.0
-    },
-    {
-     "id": "5de011a2-9143-4d97-b504-5e79c551282e",
-     "x": 116.0,
-     "y": 55.0
-    },
-    {
-     "id": "1cd76389-9bff-41c8-a171-12906cbdec61",
-     "x": 110.0,
-     "y": 49.0
-    },
-    {
-     "id": "5d8efde3-ec68-48b5-8404-55261c48e827",
-     "x": 104.0,
-     "y": 55.0
-    }
-   ],
-   "entities": [
-    {
-     "type": "circle",
-     "id": "eedfbaad-3ed1-4ef6-ab3b-1b47f9dd8f5c",
-     "construction": false,
-     "center_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius_point_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "radius_constraint_id": "1c413551-695d-4f7f-831a-10aca41f5cce",
-     "cardinal_point_ids": [
-      "fab63185-496a-484c-a8ab-ef6c9a4a0544",
-      "8dfa15b4-2159-4fcd-93a4-b064d1a762d6",
-      "4e790001-9347-4435-bf19-90392ae46f13",
-      "963c673b-1c0e-4764-95c3-7049d40313ca"
-     ],
-     "cardinal_constraint_ids": [
-      "1a1fe887-9f90-48d0-ab71-ff9e691c515a",
-      "063f8ba0-8153-4a95-bb66-72bb5d73d2f8",
-      "d59ab09a-bf1b-4cbb-a594-b8e93cbebf94",
-      "201a91a4-3df3-466f-80e3-f264178a46f8",
-      "b3dbcfa8-322d-4f2c-b029-f82bf1159d9b",
-      "8d52f34d-0b24-4da8-9428-80cf738f7601",
-      "a090c49a-8097-4f24-97e7-7dc804990387",
-      "c21515ba-89b8-4399-b7cf-50884c43b2bc"
-     ]
-    },
-    {
-     "type": "circle",
-     "id": "8809ab3c-544a-40d4-8a6c-90bc94584019",
-     "construction": false,
-     "center_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius_point_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "radius_constraint_id": "cc9ae864-d2f9-43bf-8805-c478b9aae999",
-     "cardinal_point_ids": [
-      "2f964ae4-6927-4488-9b9f-02bab241ed54",
-      "5de011a2-9143-4d97-b504-5e79c551282e",
-      "1cd76389-9bff-41c8-a171-12906cbdec61",
-      "5d8efde3-ec68-48b5-8404-55261c48e827"
-     ],
-     "cardinal_constraint_ids": [
-      "25d4b619-7771-4ac9-98ea-7fdeafb44af0",
-      "65ab12d6-4762-4604-82de-dff065ced211",
-      "8ebfba0b-bb7f-4589-ba68-fec3ffcae822",
-      "1cab7245-de18-4c22-a842-38639c7f535b",
-      "c48a3446-f5ae-4e6e-87b3-5e900169f523",
-      "dc2c66e9-3f1d-4a23-a245-9eb9441509f2",
-      "975c27d7-4d40-4a5a-a159-942e0d8bc512",
-      "bcbdd462-e4a6-4340-8fdb-9a0ca981a3d8"
-     ]
-    }
-   ],
-   "constraints": [
-    {
-     "id": "1c413551-695d-4f7f-831a-10aca41f5cce",
-     "point_a_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "point_b_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "distance": 6.0,
-     "orientation": "linear",
-     "provisional": true,
-     "type": "distance"
-    },
-    {
-     "id": "1a1fe887-9f90-48d0-ab71-ff9e691c515a",
-     "center1_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius1_point_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "center2_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius2_point_id": "fab63185-496a-484c-a8ab-ef6c9a4a0544",
-     "type": "equal_radius"
-    },
-    {
-     "id": "063f8ba0-8153-4a95-bb66-72bb5d73d2f8",
-     "point_a_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "point_b_id": "fab63185-496a-484c-a8ab-ef6c9a4a0544",
-     "distance": 0.0,
-     "orientation": "horizontal",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "d59ab09a-bf1b-4cbb-a594-b8e93cbebf94",
-     "center1_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius1_point_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "center2_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius2_point_id": "8dfa15b4-2159-4fcd-93a4-b064d1a762d6",
-     "type": "equal_radius"
-    },
-    {
-     "id": "201a91a4-3df3-466f-80e3-f264178a46f8",
-     "point_a_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "point_b_id": "8dfa15b4-2159-4fcd-93a4-b064d1a762d6",
-     "distance": 0.0,
-     "orientation": "vertical",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "b3dbcfa8-322d-4f2c-b029-f82bf1159d9b",
-     "center1_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius1_point_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "center2_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius2_point_id": "4e790001-9347-4435-bf19-90392ae46f13",
-     "type": "equal_radius"
-    },
-    {
-     "id": "8d52f34d-0b24-4da8-9428-80cf738f7601",
-     "point_a_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "point_b_id": "4e790001-9347-4435-bf19-90392ae46f13",
-     "distance": 0.0,
-     "orientation": "horizontal",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "a090c49a-8097-4f24-97e7-7dc804990387",
-     "center1_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius1_point_id": "44b02219-d164-4baf-92c9-1f3036260e33",
-     "center2_point_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "radius2_point_id": "963c673b-1c0e-4764-95c3-7049d40313ca",
-     "type": "equal_radius"
-    },
-    {
-     "id": "c21515ba-89b8-4399-b7cf-50884c43b2bc",
-     "point_a_id": "27d25eb1-ef72-4833-b52e-eb6333b69e91",
-     "point_b_id": "963c673b-1c0e-4764-95c3-7049d40313ca",
-     "distance": 0.0,
-     "orientation": "vertical",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "cc9ae864-d2f9-43bf-8805-c478b9aae999",
-     "point_a_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "point_b_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "distance": 6.0,
-     "orientation": "linear",
-     "provisional": true,
-     "type": "distance"
-    },
-    {
-     "id": "25d4b619-7771-4ac9-98ea-7fdeafb44af0",
-     "center1_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius1_point_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "center2_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius2_point_id": "2f964ae4-6927-4488-9b9f-02bab241ed54",
-     "type": "equal_radius"
-    },
-    {
-     "id": "65ab12d6-4762-4604-82de-dff065ced211",
-     "point_a_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "point_b_id": "2f964ae4-6927-4488-9b9f-02bab241ed54",
-     "distance": 0.0,
-     "orientation": "horizontal",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "8ebfba0b-bb7f-4589-ba68-fec3ffcae822",
-     "center1_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius1_point_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "center2_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius2_point_id": "5de011a2-9143-4d97-b504-5e79c551282e",
-     "type": "equal_radius"
-    },
-    {
-     "id": "1cab7245-de18-4c22-a842-38639c7f535b",
-     "point_a_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "point_b_id": "5de011a2-9143-4d97-b504-5e79c551282e",
-     "distance": 0.0,
-     "orientation": "vertical",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "c48a3446-f5ae-4e6e-87b3-5e900169f523",
-     "center1_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius1_point_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "center2_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius2_point_id": "1cd76389-9bff-41c8-a171-12906cbdec61",
-     "type": "equal_radius"
-    },
-    {
-     "id": "dc2c66e9-3f1d-4a23-a245-9eb9441509f2",
-     "point_a_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "point_b_id": "1cd76389-9bff-41c8-a171-12906cbdec61",
-     "distance": 0.0,
-     "orientation": "horizontal",
-     "provisional": false,
-     "type": "distance"
-    },
-    {
-     "id": "975c27d7-4d40-4a5a-a159-942e0d8bc512",
-     "center1_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius1_point_id": "a09f86b2-21e2-46b5-81c7-78072ce16003",
-     "center2_point_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "radius2_point_id": "5d8efde3-ec68-48b5-8404-55261c48e827",
-     "type": "equal_radius"
-    },
-    {
-     "id": "bcbdd462-e4a6-4340-8fdb-9a0ca981a3d8",
-     "point_a_id": "68f818c6-d7cc-4947-a8d8-72898a99c70d",
-     "point_b_id": "5d8efde3-ec68-48b5-8404-55261c48e827",
-     "distance": 0.0,
-     "orientation": "vertical",
-     "provisional": false,
-     "type": "distance"
-    }
-   ],
-   "external_references": [],
-   "pattern_instances": [],
-   "mirror_instances": []
-  },
-  {
-   "id": "7a1df4be-9d13-463a-b14d-0804ab889d2e",
-   "plane": "XY",
-   "origin_point_id": null,
-   "flip": false,
-   "rotation_quarter_turns": 0,
-   "points": [
-    {
-     "id": "4dd80f38-e003-4ca8-bef3-bd678d33c6d8",
-     "x": 0.0,
-     "y": 0.0
-    },
-    {
-     "id": "e3937aed-d5f0-4ea2-8454-92ffdc6e6c3f",
-     "x": 65.0,
-     "y": 0.0
-    },
-    {
-     "id": "7862d828-3f86-4db3-93b4-399c224b62f0",
-     "x": 65.0,
-     "y": 10.0
-    },
-    {
-     "id": "a1aece0d-933d-4c97-b793-71ff5ff20312",
-     "x": 0.0,
-     "y": 10.0
-    }
-   ],
-   "entities": [
-    {
-     "type": "line",
-     "id": "19b452ce-a3cb-453f-ac2d-abc2e03a95c9",
-     "construction": false,
-     "start_point_id": "4dd80f38-e003-4ca8-bef3-bd678d33c6d8",
-     "end_point_id": "e3937aed-d5f0-4ea2-8454-92ffdc6e6c3f"
-    },
-    {
-     "type": "line",
-     "id": "27e9ea30-91a6-4f64-b6b2-36947dbd9428",
-     "construction": false,
-     "start_point_id": "e3937aed-d5f0-4ea2-8454-92ffdc6e6c3f",
-     "end_point_id": "7862d828-3f86-4db3-93b4-399c224b62f0"
-    },
-    {
-     "type": "line",
-     "id": "8869d21f-7419-49ad-b84b-42836a3a50ce",
-     "construction": false,
-     "start_point_id": "7862d828-3f86-4db3-93b4-399c224b62f0",
-     "end_point_id": "a1aece0d-933d-4c97-b793-71ff5ff20312"
-    },
-    {
-     "type": "line",
-     "id": "371cd529-669c-4cf8-8e4f-fa663a3416c6",
-     "construction": false,
-     "start_point_id": "a1aece0d-933d-4c97-b793-71ff5ff20312",
-     "end_point_id": "4dd80f38-e003-4ca8-bef3-bd678d33c6d8"
-    }
-   ],
-   "constraints": [],
-   "external_references": [],
-   "pattern_instances": [],
-   "mirror_instances": []
-  },
-  {
-   "id": "c2f39475-b962-45f9-a6e7-083e88ec752a",
-   "plane": "XY",
-   "origin_point_id": null,
-   "flip": false,
-   "rotation_quarter_turns": 0,
-   "points": [
-    {
-     "id": "7dea6851-95b1-4278-b404-a17a9b32ff06",
-     "x": 0.0,
-     "y": 0.0
-    },
-    {
-     "id": "da1be4de-c4ed-4cd0-89b0-65ca9188f023",
-     "x": 32.0,
-     "y": 0.0
-    },
-    {
-     "id": "2b491065-aa2c-4aaf-b1b1-e634eaf4ff65",
-     "x": 32.0,
-     "y": 8.0
-    },
-    {
-     "id": "c8a23a38-6dd9-4963-a0e0-2c2e6994050d",
-     "x": 0.0,
-     "y": 8.0
-    }
-   ],
-   "entities": [
-    {
-     "type": "line",
-     "id": "5cfd0560-6cf5-4e89-9d0c-704843fa4406",
-     "construction": false,
-     "start_point_id": "7dea6851-95b1-4278-b404-a17a9b32ff06",
-     "end_point_id": "da1be4de-c4ed-4cd0-89b0-65ca9188f023"
-    },
-    {
-     "type": "line",
-     "id": "519b1c30-02d0-455c-a2be-0bb3c3c9bf75",
-     "construction": false,
-     "start_point_id": "da1be4de-c4ed-4cd0-89b0-65ca9188f023",
-     "end_point_id": "2b491065-aa2c-4aaf-b1b1-e634eaf4ff65"
-    },
-    {
-     "type": "line",
-     "id": "a8eb9b59-73c6-4832-bf23-d47cc5c07033",
-     "construction": false,
-     "start_point_id": "2b491065-aa2c-4aaf-b1b1-e634eaf4ff65",
-     "end_point_id": "c8a23a38-6dd9-4963-a0e0-2c2e6994050d"
-    },
-    {
-     "type": "line",
-     "id": "6ba7e49b-2106-43c8-84ac-47d75efb157a",
-     "construction": false,
-     "start_point_id": "c8a23a38-6dd9-4963-a0e0-2c2e6994050d",
-     "end_point_id": "7dea6851-95b1-4278-b404-a17a9b32ff06"
-    }
-   ],
-   "constraints": [],
-   "external_references": [],
-   "pattern_instances": [],
-   "mirror_instances": []
-  },
-  {
-   "id": "da6e8fa5-abe7-4bf0-b5a3-a3a8b4629c20",
-   "plane": "XY",
-   "origin_point_id": null,
-   "flip": false,
-   "rotation_quarter_turns": 0,
-   "points": [
-    {
-     "id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
+     "id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
      "x": 24.0,
      "y": 4.0
     },
     {
-     "id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
+     "id": "44d37388-89b2-40c1-8cd0-e25f20326838",
      "x": 28.0,
      "y": 4.0
     },
     {
-     "id": "4929e1a7-484e-4af8-9d4d-6f69d79876ce",
+     "id": "a14391e2-7f0d-4334-8c43-e1acd3c29104",
      "x": 24.0,
      "y": 8.0
     },
     {
-     "id": "97a34093-a042-4fb5-a4e5-5f0b4f4ccc56",
+     "id": "0a4390cd-e322-417d-a2e6-c98f8c604092",
      "x": 28.0,
      "y": 4.0
     },
     {
-     "id": "2e3f57b1-c8fc-4a25-92e4-5b00ed3c3276",
+     "id": "c2c3f702-fc65-4f5a-a079-982b14e4fce0",
      "x": 24.0,
      "y": 0.0
     },
     {
-     "id": "a57af581-e702-4bcc-8c9f-5dff939af8d1",
+     "id": "137711db-c6f4-40a8-8720-f814958ba897",
      "x": 20.0,
      "y": 4.000000000000001
     }
@@ -1311,102 +879,569 @@
    "entities": [
     {
      "type": "circle",
-     "id": "b5cf7e4b-82ef-4370-bd0e-a81fd89b8d6b",
+     "id": "d1ee34d0-6b22-44b9-9db5-3df4acb9ca48",
      "construction": false,
-     "center_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius_point_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
-     "radius_constraint_id": "b16fab0e-ee75-428e-a755-33daa621e42c",
+     "center_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius_point_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
+     "radius_constraint_id": "0071be65-971d-477f-bb36-141486face92",
      "cardinal_point_ids": [
-      "4929e1a7-484e-4af8-9d4d-6f69d79876ce",
-      "97a34093-a042-4fb5-a4e5-5f0b4f4ccc56",
-      "2e3f57b1-c8fc-4a25-92e4-5b00ed3c3276",
-      "a57af581-e702-4bcc-8c9f-5dff939af8d1"
+      "a14391e2-7f0d-4334-8c43-e1acd3c29104",
+      "0a4390cd-e322-417d-a2e6-c98f8c604092",
+      "c2c3f702-fc65-4f5a-a079-982b14e4fce0",
+      "137711db-c6f4-40a8-8720-f814958ba897"
      ],
      "cardinal_constraint_ids": [
-      "1d6c7269-cb1b-466c-b745-c28af93a185c",
-      "b5158128-a0d9-4013-923e-26d9a3f6c1cc",
-      "d4ccb59b-0fd2-4775-8910-923c3467f262",
-      "713aada9-7aaa-4054-9de5-e178330591f4",
-      "c22a6b51-93f6-41c3-bb2d-6b8a5bd643d6",
-      "03fe343d-1128-4837-877f-bf52fa9538db",
-      "e0b51ac0-8680-4a04-9368-a560d77c34a2",
-      "bd9b1b0f-9513-44ea-8398-eaa94cc97d4e"
+      "92608bc3-d3e8-437a-8502-4bf7870d33d2",
+      "ef8d0d1f-7b89-4ec7-b090-2b64d1f0f62f",
+      "9294136b-3877-4d09-81f4-ef2bad215548",
+      "5535e5a5-4106-4118-bfcc-284efcf3ce2a",
+      "dc4708e2-aee0-4e8f-a744-5cfb29df511b",
+      "575dce03-316e-46e9-8f60-659429ccbb2d",
+      "593a8bdc-4591-463b-95e7-12c02c4ba2e7",
+      "08d5aa20-de16-45c3-9a69-8246a9901e3a"
      ]
     }
    ],
    "constraints": [
     {
-     "id": "b16fab0e-ee75-428e-a755-33daa621e42c",
-     "point_a_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "point_b_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
+     "id": "0071be65-971d-477f-bb36-141486face92",
+     "point_a_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "point_b_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
      "distance": 4.0,
      "orientation": "linear",
      "provisional": true,
      "type": "distance"
     },
     {
-     "id": "1d6c7269-cb1b-466c-b745-c28af93a185c",
-     "center1_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius1_point_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
-     "center2_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius2_point_id": "4929e1a7-484e-4af8-9d4d-6f69d79876ce",
+     "id": "92608bc3-d3e8-437a-8502-4bf7870d33d2",
+     "center1_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius1_point_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
+     "center2_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius2_point_id": "a14391e2-7f0d-4334-8c43-e1acd3c29104",
      "type": "equal_radius"
     },
     {
-     "id": "b5158128-a0d9-4013-923e-26d9a3f6c1cc",
-     "point_a_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "point_b_id": "4929e1a7-484e-4af8-9d4d-6f69d79876ce",
+     "id": "ef8d0d1f-7b89-4ec7-b090-2b64d1f0f62f",
+     "point_a_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "point_b_id": "a14391e2-7f0d-4334-8c43-e1acd3c29104",
      "distance": 0.0,
      "orientation": "horizontal",
      "provisional": false,
      "type": "distance"
     },
     {
-     "id": "d4ccb59b-0fd2-4775-8910-923c3467f262",
-     "center1_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius1_point_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
-     "center2_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius2_point_id": "97a34093-a042-4fb5-a4e5-5f0b4f4ccc56",
+     "id": "9294136b-3877-4d09-81f4-ef2bad215548",
+     "center1_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius1_point_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
+     "center2_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius2_point_id": "0a4390cd-e322-417d-a2e6-c98f8c604092",
      "type": "equal_radius"
     },
     {
-     "id": "713aada9-7aaa-4054-9de5-e178330591f4",
-     "point_a_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "point_b_id": "97a34093-a042-4fb5-a4e5-5f0b4f4ccc56",
+     "id": "5535e5a5-4106-4118-bfcc-284efcf3ce2a",
+     "point_a_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "point_b_id": "0a4390cd-e322-417d-a2e6-c98f8c604092",
      "distance": 0.0,
      "orientation": "vertical",
      "provisional": false,
      "type": "distance"
     },
     {
-     "id": "c22a6b51-93f6-41c3-bb2d-6b8a5bd643d6",
-     "center1_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius1_point_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
-     "center2_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius2_point_id": "2e3f57b1-c8fc-4a25-92e4-5b00ed3c3276",
+     "id": "dc4708e2-aee0-4e8f-a744-5cfb29df511b",
+     "center1_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius1_point_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
+     "center2_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius2_point_id": "c2c3f702-fc65-4f5a-a079-982b14e4fce0",
      "type": "equal_radius"
     },
     {
-     "id": "03fe343d-1128-4837-877f-bf52fa9538db",
-     "point_a_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "point_b_id": "2e3f57b1-c8fc-4a25-92e4-5b00ed3c3276",
+     "id": "575dce03-316e-46e9-8f60-659429ccbb2d",
+     "point_a_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "point_b_id": "c2c3f702-fc65-4f5a-a079-982b14e4fce0",
      "distance": 0.0,
      "orientation": "horizontal",
      "provisional": false,
      "type": "distance"
     },
     {
-     "id": "e0b51ac0-8680-4a04-9368-a560d77c34a2",
-     "center1_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius1_point_id": "09ce01d5-1c1b-4394-b639-01dda622e3c4",
-     "center2_point_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "radius2_point_id": "a57af581-e702-4bcc-8c9f-5dff939af8d1",
+     "id": "593a8bdc-4591-463b-95e7-12c02c4ba2e7",
+     "center1_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius1_point_id": "44d37388-89b2-40c1-8cd0-e25f20326838",
+     "center2_point_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "radius2_point_id": "137711db-c6f4-40a8-8720-f814958ba897",
      "type": "equal_radius"
     },
     {
-     "id": "bd9b1b0f-9513-44ea-8398-eaa94cc97d4e",
-     "point_a_id": "170dca84-40a8-4b5d-ac4a-5e1773f7adf8",
-     "point_b_id": "a57af581-e702-4bcc-8c9f-5dff939af8d1",
+     "id": "08d5aa20-de16-45c3-9a69-8246a9901e3a",
+     "point_a_id": "1a056dfa-cc1c-4851-8ecd-4b53c39c0e32",
+     "point_b_id": "137711db-c6f4-40a8-8720-f814958ba897",
+     "distance": 0.0,
+     "orientation": "vertical",
+     "provisional": false,
+     "type": "distance"
+    }
+   ],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  },
+  {
+   "id": "5779a62e-7951-4bce-ac0f-4604dfb1bfc6",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "309e8ffa-b26d-445c-a752-7595953f64c2",
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "id": "58383bf2-d999-4168-bf7f-85be0c6d83e4",
+     "x": 65.0,
+     "y": 0.0
+    },
+    {
+     "id": "e969b5b1-2ab6-4676-b533-b5c9688a030f",
+     "x": 65.0,
+     "y": 10.0
+    },
+    {
+     "id": "a7144f7d-0652-4cbd-928d-a09e35c0a6af",
+     "x": 0.0,
+     "y": 10.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "line",
+     "id": "5e4bc284-9f19-4adb-a1f8-b40af19facca",
+     "construction": false,
+     "start_point_id": "309e8ffa-b26d-445c-a752-7595953f64c2",
+     "end_point_id": "58383bf2-d999-4168-bf7f-85be0c6d83e4"
+    },
+    {
+     "type": "line",
+     "id": "e2bae020-73c8-4b26-90bf-cf0bdf2e2fbc",
+     "construction": false,
+     "start_point_id": "58383bf2-d999-4168-bf7f-85be0c6d83e4",
+     "end_point_id": "e969b5b1-2ab6-4676-b533-b5c9688a030f"
+    },
+    {
+     "type": "line",
+     "id": "c7c55bb5-11be-4ce3-a601-876cd85dc112",
+     "construction": false,
+     "start_point_id": "e969b5b1-2ab6-4676-b533-b5c9688a030f",
+     "end_point_id": "a7144f7d-0652-4cbd-928d-a09e35c0a6af"
+    },
+    {
+     "type": "line",
+     "id": "5161dde4-6568-45dd-b978-61683b29381e",
+     "construction": false,
+     "start_point_id": "a7144f7d-0652-4cbd-928d-a09e35c0a6af",
+     "end_point_id": "309e8ffa-b26d-445c-a752-7595953f64c2"
+    }
+   ],
+   "constraints": [],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  },
+  {
+   "id": "6675a740-b51a-4c43-9560-54645a3afbf6",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "44d98fa4-892f-48b1-9161-b8a6aa820e51",
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "id": "4f9e2477-2f1e-43ec-b11f-2a429b1af351",
+     "x": 32.0,
+     "y": 0.0
+    },
+    {
+     "id": "446953de-b654-4589-83c4-d463b963fd0a",
+     "x": 32.0,
+     "y": 8.0
+    },
+    {
+     "id": "44696aa4-7473-458a-9090-0c6b4bbf9489",
+     "x": 0.0,
+     "y": 8.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "line",
+     "id": "86bb98df-bccd-4bf3-a17b-ae83a620c5e0",
+     "construction": false,
+     "start_point_id": "44d98fa4-892f-48b1-9161-b8a6aa820e51",
+     "end_point_id": "4f9e2477-2f1e-43ec-b11f-2a429b1af351"
+    },
+    {
+     "type": "line",
+     "id": "dce85447-7e28-4412-b0da-a8e2e7476fe8",
+     "construction": false,
+     "start_point_id": "4f9e2477-2f1e-43ec-b11f-2a429b1af351",
+     "end_point_id": "446953de-b654-4589-83c4-d463b963fd0a"
+    },
+    {
+     "type": "line",
+     "id": "56e4a355-95df-4814-b38e-f93844840440",
+     "construction": false,
+     "start_point_id": "446953de-b654-4589-83c4-d463b963fd0a",
+     "end_point_id": "44696aa4-7473-458a-9090-0c6b4bbf9489"
+    },
+    {
+     "type": "line",
+     "id": "44679457-03eb-4ce8-94d3-9f05ef86c713",
+     "construction": false,
+     "start_point_id": "44696aa4-7473-458a-9090-0c6b4bbf9489",
+     "end_point_id": "44d98fa4-892f-48b1-9161-b8a6aa820e51"
+    }
+   ],
+   "constraints": [],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  },
+  {
+   "id": "9e4b07c4-e616-4958-9240-f28deaae3208",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "e9fe8a9d-307a-49ef-8299-2892fc9c2175",
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "id": "9b05abae-22fc-46d8-b0e8-d53d2c08213a",
+     "x": 170.0,
+     "y": 0.0
+    },
+    {
+     "id": "c18727fe-da10-4414-a5bf-b1d74bc7bdd1",
+     "x": 170.0,
+     "y": 100.0
+    },
+    {
+     "id": "c7e4f606-0c60-4c6e-b95e-51983aed4a0d",
+     "x": 0.0,
+     "y": 100.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "line",
+     "id": "6e0a01f6-6c69-4304-8cae-f2cc06cccdc6",
+     "construction": false,
+     "start_point_id": "e9fe8a9d-307a-49ef-8299-2892fc9c2175",
+     "end_point_id": "9b05abae-22fc-46d8-b0e8-d53d2c08213a"
+    },
+    {
+     "type": "line",
+     "id": "fdfb85aa-0cb0-4f70-bceb-38e74cd136f5",
+     "construction": false,
+     "start_point_id": "9b05abae-22fc-46d8-b0e8-d53d2c08213a",
+     "end_point_id": "c18727fe-da10-4414-a5bf-b1d74bc7bdd1"
+    },
+    {
+     "type": "line",
+     "id": "51c5ed6d-5e16-4b59-ba1d-ccb36138e46e",
+     "construction": false,
+     "start_point_id": "c18727fe-da10-4414-a5bf-b1d74bc7bdd1",
+     "end_point_id": "c7e4f606-0c60-4c6e-b95e-51983aed4a0d"
+    },
+    {
+     "type": "line",
+     "id": "db0c7fea-0090-441f-a052-461cbe947a6a",
+     "construction": false,
+     "start_point_id": "c7e4f606-0c60-4c6e-b95e-51983aed4a0d",
+     "end_point_id": "e9fe8a9d-307a-49ef-8299-2892fc9c2175"
+    }
+   ],
+   "constraints": [],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  },
+  {
+   "id": "acb7345f-eb39-47f2-8986-b8195ec31fe1",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "x": 50.0,
+     "y": 55.0
+    },
+    {
+     "id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "x": 56.0,
+     "y": 55.0
+    },
+    {
+     "id": "f3cc86e3-998c-4d44-bfe1-7ea2c9e25c60",
+     "x": 50.0,
+     "y": 61.0
+    },
+    {
+     "id": "d10cfe5b-8887-4312-a7f4-ac753e35279a",
+     "x": 56.0,
+     "y": 55.0
+    },
+    {
+     "id": "20655712-09ba-4328-81e6-2ad0f6b1bad5",
+     "x": 50.0,
+     "y": 49.0
+    },
+    {
+     "id": "3812bb84-ae0e-41eb-ba37-fa8be0991c3e",
+     "x": 44.0,
+     "y": 55.0
+    },
+    {
+     "id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "x": 110.0,
+     "y": 55.0
+    },
+    {
+     "id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "x": 116.0,
+     "y": 55.0
+    },
+    {
+     "id": "a5fde14a-2626-49db-b2ee-28bc07c5d63e",
+     "x": 110.0,
+     "y": 61.0
+    },
+    {
+     "id": "596b0269-9276-421b-82c7-457d648ad1b1",
+     "x": 116.0,
+     "y": 55.0
+    },
+    {
+     "id": "0eed6d7a-08e0-4a70-8d44-18ea6a665a32",
+     "x": 110.0,
+     "y": 49.0
+    },
+    {
+     "id": "36e6c210-450a-4ac3-bdf7-07bfc5919b9c",
+     "x": 104.0,
+     "y": 55.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "circle",
+     "id": "86fd7d74-4f45-41ff-9ad6-8055aa282ba1",
+     "construction": false,
+     "center_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius_point_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "radius_constraint_id": "bcec6a43-4027-4883-a194-ce08c13abc27",
+     "cardinal_point_ids": [
+      "f3cc86e3-998c-4d44-bfe1-7ea2c9e25c60",
+      "d10cfe5b-8887-4312-a7f4-ac753e35279a",
+      "20655712-09ba-4328-81e6-2ad0f6b1bad5",
+      "3812bb84-ae0e-41eb-ba37-fa8be0991c3e"
+     ],
+     "cardinal_constraint_ids": [
+      "81aa6688-92a8-4f7e-a04d-b76132d536ef",
+      "eef09b60-ca65-4948-909d-616bb1ce6bed",
+      "fbbb9c2e-9523-4d4f-a828-b954909c5f7f",
+      "10e42789-6828-4e08-8c90-01df74aef7a1",
+      "352014dc-8c82-4dbf-b98b-61cd8a895699",
+      "8f4940f5-6e94-4730-bed7-51bda993c5fd",
+      "a948bc02-ab1c-4961-8232-9551e00ba525",
+      "fc07b1f0-1537-4b7d-86f2-1e908128f918"
+     ]
+    },
+    {
+     "type": "circle",
+     "id": "2b70a28b-2a52-40ba-baa9-8f8620b74d9c",
+     "construction": false,
+     "center_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius_point_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "radius_constraint_id": "50d0d0ba-4a3b-4689-9b87-9b5c2136198e",
+     "cardinal_point_ids": [
+      "a5fde14a-2626-49db-b2ee-28bc07c5d63e",
+      "596b0269-9276-421b-82c7-457d648ad1b1",
+      "0eed6d7a-08e0-4a70-8d44-18ea6a665a32",
+      "36e6c210-450a-4ac3-bdf7-07bfc5919b9c"
+     ],
+     "cardinal_constraint_ids": [
+      "4a007f76-477c-4d9a-b3cd-f261288af3a1",
+      "e69715dc-d1f3-4721-8817-06f207079e67",
+      "a239bd48-0386-45c4-b278-09d61487e157",
+      "d107489a-a52b-4bf7-971e-143c47c1836f",
+      "0f186cb5-1976-420f-bb42-395a392cc447",
+      "978fec99-f54f-4e99-9830-0aa39aca72fa",
+      "b306ddb8-767e-48f4-aea9-63c91def849c",
+      "35c67456-7f03-4c72-9c92-d5378d849f9f"
+     ]
+    }
+   ],
+   "constraints": [
+    {
+     "id": "bcec6a43-4027-4883-a194-ce08c13abc27",
+     "point_a_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "point_b_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "distance": 6.0,
+     "orientation": "linear",
+     "provisional": true,
+     "type": "distance"
+    },
+    {
+     "id": "81aa6688-92a8-4f7e-a04d-b76132d536ef",
+     "center1_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius1_point_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "center2_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius2_point_id": "f3cc86e3-998c-4d44-bfe1-7ea2c9e25c60",
+     "type": "equal_radius"
+    },
+    {
+     "id": "eef09b60-ca65-4948-909d-616bb1ce6bed",
+     "point_a_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "point_b_id": "f3cc86e3-998c-4d44-bfe1-7ea2c9e25c60",
+     "distance": 0.0,
+     "orientation": "horizontal",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "fbbb9c2e-9523-4d4f-a828-b954909c5f7f",
+     "center1_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius1_point_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "center2_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius2_point_id": "d10cfe5b-8887-4312-a7f4-ac753e35279a",
+     "type": "equal_radius"
+    },
+    {
+     "id": "10e42789-6828-4e08-8c90-01df74aef7a1",
+     "point_a_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "point_b_id": "d10cfe5b-8887-4312-a7f4-ac753e35279a",
+     "distance": 0.0,
+     "orientation": "vertical",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "352014dc-8c82-4dbf-b98b-61cd8a895699",
+     "center1_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius1_point_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "center2_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius2_point_id": "20655712-09ba-4328-81e6-2ad0f6b1bad5",
+     "type": "equal_radius"
+    },
+    {
+     "id": "8f4940f5-6e94-4730-bed7-51bda993c5fd",
+     "point_a_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "point_b_id": "20655712-09ba-4328-81e6-2ad0f6b1bad5",
+     "distance": 0.0,
+     "orientation": "horizontal",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "a948bc02-ab1c-4961-8232-9551e00ba525",
+     "center1_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius1_point_id": "f818c659-02cd-41d0-982d-97553c15dbdb",
+     "center2_point_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "radius2_point_id": "3812bb84-ae0e-41eb-ba37-fa8be0991c3e",
+     "type": "equal_radius"
+    },
+    {
+     "id": "fc07b1f0-1537-4b7d-86f2-1e908128f918",
+     "point_a_id": "d530b344-a42d-437d-b309-8b8822d9bc0c",
+     "point_b_id": "3812bb84-ae0e-41eb-ba37-fa8be0991c3e",
+     "distance": 0.0,
+     "orientation": "vertical",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "50d0d0ba-4a3b-4689-9b87-9b5c2136198e",
+     "point_a_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "point_b_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "distance": 6.0,
+     "orientation": "linear",
+     "provisional": true,
+     "type": "distance"
+    },
+    {
+     "id": "4a007f76-477c-4d9a-b3cd-f261288af3a1",
+     "center1_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius1_point_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "center2_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius2_point_id": "a5fde14a-2626-49db-b2ee-28bc07c5d63e",
+     "type": "equal_radius"
+    },
+    {
+     "id": "e69715dc-d1f3-4721-8817-06f207079e67",
+     "point_a_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "point_b_id": "a5fde14a-2626-49db-b2ee-28bc07c5d63e",
+     "distance": 0.0,
+     "orientation": "horizontal",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "a239bd48-0386-45c4-b278-09d61487e157",
+     "center1_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius1_point_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "center2_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius2_point_id": "596b0269-9276-421b-82c7-457d648ad1b1",
+     "type": "equal_radius"
+    },
+    {
+     "id": "d107489a-a52b-4bf7-971e-143c47c1836f",
+     "point_a_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "point_b_id": "596b0269-9276-421b-82c7-457d648ad1b1",
+     "distance": 0.0,
+     "orientation": "vertical",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "0f186cb5-1976-420f-bb42-395a392cc447",
+     "center1_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius1_point_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "center2_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius2_point_id": "0eed6d7a-08e0-4a70-8d44-18ea6a665a32",
+     "type": "equal_radius"
+    },
+    {
+     "id": "978fec99-f54f-4e99-9830-0aa39aca72fa",
+     "point_a_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "point_b_id": "0eed6d7a-08e0-4a70-8d44-18ea6a665a32",
+     "distance": 0.0,
+     "orientation": "horizontal",
+     "provisional": false,
+     "type": "distance"
+    },
+    {
+     "id": "b306ddb8-767e-48f4-aea9-63c91def849c",
+     "center1_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius1_point_id": "62c79dab-f789-4d13-b458-6a5ec1fb7cec",
+     "center2_point_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "radius2_point_id": "36e6c210-450a-4ac3-bdf7-07bfc5919b9c",
+     "type": "equal_radius"
+    },
+    {
+     "id": "35c67456-7f03-4c72-9c92-d5378d849f9f",
+     "point_a_id": "2fca573f-91ab-468d-92a9-0140817aeb79",
+     "point_b_id": "36e6c210-450a-4ac3-bdf7-07bfc5919b9c",
      "distance": 0.0,
      "orientation": "vertical",
      "provisional": false,

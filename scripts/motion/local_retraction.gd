@@ -29,10 +29,14 @@ const MAX_ROWS := 64
 const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
 const PAIR_MODEL_VERSION := 4 ## 4 = 3 plus an optional `pair` on a side: the second face of a Width / Symmetric mid-plane over two members (the backend emits 4 only then)
 const COUPLER_MODEL_VERSION := 5 ## 5 = coupler mates (gear / rack_pinion / screw): rows on each side's MOVE from its `anchor` pose; `set_anchors` re-bases them at every accepted anchor
+const LIMIT_MODEL_VERSION := 6 ## 6 = limit mates (limit_distance / limit_angle): an inequality row with `min` / `max`, held at the nearest bound only while violated (see `retract`); a superset of 3 to 5
+const LIMIT_ROUNDS := 3 ## active-set rounds of one retraction
+const LIMIT_TOL := 1e-6 ## mm / degrees a value may sit outside its range before the limit counts as violated
 const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
 
 const _TYPES := ["coincident", "concentric", "parallel", "angle", "distance"]
 const _COUPLER_TYPES := ["gear", "rack_pinion", "screw"]
+const _LIMIT_TYPES := ["limit_distance", "limit_angle"]
 
 var members := 0
 var member_ids: Array = []
@@ -41,12 +45,26 @@ var n := 0 ## 6 * members
 var _mates: Array = []
 var _anchors: Array = [] ## version 5: the pose each member had at the latest accepted anchor (the base of a coupler's rows); empty = the exported ones
 var _jac := true ## false = residual-only evaluation (no derivative arithmetic)
+var _held := {} ## the limits `retract` is holding at a bound, {mate id: bound}: set by the latest `retract` (reset at its start), so `residual` / `residual_inf` right after it include the held rows
 
 
 ## Re-bases a coupler's rows on `poses` (one per member, the model's member order): call it with the members' poses of every accepted anchor.
 func set_anchors(poses: Array) -> void:
 	if poses.size() == members:
 		_anchors = poses.duplicate()
+
+
+## Whether the model holds a limit mate.
+func has_limits() -> bool:
+	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			return true
+	return false
+
+
+## The limits the latest `retract` held, {mate id: bound} (a copy).
+func held_limits() -> Dictionary:
+	return _held.duplicate()
 
 
 ## Whether the model holds a coupler mate (rows measured from anchors).
@@ -63,8 +81,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	if not (json is Dictionary):
 		return null
 	var version := int(json.get("version", 0))
-	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION:
+	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION:
 		return null
+	var v6 := version == LIMIT_MODEL_VERSION
 	var ids: Array = json.get("members", [])
 	if ids.is_empty() or ids.size() > max_members:
 		return null
@@ -75,8 +94,12 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	for raw in json.get("mates", []):
 		var type := str(raw["type"])
 		var coupler := _COUPLER_TYPES.has(type)
-		if not _TYPES.has(type) and not (coupler and version == COUPLER_MODEL_VERSION):
+		var limit := _LIMIT_TYPES.has(type)
+		if not _TYPES.has(type) and not (coupler and (version == COUPLER_MODEL_VERSION or v6)) and not (limit and v6):
 			return null
+		if limit:
+			if not (raw.get("id") is String) or (raw.get("min") == null and raw.get("max") == null):
+				return null
 		var a = _parse_side(raw["a"])
 		var b = _parse_side(raw["b"])
 		if a == null or b == null:
@@ -84,8 +107,8 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 		if int(a["member"]) >= ids.size() or int(b["member"]) >= ids.size():
 			return null
 		for side in [a, b]:
-			# `anchor` belongs to version 5 only.
-			if side["ar"] != null and version != COUPLER_MODEL_VERSION:
+			# `anchor` belongs to version 5 (and 6, the superset) only.
+			if side["ar"] != null and version != COUPLER_MODEL_VERSION and not v6:
 				return null
 			if side["pair"] != null:
 				# `pair` belongs to version 4 only; a version-3 model carrying one is malformed. Out-of-range member => null.
@@ -110,6 +133,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 			"perp": _sign(raw.get("perp")),
 			"a": a,
 			"b": b,
+			"id": str(raw.get("id", "")),
+			"min": raw.get("min"),
+			"max": raw.get("max"),
 		})
 	# A dry evaluation at identity poses: tells the row count and fails on a missing field (a side lacking geometry).
 	var identity: Array = []
@@ -119,6 +145,13 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	if r == null or (r[0] as PackedFloat64Array).size() > MAX_ROWS:
 		return null
 	model.rows = (r[0] as PackedFloat64Array).size()
+	for mate in model._mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			if model._limit_row(mate, identity) == null:
+				return null # a side lacking the geometry the limit measures
+			model.rows += 1 # (counted for the size cap; it adds a row only while held)
+			if model.rows > MAX_ROWS:
+				return null
 	return model
 
 
@@ -423,10 +456,124 @@ func _coupler_row(mate: Dictionary, poses: Array) -> Array:
 	return [(b[2] - a[2]) - cs * (b[0] - a[0]), out]
 
 
+## `[value, gradient]` of a limit mate's measured value (mm for limit_distance, `(P_a - P_b) . N`, N = B's plane normal else A's;
+## degrees for limit_angle, `atan2((a x b) . h, a . b)`, h the hinge); the gradient is per unit of that value. Null if a side lacks geometry.
+func _limit_row(mate: Dictionary, poses: Array):
+	var d := _geo(mate["a"], poses)
+	var f := _geo(mate["b"], poses)
+	if mate["type"] == "limit_distance":
+		var origin_a = d["porigin"] if d.has("porigin") else d.get("point")
+		var origin_b = f["porigin"] if f.has("porigin") else f.get("point")
+		var normal = f["pnormal"] if f.has("pnormal") else d.get("pnormal")
+		if origin_a == null or origin_b == null or normal == null:
+			return null
+		return _dot(_sub(origin_a, origin_b), _unit(normal))
+	var hinge = d["hinge_direction"] if d.has("hinge_direction") else f.get("hinge_direction")
+	if hinge == null or not (d.has("direction") and f.has("direction")):
+		return null
+	var na := _unit(d["direction"])
+	var nb := _unit(f["direction"])
+	var sn := _dot(_cross(na, nb), _unit(hinge))
+	var cs := _dot(na, nb)
+	var den: float = sn[0] * sn[0] + cs[0] * cs[0]
+	var deg := 180.0 / PI
+	var grad := PackedFloat64Array()
+	if _jac:
+		grad.resize(n)
+		var sd: PackedFloat64Array = sn[1]
+		var cd: PackedFloat64Array = cs[1]
+		for c in n:
+			grad[c] = (cs[0] * sd[c] - sn[0] * cd[c]) / den * deg
+	return [rad_to_deg(atan2(sn[0], cs[0])), grad]
+
+
+## The measured value of a limit mate at `poses` (the same number as `_limit_row`'s first element) without building the whole side geometry or any
+## derivative: only the three vectors the value needs. The per-frame stop of a drag evaluates this a dozen times a frame.
+func _limit_value(mate: Dictionary, poses: Array) -> float:
+	var a: Dictionary = mate["a"]
+	var b: Dictionary = mate["b"]
+	if mate["type"] == "limit_distance":
+		var geo_a: Dictionary = a["geo"]
+		var geo_b: Dictionary = b["geo"]
+		var pa: Array = _world(a, poses, "porigin" if geo_a.has("porigin") else "point")[0]
+		var pb: Array = _world(b, poses, "porigin" if geo_b.has("porigin") else "point")[0]
+		var normal: Array = _world(b, poses, "pnormal")[0] if geo_b.has("pnormal") else _world(a, poses, "pnormal")[0]
+		var nn := Se3.norm3(normal)
+		return ((pa[0] - pb[0]) * normal[0] + (pa[1] - pb[1]) * normal[1] + (pa[2] - pb[2]) * normal[2]) / nn
+	var ga: Dictionary = a["geo"]
+	var hinge_side: Dictionary = a if ga.has("hinge_direction") else b
+	var da: Array = _world(a, poses, "direction")[0]
+	var db: Array = _world(b, poses, "direction")[0]
+	var h: Array = _world(hinge_side, poses, "hinge_direction")[0]
+	var x: Array = Se3.cross(da, db)
+	var hn := Se3.norm3(h)
+	var sine: float = (x[0] * h[0] + x[1] * h[1] + x[2] * h[2]) / (hn * Se3.norm3(da) * Se3.norm3(db))
+	var cosine: float = (da[0] * db[0] + da[1] * db[1] + da[2] * db[2]) / (Se3.norm3(da) * Se3.norm3(db))
+	return rad_to_deg(atan2(sine, cosine))
+
+
+## The indices of the members a limit mate measures (a limit's value reads only those members' poses).
+func limit_member_indices() -> Array:
+	var out: Array = []
+	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			for side in [mate["a"], mate["b"]]:
+				var m: int = side["member"]
+				if m >= 0 and not out.has(m):
+					out.append(m)
+	return out
+
+
+## Whether every limit mate's value at `poses` lies within its range (no solve, no derivatives): the cheap check a drag uses to stop at a limit.
+func limits_in_range(poses: Array) -> bool:
+	var was := _jac
+	_jac = false
+	var ok := true
+	for mate in _mates:
+		if not _LIMIT_TYPES.has(mate["type"]):
+			continue
+		var value: float = _limit_value(mate, poses)
+		if (mate["max"] != null and value > float(mate["max"]) + LIMIT_TOL) or (mate["min"] != null and value < float(mate["min"]) - LIMIT_TOL):
+			ok = false
+			break
+	_jac = was
+	return ok
+
+
+## {mate id: bound} of the limits not yet held whose range `poses` leave.
+func _violated(poses: Array) -> Dictionary:
+	var out := {}
+	var was := _jac
+	_jac = false
+	for mate in _mates:
+		if not _LIMIT_TYPES.has(mate["type"]) or _held.has(mate["id"]):
+			continue
+		var value: float = _limit_row(mate, poses)[0]
+		if mate["max"] != null and value > float(mate["max"]) + LIMIT_TOL:
+			out[mate["id"]] = float(mate["max"])
+		elif mate["min"] != null and value < float(mate["min"]) - LIMIT_TOL:
+			out[mate["id"]] = float(mate["min"])
+	_jac = was
+	return out
+
+
 func _evaluate(poses: Array):
 	var res := PackedFloat64Array()
 	var jac: Array = []
 	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			if _held.has(mate["id"]):
+				var lr = _limit_row(mate, poses)
+				var unit := PI / 180.0 if mate["type"] == "limit_angle" else 1.0
+				res.append((float(lr[0]) - float(_held[mate["id"]])) * unit)
+				if _jac:
+					var g := PackedFloat64Array()
+					g.resize(n)
+					var lg: PackedFloat64Array = lr[1]
+					for c in n:
+						g[c] = lg[c] * unit
+					jac.append(g)
+			continue
 		if _COUPLER_TYPES.has(mate["type"]):
 			var cr := _coupler_row(mate, poses)
 			res.append(cr[0])
@@ -662,7 +809,25 @@ func _scaled_rows(jac: Array, w: Array) -> Array:
 
 ## Sequential nearest-point retraction (spec §4b): `iterations` trust-region steps towards `wishes`, then `polish`
 ## constraint-only steps. `w` = per-coordinate metric (see local_scale).
+##
+## With limit mates (version 6) it is the active-set rounds: retract with none held, hold every limit the answer leaves at its nearest bound (an
+## equality row) and retract again from the SAME start and wish, at most LIMIT_ROUNDS times. Nothing is carried to the next call (a limit is released
+## the moment the wish no longer pushes past it); `held_limits()` says which were held.
 func retract(poses: Array, wishes: Array, w: Array, iterations: int = ITERATIONS, polish: int = POLISH) -> Array:
+	_held = {}
+	var got := _retract_once(poses, wishes, w, iterations, polish)
+	if not has_limits():
+		return got
+	for _round in LIMIT_ROUNDS:
+		var violated := _violated(got)
+		if violated.is_empty():
+			break
+		_held.merge(violated, true)
+		got = _retract_once(poses, wishes, w, iterations, polish)
+	return got
+
+
+func _retract_once(poses: Array, wishes: Array, w: Array, iterations: int, polish: int) -> Array:
 	var cur: Array = poses.duplicate()
 	for _it in iterations:
 		var ev = _evaluate(cur)
@@ -731,7 +896,9 @@ func frame(poses: Array, wishes: Array, fallback: Array, lever: float) -> Dictio
 	var got := retract(poses, wishes, w, local_iterations(wish_step))
 	var res := residual_inf(got)
 	var dist := Se3.weighted_dist(got[0], fallback[0], lever)
-	var ok := res <= ACCEPT_RESIDUAL and dist <= ACCEPT_DISTANCE * maxf(lever, wish_step)
+	# A held limit is a stop the projector (the fallback) knows nothing of - it would show the part going on through it - so the distance guard
+	# cannot judge the answer: a converged result with a limit held is accepted as it is.
+	var ok := res <= ACCEPT_RESIDUAL and (not _held.is_empty() or dist <= ACCEPT_DISTANCE * maxf(lever, wish_step))
 	return {
 		"accepted": ok,
 		"poses": got if ok else fallback,

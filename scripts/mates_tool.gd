@@ -62,12 +62,17 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw"]
+const LocalRetraction := preload("res://scripts/motion/local_retraction.gd") ## reads the limit mates of a version-6 model (their measured values); its solve is not run per frame (see _limit_stop)
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
 ## The coupler ("motion") mates (docs/gears-and-motion-plan.md): they place nothing, they keep a relation between how far the two parts MOVE, so turning
 ## one turns the other. Two axis picks (a round face, a circular edge or a straight edge; the rack's second a straight edge), a value (gear: ratio, B
 ## turns per A turn; rack and pinion: mm of rack per pinion turn; screw: mm per turn) and a sense ("Reverse" / "Left-hand"). `mate_value` 0 is Auto for
 ## gear and rack and pinion (the backend reads the teeth); a screw needs its lead.
 const COUPLER_TYPES: Array[String] = ["gear", "rack_pinion", "screw"]
+## The limit mates (docs/limit-mates-scope.md): they place nothing and keep a distance or an angle between a minimum and a maximum (either may be left
+## out). Two picks like Distance / Angle (a plane on at least one side for a distance; a hinge - a concentric mate between the same two parts - for an
+## angle) and a range instead of a value. A drag stops at the bound.
+const LIMIT_TYPES: Array[String] = ["limit_distance", "limit_angle"]
 ## The UI-only mate type of a Width mate (docs/width-mate-plan.md in DIDSA-CAD): four faces - the gap's two, then the two of the part(s) to
 ## centre in it - sent as a plain coincident (centred) or distance (offset from the centre) mate whose two references are mid-planes.
 ## Nothing is created for the mid-plane: it is worked out by the backend on every solve and never drawn.
@@ -89,6 +94,10 @@ var mate_type := "coincident":
 		var crosses := (v in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type) or (mate_type in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type)
 		if v != mate_type and (v in COUPLER_TYPES or mate_type in COUPLER_TYPES):
 			mate_value = 0.0 # a distance typed for another kind of mate is not a ratio, a travel or a lead (0 = Auto)
+		if v != mate_type:
+			limit_min = null # a range typed for one limit is not another's
+			limit_max = null
+			preview_limit_value = null
 		mate_type = v
 		if crosses and not _picks.is_empty():
 			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
@@ -104,6 +113,16 @@ var mate_value := 0.0:
 	set(v):
 		mate_value = v
 		request_preview()
+## A limit mate's range (mm, or degrees for an angle): null = no bound on that side. Not both null.
+var limit_min = null:
+	set(v):
+		limit_min = v
+		request_preview()
+var limit_max = null:
+	set(v):
+		limit_max = v
+		request_preview()
+var preview_limit_value = null ## a limit: the measured value of the picked pair now (the latest preview's `limit_value`), to type a range against
 ## The branch the user picked ("Closest" = not picked: the backend resolves it and the preview says which): "" or "aligned" /
 ## "anti_aligned", and -1 (auto) / 0 / 1 for the DISTANCE side, locked-CONCENTRIC half-turn or ANGLE supplement. Which of them mean
 ## anything for the picked geometry is the backend's call (`branch_controls`, from the preview).
@@ -227,6 +246,10 @@ func is_coupler() -> bool:
 	return mate_type in COUPLER_TYPES
 
 
+func is_limit() -> bool:
+	return mate_type in LIMIT_TYPES
+
+
 func is_multi() -> bool:
 	## A Width or Symmetric mate: picked as several faces rather than two entities.
 	return is_width() or is_symmetric()
@@ -296,6 +319,10 @@ func status_text() -> String:
 				return _branch_notice
 			if mate_type == "screw" and mate_value <= 0.0:
 				return "A screw needs its lead (mm per turn): press Set value."
+			if is_limit():
+				if limit_min == null and limit_max == null:
+					return "%s Press Set value to type the range." % limit_now_text(mate_type, preview_limit_value)
+				return "Moving the part past the range stops it at the bound. %s" % limit_now_text(mate_type, preview_limit_value)
 			if is_coupler():
 				var value_note := ""
 				if mate_value <= 0.0 and preview_coupler_value > 0.0:
@@ -534,9 +561,62 @@ static func type_label(type: String) -> String:
 	match type:
 		"rack_pinion":
 			return "Rack and pinion"
+		"limit_distance":
+			return "Limit distance"
+		"limit_angle":
+			return "Limit angle"
 		"width", "symmetric", "gear", "screw":
 			return type.capitalize()
 	return type.capitalize()
+
+
+static func limit_unit(type: String) -> String:
+	return "\u00b0" if type == "limit_angle" else " mm"
+
+
+static func limit_now_text(type: String, value) -> String:
+	## Pure - "Now 20 mm." (the measured value of the pair), or "" when not known.
+	if value == null:
+		return ""
+	return "Now %s%s." % [_trim_number(float(value)), limit_unit(type)]
+
+
+static func limit_range_text(type: String, lo, hi) -> String:
+	## Pure - a limit's range as the lists show it: "0 mm to 30 mm", "min 5 mm", "max 110\u00b0"; "" with neither bound.
+	var unit := limit_unit(type)
+	if lo != null and hi != null:
+		return "%s%s to %s%s" % [_trim_number(float(lo)), unit, _trim_number(float(hi)), unit]
+	if lo != null:
+		return "min %s%s" % [_trim_number(float(lo)), unit]
+	if hi != null:
+		return "max %s%s" % [_trim_number(float(hi)), unit]
+	return ""
+
+
+static func _trim_number(x: float) -> String:
+	return ("%.3f" % x).rstrip("0").rstrip(".")
+
+
+static func parse_limit_bound(type: String, text: String) -> Dictionary:
+	## Pure - one typed bound of a limit: {"ok", "value" (null = empty = no bound), "error"}. A number, or empty for no bound on that side; an angle within +-180.
+	var trimmed := text.strip_edges()
+	if trimmed == "":
+		return {"ok": true, "value": null, "error": ""}
+	if not trimmed.is_valid_float():
+		return {"ok": false, "value": null, "error": "\"%s\" is not a number" % trimmed}
+	var v := trimmed.to_float()
+	if type == "limit_angle" and absf(v) > 180.0:
+		return {"ok": false, "value": null, "error": "Angles run from -180 to 180 degrees"}
+	return {"ok": true, "value": v, "error": ""}
+
+
+static func limit_range_error(lo, hi) -> String:
+	## Pure - why the range (either bound may be null) is not one the backend accepts, or "".
+	if lo == null and hi == null:
+		return "Type a minimum, a maximum, or both."
+	if lo != null and hi != null and float(lo) > float(hi):
+		return "The minimum is above the maximum."
+	return ""
 
 
 static func coupler_value_text(type: String, value) -> String:
@@ -746,6 +826,7 @@ func _run_preview(seq: int) -> void:
 		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
 		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
 		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
+		preview_limit_value = float(json["limit_value"]) if is_limit() and json.get("limit_value") != null else null
 		if is_coupler():
 			preview_coupler_value = float(json["coupler_value"]) if json.get("coupler_value") != null else -1.0
 			if _flip_choice < 0 and branch_resolved.get("secondary_flip") != null:
@@ -754,8 +835,8 @@ func _run_preview(seq: int) -> void:
 		_branch_changes = found if found is Array else []
 		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
 	_clear_ghost()
-	if is_coupler():
-		members = [] # a coupler places nothing: no ghost (the preview only brings the default value and sense)
+	if is_coupler() or is_limit():
+		members = [] # a coupler / limit places nothing: no ghost (the preview only brings the default value and sense)
 	for member in members:
 		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
 		if part != null:
@@ -801,7 +882,8 @@ func _clear_ghost() -> void:
 
 
 func can_create() -> bool:
-	return _picks.size() == pick_target() and _width_error == "" and not _busy and not (mate_type == "screw" and mate_value <= 0.0)
+	return _picks.size() == pick_target() and _width_error == "" and not _busy and not (mate_type == "screw" and mate_value <= 0.0) \
+		and not (is_limit() and limit_range_error(limit_min, limit_max) != "")
 
 
 func build_create_payload(with_branch_changes := false) -> Dictionary:
@@ -834,6 +916,11 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 		payload["value"] = mate_value
 	elif is_coupler() and mate_value > 0.0:
 		payload["value"] = mate_value # left out for Auto (gear, rack and pinion): the backend reads the teeth
+	elif is_limit():
+		if limit_min != null:
+			payload["limit_min"] = float(limit_min)
+		if limit_max != null:
+			payload["limit_max"] = float(limit_max)
 	if with_branch_changes and not _branch_changes.is_empty():
 		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload
@@ -1958,6 +2045,12 @@ func drag_member_nodes(part: Node3D) -> Dictionary:
 	return {} if state.is_empty() else (state["nodes"] as Dictionary).duplicate()
 
 
+func drag_at_limit(part: Node3D) -> bool:
+	## True while the drag in progress on `part` is held at a limit mate's bound (the part is stopped by it).
+	var state: Dictionary = _drag.get(part, {})
+	return not state.is_empty() and bool(state["at_limit"])
+
+
 func drag_model_ready(part: Node3D) -> bool:
 	## True once an anchor has been accepted for this part's drag (tests wait on it).
 	var state: Dictionary = _drag.get(part, {})
@@ -1976,6 +2069,7 @@ func _new_drag_state(part: Node3D) -> Dictionary:
 		"members": [] as Array, "nodes": {}, "starts": {}, # occurrence id -> Node3D / pre-grab Transform3D
 		"hold": false, "held": [], "shown": [], "shown_grabbed": _local_pose(part), "shown_pose": Se3.from_transform3d(_local_pose(part)),
 		"last_error_ms": -100000.0,
+		"limits": null, "at_limit": false, # a version-6 model (limit mates: read for their values) and whether the last frame was stopped by one
 	}
 
 
@@ -2011,11 +2105,73 @@ func _frame_poses(state: Dictionary) -> Array:
 	var hyst = state["hyst"]
 	var blender = state["blender"]
 	var frame: Dictionary = hyst.frame(state["wish"])
+	var projected: Array = _limit_stop(state, frame["poses"], true)
 	if frame["event"] == "adopted":
-		blender.on_anchor(frame["prev_poses"], frame["poses"])
-	var poses: Array = blender.shown(frame["poses"])
+		blender.on_anchor(_limit_stop(state, frame["prev_poses"]), projected)
+	var poses: Array = blender.shown(projected)
 	state["shown"] = poses
 	return poses
+
+
+func _adopt_limit_model(state: Dictionary, model_json) -> void:
+	## An anchor answer's `constraint_model`: kept (to read the limit mates' values) only when it holds a limit mate. A later answer that omits it keeps the one we
+	## have; one without limits drops it. The model's own solve is NOT run per frame here: with the whole group in it (a gear train: pinion, gear, rack, crank, 42
+	## rows) it costs 12 to 70 ms a frame in GDScript, which a headset cannot spare; the cheap stop below does the same job for the motion the mates allow.
+	if model_json == null:
+		return
+	var model = LocalRetraction.try_parse(model_json, 8)
+	state["limits"] = model if model != null and model.has_limits() else null
+
+
+func _limit_stop(state: Dictionary, poses: Array, record := false) -> Array:
+	## The projector (and so `poses`) is limit-blind: it would carry the part on through a stop and the next anchor would pop it back. This keeps the same motion
+	## but stops it where a limit mate's range ends: the displacement from the anchor's poses (a screw per member, the projector's own chart) is scaled back by the
+	## largest fraction that keeps every limit inside its range (bisection on the limit values, no derivatives). Exact for a rack or a hinge (one free motion), a
+	## uniform slow-down for a diagonal drag into a stop (the nearest-point solve in the flat app slides along it instead). Nothing here when no limit is violated.
+	## `record`: this is the frame being shown, so `state["at_limit"]` says whether it was stopped (the Drive readout and the release message read it).
+	if record:
+		state["at_limit"] = false
+	var model = state["limits"]
+	var hyst = state["hyst"]
+	if model == null or hyst.active == null or model.member_ids != state["members"]:
+		return poses
+	if model.limits_in_range(poses):
+		return poses
+	var refs: Array = hyst.active.refs
+	var twists: Array = []
+	for i in poses.size():
+		twists.append(Se3.screw_log(refs[i], poses[i]))
+	var lo := 0.0
+	var hi := 1.0
+	var measured: Array = model.limit_member_indices() # only these members' poses decide a limit's value: the search moves only them
+	for _step in 16: # the fraction to 1/65536: 56 mm of travel to a thousandth of a millimetre, 200 degrees to 0.003
+		var mid := (lo + hi) / 2.0
+		if model.limits_in_range(_scaled_poses(refs, twists, mid, measured)):
+			lo = mid
+		else:
+			hi = mid
+	if record:
+		state["at_limit"] = true
+	return _scaled_poses(refs, twists, lo)
+
+
+static func _scaled_poses(refs: Array, twists: Array, fraction: float, only: Array = []) -> Array:
+	## The anchor poses moved `fraction` of the way along their twists (every member, or only those in `only`: the rest stay at the anchor).
+	var out: Array = []
+	for i in refs.size():
+		if not only.is_empty() and not only.has(i):
+			out.append(refs[i])
+			continue
+		var d: Array = []
+		for c in 6:
+			d.append(float(twists[i][c]) * fraction)
+		out.append(Se3.screw_exp(refs[i], d))
+	return out
+
+
+func _projected(state: Dictionary, wish) -> Array:
+	## What the CURRENT model shows for `wish`, stopped at the limits (hyst.peek + _limit_stop).
+	return _limit_stop(state, state["hyst"].peek(wish))
 
 
 func _apply_followers(state: Dictionary, poses: Array) -> void:
@@ -2110,9 +2266,11 @@ func handle_anchor_response(state: Dictionary, response: Dictionary, wish_sent) 
 			for row in basis:
 				if not (row is Array) or (row as Array).size() != 6 * members.size():
 					converged = false
+	if converged:
+		_adopt_limit_model(state, json.get("constraint_model")) # before the acceptance test and the blend: both read what the model shows, stopped at the limits
 	var own = null
 	if hyst.active != null and converged and wish_sent != null:
-		own = hyst.peek(wish_sent)[0] # the grabbed pose the CURRENT model projects the SAME wish to
+		own = _projected(state, wish_sent)[0] # the grabbed pose the CURRENT model projects the SAME wish to (stopped at the limits)
 	var decision := ReanchorScheduler.accept_anchor(converged, quality.get("residual_inf"), refs[0] if converged else null, own, lever)
 	if not bool(decision["accept"]):
 		_anchor_missed(state, "transport" if not response["ok"] and int(response.get("code", 0)) == 0 else str(decision["reason"]), response)
@@ -2165,11 +2323,11 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 		state["hold"] = false
 	else:
 		var holding: bool = bool(state["hold"])
-		var old_projected: Array = state["held"] if holding else hyst.peek(wish)
+		var old_projected: Array = state["held"] if holding else _projected(state, wish)
 		if holding:
 			blender.reset(ids.size()) # resume from the held pose with a normal blend
 		hyst.on_anchor(model)
-		blender.on_anchor(old_projected, hyst.peek(wish))
+		blender.on_anchor(old_projected, _projected(state, wish))
 		state["hold"] = false
 	state["lever_arm"] = lever
 	state["sched"].on_accepted(quality.get("max_step"), quality.get("sigma_gap"))
@@ -2216,6 +2374,8 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			if not before.is_equal_approx(after):
 				changes.append({"node": node, "before": before, "after": after})
 		_push_group_move("move %s" % label_or(part, str(part.name)), changes)
+		if bool(state["at_limit"]):
+			_report("%s stopped at its limit." % label_or(part, "The part"))
 	else:
 		# nothing is stored: put every member back where the grab found it
 		for occ in starts:

@@ -2,7 +2,8 @@ extends SceneTree
 ## Real backend (LOCAL ONLY, see tests/README.md): the gear train demo (demo/assemblies/gear_train/Gear_train.didsa, gears-and-motion plan M8). Opened as a file, it has
 ## its three coupler mates (pinion to gear, rack and pinion, crank to pinion) and `mate-motion` with the crank turned 90 degrees answers with the pinion turned the
 ## same 90 degrees, the 40-tooth gear 45 degrees the opposite way, the rack slid a quarter of its travel per turn (about 31.4 mm) along x only, and the plate and guide
-## still. A second request from the new anchor keeps going.
+## still. A second request from the new anchor keeps going. The rack also has a travel limit (M9): it may slide 40 mm one way and only 6 mm the other,
+## so the crank turned the way that slides it 31.4 mm gets all of it, and turned the other way the rack stops at 6 mm and the whole train stops with it.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_gear_train.gd  (needs secrets.cfg and a running backend)
 
 var main
@@ -43,6 +44,18 @@ func pose_of(answer: Dictionary, occurrence_id: String) -> Dictionary:
 	return {}
 
 
+func crank_wish(start: Dictionary, degrees: float) -> Dictionary:
+	var wish: Dictionary = (start["crank"] as Dictionary).duplicate(true)
+	wish["rotation_axis"] = [0, 0, 1]
+	wish["rotation_angle_degrees"] = degrees
+	# the crank's origin is its corner, not its hole: turn it about the pinion's axis (through (50, 55)), moving the origin round with it
+	var centre := Vector2(50.0, 55.0)
+	var t: Array = (start["crank"] as Dictionary)["translation"]
+	var turned := (Vector2(float(t[0]), float(t[1])) - centre).rotated(deg_to_rad(degrees)) + centre
+	wish["translation"] = [turned.x, turned.y, float(t[2])]
+	return wish
+
+
 func _initialize() -> void:
 	if not FileAccess.file_exists("res://secrets.cfg"):
 		print("SMOKE SKIPPED: no secrets.cfg, this test needs a running local backend, see tests/README.md")
@@ -69,19 +82,11 @@ func _initialize() -> void:
 	var kinds := {}
 	for m in mates:
 		kinds[str(m["type"])] = int(kinds.get(str(m["type"]), 0)) + 1
-	print("SMOKE the demo has two gear mates and a rack and pinion mate, plus its plain mates: ", kinds.get("gear", 0) == 2 and kinds.get("rack_pinion", 0) == 1 and kinds.get("concentric", 0) == 3 and kinds.get("coincident", 0) == 5, " ", kinds)
+	print("SMOKE the demo has two gear mates and a rack and pinion mate, plus its plain mates: ", kinds.get("gear", 0) == 2 and kinds.get("rack_pinion", 0) == 1 and kinds.get("concentric", 0) == 3 and kinds.get("coincident", 0) == 5 and kinds.get("limit_distance", 0) == 1, " ", kinds)
 	var start := {}
 	for o in await get_json("/parts/%s/occurrences" % owner_id):
 		start[str(o["id"])] = o["transform"]
-	var wish: Dictionary = (start["crank"] as Dictionary).duplicate(true)
-	wish["rotation_axis"] = [0, 0, 1]
-	wish["rotation_angle_degrees"] = 90.0
-	# the crank's origin is its corner, not its hole: turn it 90 degrees about the pinion's axis (through (50, 55)), moving the origin round with it
-	var centre := Vector2(50.0, 55.0)
-	var t: Array = (start["crank"] as Dictionary)["translation"]
-	var turned := (Vector2(float(t[0]), float(t[1])) - centre).rotated(deg_to_rad(90.0)) + centre
-	wish["translation"] = [turned.x, turned.y, float(t[2])]
-	var answer := await motion("crank", wish)
+	var answer := await motion("crank", crank_wish(start, -90.0)) # the way the rack has room for (40 mm): the whole quarter turn
 	print("SMOKE turning the crank 90 degrees converges, one degree of freedom for the whole train: ", bool(answer.get("converged", false)) and int(answer.get("dof", -1)) == 1, " dof ", answer.get("dof"))
 	var crank := pose_of(answer, "crank")
 	var pinion := pose_of(answer, "pinion")
@@ -100,4 +105,14 @@ func _initialize() -> void:
 		if not pose_of(answer, id).is_empty():
 			still = false
 	print("SMOKE the fixed plate and guide are not in the answer: ", still)
+	# the other way the rack has only 6 mm: a quarter turn the other way asks for 31.4 mm, the limit stops the rack at 6 and the pinion and gear with it
+	var stopped := await motion("crank", crank_wish(start, 90.0))
+	var stopped_rack := pose_of(stopped, "rack")
+	var stopped_pinion := pose_of(stopped, "pinion")
+	var stopped_gear := pose_of(stopped, "gear")
+	var slid_x := float(stopped_rack["translation"][0]) - float((start["rack"] as Dictionary)["translation"][0]) if not stopped_rack.is_empty() else 0.0
+	print("SMOKE turned the other way the rack stops at its limit (6 mm, not 31.4): ", bool(stopped.get("converged", false)) and absf(slid_x - 6.0) < 0.01, " ", slid_x)
+	var pinion_turn := z_turn(stopped_pinion) if not stopped_pinion.is_empty() else 0.0
+	print("SMOKE the pinion and gear stop with the rack (6 mm of 125.66 per turn = 17.19 degrees; the gear half of it the other way): ", absf(pinion_turn - 360.0 * 6.0 / (PI * 2.0 * 20.0)) < 0.05 and not stopped_gear.is_empty() and absf(z_turn(stopped_gear) + 0.5 * pinion_turn) < 0.05, " ", pinion_turn)
+	print("SMOKE the answer carries a version-6 constraint model for the clients' per-frame stop: ", int((stopped.get("constraint_model", {}) as Dictionary).get("version", 0)) == 6)
 	quit()

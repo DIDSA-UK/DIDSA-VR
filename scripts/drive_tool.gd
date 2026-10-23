@@ -264,6 +264,10 @@ func _step(delta: float) -> void:
 		_slides.clear()
 	else:
 		base = mates_tool.desired_global(part) if mates_tool.has_drag(part) else part.global_transform
+		if mates_tool.has_method("drag_at_limit") and mates_tool.drag_at_limit(part):
+			# Stopped by a limit mate: the wish stays one step past the stop instead of winding up (the stick held on past a stop would otherwise run the wish
+			# half a turn or more beyond it, where a pose is read as being on the other side, and reversing would have to unwind it first).
+			base = part.global_transform
 	var dir: Vector3 = _axis_world["dir"]
 	var wish: Transform3D
 	if kind == "spin":
@@ -353,4 +357,6 @@ func readout_text() -> String:
 			parts.append(named.call(node, "%d rpm" % roundi(rpm)))
 		elif slide >= 0.5:
 			parts.append(named.call(node, "%d mm/s" % roundi(slide))) # a rack: it slides, it does not turn
+	if mates_tool != null and mates_tool.has_method("drag_at_limit") and mates_tool.drag_at_limit(part):
+		parts.append("at its limit")
 	return " · ".join(parts)

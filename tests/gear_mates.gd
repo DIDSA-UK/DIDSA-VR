@@ -46,8 +46,8 @@ func _frames(n: int) -> void:
 func _initialize() -> void:
 	# --- the types
 	var types: Array = MatesTool.MATE_TYPES
-	print("SMOKE the mates tool lists the three couplers after the others: ", types.slice(types.size() - 3) == ["gear", "rack_pinion", "screw"] and MatesTool.COUPLER_TYPES == ["gear", "rack_pinion", "screw"])
-	print("SMOKE the tablet has a label for every type, in the same order: ", TabletPages.MATE_TYPE_LABELS.size() == types.size() and TabletPages.MATE_TYPE_LABELS.slice(types.size() - 3) == ["Gear", "Rack and pinion", "Screw"])
+	print("SMOKE the mates tool lists the three couplers, then the two limits, after the others: ", types.slice(types.size() - 5) == ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"] and MatesTool.COUPLER_TYPES == ["gear", "rack_pinion", "screw"] and MatesTool.LIMIT_TYPES == ["limit_distance", "limit_angle"])
+	print("SMOKE the tablet has a label for every type, in the same order: ", TabletPages.MATE_TYPE_LABELS.size() == types.size() and TabletPages.MATE_TYPE_LABELS.slice(types.size() - 5) == ["Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"])
 	print("SMOKE the wheel has a label and a hint for every type: ", types.all(func(t: String) -> bool: return WheelFlows.MATE_TYPE_LABELS.has(t) and WheelFlows.MATE_TYPE_HINTS.has(t)))
 	print("SMOKE type labels: ", MatesTool.type_label("rack_pinion") == "Rack and pinion" and MatesTool.type_label("gear") == "Gear" and MatesTool.type_label("screw") == "Screw" and MatesTool.type_label("concentric") == "Concentric")
 

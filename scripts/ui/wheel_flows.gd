@@ -16,7 +16,7 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
@@ -28,6 +28,8 @@ const MATE_TYPE_HINTS := {
 	"gear": "Turning one turns the other (2 round things)",
 	"rack_pinion": "A gear turns a rack along its edge",
 	"screw": "A nut climbs a screw as it turns (you type the lead)",
+	"limit_distance": "A gap that stops at a min / max (you type them)",
+	"limit_angle": "A hinge that stops at a min / max angle",
 }
 
 var tokens: Resource
@@ -411,10 +413,36 @@ func _set_mate_type(type: String) -> void:
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
 	elif type == "screw":
 		_main.open_keyboard_for("", _apply_mate_value.bind(type, "mm per turn"), {"title": _mates.value_prompt(type)})
+	elif type in _mates.LIMIT_TYPES:
+		_ask_limit_range(type)
 	elif type == "width":
 		# The optional offset from the centre (0 = centred exactly); the tablet's Set value button does the same.
 		_main.open_keyboard_for(("%.3f" % _mates.width_offset).rstrip("0").rstrip("."), _apply_width_offset, {"title": "Width offset from centre (mm, 0 = centred)"})
 	refresh_prompt()
+
+
+func _ask_limit_range(type: String) -> void:
+	## Minimum, then maximum (empty = none) on the keyboard; the same range the tablet's Set value asks.
+	var unit := "degrees" if type == "limit_angle" else "mm"
+	_main.open_keyboard_for("", func(min_text: String) -> void:
+		var parsed_min: Dictionary = _mates.parse_limit_bound(type, min_text)
+		if not parsed_min["ok"]:
+			say(str(parsed_min["error"]), 4.0)
+			return
+		_main.open_keyboard_for("", func(max_text: String) -> void:
+			var parsed_max: Dictionary = _mates.parse_limit_bound(type, max_text)
+			if not parsed_max["ok"]:
+				say(str(parsed_max["error"]), 4.0)
+				return
+			var problem: String = _mates.limit_range_error(parsed_min["value"], parsed_max["value"])
+			if problem != "":
+				say(problem, 4.0)
+				return
+			_mates.limit_min = parsed_min["value"]
+			_mates.limit_max = parsed_max["value"]
+			say("%s %s" % [MATE_TYPE_LABELS[type], _mates.limit_range_text(type, _mates.limit_min, _mates.limit_max)])
+		, {"title": "Maximum (%s, empty = none)" % unit})
+	, {"title": "Minimum (%s, empty = none)" % unit})
 
 
 func _apply_width_offset(text: String) -> void:

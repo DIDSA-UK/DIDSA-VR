@@ -1,6 +1,6 @@
 # Limit mates (M9): scope note
 
-Status: **proposed, awaiting the owner's approval. Nothing is built.** Expands §3.6 of `gears-and-motion-plan.md`.
+Status: **built on 2026-10-23 (owner's go, with the three decisions below); see "As built" at the end for where the code differs from this note.** Expands §3.6 of `gears-and-motion-plan.md`.
 
 ## What a user gets
 
@@ -55,3 +55,18 @@ Status: **proposed, awaiting the owner's approval. Nothing is built.** Expands �
 
 - The inequality handling is an active-set heuristic. Ranges where two limits fight each other or a limit sits on a coupler's driven side may need more rounds than 3 and would report infeasible.
 - Headless tests cannot judge how the stop feels in the headset.
+
+## As built (2026-10-23)
+
+What is described above is what the code does, except:
+
+- **No hysteresis, no state.** The clients rebuild the held set on every frame (retract with none held, hold what is violated, retract again from the same start and wish), so a limit is released the moment the wish stops pushing past it and nothing can chatter. The earlier plan for a hysteresis band was dropped.
+- **A converged result with a limit held is accepted without the distance guard.** The limit-blind projector (the guard's fallback) would show the part going through the stop, so comparing the answer with it would reject exactly the right answer.
+- **Version 6 is a superset** of 3 to 5 (a group with a limit may also hold couplers, with their `anchor`s, and pairs).
+- **The sign of a limit_distance** is `(P_a - P_b) . N` with N the unit normal of B's plane (A's when B has none), references never swapped: the number is the same however a solve orients the pair. The mate list and the panels show "Now 20 mm" so a range is typed against where the parts are. A limit_angle is the signed angle from A's direction to B's about the hinge, the hinge being a concentric mate between the same two parts (as for an Angle; without one the backend answers 422 `limit_angle_needs_hinge`).
+- **Creating a limit never solves** (`?solve=` is ignored): it places nothing. A part that is already outside the range is brought to the nearest bound by the next solve or drag.
+- **VR does not run the nearest-point solve per frame.** The GDScript port (`local_retraction.gd`, 71 golden vectors to 1e-9 including every limit case) is correct but, on the gear train demo (four members, 42 rows), costs 12 ms a frame without a limit held and 69 ms with one, on a desktop; a headset cannot spare that. So the VR drag keeps the limit-blind projection and stops it where a limit ends: the displacement from the anchor's poses (a screw per member, the projector's own chart) is scaled back by the largest fraction that keeps every limit inside its range (16 bisection steps on the limit values, no derivatives; 0.8 ms for the four-member train on a desktop). Exact for a rack or a hinge (one free motion); a diagonal drag into a stop slows down uniformly instead of sliding along it as the flat app's retraction does.
+- **The Drive tool's wish does not wind up past a stop.** Its wish accumulates without bound (a hand that never lets go); held on past a stop for a second or two it ran half a turn beyond, where a pose reads as being on the other side (the rack jumped to its far end). While a limit holds the part, the wish stays one step past the displayed pose; reversing the stick moves it back on the first frame.
+- **Hand drags** past a stop have the same half-turn wrap if the hand goes more than half a turn beyond it; not handled.
+- **Not done:** the angle limit in the flat app's and VR's UI was only unit-tested (the live backend e2e is the distance limit on the demo's rack and the hinge in `test_limit_mates.py`); no "at limit" cue other than the flat app's "Stopped at its limit." on release, VR's release message and the Drive readout's "at its limit"; nothing seen on a headset.
+

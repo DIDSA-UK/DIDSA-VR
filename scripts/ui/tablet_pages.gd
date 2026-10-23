@@ -24,7 +24,7 @@ const NativeCompose := preload("res://scripts/native_compose.gd") ## which file 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
 const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
 const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
@@ -792,7 +792,7 @@ func _refresh_mates_branch_controls() -> void:
 		return
 	var tool = _mates_tool
 	if _mates_toggles_row != null:
-		_mates_toggles_row.visible = not tool.is_coupler()
+		_mates_toggles_row.visible = not tool.is_coupler() and not tool.is_limit()
 	var text: String = tool.branch_text()
 	_mates_branch_label.text = text
 	_mates_branch_label.visible = text != ""
@@ -802,6 +802,8 @@ func _refresh_mates_branch_controls() -> void:
 	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.flip_is_on() else "off"]
 	if _mates_value_label != null and tool.is_coupler():
 		_mates_value_label.text = _coupler_value_label(tool)
+	elif _mates_value_label != null and tool.is_limit():
+		_mates_value_label.text = _limit_value_label(tool)
 	var steps: int = tool.branch_alternatives.size()
 	_mates_next_button.visible = steps > 1
 	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
@@ -831,8 +833,43 @@ func _coupler_value_label(tool) -> String:
 	return "%s: %s" % [_MatesTool.value_prompt(tool.mate_type).split(" (")[0], shown]
 
 
+func _limit_value_label(tool) -> String:
+	## The value line of a limit mate: its range as typed so far, and where the picked pair is now.
+	var range_text: String = _MatesTool.limit_range_text(tool.mate_type, tool.limit_min, tool.limit_max)
+	var now: String = _MatesTool.limit_now_text(tool.mate_type, tool.preview_limit_value)
+	return "Range: %s%s" % ["(set it)" if range_text == "" else range_text, "" if now == "" else "  (%s)" % now.trim_suffix(".")]
+
+
+func _ask_limit_range(type: String, lo, hi, on_done: Callable) -> void:
+	## Two keyboards, minimum then maximum (empty = no bound on that side); `on_done(lo, hi)` gets the pair only if both parsed and form a range.
+	var unit := "degrees" if type == "limit_angle" else "mm"
+	_main.open_keyboard_for("" if lo == null else _trim_mate_value(lo), func(min_text: String) -> void:
+		var parsed_min: Dictionary = _MatesTool.parse_limit_bound(type, min_text)
+		if not parsed_min["ok"]:
+			toast.emit(str(parsed_min["error"]), "error")
+			return
+		_main.open_keyboard_for("" if hi == null else _trim_mate_value(hi), func(max_text: String) -> void:
+			var parsed_max: Dictionary = _MatesTool.parse_limit_bound(type, max_text)
+			if not parsed_max["ok"]:
+				toast.emit(str(parsed_max["error"]), "error")
+				return
+			var problem: String = _MatesTool.limit_range_error(parsed_min["value"], parsed_max["value"])
+			if problem != "":
+				toast.emit(problem, "error")
+				return
+			on_done.call(parsed_min["value"], parsed_max["value"])
+		, {"title": "Maximum (%s, empty = none)" % unit})
+	, {"title": "Minimum (%s, empty = none)" % unit})
+
+
 func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
+		return
+	if _mates_tool.is_limit():
+		_ask_limit_range(_mates_tool.mate_type, _mates_tool.limit_min, _mates_tool.limit_max, func(lo, hi) -> void:
+			_mates_tool.limit_min = lo
+			_mates_tool.limit_max = hi
+			_mates_value_label.text = _limit_value_label(_mates_tool))
 		return
 	if _mates_tool.is_coupler():
 		_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value) if _mates_tool.mate_value > 0.0 else "", func(text: String) -> void:
@@ -884,6 +921,7 @@ func _mates_rows() -> Array:
 		var is_symmetric_mate: bool = refs_list.size() == 2 and refs_list[0] is Dictionary and refs_list[0].get("midplane") != null and refs_list[1] is Dictionary and refs_list[1].get("midplane") == null
 		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else _MatesTool.type_label(type_str))
 		var is_coupler_mate: bool = type_str in _MatesTool.COUPLER_TYPES
+		var is_limit_mate: bool = type_str in _MatesTool.LIMIT_TYPES
 		var has_value: bool = mate.get("value") != null and not is_coupler_mate
 		var mate_id := str(mate.get("id", ""))
 		var free_spin := bool(mate.get("allow_rotation", true))
@@ -892,6 +930,10 @@ func _mates_rows() -> Array:
 		var notes := []
 		if is_coupler_mate:
 			notes.append(_MatesTool.coupler_value_text(type_str, mate.get("value"))) # (the raw sense means nothing on its own: only the Reverse action shows it)
+		if is_limit_mate:
+			notes.append(_MatesTool.limit_range_text(type_str, mate.get("limit_min"), mate.get("limit_max")))
+			if mate.get("limit_value") != null:
+				notes.append("now %s%s" % [_trim_mate_value(mate["limit_value"]), _MatesTool.limit_unit(type_str)])
 		if alignment != null:
 			notes.append(("swing %s" % _MatesTool.alignment_label(type_str, str(alignment))) if type_str == "angle" else ("aligned" if str(alignment) == "aligned" else "anti-aligned"))
 		if secondary != null and not is_coupler_mate:
@@ -908,6 +950,8 @@ func _mates_rows() -> Array:
 			actions.append({"label": "Lock rotation" if free_spin else "Free rotation", "callback": _on_edit_mate.bind(mate_id, {"allow_rotation": not free_spin})})
 		if type_str in ["distance", "angle"] or is_coupler_mate:
 			actions.append({"label": "Value", "callback": _on_edit_mate_value.bind(mate_id, mate.get("value"))})
+		if is_limit_mate:
+			actions.append({"label": "Range", "callback": _on_edit_limit_range.bind(mate_id, type_str, mate.get("limit_min"), mate.get("limit_max"))})
 		actions.append({"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)})
 		rows.append({
 			"id": mate_id,
@@ -925,6 +969,13 @@ func _on_edit_mate(mate_id: String, fields: Dictionary) -> void:
 	var result: Dictionary = await _mates_tool.update_mate(_mates_last_owner_part_id, mate_id, fields)
 	if not result["ok"]:
 		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
+
+
+func _on_edit_limit_range(mate_id: String, type_str: String, lo, hi) -> void:
+	if _mates_tool == null or _main == null:
+		return
+	_ask_limit_range(type_str, lo, hi, func(new_lo, new_hi) -> void:
+		_on_edit_mate(mate_id, {"limit_min": new_lo, "limit_max": new_hi}))
 
 
 func _on_edit_mate_value(mate_id: String, current) -> void:

@@ -90,3 +90,7 @@ Whatever the verdict, VR stays correct: the projector is the fallback and the on
 The drag on the headset also depends on network round trips (anchors), hand tracking and rendering; this isolates only the solver's CPU
 cost. A GDScript solver could be made cheaper (sparse rows, reusing the factorisation, fewer iterations on small wishes): not attempted
 because on the desktop numbers the unoptimised port is already ~10x the projector for k=1-2.
+
+## Addendum, 23 Oct: the gear train (limit mates, M9)
+
+The VR drag was going to run the nearest-point solve per frame for groups with a limit mate. Measured on the gear train demo's real constraint model (pinion, gear, rack, crank: 4 members, 42 rows, `Local.try_parse(model, 8)`, a desktop, headless): **11.7 ms per `frame()` with no limit held and 69 ms with one held** (the active-set rounds run the retraction two to four times). Far over a headset frame (11 ms) before the Quest's slower CPU is counted. So VR does not run it for such groups: the drag keeps the limit-blind projection and stops it at the limit with a bisection on the limit values (`MatesTool._limit_stop`, 0.8 ms for the same four members, only while a limit is violated). See `limit-mates-scope.md`.

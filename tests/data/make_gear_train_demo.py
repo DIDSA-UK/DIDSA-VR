@@ -2,7 +2,7 @@
 
 The document: a plate (fixed) carrying a 20-tooth pinion and a 40-tooth gear (module 2, bore 8, 60 mm apart, each concentric to a hole of the plate and
 flat on it), a 10-tooth rack that can only slide along x (flat on the plate, back on a fixed guide block) under the pinion, and a crank handle (a bar with a
-hole) over the pinion. Mates: gear (pinion to gear, Auto ratio 1 : 2), rack and pinion (Auto travel per turn), and a 1 : 1 gear mate (the sense reversed from
+hole) over the pinion. Mates: gear (pinion to gear, Auto ratio 1 : 2), rack and pinion (Auto travel per turn), a travel limit on the rack (it slides 46 mm, so it stays on the plate and under the pinion), and a 1 : 1 gear mate (the sense reversed from
 the default) that makes the crank turn with the pinion the same way round. Turn the crank (or use the Drive tool on it): the gear turns the other way at half the speed and the rack slides.
 Done in Python (not in Godot) for the same reason as make_gear_fixture.py. Usage (from the project root, after tools/start_backend.sh):
     python3 tests/data/make_gear_train_demo.py
@@ -185,6 +185,13 @@ mate("rack_pinion", ref("pinion", pinion, cylinder_face(pinion)), edge_ref("rack
 # (the backend's default sense for two gears is the OPPOSITE way round in the world, as meshing gears turn; a crank fixed to the pinion turns the SAME way, so take the other one)
 crank_mate = mate("gear", ref("crank", crank, cylinder_face(crank)), ref("pinion", pinion, cylinder_face(pinion)), value=1.0)
 call("PATCH", f"/document/parts/{root['id']}/mates/{crank_mate['id']}", {"secondary_flip": not crank_mate["secondary_flip"]})
+
+# the rack's travel (limit mates, M9): its +x end against the plate's +x edge, the signed gap from the plate edge, limited to where the pinion still meets the
+# rack - it slides 40 mm towards the plate's left edge and 6 mm back to the right of where it starts (the rack starts near the right end of its travel). Made with
+# a wide range first to read where it sits now, then narrowed around that.
+rack_end = mate("limit_distance", ref("rack", rack, planar_face(rack, (1.0, 0.0, 0.0))), ref("plate", plate, planar_face(plate, (1.0, 0.0, 0.0))), limit_min=-1000.0, limit_max=1000.0)
+now = rack_end["limit_value"]
+call("PATCH", f"/document/parts/{root['id']}/mates/{rack_end['id']}", {"limit_min": round(now - 40.0, 3), "limit_max": round(now + 6.0, 3)})
 
 document = call("GET", "/document/export/native")
 document["document"]["root_part_id"] = root["id"]
