@@ -46,6 +46,21 @@ func _initialize() -> void:
 	print("SMOKE the tablet and the wheel have a label (and the wheel a hint) for them: ", TabletPages.MATE_TYPE_LABELS.slice(types.size() - 2) == ["Limit distance", "Limit angle"] and MatesTool.LIMIT_TYPES.all(func(t: String) -> bool: return WheelFlows.MATE_TYPE_LABELS.has(t) and WheelFlows.MATE_TYPE_HINTS.has(t)))
 	print("SMOKE type labels: ", MatesTool.type_label("limit_distance") == "Limit distance" and MatesTool.type_label("limit_angle") == "Limit angle")
 
+	# --- the wheel's Type ring: seven wedges (five basic, Centre, Motion), every type reachable once, each with its own icon
+	var ring: Array = WheelFlows.MATE_RING_BASIC + WheelFlows.MATE_RING_CENTRE + WheelFlows.MATE_RING_MOTION
+	var sorted_ring := ring.duplicate()
+	sorted_ring.sort()
+	var sorted_types := types.duplicate()
+	sorted_types.sort()
+	print("SMOKE every mate type is on the Type ring (directly or under Centre / Motion) exactly once: ", sorted_ring == sorted_types, " ", ring.size())
+	var UiIcons := preload("res://scripts/ui/ui_icons.gd")
+	var seen := {}
+	var icons_ok := true
+	for t in types:
+		icons_ok = icons_ok and UiIcons.has_icon("mate_" + t) and not seen.has(UiIcons.svg("mate_" + t))
+		seen[UiIcons.svg("mate_" + t)] = true
+	print("SMOKE every mate type has an icon of its own: ", icons_ok and UiIcons.has_icon("mate_width") and UiIcons.has_icon("mate_gear"))
+
 	# --- pure helpers
 	var ok_bound := MatesTool.parse_limit_bound("limit_distance", " 12.5 ")
 	var empty_bound := MatesTool.parse_limit_bound("limit_distance", "")

@@ -399,10 +399,31 @@ func _mates_pick_hint() -> String:
 	return "Pick two faces first"
 
 
+## The Type ring is kept to seven wedges (twelve crowded the labels and left no room for a distinct icon each): the five basic types, then two sub-rings.
+const MATE_RING_BASIC := ["coincident", "concentric", "parallel", "distance", "angle"]
+const MATE_RING_CENTRE := ["width", "symmetric"]
+const MATE_RING_MOTION := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
+
+
 func _mate_type_entries() -> Array:
+	var out := _mate_type_actions(MATE_RING_BASIC)
+	out.append(_submenu("type_centre", "Centre", "mate_width", Color(0.37, 0.76, 1.00), "Width and Symmetric", _mate_centre_entries))
+	out.append(_submenu("type_motion", "Motion", "mate_gear", Color(0.37, 0.76, 1.00), "Gear, rack, screw, limits", _mate_motion_entries))
+	return out
+
+
+func _mate_centre_entries() -> Array:
+	return _mate_type_actions(MATE_RING_CENTRE)
+
+
+func _mate_motion_entries() -> Array:
+	return _mate_type_actions(MATE_RING_MOTION)
+
+
+func _mate_type_actions(types: Array) -> Array:
 	var out := []
-	for type in _mates.MATE_TYPES:
-		out.append(_action("type_" + type, MATE_TYPE_LABELS[type], "mates", Color(0.37, 0.76, 1.00), MATE_TYPE_HINTS[type], _set_mate_type.bind(type), true, _mates.mate_type == type))
+	for type in types:
+		out.append(_action("type_" + type, MATE_TYPE_LABELS[type], "mate_" + type, Color(0.37, 0.76, 1.00), MATE_TYPE_HINTS[type], _set_mate_type.bind(type), true, _mates.mate_type == type))
 	return out
 
 

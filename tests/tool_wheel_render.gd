@@ -67,7 +67,7 @@ func _initialize() -> void:
 	await _shot("05b_wrist_panel_closeup_ring_up", true)
 	await _move(Vector2(sin(TAU / 5.0), cos(TAU / 5.0)) * 0.24) # towards Type (the second wedge of five), opens its ring
 	_anchor = _r.global_position
-	var type_angle := TAU / float(mates.MATE_TYPES.size()) # the second wedge of the type ring
+	var type_angle := TAU / 7.0 # the second wedge of the seven-wedge type ring
 	await _move(Vector2(sin(type_angle), cos(type_angle)) * 0.12) # Concentric
 	await _shot("06_type_subwheel_concentric_hovered")
 	_release()

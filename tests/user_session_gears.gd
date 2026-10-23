@@ -63,7 +63,7 @@ func _initialize() -> void:
 	var ok: bool = await user.wheel_pick("mates")
 	print("SMOKE the wheel's Mates wedge switches the Mates tool on: ", ok and main._tablet.manager.is_active("mates"))
 	await user.shot("wheel_mates_on")
-	ok = await user.wheel_pick(["mate_type", "type_gear"])
+	ok = await user.wheel_pick(["mate_type", "type_motion", "type_gear"])
 	print("SMOKE ...and the Type sub-wheel sets Gear: ", ok and mt.mate_type == "gear", " ", mt.mate_type)
 	await user.shot("type_gear")
 	main._tablet.open_tablet()

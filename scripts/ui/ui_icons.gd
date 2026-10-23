@@ -53,6 +53,19 @@ const _ICONS := {
 	# Assembly tools
 	"mates": '<circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="8"/><path d="M24 24V24.5"/>',
 	"paint": '<circle cx="22" cy="27" r="14"/><path d="M13 22C14.5 17 18.5 14 23.5 13.5"/><path d="M17 36C25 38.5 33 34 35.5 26"/><path d="M38 4V14M33 9H43"/>', # Appearance: a shaded sphere with a glint (colour, see-through, shine, glow); was a spray gun
+	# one icon per mate type (the wheel's Type ring and its Centre / Motion sub-rings)
+	"mate_coincident": '<path d="M6 24H42"/><path d="M24 5V19M18 13L24 19L30 13"/><path d="M24 43V29M18 35L24 29L30 35"/>',
+	"mate_concentric": '<circle cx="24" cy="24" r="18"/><circle cx="24" cy="24" r="9"/><path d="M24 24V24.5"/>',
+	"mate_parallel": '<path d="M10 38L22 10"/><path d="M26 38L38 10"/>',
+	"mate_distance": '<path d="M8 10V38M40 10V38"/><path d="M8 24H40"/><path d="M14 18L8 24L14 30M34 18L40 24L34 30"/>',
+	"mate_angle": '<path d="M8 40H42"/><path d="M8 40L34 12"/><path d="M25 40A17 17 0 0 0 19.6 28.3"/>',
+	"mate_width": '<path d="M6 8V40M42 8V40"/><rect x="16" y="16" width="16" height="16" rx="1"/><path d="M6 24H16M32 24H42" stroke-dasharray="2 3"/>',
+	"mate_symmetric": '<path d="M24 5V43" stroke-dasharray="3 3"/><path d="M19 14L7 24L19 34Z"/><path d="M29 14L41 24L29 34Z"/>',
+	"mate_gear": '<circle cx="24" cy="24" r="14"/><circle cx="24" cy="24" r="5"/><path d="M24 6V10M24 38V42M6 24H10M38 24H42M11 11L14 14M34 34L37 37M37 11L34 14M14 34L11 37"/>',
+	"mate_rack_pinion": '<circle cx="24" cy="16" r="9"/><path d="M6 33H42V42H6Z"/><path d="M12 28V33M20 28V33M28 28V33M36 28V33"/>',
+	"mate_screw": '<path d="M18 5V43M30 5V43"/><path d="M18 14L30 10M18 22L30 18M18 30L30 26M18 38L30 34"/>',
+	"mate_limit_distance": '<rect x="4" y="8" width="6" height="32" fill="white"/><rect x="38" y="8" width="6" height="32" fill="white"/><rect x="18" y="18" width="12" height="12" rx="1"/><path d="M12 24H18M30 24H36"/>',
+	"mate_limit_angle": '<path d="M8 40H42"/><path d="M8 40L34 14"/><path d="M8 40L24 8" stroke-dasharray="3 3"/><path d="M28 40A20 20 0 0 0 25 27"/>',
 	"play": '<path d="M15 9L39 24L15 39Z"/>',
 	"stop": '<path d="M11 11H37V37H11Z"/>',
 	"invert": '<circle cx="24" cy="24" r="16"/><path d="M24 8A16 16 0 0 1 24 40Z" fill="white"/>',
