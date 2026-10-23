@@ -360,10 +360,16 @@ func _mates_entries() -> Array:
 		picks_entry = _action("mate_undo", "Undo pick", "undo", Color(0.96, 0.69, 0.25), "Take back the last face", _mates.back_pick, not _mates.picked_labels().is_empty(), false, "Nothing picked yet")
 	else:
 		picks_entry = _action("mate_clear", "Clear picks", "clear_picks", Color(0.96, 0.69, 0.25), "Start again", _mates.clear_picks)
+	var flip_label := "Flip"
+	var flip_hint := "Turn the preview round"
+	if _mates.is_coupler():
+		# A coupler has no ghost to turn round: the same wedge chooses which way the second part turns (Reverse; Left-hand for a screw).
+		flip_label = _mates.secondary_flip_label(_mates.mate_type)
+		flip_hint = "Which way the second part turns"
 	return [
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, need),
 		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
-		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, need),
+		_action("mate_flip", flip_label, "flip", Color(0.37, 0.76, 1.00), flip_hint, _flip_mate, _mates.can_create(), false, need),
 		picks_entry, # (straight down, above the pill: never a sub-wheel there)
 		_relax_entry(),
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),

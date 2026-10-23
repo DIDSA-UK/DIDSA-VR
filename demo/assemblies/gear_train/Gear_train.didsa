@@ -5,277 +5,6 @@
   "root_part_id": "e92a75c1-4af4-4948-9e6d-e7cfdf3e62e6",
   "parts": [
    {
-    "id": "6fccd0e3-b5b5-4931-9185-88220a4b234a",
-    "name": "Plate",
-    "features": [
-     {
-      "type": "sketch",
-      "id": "e22781e5-d91d-490f-bcab-576279591a0a",
-      "sketch_id": "154e6733-a4da-45dc-be53-04199d58d725",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
-      "sketch_feature_id": "e22781e5-d91d-490f-bcab-576279591a0a",
-      "extrude_type": "boss",
-      "start_distance": 0.0,
-      "end_distance": 10.0,
-      "target_body_ids": [],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     },
-     {
-      "type": "sketch",
-      "id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
-      "sketch_id": "4cefe5ce-682e-4ca3-acb8-df8c768de875",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "e754cfa5-24ca-4561-81b2-a47132235727",
-      "sketch_feature_id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
-      "extrude_type": "cut",
-      "start_distance": 0.0,
-      "end_distance": 10.0,
-      "target_body_ids": [
-       "f9873ebb-688f-495c-be8c-552ebd3e0f9f"
-      ],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6",
-    "name": "Pinion (20 teeth)",
-    "features": [
-     {
-      "type": "gear",
-      "id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
-      "plane_ref": {
-       "face_ref": null,
-       "fixed_plane": "XY",
-       "plane_feature_id": null
-      },
-      "gear_type": "boss",
-      "is_internal": false,
-      "module": 2.0,
-      "tooth_count": 20,
-      "face_width": 10.0,
-      "pressure_angle_degrees": 20.0,
-      "profile_shift": null,
-      "backlash": 0.0,
-      "root_fillet_radius": 0.0,
-      "outer_diameter": null,
-      "target_body_ids": [],
-      "helix_angle_degrees": 0.0,
-      "herringbone": false,
-      "points_per_flank": 12,
-      "bore_diameter": 8.0
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7",
-    "name": "Gear (40 teeth)",
-    "features": [
-     {
-      "type": "gear",
-      "id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
-      "plane_ref": {
-       "face_ref": null,
-       "fixed_plane": "XY",
-       "plane_feature_id": null
-      },
-      "gear_type": "boss",
-      "is_internal": false,
-      "module": 2.0,
-      "tooth_count": 40,
-      "face_width": 10.0,
-      "pressure_angle_degrees": 20.0,
-      "profile_shift": null,
-      "backlash": 0.0,
-      "root_fillet_radius": 0.0,
-      "outer_diameter": null,
-      "target_body_ids": [],
-      "helix_angle_degrees": 0.0,
-      "herringbone": false,
-      "points_per_flank": 12,
-      "bore_diameter": 8.0
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "70bcee71-07c2-4c26-bb92-76638d4abd51",
-    "name": "Rack (10 teeth)",
-    "features": [
-     {
-      "type": "rack",
-      "id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
-      "plane_ref": {
-       "face_ref": null,
-       "fixed_plane": "XY",
-       "plane_feature_id": null
-      },
-      "rack_type": "boss",
-      "module": 2.0,
-      "tooth_count": 10,
-      "face_width": 10.0,
-      "pressure_angle_degrees": 20.0,
-      "backlash": 0.0,
-      "backing_height": null,
-      "target_body_ids": []
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "fe8722e0-5826-4433-bb23-0935fe40494c",
-    "name": "Rack guide",
-    "features": [
-     {
-      "type": "sketch",
-      "id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
-      "sketch_id": "7a1df4be-9d13-463a-b14d-0804ab889d2e",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "a08e3205-5057-4f83-99fe-f6d6f26dfd23",
-      "sketch_feature_id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
-      "extrude_type": "boss",
-      "start_distance": 0.0,
-      "end_distance": 10.0,
-      "target_body_ids": [],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e",
-    "name": "Crank handle",
-    "features": [
-     {
-      "type": "sketch",
-      "id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
-      "sketch_id": "c2f39475-b962-45f9-a6e7-083e88ec752a",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "0772de0d-9aef-4613-b546-0fe46373ba46",
-      "sketch_feature_id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
-      "extrude_type": "boss",
-      "start_distance": 0.0,
-      "end_distance": 6.0,
-      "target_body_ids": [],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     },
-     {
-      "type": "sketch",
-      "id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
-      "sketch_id": "da6e8fa5-abe7-4bf0-b5a3-a3a8b4629c20",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "487601ec-3714-4761-9f01-3c8708ab78b5",
-      "sketch_feature_id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
-      "extrude_type": "cut",
-      "start_distance": 0.0,
-      "end_distance": 6.0,
-      "target_body_ids": [
-       "0772de0d-9aef-4613-b546-0fe46373ba46"
-      ],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
     "id": "e92a75c1-4af4-4948-9e6d-e7cfdf3e62e6",
     "name": "Gear train",
     "features": [],
@@ -292,7 +21,7 @@
       "id": "plate",
       "external_ref": "parts/6fccd0e3-b5b5-4931-9185-88220a4b234a.didsa",
       "resolved_part_id": "6fccd0e3-b5b5-4931-9185-88220a4b234a",
-      "name_override": null,
+      "name_override": "Plate",
       "transform": {
        "translation": [
         0.0,
@@ -316,7 +45,7 @@
       "id": "pinion",
       "external_ref": "parts/1d261f90-e111-4d1f-a9c6-c9887ce260e6.didsa",
       "resolved_part_id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6",
-      "name_override": null,
+      "name_override": "Pinion (20 teeth)",
       "transform": {
        "translation": [
         50.0,
@@ -340,7 +69,7 @@
       "id": "gear",
       "external_ref": "parts/eb719b77-9e28-4bdf-b7a4-300bea5329a7.didsa",
       "resolved_part_id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7",
-      "name_override": null,
+      "name_override": "Gear (40 teeth)",
       "transform": {
        "translation": [
         110.0,
@@ -364,7 +93,7 @@
       "id": "guide",
       "external_ref": "parts/fe8722e0-5826-4433-bb23-0935fe40494c.didsa",
       "resolved_part_id": "fe8722e0-5826-4433-bb23-0935fe40494c",
-      "name_override": null,
+      "name_override": "Rack guide",
       "transform": {
        "translation": [
         10.0,
@@ -388,7 +117,7 @@
       "id": "rack",
       "external_ref": "parts/70bcee71-07c2-4c26-bb92-76638d4abd51.didsa",
       "resolved_part_id": "70bcee71-07c2-4c26-bb92-76638d4abd51",
-      "name_override": null,
+      "name_override": "Rack",
       "transform": {
        "translation": [
         42.0,
@@ -412,7 +141,7 @@
       "id": "crank",
       "external_ref": "parts/bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e.didsa",
       "resolved_part_id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e",
-      "name_override": null,
+      "name_override": "Crank handle",
       "transform": {
        "translation": [
         26.0,
@@ -798,6 +527,277 @@
       "branch_source": "user"
      }
     ],
+    "component_patterns": []
+   },
+   {
+    "id": "6fccd0e3-b5b5-4931-9185-88220a4b234a",
+    "name": "Plate",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "e22781e5-d91d-490f-bcab-576279591a0a",
+      "sketch_id": "154e6733-a4da-45dc-be53-04199d58d725",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "f9873ebb-688f-495c-be8c-552ebd3e0f9f",
+      "sketch_feature_id": "e22781e5-d91d-490f-bcab-576279591a0a",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     },
+     {
+      "type": "sketch",
+      "id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
+      "sketch_id": "4cefe5ce-682e-4ca3-acb8-df8c768de875",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "e754cfa5-24ca-4561-81b2-a47132235727",
+      "sketch_feature_id": "40dad9e4-e9e1-438c-b61d-ff4ad2f4c7ef",
+      "extrude_type": "cut",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [
+       "f9873ebb-688f-495c-be8c-552ebd3e0f9f"
+      ],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "1d261f90-e111-4d1f-a9c6-c9887ce260e6",
+    "name": "Pinion (20 teeth)",
+    "features": [
+     {
+      "type": "gear",
+      "id": "576ae78d-a6a9-421b-9d85-7fef872b55a2",
+      "plane_ref": {
+       "face_ref": null,
+       "fixed_plane": "XY",
+       "plane_feature_id": null
+      },
+      "gear_type": "boss",
+      "is_internal": false,
+      "module": 2.0,
+      "tooth_count": 20,
+      "face_width": 10.0,
+      "pressure_angle_degrees": 20.0,
+      "profile_shift": null,
+      "backlash": 0.0,
+      "root_fillet_radius": 0.0,
+      "outer_diameter": null,
+      "target_body_ids": [],
+      "helix_angle_degrees": 0.0,
+      "herringbone": false,
+      "points_per_flank": 12,
+      "bore_diameter": 8.0
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "eb719b77-9e28-4bdf-b7a4-300bea5329a7",
+    "name": "Gear (40 teeth)",
+    "features": [
+     {
+      "type": "gear",
+      "id": "41415b93-4d59-47e3-b033-5c9eccbb482b",
+      "plane_ref": {
+       "face_ref": null,
+       "fixed_plane": "XY",
+       "plane_feature_id": null
+      },
+      "gear_type": "boss",
+      "is_internal": false,
+      "module": 2.0,
+      "tooth_count": 40,
+      "face_width": 10.0,
+      "pressure_angle_degrees": 20.0,
+      "profile_shift": null,
+      "backlash": 0.0,
+      "root_fillet_radius": 0.0,
+      "outer_diameter": null,
+      "target_body_ids": [],
+      "helix_angle_degrees": 0.0,
+      "herringbone": false,
+      "points_per_flank": 12,
+      "bore_diameter": 8.0
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "70bcee71-07c2-4c26-bb92-76638d4abd51",
+    "name": "Rack (10 teeth)",
+    "features": [
+     {
+      "type": "rack",
+      "id": "f9c66351-2f8e-41c3-8964-4d43344a2d1c",
+      "plane_ref": {
+       "face_ref": null,
+       "fixed_plane": "XY",
+       "plane_feature_id": null
+      },
+      "rack_type": "boss",
+      "module": 2.0,
+      "tooth_count": 10,
+      "face_width": 10.0,
+      "pressure_angle_degrees": 20.0,
+      "backlash": 0.0,
+      "backing_height": null,
+      "target_body_ids": []
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "fe8722e0-5826-4433-bb23-0935fe40494c",
+    "name": "Rack guide",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
+      "sketch_id": "7a1df4be-9d13-463a-b14d-0804ab889d2e",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "a08e3205-5057-4f83-99fe-f6d6f26dfd23",
+      "sketch_feature_id": "4fc466c4-1a5b-4f19-a503-8ee376c7d3d0",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "bab2bcf0-1d97-4fa3-b1c6-1a158dd3501e",
+    "name": "Crank handle",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
+      "sketch_id": "c2f39475-b962-45f9-a6e7-083e88ec752a",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "0772de0d-9aef-4613-b546-0fe46373ba46",
+      "sketch_feature_id": "b9a98209-8a60-4a7d-9e8a-6c6dfd9fcb8f",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 6.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     },
+     {
+      "type": "sketch",
+      "id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
+      "sketch_id": "da6e8fa5-abe7-4bf0-b5a3-a3a8b4629c20",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "487601ec-3714-4761-9f01-3c8708ab78b5",
+      "sketch_feature_id": "0bc7e6fc-5547-4122-851a-ff90b695b0aa",
+      "extrude_type": "cut",
+      "start_distance": 0.0,
+      "end_distance": 6.0,
+      "target_body_ids": [
+       "0772de0d-9aef-4613-b546-0fe46373ba46"
+      ],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
     "component_patterns": []
    }
   ]

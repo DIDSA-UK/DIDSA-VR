@@ -146,6 +146,7 @@ crank = box_part("Crank handle", 32.0, 8.0, 6.0, holes=[(24.0, 4.0, 4.0)])
 root = make_part("Gear train")
 
 IDENTITY = [0.0, 0.0, 1.0]
+DISPLAY_NAMES = {"plate": "Plate", "pinion": "Pinion (20 teeth)", "gear": "Gear (40 teeth)", "guide": "Rack guide", "rack": "Rack", "crank": "Crank handle"} # the assembly tree and the VR readout show these (without a name they read "Component 3")
 rack_y = PINION_XY[1] - 20.0 # the rack's pitch line (its local y = 0) touches the pinion's pitch circle
 placements = [
     ("plate", plate, (0.0, 0.0, 0.0), True),
@@ -157,7 +158,7 @@ placements = [
 ]
 for occ_id, part, t, fixed in placements:
     call("POST", f"/document/parts/{root['id']}/occurrences", {
-        "id": occ_id, "external_ref": f"parts/{part['id']}.didsa", "resolved_part_id": part["id"], "name_override": None,
+        "id": occ_id, "external_ref": f"parts/{part['id']}.didsa", "resolved_part_id": part["id"], "name_override": DISPLAY_NAMES[occ_id],
         "transform": {"translation": list(t), "rotation_axis": IDENTITY, "rotation_angle_degrees": 0.0}, "fixed": fixed})
 
 
@@ -187,6 +188,7 @@ call("PATCH", f"/document/parts/{root['id']}/mates/{crank_mate['id']}", {"second
 
 document = call("GET", "/document/export/native")
 document["document"]["root_part_id"] = root["id"]
+document["document"]["parts"].sort(key=lambda part: part["id"] != root["id"])  # the flat app opens a multi-part file on its FIRST part: the root assembly goes first
 import os
 os.makedirs("demo/assemblies/gear_train", exist_ok=True)
 with open("demo/assemblies/gear_train/Gear_train.didsa", "w", encoding="utf-8") as f:

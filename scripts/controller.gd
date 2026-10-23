@@ -427,6 +427,8 @@ func _try_grab() -> void:
 		mates_tool.notify_locked(target)
 		return
 	if target:
+		if drive_tool != null:
+			drive_tool.on_grip() # (a run of the Drive tool and a hand drag must not both steer the group)
 		_set_grab_hover(null)
 		if _sel_group != null and _sel_group.members.has(target):
 			_sel_group.follow()

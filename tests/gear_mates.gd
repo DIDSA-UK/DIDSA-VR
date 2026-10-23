@@ -78,6 +78,20 @@ func _initialize() -> void:
 	print("SMOKE a flat face is refused with the reason and not picked: ", tool.picked_labels().is_empty() and tool.status_text().contains("needs an axis"))
 	tool.try_pick(gear_a, 1)
 	print("SMOKE a round face is picked: ", tool.picked_labels() == ["Gear A"])
+	tool.clear_picks()
+	tool.try_pick(gear_a, 1, {"kind": "edge", "body_id": "body-a", "index": 0}) # the laser on the round face, snapped to its seam line (a straight edge 4 mm off the axis)
+	var seam_pick: Dictionary = tool._picks[0] if not tool._picks.is_empty() else {}
+	print("SMOKE the laser on a round face that snaps to a straight edge of it picks the round FACE (a seam is not the axis): ", tool.picked_labels() == ["Gear A"] and str(seam_pick.get("subshape_ref", {}).get("shape_type", "")) == "face")
+	tool.clear_picks()
+	tool.try_pick(gear_a, 1, {"kind": "vertex", "body_id": "body-a", "index": 0})
+	seam_pick = tool._picks[0] if not tool._picks.is_empty() else {}
+	print("SMOKE ...and the same for a corner of it: ", str(seam_pick.get("subshape_ref", {}).get("shape_type", "")) == "face")
+	tool.clear_picks()
+	tool.try_pick(gear_a, 1, {"kind": "edge", "body_id": "body-a", "index": 1}) # a circular edge is an axis as it is
+	seam_pick = tool._picks[0] if not tool._picks.is_empty() else {}
+	print("SMOKE a circular edge stays a circular edge: ", str(seam_pick.get("subshape_ref", {}).get("shape_type", "")) == "edge")
+	tool.clear_picks()
+	tool.try_pick(gear_a, 1)
 	tool.try_pick(gear_b, 1)
 	print("SMOKE two axes complete a gear mate and it can be created with no value (Auto): ", tool.picked_labels().size() == 2 and tool.can_create())
 

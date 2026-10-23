@@ -21,6 +21,8 @@ e2e_gears
 e2e_gear_mates
 e2e_drive
 e2e_gear_train
+user_session_gears
+user_session_train
 e2e_body_features
 e2e_trim_offset
 e2e_modify

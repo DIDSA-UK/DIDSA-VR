@@ -37,7 +37,10 @@ var _b_edge := false
 var _a_down := false
 var _rates := {} ## node -> smoothed signed rpm
 var _prev := {} ## node -> Quaternion at the last tick
+var _prev_pos := {} ## node -> its origin at the last tick
+var _slides := {} ## node -> smoothed speed of its origin, mm/s (in the part's own units)
 var _stuck := false
+var _wait_for_rest := false ## a hand took the part: the stick is ignored until it has been at rest
 var _last_status_ms := 0
 
 
@@ -60,6 +63,13 @@ func clear_pick() -> void:
 	_status = ""
 
 
+func on_grip() -> void:
+	## A hand took a part (controller.gd): a hand drag and the stick would both steer the same mated group, so the run stops (one commit) and the hand has it.
+	if running:
+		stop()
+		_wait_for_rest = true # the stick is still pushed: it must come back to rest before it drives again, or it would take the part back from the hand
+
+
 func owns_stick() -> bool:
 	## True while a part is picked: the stick is the throttle, so locomotion leaves it alone.
 	return active and part != null and is_instance_valid(part)
@@ -73,15 +83,20 @@ func status_text() -> String:
 	if part == null or not is_instance_valid(part):
 		return "Pick a round face to turn a part, or a straight edge to slide it."
 	var what := "turn" if kind == "spin" else "slide"
-	return "%s: stick sideways to %s (A keeps it going, B stops)." % [str(part.name), what]
+	var label := _label(part)
+	return "%sstick sideways to %s (A keeps it going, B stops)." % [label + ": " if label != "" else "", what]
 
 
 # --- Picking ----------------------------------------------------------------------------------
 
-func try_pick(target: Node3D, _face_index: int, entity: Dictionary, _point: Vector3 = Vector3.INF) -> void:
+func try_pick(target: Node3D, face_index: int, entity: Dictionary, _point: Vector3 = Vector3.INF) -> void:
 	if target == null or entity.is_empty():
 		return
 	stop()
+	# The laser on a bore or a shaft snaps to its seam line or a corner when near one: that is the round face, which turns about its axis.
+	var hit_face := TopologyPick.face_entity(target, face_index)
+	if not hit_face.is_empty() and TopologyPick.axis_kind(target, hit_face) == "cylinder" and (str(entity.get("kind", "")) == "vertex" or TopologyPick.axis_kind(target, entity) == "line"):
+		entity = hit_face
 	var axis := axis_of(target, entity)
 	if axis.is_empty():
 		_reject("Pick a round face to turn it, or a straight edge to slide it.")
@@ -91,10 +106,13 @@ func try_pick(target: Node3D, _face_index: int, entity: Dictionary, _point: Vect
 		return
 	if mates_tool.is_locked(target):
 		mates_tool.notify_locked(target)
-		_reject("%s is grounded: Float it first." % str(target.name))
+		_reject("%s is grounded: Float it first." % _label_or(target, "This part"))
+		return
+	if bool(mates_tool.get("relaxed")):
+		_reject("Mates are relaxed (a sandbox): Drive needs them enforced. Wheel: Return parts first.")
 		return
 	if not mates_tool.is_constrained(target):
-		_reject("%s has no mates: Drive turns a part its mates hold (mate it to something first)." % str(target.name))
+		_reject("%s has no mates: Drive turns a part its mates hold (mate it to something first)." % _label_or(target, "This part"))
 		return
 	part = target
 	kind = str(axis["kind"])
@@ -211,6 +229,10 @@ func tick(delta: float) -> void:
 	_b_edge = false
 	if part == null or not is_instance_valid(part) or delta <= 0.0:
 		return
+	if _wait_for_rest:
+		if absf(x) < DEADZONE and not b:
+			_wait_for_rest = false
+		return
 	if b:
 		stop()
 		return
@@ -238,6 +260,8 @@ func _step(delta: float) -> void:
 		_stuck = false
 		_rates.clear()
 		_prev.clear()
+		_prev_pos.clear()
+		_slides.clear()
 	else:
 		base = mates_tool.desired_global(part) if mates_tool.has_drag(part) else part.global_transform
 	var dir: Vector3 = _axis_world["dir"]
@@ -265,9 +289,20 @@ func stop() -> void:
 	keep = false
 	_rates.clear()
 	_prev.clear()
+	_prev_pos.clear()
+	_slides.clear()
 	if _status.begins_with("Held:"):
 		_status = ""
 	status_changed.emit()
+
+
+func _label(node: Node3D) -> String:
+	return mates_tool.part_label(node) if mates_tool != null and mates_tool.has_method("part_label") else ""
+
+
+func _label_or(node: Node3D, fallback: String) -> String:
+	var label := _label(node)
+	return label if label != "" else fallback
 
 
 # --- Readout ----------------------------------------------------------------------------------
@@ -287,9 +322,14 @@ func _update_readout(delta: float) -> void:
 			var angle := dq.get_angle()
 			var rpm := 0.0
 			if angle > 1e-7:
-				rpm = angle * signf(dq.get_axis().dot(axis)) / delta * 60.0 / TAU
+				# (a slide has no turning direction to sign against: every follower reads as a plain rpm)
+				rpm = angle * (signf(dq.get_axis().dot(axis)) if kind == "spin" else 1.0) / delta * 60.0 / TAU
 			_rates[node] = lerpf(float(_rates.get(node, rpm)), rpm, READOUT_SMOOTH)
+			var here: Vector3 = node.global_transform.origin
+			var mm_per_s: float = here.distance_to(_prev_pos[node]) / delta / maxf(node.global_transform.basis.get_scale().x, 1e-9)
+			_slides[node] = lerpf(float(_slides.get(node, mm_per_s)), mm_per_s, READOUT_SMOOTH)
 		_prev[node] = q
+		_prev_pos[node] = node.global_transform.origin
 	if Time.get_ticks_msec() - _last_status_ms < STATUS_EVERY_MS:
 		return
 	_last_status_ms = Time.get_ticks_msec()
@@ -297,16 +337,20 @@ func _update_readout(delta: float) -> void:
 
 
 func readout_text() -> String:
-	## "Gear A 30 rpm · Gear B -15 rpm": the driven part first, then every other member that turns (signed against the drive axis).
+	## "Gear A 30 rpm · Gear B -15 rpm": the driven part first, then every other member that turns (signed against the drive axis) or slides (mm/s).
 	if part == null or not is_instance_valid(part):
 		return ""
-	if kind == "slide":
-		return "%s %d mm/s" % [str(part.name), roundi(speed)]
-	var parts := PackedStringArray(["%s %d rpm" % [str(part.name), roundi(speed)]])
+	var named := func(node: Node3D, value: String) -> String:
+		var label := _label(node)
+		return "%s %s" % [label, value] if label != "" else value
+	var parts := PackedStringArray([named.call(part, ("%d mm/s" % roundi(speed)) if kind == "slide" else ("%d rpm" % roundi(speed)))])
 	for node in _rates:
 		if node == part or not is_instance_valid(node):
 			continue
 		var rpm: float = _rates[node]
+		var slide: float = _slides.get(node, 0.0)
 		if absf(rpm) >= 0.5:
-			parts.append("%s %d rpm" % [str(node.name), roundi(rpm)])
+			parts.append(named.call(node, "%d rpm" % roundi(rpm)))
+		elif slide >= 0.5:
+			parts.append(named.call(node, "%d mm/s" % roundi(slide))) # a rack: it slides, it does not turn
 	return " · ".join(parts)

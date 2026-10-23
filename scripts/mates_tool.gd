@@ -138,6 +138,8 @@ var sandbox_lines := false ## while relaxed, a thin line from each moved part to
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
 var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
 
+var _labels: Dictionary = {} ## "owner|occurrence" -> a short readable name (part_label)
+var _part_names: Dictionary = {} ## resolved part id -> the Part's own name, fetched once
 var _mated_ids: Dictionary = {} ## occurrence_id -> true, for every occurrence any Mate references
 var _drag: Dictionary = {} ## part -> live-drag state, see constrain_drag()
 var _last_locked_notice_ms := -10000
@@ -340,6 +342,14 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		# The laser was on a straight / circular edge or a corner of that face (topology_pick.gd): mate that.
 		kind = str(entity["kind"])
 		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
+	if is_coupler() and kind != "face" and not subshape.is_empty() and not (mate_type == "rack_pinion" and _picks.size() == 1):
+		# A coupler's turning side wants the AXIS. The laser on a round face (a bore, a shaft) snaps to that face's seam line or a corner of it when it is
+		# near one, and the seam is a straight edge 4 mm off the axis: mating on it would turn the part about the wrong line. Take the round face itself.
+		var hit_face := TopologyPick.face_entity(part, face_index)
+		if not hit_face.is_empty() and TopologyPick.axis_kind(part, hit_face) == "cylinder" and TopologyPick.axis_kind(part, entity) in ["line", "vertex"]:
+			kind = "face"
+			entity = {}
+			subshape = MeshIdentity.subshape_ref_for_hit(part, face_index)
 	var rejection := _validate_pick(occ_ref, subshape)
 	if rejection == "" and is_multi() and _width_error != "":
 		rejection = "The last two faces are not parallel: press Undo pick first."
@@ -357,7 +367,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"owner_part_id": occ_ref["owner_part_id"],
 		"occurrence_id": occ_ref["occurrence_id"],
 		"subshape_ref": subshape,
-		"label": str(part.name), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
+		"label": label_or(part, str(part.name)), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
 		"part": part, # for face_highlight.gd: the picked face / edge / corner stays lit
 		"face_index": face_index,
 		"entity": entity if kind != "face" else {},
@@ -899,7 +909,7 @@ func create_mate() -> Dictionary:
 	if relaxed:
 		note_sandbox_mate(owner_part_id, driven_occurrence_id)
 	if atomic:
-		await _adopt_backend_poses(owner_part_id, "mate %s" % (str(part.name) if part != null else driven_occurrence_id))
+		await _adopt_backend_poses(owner_part_id, "mate %s" % (label_or(part, str(part.name)) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
 	if not relaxed and driven_fixed:
 		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
@@ -981,7 +991,7 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 	if relaxed:
 		note_sandbox_mate(owner_part_id, driven_id)
 	if atomic:
-		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (str(part.name) if part != null else driven_id))
+		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (label_or(part, str(part.name)) if part != null else driven_id))
 	await refresh_mates(owner_part_id)
 	if not relaxed and driven_fixed:
 		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
@@ -1014,7 +1024,7 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 		return {"ok": false, "error": _friendly_error(result)}
 	# /solve now moves the WHOLE mate-graph component (followers included) and stores it: adopt every
 	# moved occurrence's stored pose, one undo entry for the lot.
-	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (str(part.name) if part != null else occurrence_id))
+	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (label_or(part, str(part.name)) if part != null else occurrence_id))
 	if not adopted:
 		var transform_json: Dictionary = result["json"].get("transform", {})
 		if part != null and not transform_json.is_empty():
@@ -1383,10 +1393,55 @@ func refresh_state(owner_part_id: String) -> void:
 	if result["ok"] and result["json"] is Array:
 		for occ in result["json"]:
 			occurrences[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+		await _load_labels(owner_part_id, result["json"])
 	await refresh_mates(owner_part_id)
 	await refresh_nested_state(owner_part_id)
 	if relaxed:
 		_rebase_sandbox()
+
+
+func part_label(node: Node3D) -> String:
+	## A short readable name for a placed part (its name on the assembly, else the Part's own name, else its file's name), or "" when there is nothing
+	## useful to say (the glb's own node names, "Mesh 1", mean nothing to a person).
+	if not is_instance_valid(node):
+		return ""
+	return str(_labels.get("%s|%s" % [owner_of(node), _occ_id(node)], ""))
+
+
+func label_or(node: Node3D, fallback: String) -> String:
+	var label := part_label(node)
+	return label if label != "" else fallback
+
+
+static func shorten_label(raw: String, max_length: int = 18) -> String:
+	## Trims a name for a status line; "" for a name that says nothing (empty, "Mesh 1", "Occurrence d3c1...", an id).
+	var name := raw.strip_edges()
+	if name.get_extension().to_lower() in ["didsa", "didsaprt", "didsacad", "step", "stp", "stl", "obj", "glb"]:
+		name = name.get_basename()
+	var lower := name.to_lower()
+	var generic := RegEx.new()
+	generic.compile("^(mesh|node|occurrence|part|object)[ _-]?[0-9a-f]*$")
+	var id_like := RegEx.new()
+	id_like.compile("^[0-9a-f]{8}(-[0-9a-f]{4}){0,4}$")
+	if name == "" or generic.search(lower) != null or id_like.search(lower) != null:
+		return ""
+	return name if name.length() <= max_length else name.substr(0, max_length - 1).strip_edges() + "…"
+
+
+func _load_labels(owner_part_id: String, rows: Array) -> void:
+	## Names the owner's occurrences: name_override, else the Part's name (GET /parts/{id}, once per Part), else the file's base name.
+	for occ in rows:
+		var key := "%s|%s" % [owner_part_id, str(occ.get("id", ""))]
+		var label := shorten_label(str(occ.get("name_override", "")) if occ.get("name_override") != null else "")
+		if label == "":
+			var part_id := str(occ.get("resolved_part_id", "")) if occ.get("resolved_part_id") != null else ""
+			if part_id != "" and not _part_names.has(part_id):
+				var fetched := await _api_request(HTTPClient.METHOD_GET, "/parts/%s" % part_id, null)
+				_part_names[part_id] = str(fetched["json"].get("name", "")) if fetched["ok"] and fetched["json"] is Dictionary else ""
+			label = shorten_label(str(_part_names.get(part_id, "")))
+		if label == "" and occ.get("external_ref") != null:
+			label = shorten_label(str(occ["external_ref"]).get_file())
+		_labels[key] = label
 
 
 func refresh_nested_state(root_part_id: String) -> void:
@@ -1513,6 +1568,7 @@ func load_owner_state(owner_part_id: String) -> bool:
 	var occs := {}
 	for occ in occ_result["json"]:
 		occs[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+	await _load_labels(owner_part_id, occ_result["json"])
 	var mated := {}
 	var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if mate_result["ok"] and mate_result["json"] is Array:
@@ -1568,7 +1624,7 @@ func notify_nested_locked(part: Node3D) -> void:
 	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
 		return
 	_last_locked_notice_ms = Time.get_ticks_msec()
-	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % str(part.name))
+	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % label_or(part, "This part"))
 
 
 func _mates_dirty(part: Node3D) -> bool:
@@ -1585,7 +1641,7 @@ func notify_locked(part: Node3D) -> void:
 	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
 		return # a held button would otherwise re-announce every physics frame
 	_last_locked_notice_ms = Time.get_ticks_msec()
-	_report("%s is grounded by a mate — Float it (Assembly > Mates) or Relax all mates to move it." % str(part.name))
+	_report("%s is grounded by a mate — Float it (Assembly > Mates) or Relax all mates to move it." % label_or(part, "This part"))
 
 
 func toggle_fixed(part: Node3D) -> void:
@@ -1600,11 +1656,11 @@ func toggle_fixed(part: Node3D) -> void:
 	var now_fixed := not bool(occs.get(occ, {}).get("fixed", false))
 	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner, occ], {"fixed": now_fixed})
 	if not result["ok"]:
-		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", str(part.name), _friendly_error(result)])
+		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", label_or(part, "the part"), _friendly_error(result)])
 		return
 	occs[occ] = {"fixed": now_fixed}
 	document_changed.emit()
-	_report("%s is now %s." % [str(part.name), "grounded (fixed)" if now_fixed else "floating (free to move)"])
+	_report("%s is now %s." % [label_or(part, "The part"), "grounded (fixed)" if now_fixed else "floating (free to move)"])
 
 
 func _choose_driven(first_occ: String, second_occ: String) -> String:
@@ -2090,7 +2146,7 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 		# No free motion at all: the mates fix this part completely. Without saying so it just doesn't follow the hand, which reads as a dead grip.
 		state["stuck"] = false # (false until the hand that holds it has buzzed: take_stuck_notice)
 		var node: Node3D = state["part"]
-		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (str(node.name) if is_instance_valid(node) else "That part"))
+		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (label_or(node, "That part") if is_instance_valid(node) else "That part"))
 	var wish = state["wish"]
 	if ids != state["members"]:
 		# first anchor, or the group changed under the drag: a fresh model and blender
@@ -2159,7 +2215,7 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			node.transform = after
 			if not before.is_equal_approx(after):
 				changes.append({"node": node, "before": before, "after": after})
-		_push_group_move("move %s" % part.name, changes)
+		_push_group_move("move %s" % label_or(part, str(part.name)), changes)
 	else:
 		# nothing is stored: put every member back where the grab found it
 		for occ in starts:
@@ -2252,7 +2308,7 @@ func _apply_solved_transform(part: Node3D, transform_json: Dictionary) -> void:
 	var after := json_to_pose(transform_json)
 	part.transform = after
 	if command_stack and not before.is_equal_approx(after):
-		command_stack.push("solve %s" % part.name,
+		command_stack.push("solve %s" % label_or(part, str(part.name)),
 			func() -> void:
 				if is_instance_valid(part):
 					part.transform = before

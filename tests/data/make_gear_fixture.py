@@ -118,10 +118,11 @@ gear_b = gear_part("Gear B (40 teeth)", 40)
 root = make_part("Gear pair")
 
 IDENTITY = [0.0, 0.0, 1.0]
+DISPLAY_NAMES = {"plate": "Plate", "gear-a": "Gear A (20 teeth)", "gear-b": "Gear B (40 teeth)"}
 placements = [("plate", plate, (0.0, 0.0, 0.0), True), ("gear-a", gear_a, (20.0, 30.0, 10.0), False), ("gear-b", gear_b, (80.0, 30.0, 10.0), False)]
 for occ_id, part, t, fixed in placements:
     call("POST", f"/document/parts/{root['id']}/occurrences", {
-        "id": occ_id, "external_ref": f"parts/{part['id']}.didsa", "resolved_part_id": part["id"], "name_override": None,
+        "id": occ_id, "external_ref": f"parts/{part['id']}.didsa", "resolved_part_id": part["id"], "name_override": DISPLAY_NAMES[occ_id],
         "transform": {"translation": list(t), "rotation_axis": IDENTITY, "rotation_angle_degrees": 0.0}, "fixed": fixed})
 
 top = planar_face(plate, (0.0, 0.0, 1.0))
@@ -132,6 +133,7 @@ for occ_id, gear, hole_xy in (("gear-a", gear_a, (20.0, 30.0)), ("gear-b", gear_
 
 document = call("GET", "/document/export/native")
 document["document"]["root_part_id"] = root["id"]
+document["document"]["parts"].sort(key=lambda part: part["id"] != root["id"])  # the flat app opens a multi-part file on its FIRST part: the root assembly goes first
 with open("tests/data/gear_pair.didsa", "w", encoding="utf-8") as f:
     json.dump(document, f, indent=1)
 print("wrote tests/data/gear_pair.didsa: root", root["id"], "plate fixed, gear A (20 teeth) and gear B (40 teeth) on their holes 60 mm apart, no gear mate")

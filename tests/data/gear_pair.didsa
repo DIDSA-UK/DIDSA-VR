@@ -5,147 +5,6 @@
   "root_part_id": "49185e3d-c7eb-464d-906b-85d6b3927799",
   "parts": [
    {
-    "id": "7f356037-45d7-47bc-8cc0-a78d8b689a5e",
-    "name": "Plate",
-    "features": [
-     {
-      "type": "sketch",
-      "id": "c7a0fc85-1d3e-4822-865d-3e60adc88ff4",
-      "sketch_id": "ed196309-fb7b-4ad0-bd5f-0edd9baaff09",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "8fc7c3a6-1925-4886-a1a3-4148f8026793",
-      "sketch_feature_id": "c7a0fc85-1d3e-4822-865d-3e60adc88ff4",
-      "extrude_type": "boss",
-      "start_distance": 0.0,
-      "end_distance": 10.0,
-      "target_body_ids": [],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     },
-     {
-      "type": "sketch",
-      "id": "fe29881d-3a99-4094-a2ef-094455feee25",
-      "sketch_id": "3f268ef6-9695-4c72-9a25-ec6d03fb9483",
-      "plane_feature_id": null
-     },
-     {
-      "type": "extrude",
-      "id": "95ab4622-8328-4cee-93d9-c2d2d1f884b4",
-      "sketch_feature_id": "fe29881d-3a99-4094-a2ef-094455feee25",
-      "extrude_type": "cut",
-      "start_distance": 0.0,
-      "end_distance": 10.0,
-      "target_body_ids": [
-       "8fc7c3a6-1925-4886-a1a3-4148f8026793"
-      ],
-      "profile_refs": [],
-      "thickness": null,
-      "thickness_direction": "outward",
-      "draft_angle": null,
-      "draft_outward": true
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "bdbfcd55-9d23-438a-aa0e-5b9ee5a54d32",
-    "name": "Gear A (20 teeth)",
-    "features": [
-     {
-      "type": "gear",
-      "id": "bf2c6585-018b-4558-9767-3d8809409141",
-      "plane_ref": {
-       "face_ref": null,
-       "fixed_plane": "XY",
-       "plane_feature_id": null
-      },
-      "gear_type": "boss",
-      "is_internal": false,
-      "module": 2.0,
-      "tooth_count": 20,
-      "face_width": 10.0,
-      "pressure_angle_degrees": 20.0,
-      "profile_shift": null,
-      "backlash": 0.0,
-      "root_fillet_radius": 0.0,
-      "outer_diameter": null,
-      "target_body_ids": [],
-      "helix_angle_degrees": 0.0,
-      "herringbone": false,
-      "points_per_flank": 12,
-      "bore_diameter": 8.0
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
-    "id": "b466cabc-2d2b-4779-ac45-c5a0574620b9",
-    "name": "Gear B (40 teeth)",
-    "features": [
-     {
-      "type": "gear",
-      "id": "67cebf79-bda7-4973-890b-3fef68dba83d",
-      "plane_ref": {
-       "face_ref": null,
-       "fixed_plane": "XY",
-       "plane_feature_id": null
-      },
-      "gear_type": "boss",
-      "is_internal": false,
-      "module": 2.0,
-      "tooth_count": 40,
-      "face_width": 10.0,
-      "pressure_angle_degrees": 20.0,
-      "profile_shift": null,
-      "backlash": 0.0,
-      "root_fillet_radius": 0.0,
-      "outer_diameter": null,
-      "target_body_ids": [],
-      "helix_angle_degrees": 0.0,
-      "herringbone": false,
-      "points_per_flank": 12,
-      "bore_diameter": 8.0
-     }
-    ],
-    "part_number": null,
-    "description": null,
-    "revision": null,
-    "remarks": null,
-    "supplier": null,
-    "supplier_part_number": null,
-    "default_material": null,
-    "body_material_assignments": {},
-    "occurrences": [],
-    "mates": [],
-    "component_patterns": []
-   },
-   {
     "id": "49185e3d-c7eb-464d-906b-85d6b3927799",
     "name": "Gear pair",
     "features": [],
@@ -162,7 +21,7 @@
       "id": "plate",
       "external_ref": "parts/7f356037-45d7-47bc-8cc0-a78d8b689a5e.didsa",
       "resolved_part_id": "7f356037-45d7-47bc-8cc0-a78d8b689a5e",
-      "name_override": null,
+      "name_override": "Plate",
       "transform": {
        "translation": [
         0.0,
@@ -186,7 +45,7 @@
       "id": "gear-a",
       "external_ref": "parts/bdbfcd55-9d23-438a-aa0e-5b9ee5a54d32.didsa",
       "resolved_part_id": "bdbfcd55-9d23-438a-aa0e-5b9ee5a54d32",
-      "name_override": null,
+      "name_override": "Gear A (20 teeth)",
       "transform": {
        "translation": [
         20.0,
@@ -210,7 +69,7 @@
       "id": "gear-b",
       "external_ref": "parts/b466cabc-2d2b-4779-ac45-c5a0574620b9.didsa",
       "resolved_part_id": "b466cabc-2d2b-4779-ac45-c5a0574620b9",
-      "name_override": null,
+      "name_override": "Gear B (40 teeth)",
       "transform": {
        "translation": [
         80.0,
@@ -365,6 +224,147 @@
       "branch_source": "auto"
      }
     ],
+    "component_patterns": []
+   },
+   {
+    "id": "7f356037-45d7-47bc-8cc0-a78d8b689a5e",
+    "name": "Plate",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "c7a0fc85-1d3e-4822-865d-3e60adc88ff4",
+      "sketch_id": "ed196309-fb7b-4ad0-bd5f-0edd9baaff09",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "8fc7c3a6-1925-4886-a1a3-4148f8026793",
+      "sketch_feature_id": "c7a0fc85-1d3e-4822-865d-3e60adc88ff4",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     },
+     {
+      "type": "sketch",
+      "id": "fe29881d-3a99-4094-a2ef-094455feee25",
+      "sketch_id": "3f268ef6-9695-4c72-9a25-ec6d03fb9483",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "95ab4622-8328-4cee-93d9-c2d2d1f884b4",
+      "sketch_feature_id": "fe29881d-3a99-4094-a2ef-094455feee25",
+      "extrude_type": "cut",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [
+       "8fc7c3a6-1925-4886-a1a3-4148f8026793"
+      ],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "bdbfcd55-9d23-438a-aa0e-5b9ee5a54d32",
+    "name": "Gear A (20 teeth)",
+    "features": [
+     {
+      "type": "gear",
+      "id": "bf2c6585-018b-4558-9767-3d8809409141",
+      "plane_ref": {
+       "face_ref": null,
+       "fixed_plane": "XY",
+       "plane_feature_id": null
+      },
+      "gear_type": "boss",
+      "is_internal": false,
+      "module": 2.0,
+      "tooth_count": 20,
+      "face_width": 10.0,
+      "pressure_angle_degrees": 20.0,
+      "profile_shift": null,
+      "backlash": 0.0,
+      "root_fillet_radius": 0.0,
+      "outer_diameter": null,
+      "target_body_ids": [],
+      "helix_angle_degrees": 0.0,
+      "herringbone": false,
+      "points_per_flank": 12,
+      "bore_diameter": 8.0
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "b466cabc-2d2b-4779-ac45-c5a0574620b9",
+    "name": "Gear B (40 teeth)",
+    "features": [
+     {
+      "type": "gear",
+      "id": "67cebf79-bda7-4973-890b-3fef68dba83d",
+      "plane_ref": {
+       "face_ref": null,
+       "fixed_plane": "XY",
+       "plane_feature_id": null
+      },
+      "gear_type": "boss",
+      "is_internal": false,
+      "module": 2.0,
+      "tooth_count": 40,
+      "face_width": 10.0,
+      "pressure_angle_degrees": 20.0,
+      "profile_shift": null,
+      "backlash": 0.0,
+      "root_fillet_radius": 0.0,
+      "outer_diameter": null,
+      "target_body_ids": [],
+      "helix_angle_degrees": 0.0,
+      "herringbone": false,
+      "points_per_flank": 12,
+      "bore_diameter": 8.0
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
     "component_patterns": []
    }
   ]

@@ -10,8 +10,16 @@ var desired := Transform3D.IDENTITY
 var calls: Array = []
 var followers := {}
 var stuck_once := false
+var sliders: Array = [] ## nodes that slide along x by `slide_step` metres at every constrain_drag (a rack)
+var slide_step := 0.0
+var relaxed := false ## Relax all mates: nothing is constrained
+var labels := true ## false: no part has a readable name (part_label answers "")
 var _start_angle := 0.0
 var _started := false
+
+
+func part_label(node: Node3D) -> String:
+	return str(node.name) if labels else ""
 
 
 func is_managed(_p: Node3D) -> bool:
@@ -55,7 +63,10 @@ func constrain_drag(_p: Node3D, wish: Transform3D) -> Transform3D:
 	var angle := atan2(wish.basis.x.y, wish.basis.x.x)
 	_started = true
 	for node in followers.values():
-		(node as Node3D).global_transform = Transform3D(Basis(Vector3.BACK, -0.5 * (angle - _start_angle)), (node as Node3D).global_transform.origin)
+		if sliders.has(node):
+			(node as Node3D).global_position += Vector3.RIGHT * slide_step
+		else:
+			(node as Node3D).global_transform = Transform3D(Basis(Vector3.BACK, -0.5 * (angle - _start_angle)), (node as Node3D).global_transform.origin)
 	return wish
 
 

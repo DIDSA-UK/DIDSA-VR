@@ -25,11 +25,13 @@ func _part(name: String) -> Node3D:
 	var part := Node3D.new()
 	part.name = name
 	root.add_child(part)
+	part.set_meta("face_ids", [0, 1])
+	part.set_meta("body_ids", ["B", "B"])
 	part.set_meta("topology", {"B": {
-		"edges": {0: _circle(CENTRE, 0.01), 1: PackedVector3Array([Vector3(0, 0, 0), Vector3(0.05, 0, 0)]), 2: PackedVector3Array([Vector3.ZERO, Vector3(0, 0.01, 0.0)])},
-		"edge_kinds": {0: "circle", 1: "line", 2: "spline"},
+		"edges": {0: _circle(CENTRE, 0.01), 1: PackedVector3Array([Vector3(0, 0, 0), Vector3(0.05, 0, 0)]), 2: PackedVector3Array([Vector3.ZERO, Vector3(0, 0.01, 0.0)]), 3: PackedVector3Array([Vector3(0.013, 0.002, 0.0), Vector3(0.013, 0.002, 0.01)])},
+		"edge_kinds": {0: "circle", 1: "line", 2: "spline", 3: "line"},
 		"face_kinds": ["cylinder", "plane"],
-		"face_edges": [PackedInt32Array([2, 0]), PackedInt32Array([1])],
+		"face_edges": [PackedInt32Array([2, 0, 3]), PackedInt32Array([1])],
 		"vertices": {}, "vertex_at": {},
 	}})
 	return part
@@ -75,6 +77,16 @@ func _initialize() -> void:
 	tool.try_pick(part, 0, _face(0))
 	print("SMOKE a part with no mates is refused (nothing couples to it): ", tool.part == null and tool.status_text().contains("no mates"))
 	fake.constrained = true
+	fake.relaxed = true
+	tool.try_pick(part, 0, _face(0))
+	print("SMOKE with the mates relaxed Drive says so (not 'no mates'): ", tool.part == null and tool.status_text().contains("relaxed"), " ", tool.status_text())
+	fake.relaxed = false
+	tool.try_pick(part, 0, _edge(3)) # triangle 0 is on the round face: the laser snapped to its seam line (4 mm off the axis)
+	print("SMOKE the laser on a round face that snaps to its seam line or a corner still takes the round face, to spin about its axis: ", tool.part == part and tool.kind == "spin")
+	tool.try_pick(part, 0, {"kind": "vertex", "body_id": "B", "index": 5})
+	print("SMOKE ...and so does a corner of it: ", tool.part == part and tool.kind == "spin")
+	tool.try_pick(part, 1, _edge(1)) # a straight edge of the flat face (triangle 1): a slide
+	print("SMOKE a straight edge of a flat face is still a slide: ", tool.part == part and tool.kind == "slide")
 	tool.try_pick(part, 0, _face(0))
 	print("SMOKE a round face of a mated part is picked to spin: ", tool.part == part and tool.kind == "spin")
 
@@ -99,9 +111,21 @@ func _initialize() -> void:
 	print("SMOKE the readout names the driven part and the follower with signed rpm: ", text.begins_with("Gear A 30 rpm") and text.contains("Gear B -1"), " ", text)
 	print("SMOKE ...and the status line carries it: ", tool.status_text().begins_with("Gear A 30 rpm") or tool.status_text() == text)
 
+	tool.on_grip()
+	print("SMOKE a hand taking a part stops the run with ONE end_drag (the hand and the stick never both steer): ", not tool.running and fake.calls.count("end") == 1)
+	tool.feed(Vector2(1.0, 0.0), false, false)
+	tool.tick(1.0 / 90.0)
+	print("SMOKE ...the stick, still pushed, does not take the part back from the hand: ", not tool.running and fake.calls.count("end") == 1)
 	tool.feed(Vector2.ZERO, false, false)
 	tool.tick(1.0 / 90.0)
-	print("SMOKE letting the stick go stops the run with ONE end_drag: ", not tool.running and fake.calls.count("end") == 1)
+	tool.feed(Vector2(1.0, 0.0), false, false)
+	tool.tick(1.0 / 90.0)
+	print("SMOKE ...but once it has been at rest it drives again: ", tool.running)
+	tool.feed(Vector2.ZERO, false, false)
+	tool.tick(1.0 / 90.0)
+	print("SMOKE letting the stick go stops the run with another end_drag: ", not tool.running and fake.calls.count("end") == 2)
+	tool.on_grip()
+	print("SMOKE ...and a grip with nothing running does nothing: ", fake.calls.count("end") == 2)
 
 	# keep running: A at 0.5 stick, then the stick at rest; B stops
 	tool.feed(Vector2(0.575, 0.0), false, false)
@@ -116,7 +140,7 @@ func _initialize() -> void:
 	print("SMOKE ...and a stick push takes the speed back (-30 rpm): ", absf(tool.speed + 30.0) < 0.0001)
 	tool.feed(Vector2.ZERO, false, true)
 	tool.tick(1.0 / 90.0)
-	print("SMOKE B stops it: one more end_drag, speed 0, keep off: ", not tool.running and tool.speed == 0.0 and not tool.keep and fake.calls.count("end") == 2)
+	print("SMOKE B stops it: one more end_drag, speed 0, keep off: ", not tool.running and tool.speed == 0.0 and not tool.keep and fake.calls.count("end") == 3)
 
 	# nothing can turn
 	fake.stuck_once = true
@@ -125,11 +149,37 @@ func _initialize() -> void:
 	print("SMOKE a drive the mates hold fixed says so: ", tool.status_text() == "Held: nothing can turn.")
 	tool.stop()
 
+	# a rack that slides alongside the gears is read out in mm/s (a part scale of 0.001: 1 unit = 1 mm)
+	var rack_node := _part("Rack")
+	rack_node.scale = Vector3.ONE * 0.001
+	await process_frame
+	fake.followers["r"] = rack_node
+	fake.sliders = [rack_node]
+	fake.slide_step = 0.00001
+	for i in 30:
+		tool.feed(Vector2(1.0, 0.0), false, false)
+		tool.tick(1.0 / 90.0)
+	var with_rack: String = tool.readout_text()
+	print("SMOKE a follower that slides (a rack) is read out in mm/s next to the turning gears: ", with_rack.contains("Rack 1 mm/s") and with_rack.contains("Gear B"), " ", with_rack)
+	fake.sliders = []
+	fake.followers.erase("r")
+	rack_node.free()
+	tool.stop()
+
+	# a part with no readable name shows its numbers alone, never a node name
+	fake.labels = false
+	tool.feed(Vector2(1.0, 0.0), false, false)
+	tool.tick(1.0 / 90.0)
+	var unnamed: String = tool.readout_text()
+	print("SMOKE with no readable names the readout is just the numbers: ", unnamed.begins_with("30 rpm") and not unnamed.contains("Gear") and not unnamed.contains("Mesh"), " ", unnamed)
+	tool.stop()
+	fake.labels = true
+
 	# slide along a straight edge, in the part's scaled frame (1 unit of the backend = 0.001 world)
 	var slider := _part("Rack")
 	slider.scale = Vector3.ONE * 0.001
 	await process_frame
-	tool.try_pick(slider, 0, _edge(1))
+	tool.try_pick(slider, 1, _edge(1))
 	var x0 := slider.global_transform.origin.x
 	for i in 90:
 		tool.feed(Vector2(1.0, 0.0), false, false)
