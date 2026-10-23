@@ -97,7 +97,8 @@ func _initialize() -> void:
 	print("SMOKE the laser in the crank's hole picks the crank to turn: ", aimed and drive.part == crank and drive.kind == "spin", " ", drive.status_text())
 	await user.shot("crank_picked")
 	var start := await stored()
-	user.stick("right", Vector2(1.0, 0.0))
+	# stick LEFT and half way: the way the rack has 40 mm of room (to the right it has 6 and the limit stops it); 70 frames at about 15 rpm is about 25 mm of it
+	user.stick("right", Vector2(-0.5, 0.0))
 	var reading := ""
 	for i in 70:
 		await physics_frame
