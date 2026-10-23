@@ -66,6 +66,14 @@ func _initialize() -> void:
 	ok = await user.wheel_pick(["mate_type", "type_gear"])
 	print("SMOKE ...and the Type sub-wheel sets Gear: ", ok and mt.mate_type == "gear", " ", mt.mate_type)
 	await user.shot("type_gear")
+	main._tablet.open_tablet()
+	main._tablet.ui.select_tool("mates")
+	await user.frames(12)
+	var toggles: Control = main._tablet.pages._mates_toggles_row
+	print("SMOKE the tablet's Mates page hides Allow rotation / Minimal movement for a coupler type: ", toggles != null and not toggles.visible)
+	await user.shot("tablet_gear")
+	main._tablet.close_tablet()
+	await user.frames(4)
 
 	# --- point the laser at each gear's bore and pull the trigger
 	var a_ok: bool = await pick_bore(gear_a)

@@ -66,6 +66,7 @@ var _speed_label: Label
 var _speed_slider: HSlider
 var _mates_picks_label: Label
 var _mates_value_label: Label
+var _mates_toggles_row: Control ## Allow rotation / Minimal movement: neither means anything for a coupler (nothing moves when one is made)
 var _mates_create_button: Button
 var _mates_branch_label: Label ## which orientation / side the preview shows, and where Next solution is (MatesTool.branch_text)
 var _mates_alignment_button: Button
@@ -672,6 +673,7 @@ func _build_mates_page() -> Control:
 			_mates_tool.mate_type = _mates_tool.MATE_TYPES[i]
 	, 5))
 	var toggles := _row()
+	_mates_toggles_row = toggles
 	page.add_child(toggles)
 	var allow_rot := Button.new()
 	allow_rot.text = "Allow rotation"
@@ -789,6 +791,8 @@ func _refresh_mates_branch_controls() -> void:
 	if _mates_branch_label == null or _mates_tool == null:
 		return
 	var tool = _mates_tool
+	if _mates_toggles_row != null:
+		_mates_toggles_row.visible = not tool.is_coupler()
 	var text: String = tool.branch_text()
 	_mates_branch_label.text = text
 	_mates_branch_label.visible = text != ""

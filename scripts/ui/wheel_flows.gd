@@ -234,9 +234,8 @@ func root_entries() -> Array:
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
 		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Paint colour, see-through, shine, glow"),
-		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"),
-		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
+		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
 		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
@@ -306,6 +305,7 @@ func visibility_entries(has_selection: bool = true) -> Array:
 		_action("show_all", "Show all", "eye", Color(0.48, 0.88, 0.69), "Bring every part back", _show_all),
 		_action("invert", "Invert", "invert", Color(0.48, 0.88, 0.69), "Hidden becomes shown and the reverse", _main.reverse_visibility),
 		_action("isolate", "Isolate part", "eye_half", Color(0.48, 0.88, 0.69), "Hide everything but the selected part", _main.isolate_selected, has_selection, false, "Select a part first (trigger on a part)"),
+		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"), # (a visibility tool: it lives here so the root ring keeps ten wedges)
 	]
 	if _design_table != null and _design_table.is_open() and _design_table.build != null:
 		out.append(_submenu("categories", "Categories", "layers", Color(0.48, 0.88, 0.69), "Isolate sketches, bodies, planes...", category_entries))
