@@ -165,6 +165,8 @@ func entries() -> Array:
 			return _measure_entries()
 		"drive":
 			return _drive_entries()
+		"sections":
+			return _section_entries()
 		"paint":
 			return _colour_entries()
 	return root_entries()
@@ -233,7 +235,7 @@ func root_entries() -> Array:
 		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
-		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Paint colour, see-through, shine, glow"),
+		_tool_entry("paint", "Look", "paint", Color(0.48, 0.88, 0.69), "Appearance: colour, see-through, shine, glow"), # (the full name is too wide for its tile; the tablet and the prompt say Appearance)
 		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
 		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
@@ -439,6 +441,22 @@ func _measure_entries() -> Array:
 		_action("measure_clear", "Clear", "clear_picks", Color(0.96, 0.69, 0.25), "Start a new measurement", _measure.clear_picks),
 		_action("measure_tablet", "Tablet", "tablet", Color(0.77, 0.55, 1.00), "Volume, area, mass", open_measure_tablet),
 	]
+
+
+func _section_entries() -> Array:
+	## The prompt says "Wheel: Flip", so the ring has it: Flip is on while the other side of the plane is the one that stays.
+	var section = _main.get("_section_tool")
+	var flipped: bool = section != null and bool(section.flipped)
+	return [
+		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
+		_action("section_flip", "Flip", "flip", Color(0.77, 0.55, 1.00), "Keep the other side of the plane", _flip_section, section != null, flipped, "Not available"),
+	]
+
+
+func _flip_section() -> void:
+	var section = _main.get("_section_tool")
+	if section != null:
+		section.set_flipped(not bool(section.flipped))
 
 
 func _drive_entries() -> Array:

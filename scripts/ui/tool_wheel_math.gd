@@ -37,6 +37,23 @@ static func centre_direction(index: int, count: int) -> Vector2:
 	return Vector2(sin(a), cos(a))
 
 
+static func tile_centroid(poly: PackedVector2Array) -> Vector2:
+	## The area centroid of a tile outline: where its icon-and-name block looks centred (the wedge's own axis point at one radius sits off it on a slanted tile).
+	var area := 0.0
+	var cx := 0.0
+	var cy := 0.0
+	for i in poly.size():
+		var a := poly[i]
+		var b := poly[(i + 1) % poly.size()]
+		var cross := a.x * b.y - b.x * a.y
+		area += cross
+		cx += (a.x + b.x) * cross
+		cy += (a.y + b.y) * cross
+	if absf(area) < 1e-12:
+		return Vector2.ZERO
+	return Vector2(cx, cy) / (3.0 * area)
+
+
 static func wedge_outline(index: int, count: int, inner: float = INNER_RADIUS, outer: float = OUTER_RADIUS, gap: float = GAP, steps: int = 14, corner: float = CORNER) -> PackedVector2Array:
 	## A closed polygon for the wedge (counter-clockwise), with `gap` metres trimmed off each side so the wedges don't touch.
 	var pts := PackedVector2Array()

@@ -52,7 +52,7 @@ const _ICONS := {
 	"environment": '<circle cx="24" cy="19" r="8"/><path d="M4 36H44M12 43H36"/>',
 	# Assembly tools
 	"mates": '<circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="8"/><path d="M24 24V24.5"/>',
-	"paint": '<path d="M6 17H30V29H6Z"/><path d="M30 20H40"/><path d="M40 14V26"/><path d="M12 29V38H20V29"/>',
+	"paint": '<circle cx="22" cy="27" r="14"/><path d="M13 22C14.5 17 18.5 14 23.5 13.5"/><path d="M17 36C25 38.5 33 34 35.5 26"/><path d="M38 4V14M33 9H43"/>', # Appearance: a shaded sphere with a glint (colour, see-through, shine, glow); was a spray gun
 	"invert": '<circle cx="24" cy="24" r="16"/><path d="M24 8A16 16 0 0 1 24 40Z" fill="white"/>',
 	"flip": '<path d="M8 18H36"/><path d="M30 12L36 18L30 24"/><path d="M40 30H12"/><path d="M18 24L12 30L18 36"/>',
 	"relax": '<circle cx="13" cy="24" r="8"/><circle cx="35" cy="24" r="8"/><path d="M21 24H23M25 24H27"/>',
