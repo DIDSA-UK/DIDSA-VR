@@ -156,7 +156,7 @@ func register(reg) -> void:
 	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
 		"caption": "hide · show · isolate",
 		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
-	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
+	reg.add_tool("view", "shoot_hide", "Hide tool", "shoot_hide", _build_shoot_hide_page, {
 		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
 		"caption": "point and hide",
 		"hint": "Point at a part and pull the right trigger to hide it.",
@@ -512,7 +512,7 @@ func _build_visibility_page() -> Control:
 	row.add_child(_button("Show all", func() -> void: _main.show_all_parts()))
 	page.add_child(_button("Reverse visibility", func() -> void: _main.reverse_visibility()))
 	page.add_child(_button("Isolate selected", func() -> void: _main.isolate_selected()))
-	page.add_child(_hint("To hide parts by pointing at them, use Shoot hide."))
+	page.add_child(_hint("To hide parts by pointing at them, use the Hide tool."))
 	var rm = _main.room_manager if _main and _main.get("room_manager") else null
 	if rm != null:
 		page.add_child(_hint("Delete takes the selected part out of the assembly (its mates go too). Two presses; undo puts it back.", true))

@@ -688,6 +688,8 @@ func _paint() -> void:
 		if on:
 			fill = tokens.accent_deep
 			border_alpha = 0.95
+		if entry.has("tint"):
+			fill = fill.lerp(entry["tint"] as Color, 0.32) # an entry or exit button: its colour is in the tile, not only the border
 		if lit:
 			fill = tokens.surface_hover.lerp(accent, 0.28)
 			border_alpha = 1.0

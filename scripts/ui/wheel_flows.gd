@@ -104,7 +104,7 @@ func prompt_text() -> String:
 		"paint":
 			return "Appearance · %s\nClick paints the body; hold the trigger to choose what." % _paint_hex()
 		"shoot_hide":
-			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
+			return "Hide tool\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
 			return "Section\nGrip the plane to move it. Wheel: Flip."
 		"drive":
@@ -230,17 +230,19 @@ func ring_title() -> String:
 
 
 func root_entries() -> Array:
+	## Tools (they switch on and bring their own ring) and actions, then the two menus. Where a name goes is set by how wide its tile is at the height of the name
+	## (the tiles at three and nine o'clock are the narrow ones): the long names are on the wide tiles.
 	var has_selection: bool = _main.current_selected_part() != null
 	return [
 		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
-		_tool_entry("paint", "Look", "paint", Color(0.48, 0.88, 0.69), "Appearance: colour, see-through, shine, glow"), # (the full name is too wide for its tile; the tablet and the prompt say Appearance)
-		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
-		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
+		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
+		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Control the appearance of the models"),
+		_submenu("visibility", "Show / Hide", "visibility", Color(0.48, 0.88, 0.69), "Show / hide parts", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
-		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
+		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Temporarily change part positions and visibility", scenes_entries),
 		_action("home", "Home", "home", Color(0.62, 0.70, 0.80), "Back to the landing: demos, tips, logo", _main.go_home),
 	]
 
@@ -304,10 +306,10 @@ func _open_scenes_tablet() -> void:
 
 func visibility_entries(has_selection: bool = true) -> Array:
 	var out := [
-		_action("show_all", "Show all", "eye", Color(0.48, 0.88, 0.69), "Bring every part back", _show_all),
-		_action("invert", "Invert", "invert", Color(0.48, 0.88, 0.69), "Hidden becomes shown and the reverse", _main.reverse_visibility),
 		_action("isolate", "Isolate part", "eye_half", Color(0.48, 0.88, 0.69), "Hide everything but the selected part", _main.isolate_selected, has_selection, false, "Select a part first (trigger on a part)"),
-		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"), # (a visibility tool: it lives here so the root ring keeps ten wedges)
+		_action("invert", "Invert", "invert", Color(0.48, 0.88, 0.69), "Hidden becomes shown and the reverse", _main.reverse_visibility),
+		_tool_entry("shoot_hide", "Hide tool", "shoot_hide", Color(0.48, 0.88, 0.69), "Point at a part and pull the trigger to hide it"),
+		_action("show_all", "Show all", "eye", Color(0.48, 0.88, 0.69), "Bring every part back", _show_all),
 	]
 	if _design_table != null and _design_table.is_open() and _design_table.build != null:
 		out.append(_submenu("categories", "Categories", "layers", Color(0.48, 0.88, 0.69), "Isolate sketches, bodies, planes...", category_entries))

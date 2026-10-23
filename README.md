@@ -56,7 +56,7 @@ Right hand is the laser and the selector; left hand walks.
 | **Left thumbstick** | Walk (speed slider on the tablet: 1.5 to 30 m/s). |
 | **Right thumbstick** X / Y | Snap-turn / aim and blink a teleport (push forward, point at the floor, release). Scrolls a panel when the laser is on one. |
 | **Right thumbstick click** | Numeric keypad pre-filled with the scale; type an exact scale and press OK (undoable). |
-| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, **Look** (the Appearance tool), **Drive**, Section, Visibility (its sub-wheel also has **Shoot hide**), Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
+| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Section, **Drive**, **Appearance**, **Show / Hide** (Isolate part, Invert, the Hide tool, Show all), Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
 | **Laser at the wrist icon + trigger** | Open the **wrist tablet** (never opens by itself). |
 | **Grip a handle** (centre of a window's or the keyboard's lower edge, a room's move bar, a table's front edge) | Carry it somewhere else. |
 
@@ -72,14 +72,14 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** c
 | **Design** | Summons the design table, or brings it to you. |
 | **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
 | **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Gear / Rack and pinion / Screw (turning one part turns the other), Drive (turn a mated part with the stick so its mechanism runs), Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
-| **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
+| **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Hide tool, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
 | **Home** | Back to the landing: the demo models, the launcher and the tips. (The tool wheel has a Home wedge too.) |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
 | **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
 
-One mode tool is on at a time (Mates, Measure, Sections, Shoot hide); a badge above your right hand shows which. Anything needing real text opens a full QWERTY keyboard that you can carry by its handle.
+One mode tool is on at a time (Mates, Measure, Sections, Hide tool); a badge above your right hand shows which. Anything needing real text opens a full QWERTY keyboard that you can carry by its handle.
 
 ## Architecture
 
