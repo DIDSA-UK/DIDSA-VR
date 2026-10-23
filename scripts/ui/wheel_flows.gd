@@ -252,20 +252,28 @@ func _scenes():
 
 
 func scenes_entries() -> Array:
-	## The Scenes sub-wheel (scenes_tool.gd): Back to default, Update, Save as new, then a wedge per scene (the first six).
+	## The Scenes sub-wheel (scenes_tool.gd), clockwise from the top: Start scene (green: relaxes the mates, a sandbox where moves are temporary), the saved scenes
+	## (a wedge each, the first six: choosing one shows it, which starts a scene too), Abandon (red: every part back at its mate position; asks first if the scene
+	## has unsaved changes), then Update and Save new. Start and Abandon are the way in and the way out, at opposite ends of the ring and filled in their colours.
 	var scenes = _scenes()
 	if scenes == null:
 		return []
 	var accent := Color(0.96, 0.69, 0.25)
+	var green := Color(0.40, 0.90, 0.55)
+	var red := Color(0.95, 0.42, 0.42)
 	var shown_id: String = scenes.shown_id()
-	var out := [
-		_action("scene_back", "Default", "undo", accent, "Back to default: every part back where it is", _scene_back, _mates != null and _mates.relaxed, false, "Nothing is moved: this is the default"),
-		_action("scene_update", "Update", "check", accent, "Keep what is on screen in \"%s\"" % scenes.shown_name(), _scene_update, shown_id != "", false, "Show a scene first"),
-		_action("scene_new", "Save new", "scenes", accent, "Save what is on screen as a new scene", _scene_new),
-	]
+	var in_scene: bool = _mates != null and _mates.relaxed
+	var start := _action("scene_start", "Start scene", "play", green, "Relax the mates so you can move and hide parts; Abandon puts everything back", _relax_mates, not in_scene, false, "Already in a scene: Abandon it first")
+	start["tint"] = green
+	var out := [start]
 	for scene in scenes.scenes_of().slice(0, 6):
 		var id := str(scene.get("id", ""))
 		out.append(_action("scene_" + id, str(scene.get("name", "")), "image", accent, "Show this scene", _scene_show.bind(id), true, id == shown_id))
+	var abandon := _action("scene_abandon", "Abandon", "stop", red, "Abandon the scene: every part back at its mate position", _scene_back, in_scene, false, "No scene started")
+	abandon["tint"] = red
+	out.append(abandon)
+	out.append(_action("scene_update", "Update", "check", accent, "Keep what is on screen in \"%s\"" % scenes.shown_name(), _scene_update, shown_id != "", false, "Show a scene first"))
+	out.append(_action("scene_new", "Save new", "scenes", accent, "Save what is on screen as a new scene", _scene_new))
 	return out
 
 
