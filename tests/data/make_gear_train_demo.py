@@ -125,6 +125,14 @@ def edge_along(part, direction, min_length=20.0, limit=400):
     raise SystemExit(f"no straight edge along {direction} on {part['id']}")
 
 
+def bevel_part(name, teeth):
+    """A straight bevel gear (module 3, 45 degrees: a 90 degree pair with an equal partner), apex at the part's origin, widening along +z, bore 8."""
+    part = make_part(name)
+    call("POST", f"/document/parts/{part['id']}/bevel-gear-features",
+         {"bevel_type": "boss", "module": 3.0, "tooth_count": teeth, "face_width": 12.0, "pitch_cone_angle_degrees": 45.0, "bore_diameter": 8.0})
+    return {"id": part["id"], "body_id": call("GET", f"/document/parts/{part['id']}/mesh")[0]["body_id"]}
+
+
 def rack_part(name, teeth):
     part = make_part(name)
     call("POST", f"/document/parts/{part['id']}/rack-features", {"rack_type": "boss", "module": 2.0, "tooth_count": teeth, "face_width": 10.0})
@@ -143,10 +151,14 @@ gear = gear_part("Gear (40 teeth)", 40)
 rack = rack_part("Rack (10 teeth)", 10)
 guide = box_part("Rack guide", 65.0, 10.0, 10.0)
 crank = box_part("Crank handle", 32.0, 8.0, 6.0, holes=[(24.0, 4.0, 4.0)])
+bevel_a = bevel_part("Bevel gear A (20 teeth)", 20)
+bevel_b = bevel_part("Bevel gear B (20 teeth)", 20)
+bearing = box_part("Bearing block", 36.0, 36.0, 14.0, holes=[(18.0, 18.0, 4.0)])
 root = make_part("Gear train")
 
 IDENTITY = [0.0, 0.0, 1.0]
-DISPLAY_NAMES = {"plate": "Plate", "pinion": "Pinion (20 teeth)", "gear": "Gear (40 teeth)", "guide": "Rack guide", "rack": "Rack", "crank": "Crank handle"} # the assembly tree and the VR readout show these (without a name they read "Component 3")
+DISPLAY_NAMES = {"plate": "Plate", "pinion": "Pinion (20 teeth)", "gear": "Gear (40 teeth)", "guide": "Rack guide", "rack": "Rack", "crank": "Crank handle",
+                 "bevel_a": "Bevel gear A", "bevel_b": "Bevel gear B", "bearing": "Bearing block"} # the assembly tree and the VR readout show these (without a name they read "Component 3")
 rack_y = PINION_XY[1] - 20.0 # the rack's pitch line (its local y = 0) touches the pinion's pitch circle
 placements = [
     ("plate", plate, (0.0, 0.0, 0.0), True),
@@ -156,10 +168,23 @@ placements = [
     ("rack", rack, (42.0, rack_y, 10.0), False),
     ("crank", crank, (PINION_XY[0] - 24.0, PINION_XY[1] - 4.0, 20.0), False),
 ]
-for occ_id, part, t, fixed in placements:
+# A 90 degree bevel pair on the gear's shaft: bevel A sits on top of the 40-tooth gear, large end down (turned over about x), its cone narrowing upwards to an apex
+# 31.7515 mm above the gear's top face (the large end plane's distance from the apex, as the solver places it: the mesh's highest vertex, 31.8398, is not on the plane); bevel B's axis is horizontal (along world x) through the SAME apex, its large end facing +x, and a bearing block (fixed,
+# rotated so its hole runs along x) holds it. A turns with the gear (a 1 : 1 gear mate, like the crank), B turns with A (Auto ratio 1 : 1) about a crossed axis.
+BEVEL_END = 31.7515339340878
+APEX = (GEAR_XY[0], GEAR_XY[1], 20.0 + BEVEL_END)
+BLOCK_X = APEX[0] + BEVEL_END # B's large end plane
+placements += [
+    ("bevel_a", bevel_a, APEX, False, ((1.0, 0.0, 0.0), 180.0)),
+    ("bevel_b", bevel_b, APEX, False, ((0.0, 1.0, 0.0), 90.0)),
+    ("bearing", bearing, (BLOCK_X, APEX[1] - 18.0, APEX[2] + 18.0), True, ((0.0, 1.0, 0.0), 90.0)),
+]
+for entry in placements:
+    occ_id, part, t, fixed = entry[:4]
+    axis, degrees = entry[4] if len(entry) > 4 else (IDENTITY, 0.0)
     call("POST", f"/document/parts/{root['id']}/occurrences", {
         "id": occ_id, "external_ref": f"parts/{part['id']}.didsa", "resolved_part_id": part["id"], "name_override": DISPLAY_NAMES[occ_id],
-        "transform": {"translation": list(t), "rotation_axis": IDENTITY, "rotation_angle_degrees": 0.0}, "fixed": fixed})
+        "transform": {"translation": list(t), "rotation_axis": list(axis), "rotation_angle_degrees": degrees}, "fixed": fixed})
 
 
 def ref(occ, part, index):
@@ -185,6 +210,16 @@ mate("rack_pinion", ref("pinion", pinion, cylinder_face(pinion)), edge_ref("rack
 # (the backend's default sense for two gears is the OPPOSITE way round in the world, as meshing gears turn; a crank fixed to the pinion turns the SAME way, so take the other one)
 crank_mate = mate("gear", ref("crank", crank, cylinder_face(crank)), ref("pinion", pinion, cylinder_face(pinion)), value=1.0)
 call("PATCH", f"/document/parts/{root['id']}/mates/{crank_mate['id']}", {"secondary_flip": not crank_mate["secondary_flip"]})
+
+# the bevel pair: A on the gear's shaft (concentric to its bore, large end on the gear's top face), turning with the gear; B in the bearing block (concentric to
+# its hole, large end on the block's face), turning with A at 1 : 1 about the crossed axis (the backend's default sense for a crossed pair is k = -1)
+mate("concentric", ref("bevel_a", bevel_a, cylinder_face(bevel_a)), ref("gear", gear, cylinder_face(gear)))
+mate("coincident", ref("bevel_a", bevel_a, planar_face(bevel_a, (0.0, 0.0, 1.0))), ref("gear", gear, planar_face(gear, (0.0, 0.0, 1.0))), alignment="anti_aligned")
+mate("concentric", ref("bevel_b", bevel_b, cylinder_face(bevel_b)), ref("bearing", bearing, cylinder_face(bearing, (18.0, 18.0))))
+mate("coincident", ref("bevel_b", bevel_b, planar_face(bevel_b, (0.0, 0.0, 1.0))), ref("bearing", bearing, planar_face(bearing, (0.0, 0.0, -1.0))), alignment="anti_aligned")
+rigid = mate("gear", ref("gear", gear, cylinder_face(gear)), ref("bevel_a", bevel_a, cylinder_face(bevel_a)), value=1.0)
+call("PATCH", f"/document/parts/{root['id']}/mates/{rigid['id']}", {"secondary_flip": not rigid["secondary_flip"]}) # the same shaft: A turns the way the gear does
+mate("gear", ref("bevel_a", bevel_a, cylinder_face(bevel_a)), ref("bevel_b", bevel_b, cylinder_face(bevel_b))) # Auto: 20 teeth to 20 teeth
 
 # the rack's travel (limit mates, M9): its +x end against the plate's +x edge, the signed gap from the plate edge, limited to where the pinion still meets the
 # rack - it slides 40 mm towards the plate's left edge and 6 mm back to the right of where it starts (the rack starts near the right end of its travel). Made with

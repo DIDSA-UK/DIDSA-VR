@@ -77,7 +77,7 @@ func has_coupler() -> bool:
 
 ## Parses an anchor's `constraint_model`. Returns null (= keep projecting) for no model, another version, an unknown mate type,
 ## a side missing geometry its residual needs, or a group the local solve is not meant for.
-static func try_parse(json, max_members: int = MAX_MEMBERS):
+static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_ROWS):
 	if not (json is Dictionary):
 		return null
 	var version := int(json.get("version", 0))
@@ -142,7 +142,7 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	for i in ids.size():
 		identity.append(Se3.make_pose([0.0, 0.0, 0.0], Se3.identity()))
 	var r = model._evaluate(identity)
-	if r == null or (r[0] as PackedFloat64Array).size() > MAX_ROWS:
+	if r == null or (r[0] as PackedFloat64Array).size() > max_rows:
 		return null
 	model.rows = (r[0] as PackedFloat64Array).size()
 	for mate in model._mates:
@@ -150,7 +150,7 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 			if model._limit_row(mate, identity) == null:
 				return null # a side lacking the geometry the limit measures
 			model.rows += 1 # (counted for the size cap; it adds a row only while held)
-			if model.rows > MAX_ROWS:
+			if model.rows > max_rows:
 				return null
 	return model
 

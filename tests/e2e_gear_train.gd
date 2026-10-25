@@ -44,6 +44,19 @@ func pose_of(answer: Dictionary, occurrence_id: String) -> Dictionary:
 	return {}
 
 
+func basis_of(transform: Dictionary) -> Basis:
+	var axis: Array = transform["rotation_axis"]
+	return Basis(Vector3(axis[0], axis[1], axis[2]).normalized(), deg_to_rad(float(transform["rotation_angle_degrees"])))
+
+
+func turned_since(start: Dictionary, now: Dictionary) -> Dictionary:
+	## How a part has turned from its start pose, in the WORLD: {"axis": unit Vector3 (signed so the angle is positive), "deg": the angle}.
+	var q := Quaternion(basis_of(now) * basis_of(start).inverse())
+	var angle := q.get_angle()
+	var axis := q.get_axis() if angle > 1e-9 else Vector3.ZERO
+	return {"axis": axis, "deg": rad_to_deg(angle)}
+
+
 func crank_wish(start: Dictionary, degrees: float) -> Dictionary:
 	var wish: Dictionary = (start["crank"] as Dictionary).duplicate(true)
 	wish["rotation_axis"] = [0, 0, 1]
@@ -82,7 +95,7 @@ func _initialize() -> void:
 	var kinds := {}
 	for m in mates:
 		kinds[str(m["type"])] = int(kinds.get(str(m["type"]), 0)) + 1
-	print("SMOKE the demo has two gear mates and a rack and pinion mate, plus its plain mates: ", kinds.get("gear", 0) == 2 and kinds.get("rack_pinion", 0) == 1 and kinds.get("concentric", 0) == 3 and kinds.get("coincident", 0) == 5 and kinds.get("limit_distance", 0) == 1, " ", kinds)
+	print("SMOKE the demo has four gear mates (two spur, one rigid, one bevel) and a rack and pinion mate, plus its plain mates: ", kinds.get("rack_pinion", 0) == 1 and kinds.get("concentric", 0) == 5 and kinds.get("coincident", 0) == 7 and kinds.get("limit_distance", 0) == 1 and kinds.get("gear", 0) == 4, " ", kinds)
 	var start := {}
 	for o in await get_json("/parts/%s/occurrences" % owner_id):
 		start[str(o["id"])] = o["transform"]
@@ -98,6 +111,16 @@ func _initialize() -> void:
 	if not rack.is_empty():
 		for i in 3:
 			slid.append(float(rack["translation"][i]) - float((start["rack"] as Dictionary)["translation"][i]))
+	# the bevel pair (20 teeth to 20 teeth, crossed axes): bevel A is rigid with the 40-tooth gear (the same turn about the shaft, world z), bevel B turns with A
+	# at 1 : 1 about the CROSSED axis, world x
+	var bevel_a := pose_of(answer, "bevel_a")
+	var bevel_b := pose_of(answer, "bevel_b")
+	var turn_a := turned_since(start["bevel_a"], bevel_a) if not bevel_a.is_empty() else {"axis": Vector3.ZERO, "deg": 0.0}
+	var turn_b := turned_since(start["bevel_b"], bevel_b) if not bevel_b.is_empty() else {"axis": Vector3.ZERO, "deg": 0.0}
+	print("SMOKE bevel A turns with the 40-tooth gear: the same 45 degrees about the shaft (world z): ", absf(float(turn_a["deg"]) - 45.0) < 0.1 and absf(absf((turn_a["axis"] as Vector3).z) - 1.0) < 1e-6, " ", turn_a)
+	print("SMOKE bevel B turns 1 : 1 with A, 45 degrees about world x (a crossed axis, not parallel to the shaft): ", absf(float(turn_b["deg"]) - 45.0) < 0.1 and absf(absf((turn_b["axis"] as Vector3).x) - 1.0) < 1e-6, " ", turn_b)
+	var apex_b: Array = bevel_b["translation"] if not bevel_b.is_empty() else [0, 0, 0]
+	print("SMOKE bevel B stays on its axis (its origin, the apex, did not move): ", absf(float(apex_b[0]) - float(start["bevel_b"]["translation"][0])) < 1e-6 and absf(float(apex_b[1]) - float(start["bevel_b"]["translation"][1])) < 1e-6 and absf(float(apex_b[2]) - float(start["bevel_b"]["translation"][2])) < 1e-6, " ", apex_b, " from ", start["bevel_b"]["translation"])
 	var per_turn := PI * 2.0 * 20.0 # module 2, 20 teeth: pitch circumference
 	print("SMOKE the rack slid a quarter of 125.66 mm along x only: ", slid.size() == 3 and absf(absf(slid[0]) - per_turn / 4.0) < 0.1 and absf(slid[1]) < 1e-6 and absf(slid[2]) < 1e-6, " ", slid)
 	var still := true

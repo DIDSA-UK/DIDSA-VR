@@ -140,6 +140,9 @@ func _initialize() -> void:
 	# model parsing: null / another version / unknown type / missing field / out-of-range member / too many members
 	var base: Dictionary = (cases[0]["input"]["model"] as Dictionary).duplicate(true)
 	var ok_parse := Local.try_parse(base) != null
+	var base_rows: int = Local.try_parse(base).rows
+	# a row cap below the model's own count refuses it; a larger one (the limit read of a big group) takes it
+	print("SMOKE try_parse honours its row cap: ", Local.try_parse(base, 8, base_rows - 1) == null and Local.try_parse(base, 8, base_rows) != null, " rows ", base_rows)
 	var bad_version: Dictionary = base.duplicate(true)
 	bad_version["version"] = Local.LIMIT_MODEL_VERSION + 1
 	var old_version: Dictionary = base.duplicate(true)

@@ -2119,7 +2119,7 @@ func _adopt_limit_model(state: Dictionary, model_json) -> void:
 	## rows) it costs 12 to 70 ms a frame in GDScript, which a headset cannot spare; the cheap stop below does the same job for the motion the mates allow.
 	if model_json == null:
 		return
-	var model = LocalRetraction.try_parse(model_json, 8)
+	var model = LocalRetraction.try_parse(model_json, 8, 1024)
 	state["limits"] = model if model != null and model.has_limits() else null
 
 

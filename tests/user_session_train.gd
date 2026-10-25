@@ -78,7 +78,7 @@ func _initialize() -> void:
 	for n in root.get_tree().get_nodes_in_group("grabbable_parts"):
 		labels.append(mt.part_label(n))
 	labels.sort()
-	print("SMOKE every part has a readable name (no Mesh N): ", labels == ["Crank handle", "Gear (40 teeth)", "Pinion (20 teeth)", "Plate", "Rack", "Rack guide"], " ", labels)
+	print("SMOKE every part has a readable name (no Mesh N): ", labels == ["Bearing block", "Bevel gear A", "Bevel gear B", "Crank handle", "Gear (40 teeth)", "Pinion (20 teeth)", "Plate", "Rack", "Rack guide"], " ", labels)
 
 	var s0: float = main.assembly_root.scale.x
 	var s1: float = await user.spread_hands_until(s0 * 6.0)
