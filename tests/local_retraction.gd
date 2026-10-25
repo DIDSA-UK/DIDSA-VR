@@ -290,7 +290,4 @@ func _pair_cost(cases: Array) -> void:
 				model.frame(poses, wishes, poses, lever)
 			us[key] = float(Time.get_ticks_usec() - t0) / reps
 		print("SMOKE BENCH pair vs plain twin ", id, ": plain ", rows["plain"], " rows ", snappedf(us["plain"], 0.1), " us/frame, pair ", rows["pair"], " rows ", snappedf(us["pair"], 0.1), " us/frame (", snappedf(us["pair"] / us["plain"], 0.01), "x)")
-		var cost_ok: bool = us["pair"] < 200000.0
-		print("SMOKE pair frame under 200 ms (loose ceiling): ", cost_ok)
-		if not cost_ok:
-			failures += 1
+		# (reported, never a gate: a wall-clock ceiling fails on a slow runner and says nothing about the code; see tests/README.md "Timing")

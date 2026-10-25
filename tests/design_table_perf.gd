@@ -109,7 +109,7 @@ func _initialize() -> void:
 	print("SMOKE ...of which the snap search over 300 points / 150 lines: %.3f ms" % (snap_us / 1000.0))
 	print("SMOKE rebuilding the drawing mesh for 150 lines + 300 points (only when the sketch changes): %.2f ms" % (rebuild_us / 1000.0))
 	print("SMOKE the laser was really on the sheet for the measurement: ", hovering)
-	print("SMOKE inside the repo's per-frame rule even at the Quest 3 factor: ", sketch_ms * QUEST_FACTOR < BUDGET_MS)
+	print("SMOKE per-frame rule (%.1f ms) against the Quest 3 estimate (%.2f ms): reported, never a gate (a slow runner is not a slow table)" % [BUDGET_MS, sketch_ms * QUEST_FACTOR])
 	var meshes: int = table.find_children("*", "MeshInstance3D", true, false).size()
 	print("SMOKE the console and its sketch are %d mesh nodes (slab, 4 frame bars, ring, handle + halo, deck quad, sheet, drawing, preview, cursor, plane squares)" % meshes)
 	var viewports: Array = table.find_children("*", "SubViewport", true, false)

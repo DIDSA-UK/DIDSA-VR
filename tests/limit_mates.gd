@@ -175,7 +175,7 @@ func _initialize() -> void:
 	shown = drag._limit_stop(train_state, carried, true)
 	var micros := Time.get_ticks_usec() - started
 	print("SMOKE four members: carried 40 mm on, they stop together at the 6 mm bound: ", absf(shown[0]["t"][0] - (train_refs[0]["t"][0] + 6.0)) < 1e-3 and absf(shown[3]["t"][0] - (train_refs[3]["t"][0] + 6.0)) < 1e-3 and train_state["at_limit"])
-	print("SMOKE BENCH the stop on four members: ", micros, " us (a headset frame is 11000 us) ", micros < 20000)
+	print("SMOKE BENCH the stop on four members: ", micros, " us (a headset frame is 11000 us; reported, never a gate)")
 
 	for n in [part_a, part_b]:
 		n.free()

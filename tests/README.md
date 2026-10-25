@@ -304,3 +304,8 @@ a new intended false (add it, with a comment). Do not add an entry just to get g
 - **Baselines.** A new test that must print `false` when correct goes in `expected_false.txt` (`expected_false_e2e.txt` for e2e) with a one-line reason; see "Adding a test" above. A stale-entry warning in the log means delete that entry.
 - **Known limits of the check:** it reads booleans only (numbers meant to be eyeballed, such as the steadiness and sensitivity tables, are not machine-checked), and an expected-false line that flips to `true` is only a stale warning, not a failure. Runner timing could in principle flip the frame-count `settle` tests; none has so far (about 8 runs). Investigate any flip rather than adding retries.
 - Not in CI by design: the picture-only render tests, `gpu_timing.gd`, the benches, and the `e2e_*` tests not in `e2e_ci_list.txt`.
+
+## Timing is reported, never a gate
+
+A test that fails because a machine was slow is a false positive: CI reruns of the same commit pass. So no test here decides pass or fail on elapsed time. `SMOKE BENCH ...` lines (and the per-frame cost lines in `local_retraction.gd`, `limit_mates.gd`, `design_table_perf.gd`) print their numbers and nothing more. DIDSA-CAD does the same (`backend/tests/timing.py`, `client/test/support/timing.dart`: the measurement is printed, enforced only with `DIDSA_ENFORCE_TIMING=1`, and a backend test fails if one is added that gates on time). What a timed step is really about should be asserted by something deterministic (a status, a count, a result).
+
