@@ -17,6 +17,7 @@ e2e_references_fix_feature
 e2e_preview
 e2e_create_plane
 e2e_loft_sweep
+e2e_loft_guides_helix
 e2e_gears
 e2e_gear_mates
 e2e_drive

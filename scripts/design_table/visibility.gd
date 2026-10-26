@@ -104,6 +104,9 @@ static func _seeds_of_row(f: Dictionary, by_sketch_id: Dictionary) -> Array:
 		"loft":
 			for sec in f.get("sections", []):
 				found.append(str((sec as Dictionary).get("sketch_feature_id", "")))
+			for guide in f.get("guide_curves", []):
+				for ref in guide:
+					found.append(str(by_sketch_id.get(str((ref as Dictionary).get("sketch_id", "")), "")))
 		"sweep":
 			found.append(str(f.get("sketch_feature_id", "")))
 			for ref in f.get("path_refs", []):

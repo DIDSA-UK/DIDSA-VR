@@ -336,7 +336,7 @@ func _show(entities: Array) -> void:
 func can_edit(feature_id: String) -> bool:
 	var type := str(row(feature_id).get("type", ""))
 	var tool = FeatureTools.for_type(type)
-	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "") or (tool != null and tool.edits_in_tool())
+	return BuildTree.EDITABLE.has(type) or (type == "sketch" and str(row(feature_id).get("sketch_id", "")) != "") or (tool != null and tool.edits_in_tool() and tool.edits_row(row(feature_id)))
 
 
 func edit_selected() -> void:
@@ -347,7 +347,7 @@ func edit_selected() -> void:
 		await _table.editor.reopen_sketch(selected_id) # a sketch is edited on the sheet, not with a number
 		return
 	var in_tool = FeatureTools.for_type(str(f.get("type", "")))
-	if in_tool != null and in_tool.edits_in_tool():
+	if in_tool != null and in_tool.edits_in_tool() and in_tool.edits_row(f):
 		await _table.editor.begin_tool_edit(selected_id)
 		return
 	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})

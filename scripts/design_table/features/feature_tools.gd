@@ -22,11 +22,12 @@ const CreatePlaneTool := preload("res://scripts/design_table/features/create_pla
 const GearTool := preload("res://scripts/design_table/features/gear_tool.gd")
 const RackTool := preload("res://scripts/design_table/features/rack_tool.gd")
 const BevelGearTool := preload("res://scripts/design_table/features/bevel_gear_tool.gd")
+const HelixTool := preload("res://scripts/design_table/features/helix_tool.gd")
 
 
 static func make_all() -> Dictionary:
 	var all := {}
-	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new(), LoftTool.new(), SweepTool.new(), PatternTool.new(), BooleanTool.new(), MergeTool.new(), SplitTool.new(), MoveFaceTool.new(), DeleteFaceTool.new(), MoveBodyTool.new(), ScaleBodyTool.new(), DeleteBodyTool.new(), GearTool.new(), RackTool.new(), BevelGearTool.new()]:
+	for tool in [ExtrudeTool.new(), RevolveTool.new(), FilletTool.new(), ChamferTool.new(), ShellTool.new(), MirrorTool.new(), CreatePlaneTool.new(), LoftTool.new(), SweepTool.new(), HelixTool.new(), PatternTool.new(), BooleanTool.new(), MergeTool.new(), SplitTool.new(), MoveFaceTool.new(), DeleteFaceTool.new(), MoveBodyTool.new(), ScaleBodyTool.new(), DeleteBodyTool.new(), GearTool.new(), RackTool.new(), BevelGearTool.new()]:
 		all[tool.id] = tool
 	return all
 

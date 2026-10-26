@@ -142,19 +142,57 @@ static func create_plane_typed(method: String, bases: Array, edges: Array, verti
 	return _bad("That way of making a plane isn't offered.")
 
 
-static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array, wall: float = 0.0, wall_from_closed: bool = false) -> Dictionary:
+static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, target_body_ids: Array, wall: float = 0.0, wall_from_closed: bool = false, guide_refs: Array = []) -> Dictionary:
 	## A loft through two or more sections, each the closed profile of a sketch (on its own plane). `wall` over 0 makes it a thin-walled loft:
 	## `wall_from_closed` keeps the closed profiles and gives a hollow tube between them (the thin source for closed sections), otherwise the sections are open chains.
+	## `guide_refs`: any number of guides that shape the surface, each an ordered chain of sketch entity refs ({sketch_id, entity_type, entity_id}); sent as
+	## `guide_curves` (always, an empty list clears them on an edit). A ruled loft is straight between sections, so guides are not sent with one (the backend refuses the pair).
 	if section_sketch_ids.size() < 2:
 		return _bad("A loft needs at least two sections: pick a line of each of two different sketches.")
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
+	for guide in guide_refs:
+		if (guide as Array).is_empty():
+			return _bad("A guide needs at least one curve.")
 	var body := {"sections": section_sketch_ids.map(func(id): return {"sketch_feature_id": str(id)}), "mode": "boss" if boss else "cut",
-		"ruled": ruled, "target_body_ids": target_body_ids}
+		"ruled": ruled, "target_body_ids": target_body_ids, "guide_curves": [] if ruled else guide_refs}
 	if wall > 0.0:
 		body["thickness"] = wall
 		body["thin_from_closed_profile"] = wall_from_closed
 	return _good("loft-features", body)
+
+
+static func helix_request(h: Dictionary, plane_ref: Dictionary) -> Dictionary:
+	## One helix curve (a curve feature, not a body) standing on `plane_ref` (the backend's axis_ref: the plane's normal is the axis, its origin the start, x axis
+	## the start direction; {} = the XY plane). `h`: {radius, taper ("none" | "end_radius" | "angle"), taper_value, segments (Array of {pitch, turns}), right_handed}.
+	## The backend takes an end radius OR a taper angle (it returns both) and a list of pitch + turns segments, every pitch the same sign.
+	if float(h["radius"]) <= 0.0:
+		return _bad("The radius has to be bigger than zero.")
+	var segments: Array = h["segments"]
+	if segments.is_empty():
+		return _bad("A helix needs at least one segment (pitch and turns).")
+	var out_segments: Array = []
+	for i in segments.size():
+		var seg: Dictionary = segments[i]
+		if is_zero_approx(float(seg["pitch"])):
+			return _bad("Segment %d: the pitch can't be zero." % (i + 1))
+		if float(seg["turns"]) <= 0.0:
+			return _bad("Segment %d: the turns have to be more than zero." % (i + 1))
+		if (float(seg["pitch"]) > 0.0) != (float((segments[0] as Dictionary)["pitch"]) > 0.0):
+			return _bad("Every segment has to go the same way along the axis (the pitches' signs differ).")
+		out_segments.append({"pitch": float(seg["pitch"]), "turns": float(seg["turns"])})
+	var body := {"curve_type": "helix", "axis_ref": plane_ref if not plane_ref.is_empty() else {"fixed_plane": "XY"}, "radius": float(h["radius"]),
+		"segments": out_segments, "right_handed": bool(h["right_handed"])}
+	match str(h["taper"]):
+		"end_radius":
+			if float(h["taper_value"]) <= 0.0:
+				return _bad("The end radius has to be bigger than zero.")
+			body["end_radius"] = float(h["taper_value"])
+		"angle":
+			if absf(float(h["taper_value"])) >= 90.0:
+				return _bad("The taper angle has to be under 90 degrees.")
+			body["taper_angle_degrees"] = float(h["taper_value"])
+	return _good("curve-features", body)
 
 
 static func sweep_request(sketch_feature_id: String, path_refs: Array, boss: bool, target_body_ids: Array) -> Dictionary:
@@ -402,7 +440,7 @@ func list_features(owner_part_id: String) -> Dictionary:
 func update_feature(owner_part_id: String, feature_type: String, feature_id: String, payload: Dictionary) -> Dictionary:
 	## Changes the one number of an extrude / fillet / chamfer, or swaps a reference (a Build row's Fix: PATCH with a replacement edge or face; any feature of the
 	## part, not just the last). {ok, id, error}.
-	var route: String = "%s-features" % feature_type.replace("_", "-") # every feature type's routes are named after it
+	var route: String = "%s-features" % str(ROUTE_TYPES.get(feature_type, feature_type)).replace("_", "-") # every feature type's routes are named after it (a tool whose id is not its backend type is mapped)
 	if feature_type == "":
 		return {"ok": false, "id": "", "error": "That kind of feature can't be edited here."}
 	return _result(await api.call(HTTPClient.METHOD_PATCH, "/document/parts/%s/%s/%s" % [owner_part_id, route, feature_id], payload))
@@ -421,7 +459,11 @@ func _result(r: Dictionary) -> Dictionary:
 	if not r["ok"]:
 		return {"ok": false, "id": "", "error": _plain(str(r["error"]))}
 	var json = r["json"]
-	return {"ok": true, "id": str(json.get("id", "")) if json is Dictionary else "", "error": ""}
+	var warnings: Array = (json.get("warnings", []) as Array) if json is Dictionary and json.get("warnings") is Array else []
+	return {"ok": true, "id": str(json.get("id", "")) if json is Dictionary else "", "error": "", "warnings": warnings}
+
+
+const ROUTE_TYPES := {"helix": "curve"} ## tool id -> the backend feature type, where they differ (the Helix tool makes a curve feature)
 
 
 static func _plain(error: String) -> String:

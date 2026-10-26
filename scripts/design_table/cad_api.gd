@@ -114,6 +114,8 @@ static func error_text(parsed) -> String:
 	if parsed is Dictionary and parsed.has("detail"):
 		var detail = parsed["detail"]
 		if detail is Dictionary:
+			if str(detail.get("type", "")) == "invalid_guide_curve_ref" and detail.has("detail"):
+				return str(detail["detail"]) # a loft guide that does not reach a section: the message names the guide and the section
 			return str(detail.get("type", detail.get("message", JSON.stringify(detail))))
 		if detail is Array and not detail.is_empty() and detail[0] is Dictionary:
 			return str(detail[0].get("msg", JSON.stringify(detail[0])))

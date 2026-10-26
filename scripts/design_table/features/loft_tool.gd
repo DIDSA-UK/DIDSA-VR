@@ -1,7 +1,9 @@
 extends "res://scripts/design_table/features/feature_tool.gd"
 ## Loft: a solid through two or more sections, each the closed profile of a finished sketch (its own plane: make planes with Plane first). The laser
 ## picks a visible sketch for each section (any line of it), in pick order. A Build row's Edit keeps the older line picking (Lines on / off narrows it). Boss or Cut, Ruled
-## (straight between sections). Preview is the coarse route: nothing is stored until Apply.
+## (straight between sections). Guides (Add guide) are curves of earlier sketches that run through every section and shape the surface between them: each pull
+## on a curve adds one to the guide being built (Done keeps it), any number of guides, ignored (and not sent) while Ruled is on. Preview is the coarse route:
+## nothing is stored until Apply.
 
 
 func _init() -> void:
@@ -17,6 +19,11 @@ func options(ed) -> Array:
 		{"id": "clear_curves", "text": "Clear"},
 		{"id": "apply", "text": "Apply (%d sections)" % sections(ed).size(), "disabled": not can_apply(ed)},
 	]
+	if not bool(ed.options["ruled"]):
+		var at := list.size() - 2 # the guide rows sit before Clear and Apply
+		for row in ed.guide_option_rows():
+			list.insert(at, row)
+			at += 1
 	if bool(ed.options["lo_thin"]):
 		list.insert(4, {"id": "lo_closed", "text": "From closed", "toggle": true, "pressed": bool(ed.options["lo_closed"])}) # a chip beside Thin wall, the value beside Clear
 		list.insert(5, {"id": "lo_wall", "text": "Wall %.2f mm" % float(ed.options["lo_wall"])})
@@ -54,7 +61,16 @@ func handle_option(ed, option_id: String) -> bool:
 			ed.clear_picks()
 		"targets":
 			ed.toggle_target_picking()
+		"guide_add":
+			ed.start_guide_pick()
+		"guide_done":
+			ed.finish_guide_pick(true)
+		"guide_cancel":
+			ed.finish_guide_pick(false)
 		_:
+			if option_id.begins_with("guide_del_"):
+				ed.remove_guide(int(option_id.trim_prefix("guide_del_")))
+				return true
 			return false
 	return true
 
@@ -67,7 +83,7 @@ func on_activated(ed) -> void:
 
 
 func can_apply(ed) -> bool:
-	return sections(ed).size() >= 2
+	return sections(ed).size() >= 2 and not ed.is_picking_guide()
 
 
 func preview_mode() -> String:
@@ -80,7 +96,7 @@ func preview_route() -> String:
 
 func request(ed, _extra: Dictionary = {}) -> Dictionary:
 	var o: Dictionary = ed.options
-	return PartFeatures.loft_request(sections(ed), bool(o["boss"]), bool(o["ruled"]), ed.extrude_targets(), float(o["lo_wall"]) if bool(o["lo_thin"]) else 0.0, bool(o["lo_closed"]))
+	return PartFeatures.loft_request(sections(ed), bool(o["boss"]), bool(o["ruled"]), ed.extrude_targets(), float(o["lo_wall"]) if bool(o["lo_thin"]) else 0.0, bool(o["lo_closed"]), ed.guide_refs())
 
 
 func edits_in_tool() -> bool:
@@ -88,7 +104,7 @@ func edits_in_tool() -> bool:
 
 
 func patch_keys() -> Array:
-	return ["sections", "mode", "ruled", "target_body_ids", "thickness", "thin_from_closed_profile"]
+	return ["sections", "mode", "ruled", "target_body_ids", "thickness", "thin_from_closed_profile", "guide_curves"]
 
 
 func load_from_row(ed, row: Dictionary) -> void:
@@ -101,6 +117,14 @@ func load_from_row(ed, row: Dictionary) -> void:
 	for sec in row.get("sections", []):
 		var sid := str((sec as Dictionary).get("sketch_feature_id", ""))
 		ed.curve_picks.append({"kind": "curve", "sketch_feature_id": sid, "sketch_id": "", "entity_type": "", "entity_id": "", "key": "section:%s" % sid})
+	ed.guides = []
+	ed.guide_draft = []
+	for guide in row.get("guide_curves", []):
+		var chain: Array = []
+		for ref in guide:
+			var r: Dictionary = ref
+			chain.append({"kind": "curve", "sketch_feature_id": "", "sketch_id": str(r.get("sketch_id", "")), "entity_type": str(r.get("entity_type", "")), "entity_id": str(r.get("entity_id", "")), "key": "curve:%s:%s" % [r.get("sketch_id", ""), r.get("entity_id", "")]})
+		ed.guides.append(chain)
 
 
 func patch_body(req: Dictionary) -> Dictionary:
@@ -112,7 +136,8 @@ func patch_body(req: Dictionary) -> Dictionary:
 
 
 func summary(f: Dictionary, _features: Array) -> String:
-	return "%s, %d sections%s%s" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", (f.get("sections", []) as Array).size(), ", ruled" if bool(f.get("ruled", false)) else "", ", thin wall" if f.get("thickness") != null else ""]
+	var guides: int = (f.get("guide_curves", []) as Array).size()
+	return "%s, %d sections%s%s%s" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", (f.get("sections", []) as Array).size(), ", ruled" if bool(f.get("ruled", false)) else "", ", thin wall" if f.get("thickness") != null else "", (", %d guide%s" % [guides, "" if guides == 1 else "s"]) if guides > 0 else ""]
 
 
 func done_text() -> String:

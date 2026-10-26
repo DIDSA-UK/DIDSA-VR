@@ -21,6 +21,7 @@ var mesh_bytes := PackedByteArray()
 var mesh_ok := true
 var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
+var feature_warnings: Array = [] ## the non-blocking notes a feature POST / PATCH answers with (the real backend: a loft guide bent to meet a section)
 var track_rows := false ## opt-in: a POST of a feature adds its row to feature_rows (the request body merged in) and a DELETE of it takes the row away, like the real backend
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
@@ -114,7 +115,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 					row["lost_references"] = []
 					row["moved_references"] = []
 					row["has_lost_reference"] = false
-		return _ok({"id": path.get_file()})
+		return _ok({"id": path.get_file(), "warnings": feature_warnings})
 	if verb == "DELETE" and path.ends_with("/cascade"):
 		var owner := path.get_slice("/", 3)
 		var rows: Array = feature_rows.get(owner, [])
@@ -153,7 +154,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 			var owner_rows: Array = feature_rows.get(path.get_slice("/", 3), [])
 			owner_rows.append(row)
 			feature_rows[path.get_slice("/", 3)] = owner_rows
-		return _ok({"id": made})
+		return _ok({"id": made, "warnings": feature_warnings})
 	if verb == "DELETE" and path.contains("/features/"):
 		if track_rows:
 			var owner_id := path.get_slice("/", 3)
