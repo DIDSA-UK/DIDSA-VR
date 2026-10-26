@@ -24,6 +24,7 @@ const FEATURE_GROUPS := [ ## the Feature tab's groups, each a colour and the too
 	["create", "Create", Color(0.31, 0.77, 1.00), ["extrude", "revolve", "loft", "sweep", "create_plane"]],
 	["refine", "Refine", Color(0.96, 0.69, 0.25), ["fillet", "chamfer", "shell", "mirror"]],
 	["combine", "Modify", Color(0.78, 0.55, 0.98), ["pattern", "boolean", "merge", "split"]],
+	["gears", "Gears", Color(0.55, 0.85, 0.45), ["gear", "rack", "bevel_gear"]],
 ]
 const ACCENT_FEATURE := ACCENT_SKETCH
 const ACCENT_MODIFY := ACCENT_SKETCH
@@ -72,6 +73,9 @@ const FEATURE_TOOLS := [
 	["boolean", "Boolean", "tool_boolean"],
 	["merge", "Merge", "tool_merge"],
 	["split", "Split", "tool_split"],
+	["gear", "Gear", "tool_gear"],
+	["rack", "Rack", "tool_rack"],
+	["bevel_gear", "Bevel", "tool_bevel_gear"],
 ]
 
 ## The Modify category (direct editing: no sketch, works on faces and bodies of any solid, an imported STEP part included).
@@ -122,6 +126,9 @@ const HINTS := {
 	"scale_body": "Pick the body to scale, set the factor, then Apply.",
 	"delete_body": "Pick the bodies to delete, then Apply.",
 	"mirror": "Aim at a flat face or a reference plane and pull the trigger: the part is mirrored across it.",
+	"gear": "Set the module, teeth and width (and a bore for the shaft), then Apply: a new gear body. Pull the trigger on a plane or flat face first to stand it there. The line below gives the centre distance to a partner gear.",
+	"rack": "Set the module, teeth and width, then Apply: a new rack body. Pull the trigger on a plane or flat face first to stand it there.",
+	"bevel_gear": "Set the module, teeth, width and pitch cone angle (or the mate's teeth, then Cone from mate for a 90 degree pair), and a bore, then Apply: a new bevel gear body.",
 }
 
 

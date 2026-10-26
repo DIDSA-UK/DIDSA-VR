@@ -60,6 +60,12 @@ func _initialize() -> void:
 	_num(Local.ACCEPT_DISTANCE, float(c["local_accept_distance"]), "const local_accept_distance", 1e-300)
 	_num(Local.PAIR_MODEL_VERSION, float(c["local_pair_model_version"]), "const local_pair_model_version", 0.5)
 	_num(Local.MODEL_VERSION, float(c["local_model_version"]), "const local_model_version", 0.5)
+	if c.has("local_coupler_model_version"):
+		_num(Local.COUPLER_MODEL_VERSION, float(c["local_coupler_model_version"]), "const local_coupler_model_version", 0.5)
+	if c.has("local_limit_model_version"):
+		_num(Local.LIMIT_MODEL_VERSION, float(c["local_limit_model_version"]), "const local_limit_model_version", 0.5)
+		_num(Local.LIMIT_ROUNDS, float(c["local_limit_rounds"]), "const local_limit_rounds", 0.5)
+		_num(Local.LIMIT_TOL, float(c["local_limit_tol"]), "const local_limit_tol", 1e-300)
 	print("SMOKE GDScript local-retraction constants equal the vectors' constants: ", failures == 0)
 	var width_cases := cases.filter(func(x): return str(x["id"]).begins_with("local-width-"))
 	print("SMOKE local_retract cases in the fixture: ", cases.size(), " (>= 12: ", cases.size() >= 12, "); local-width-*: ", width_cases.size(), " (>= 17: ", width_cases.size() >= 17, ")")
@@ -80,6 +86,11 @@ func _initialize() -> void:
 		var wishes := _poses_in(inp["wishes"])
 		var fallback := _poses_in(inp["fallback_poses"])
 		var r: Dictionary = model.frame(poses, wishes, fallback, float(inp["lever_arm"]))
+		if exp.has("held_limits"):
+			var held: Array = model.held_limits().keys()
+			held.sort()
+			if held != exp["held_limits"]:
+				_fail(id, "held limits %s vs %s" % [str(held), str(exp["held_limits"])])
 		if bool(r["accepted"]) != bool(exp["accepted"]):
 			_fail(id, "accepted %s vs %s" % [str(r["accepted"]), str(exp["accepted"])])
 		for i in poses.size():
@@ -129,12 +140,15 @@ func _initialize() -> void:
 	# model parsing: null / another version / unknown type / missing field / out-of-range member / too many members
 	var base: Dictionary = (cases[0]["input"]["model"] as Dictionary).duplicate(true)
 	var ok_parse := Local.try_parse(base) != null
+	var base_rows: int = Local.try_parse(base).rows
+	# a row cap below the model's own count refuses it; a larger one (the limit read of a big group) takes it
+	print("SMOKE try_parse honours its row cap: ", Local.try_parse(base, 8, base_rows - 1) == null and Local.try_parse(base, 8, base_rows) != null, " rows ", base_rows)
 	var bad_version: Dictionary = base.duplicate(true)
-	bad_version["version"] = Local.PAIR_MODEL_VERSION + 1
+	bad_version["version"] = Local.LIMIT_MODEL_VERSION + 1
 	var old_version: Dictionary = base.duplicate(true)
 	old_version["version"] = 1 # the pre-branch model (sign-agnostic residuals) is not evaluated
 	var bad_type: Dictionary = base.duplicate(true)
-	bad_type["mates"][0]["type"] = "gear"
+	bad_type["mates"][0]["type"] = "weld"
 	var missing: Dictionary = base.duplicate(true)
 	missing["mates"][0]["a"].erase("axis_origin")
 	var bad_member: Dictionary = base.duplicate(true)
@@ -170,12 +184,21 @@ func _initialize() -> void:
 		for m in mdl["mates"]:
 			if m["a"].has("pair") or m["b"].has("pair"):
 				has_pair = true
-		if int(mdl["version"]) != (4 if has_pair else 3):
+		var has_coupler := false
+		for m in mdl["mates"]:
+			if ["gear", "rack_pinion", "screw"].has(m["type"]):
+				has_coupler = true
+		var has_limit := false
+		for m in mdl["mates"]:
+			if ["limit_distance", "limit_angle"].has(m["type"]):
+				has_limit = true
+		if int(mdl["version"]) != (6 if has_limit else (5 if has_coupler else (4 if has_pair else 3))):
 			versions_ok = false
-	print("SMOKE every golden model is version 4 exactly when a side has a pair: ", versions_ok)
+	print("SMOKE every golden model is version 6 with a limit, 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
 	if not versions_ok:
 		failures += 1
 
+	_limit_rules(cases)
 	_pair_cost(cases)
 
 	# the production limit: the 5- and 8-member vector models are refused at MAX_MEMBERS (stay on the projector)
@@ -191,6 +214,51 @@ func _initialize() -> void:
 		return
 	print("SMOKE PASSED: every local_retract vector to ", tol, " (", checks, " checks, worst diff ", worst, ")")
 	quit(0)
+
+
+## Version 6 (limit mates) - mirrors client/test/local_retraction_test.dart: parsing rules, and the held set rebuilt every frame (stopped at the minimum, then
+## released the next frame the hand pulls back).
+func _limit_rules(cases: Array) -> void:
+	var slider: Dictionary = cases.filter(func(x): return x["id"] == "local-limit-distance-stops-at-min")[0]["input"]
+	var base: Dictionary = (slider["model"] as Dictionary).duplicate(true)
+	var limit_mate := func(model: Dictionary) -> Dictionary:
+		for m in model["mates"]:
+			if str(m["type"]).begins_with("limit_"):
+				return m
+		return {}
+	var v5: Dictionary = base.duplicate(true)
+	v5["version"] = Local.COUPLER_MODEL_VERSION
+	var no_id: Dictionary = base.duplicate(true)
+	limit_mate.call(no_id).erase("id")
+	var no_range: Dictionary = base.duplicate(true)
+	limit_mate.call(no_range)["min"] = null
+	limit_mate.call(no_range)["max"] = null
+	var no_plane: Dictionary = base.duplicate(true)
+	for side in ["a", "b"]:
+		limit_mate.call(no_plane)[side].erase("plane")
+	var angle: Dictionary = (cases.filter(func(x): return x["id"] == "local-limit-angle-inside")[0]["input"]["model"] as Dictionary).duplicate(true)
+	var no_hinge: Dictionary = angle.duplicate(true)
+	limit_mate.call(no_hinge)["b"].erase("hinge_direction")
+	var rules_ok: bool = Local.try_parse(base) != null and Local.try_parse(angle) != null and Local.try_parse(v5) == null and Local.try_parse(no_id) == null \
+		and Local.try_parse(no_range) == null and Local.try_parse(no_plane) == null and Local.try_parse(no_hinge) == null
+	print("SMOKE limit model parsing (v6 parses; as v5, no id, no range, no plane, no hinge -> null): ", rules_ok)
+	if not rules_ok:
+		failures += 1
+	var model = Local.try_parse(base)
+	var lever := float(slider["lever_arm"])
+	var start := _poses_in(slider["poses"])
+	var w := Local.local_scale(1, lever)
+	var far := Se3.make_pose([start[0]["t"][0] + 40.0, start[0]["t"][1], start[0]["t"][2]], start[0]["r"])
+	var stopped: Array = model.retract(start, [far], w)
+	var held_a: Array = model.held_limits().keys()
+	var back := Se3.make_pose([stopped[0]["t"][0] - 4.0, stopped[0]["t"][1], stopped[0]["t"][2]], stopped[0]["r"])
+	var freed: Array = model.retract(stopped, [back], w)
+	var held_b: Array = model.held_limits().keys()
+	var held_ok: bool = held_a == ["gap"] and absf(float(stopped[0]["t"][0]) - (float(start[0]["t"][0]) + 15.0)) < 1e-5 and held_b.is_empty() \
+		and absf(float(freed[0]["t"][0]) - (float(stopped[0]["t"][0]) - 4.0)) < 1e-5
+	print("SMOKE limit held at the stop, released the next frame the hand pulls back: ", held_ok)
+	if not held_ok:
+		failures += 1
 
 
 func _pair_side(model: Dictionary) -> Dictionary:
@@ -225,7 +293,4 @@ func _pair_cost(cases: Array) -> void:
 				model.frame(poses, wishes, poses, lever)
 			us[key] = float(Time.get_ticks_usec() - t0) / reps
 		print("SMOKE BENCH pair vs plain twin ", id, ": plain ", rows["plain"], " rows ", snappedf(us["plain"], 0.1), " us/frame, pair ", rows["pair"], " rows ", snappedf(us["pair"], 0.1), " us/frame (", snappedf(us["pair"] / us["plain"], 0.01), "x)")
-		var cost_ok: bool = us["pair"] < 200000.0
-		print("SMOKE pair frame under 200 ms (loose ceiling): ", cost_ok)
-		if not cost_ok:
-			failures += 1
+		# (reported, never a gate: a wall-clock ceiling fails on a slow runner and says nothing about the code; see tests/README.md "Timing")

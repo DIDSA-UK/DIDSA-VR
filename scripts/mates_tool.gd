@@ -62,7 +62,17 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric"]
+const LocalRetraction := preload("res://scripts/motion/local_retraction.gd") ## reads the limit mates of a version-6 model (their measured values); its solve is not run per frame (see _limit_stop)
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
+## The coupler ("motion") mates (docs/gears-and-motion-plan.md): they place nothing, they keep a relation between how far the two parts MOVE, so turning
+## one turns the other. Two axis picks (a round face, a circular edge or a straight edge; the rack's second a straight edge), a value (gear: ratio, B
+## turns per A turn; rack and pinion: mm of rack per pinion turn; screw: mm per turn) and a sense ("Reverse" / "Left-hand"). `mate_value` 0 is Auto for
+## gear and rack and pinion (the backend reads the teeth); a screw needs its lead.
+const COUPLER_TYPES: Array[String] = ["gear", "rack_pinion", "screw"]
+## The limit mates (docs/limit-mates-scope.md): they place nothing and keep a distance or an angle between a minimum and a maximum (either may be left
+## out). Two picks like Distance / Angle (a plane on at least one side for a distance; a hinge - a concentric mate between the same two parts - for an
+## angle) and a range instead of a value. A drag stops at the bound.
+const LIMIT_TYPES: Array[String] = ["limit_distance", "limit_angle"]
 ## The UI-only mate type of a Width mate (docs/width-mate-plan.md in DIDSA-CAD): four faces - the gap's two, then the two of the part(s) to
 ## centre in it - sent as a plain coincident (centred) or distance (offset from the centre) mate whose two references are mid-planes.
 ## Nothing is created for the mid-plane: it is worked out by the backend on every solve and never drawn.
@@ -82,6 +92,12 @@ var command_stack = null ## set via setup(); shared undo/redo history
 var mate_type := "coincident":
 	set(v):
 		var crosses := (v in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type) or (mate_type in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type)
+		if v != mate_type and (v in COUPLER_TYPES or mate_type in COUPLER_TYPES):
+			mate_value = 0.0 # a distance typed for another kind of mate is not a ratio, a travel or a lead (0 = Auto)
+		if v != mate_type:
+			limit_min = null # a range typed for one limit is not another's
+			limit_max = null
+			preview_limit_value = null
 		mate_type = v
 		if crosses and not _picks.is_empty():
 			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
@@ -97,6 +113,16 @@ var mate_value := 0.0:
 	set(v):
 		mate_value = v
 		request_preview()
+## A limit mate's range (mm, or degrees for an angle): null = no bound on that side. Not both null.
+var limit_min = null:
+	set(v):
+		limit_min = v
+		request_preview()
+var limit_max = null:
+	set(v):
+		limit_max = v
+		request_preview()
+var preview_limit_value = null ## a limit: the measured value of the picked pair now (the latest preview's `limit_value`), to type a range against
 ## The branch the user picked ("Closest" = not picked: the backend resolves it and the preview says which): "" or "aligned" /
 ## "anti_aligned", and -1 (auto) / 0 / 1 for the DISTANCE side, locked-CONCENTRIC half-turn or ANGLE supplement. Which of them mean
 ## anything for the picked geometry is the backend's call (`branch_controls`, from the preview).
@@ -131,6 +157,8 @@ var sandbox_lines := false ## while relaxed, a thin line from each moved part to
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
 var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
 
+var _labels: Dictionary = {} ## "owner|occurrence" -> a short readable name (part_label)
+var _part_names: Dictionary = {} ## resolved part id -> the Part's own name, fetched once
 var _mated_ids: Dictionary = {} ## occurrence_id -> true, for every occurrence any Mate references
 var _drag: Dictionary = {} ## part -> live-drag state, see constrain_drag()
 var _last_locked_notice_ms := -10000
@@ -151,6 +179,8 @@ var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the
 var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
 var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
 var _branch_notice := "" ## the sentence telling the user so (branch_notice())
+var _flip_base := -1 ## a coupler: the sense (0 / 1) the backend chose by default, which "Reverse" / "Left-hand" is measured from (-1 = not known yet)
+var preview_coupler_value := -1.0 ## a coupler: the ratio / travel / lead the latest preview says the mate would be made with (-1 = none)
 var _pending_edit: Dictionary = {} ## "mate_id|fields" -> the branch changes an edit was refused for; repeating that exact edit confirms them
 var _busy := false
 var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
@@ -212,6 +242,14 @@ func is_symmetric() -> bool:
 	return mate_type == SYMMETRIC_TYPE
 
 
+func is_coupler() -> bool:
+	return mate_type in COUPLER_TYPES
+
+
+func is_limit() -> bool:
+	return mate_type in LIMIT_TYPES
+
+
 func is_multi() -> bool:
 	## A Width or Symmetric mate: picked as several faces rather than two entities.
 	return is_width() or is_symmetric()
@@ -271,12 +309,25 @@ func status_text() -> String:
 			return symmetric_progress_text(_picks.size()) if is_symmetric() else width_progress_text(_picks.size())
 	match _picks.size():
 		0:
-			return "Pick a face, edge or corner on the first part."
+			return "Pick a round face, a circular edge or a straight edge (the axis) on the first part." if is_coupler() else "Pick a face, edge or corner on the first part."
 		1:
-			return "Pick a face, edge or corner on the second part."
+			if mate_type == "rack_pinion":
+				return "Pick a straight edge along the rack on the second part."
+			return "Pick a round face, a circular edge or a straight edge (the axis) on the second part." if is_coupler() else "Pick a face, edge or corner on the second part."
 		_:
 			if _branch_notice != "":
 				return _branch_notice
+			if mate_type == "screw" and mate_value <= 0.0:
+				return "A screw needs its lead (mm per turn): press Set value."
+			if is_limit():
+				if limit_min == null and limit_max == null:
+					return "%s Press Set value to type the range." % limit_now_text(mate_type, preview_limit_value)
+				return "Moving the part past the range stops it at the bound. %s" % limit_now_text(mate_type, preview_limit_value)
+			if is_coupler():
+				var value_note := ""
+				if mate_value <= 0.0 and preview_coupler_value > 0.0:
+					value_note = " (%s, from the teeth)" % coupler_value_text(mate_type, preview_coupler_value)
+				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			return "Ready — choose a mate type and Create."
@@ -318,11 +369,21 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		# The laser was on a straight / circular edge or a corner of that face (topology_pick.gd): mate that.
 		kind = str(entity["kind"])
 		subshape = {"body_id": str(entity["body_id"]), "shape_type": kind, "index": int(entity["index"])}
+	if is_coupler() and kind != "face" and not subshape.is_empty() and not (mate_type == "rack_pinion" and _picks.size() == 1):
+		# A coupler's turning side wants the AXIS. The laser on a round face (a bore, a shaft) snaps to that face's seam line or a corner of it when it is
+		# near one, and the seam is a straight edge 4 mm off the axis: mating on it would turn the part about the wrong line. Take the round face itself.
+		var hit_face := TopologyPick.face_entity(part, face_index)
+		if not hit_face.is_empty() and TopologyPick.axis_kind(part, hit_face) == "cylinder" and TopologyPick.axis_kind(part, entity) in ["line", "vertex"]:
+			kind = "face"
+			entity = {}
+			subshape = MeshIdentity.subshape_ref_for_hit(part, face_index)
 	var rejection := _validate_pick(occ_ref, subshape)
 	if rejection == "" and is_multi() and _width_error != "":
 		rejection = "The last two faces are not parallel: press Undo pick first."
 	if rejection == "" and is_multi() and kind != "face":
 		rejection = "A Symmetric mate is made from faces." if is_symmetric() else "A Width mate is made from faces."
+	if rejection == "" and is_coupler():
+		rejection = coupler_rejection(mate_type, _picks.size(), TopologyPick.axis_kind(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)))
 	if rejection == "" and not TopologyPick.is_mateable(part, entity if kind != "face" else TopologyPick.face_entity(part, face_index)):
 		rejection = "A mate can only use a plane, a cylinder, a straight or circular edge, or a corner - this surface is none of those."
 	if rejection != "":
@@ -333,7 +394,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"owner_part_id": occ_ref["owner_part_id"],
 		"occurrence_id": occ_ref["occurrence_id"],
 		"subshape_ref": subshape,
-		"label": str(part.name), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
+		"label": label_or(part, str(part.name)), # Node.name is a StringName, not a String - cast once here so later == comparisons (tests, UI) behave
 		"part": part, # for face_highlight.gd: the picked face / edge / corner stays lit
 		"face_index": face_index,
 		"entity": entity if kind != "face" else {},
@@ -491,11 +552,121 @@ func reset_branch_choice() -> void:
 	## Back to Closest, without re-running the preview (the caller does).
 	_alignment_choice = ""
 	_flip_choice = -1
+	_flip_base = -1
+	preview_coupler_value = -1.0
+
+
+static func type_label(type: String) -> String:
+	## Pure - the name of a mate type in lists.
+	match type:
+		"rack_pinion":
+			return "Rack and pinion"
+		"limit_distance":
+			return "Limit distance"
+		"limit_angle":
+			return "Limit angle"
+		"width", "symmetric", "gear", "screw":
+			return type.capitalize()
+	return type.capitalize()
+
+
+static func limit_unit(type: String) -> String:
+	return "\u00b0" if type == "limit_angle" else " mm"
+
+
+static func limit_now_text(type: String, value) -> String:
+	## Pure - "Now 20 mm." (the measured value of the pair), or "" when not known.
+	if value == null:
+		return ""
+	return "Now %s%s." % [_trim_number(float(value)), limit_unit(type)]
+
+
+static func limit_range_text(type: String, lo, hi) -> String:
+	## Pure - a limit's range as the lists show it: "0 mm to 30 mm", "min 5 mm", "max 110\u00b0"; "" with neither bound.
+	var unit := limit_unit(type)
+	if lo != null and hi != null:
+		return "%s%s to %s%s" % [_trim_number(float(lo)), unit, _trim_number(float(hi)), unit]
+	if lo != null:
+		return "min %s%s" % [_trim_number(float(lo)), unit]
+	if hi != null:
+		return "max %s%s" % [_trim_number(float(hi)), unit]
+	return ""
+
+
+static func _trim_number(x: float) -> String:
+	return ("%.3f" % x).rstrip("0").rstrip(".")
+
+
+static func parse_limit_bound(type: String, text: String) -> Dictionary:
+	## Pure - one typed bound of a limit: {"ok", "value" (null = empty = no bound), "error"}. A number, or empty for no bound on that side; an angle within +-180.
+	var trimmed := text.strip_edges()
+	if trimmed == "":
+		return {"ok": true, "value": null, "error": ""}
+	if not trimmed.is_valid_float():
+		return {"ok": false, "value": null, "error": "\"%s\" is not a number" % trimmed}
+	var v := trimmed.to_float()
+	if type == "limit_angle" and absf(v) > 180.0:
+		return {"ok": false, "value": null, "error": "Angles run from -180 to 180 degrees"}
+	return {"ok": true, "value": v, "error": ""}
+
+
+static func limit_range_error(lo, hi) -> String:
+	## Pure - why the range (either bound may be null) is not one the backend accepts, or "".
+	if lo == null and hi == null:
+		return "Type a minimum, a maximum, or both."
+	if lo != null and hi != null and float(lo) > float(hi):
+		return "The minimum is above the maximum."
+	return ""
+
+
+static func coupler_value_text(type: String, value) -> String:
+	## Pure - a coupler's value as the lists show it: gear "1 : 2" (A turns for one of B), rack and pinion "62.832 mm per turn", screw "lead 2 mm";
+	## "" for another type or no value.
+	if value == null or float(value) <= 0.0 or not type in COUPLER_TYPES:
+		return ""
+	var v := float(value)
+	var trim := func(x: float) -> String: return ("%.3f" % x).rstrip("0").rstrip(".")
+	match type:
+		"gear":
+			return "1 : %s" % trim.call(1.0 / v)
+		"rack_pinion":
+			return "%s mm per turn" % trim.call(v)
+	return "lead %s mm" % trim.call(v)
+
+
+static func value_prompt(type: String) -> String:
+	## Pure - what the value of `type` is called (the keyboard's title and the tablet's label).
+	match type:
+		"gear":
+			return "Ratio (B turns per A turn; empty = Auto from the teeth)"
+		"rack_pinion":
+			return "Travel per turn (mm of rack per pinion turn; empty = Auto from the teeth)"
+		"screw":
+			return "Lead (mm per turn)"
+		"angle":
+			return "Angle (degrees)"
+	return "Distance (mm)"
+
+
+static func coupler_rejection(type: String, slot: int, kind: String) -> String:
+	## Pure - why an entity of backend `kind` (TopologyPick.axis_kind) cannot be pick number `slot` (0 / 1) of a `type` coupler, or "". An unknown
+	## kind ("") passes: the backend has the last word.
+	if kind == "":
+		return ""
+	if type == "rack_pinion" and slot == 1:
+		return "" if kind == "line" else "The rack side is a straight edge along the rack: pick one of its straight edges."
+	if kind in ["cylinder", "circle", "line"]:
+		return ""
+	return "%s needs an axis: pick a round face, a circular edge or a straight edge." % type_label(type)
 
 
 static func secondary_flip_label(type: String) -> String:
 	## Pure — what the secondary flag means for a mate of `type`.
 	match type:
+		"gear", "rack_pinion":
+			return "Reverse"
+		"screw":
+			return "Left-hand"
 		"distance":
 			return "Flip side"
 		"concentric":
@@ -505,10 +676,17 @@ static func secondary_flip_label(type: String) -> String:
 	return "Flip"
 
 
-static func parse_value(type: String, text: String) -> Dictionary:
+static func parse_value(type: String, text: String, allow_auto := true) -> Dictionary:
 	## Pure — a typed mate value: {"ok", "value", "error"}. Not a number is refused, and so is a negative DISTANCE (the side of a distance
 	## is the Flip side control; the backend refuses a negative one, which used to leave the ghost blank with no word why). An angle may be negative.
+	## A coupler's value is above zero; empty (value 0) means Auto for a gear and a rack and pinion when `allow_auto` (a new mate; an edit has no Auto).
 	var trimmed := text.strip_edges()
+	if type in COUPLER_TYPES:
+		if trimmed == "" and allow_auto and type != "screw":
+			return {"ok": true, "value": 0.0, "error": ""}
+		if not trimmed.is_valid_float() or trimmed.to_float() <= 0.0:
+			return {"ok": false, "value": 0.0, "error": "A %s value must be a number above zero%s" % [type_label(type).to_lower(), "" if type == "screw" or not allow_auto else " (or empty for Auto)"]}
+		return {"ok": true, "value": trimmed.to_float(), "error": ""}
 	if not trimmed.is_valid_float():
 		return {"ok": false, "value": 0.0, "error": "\"%s\" is not a number" % trimmed}
 	var value := trimmed.to_float()
@@ -582,6 +760,15 @@ func toggle_alignment() -> void:
 		mate_alignment = "anti_aligned" if shown == "aligned" else "aligned"
 
 
+func flip_is_on() -> bool:
+	## What the secondary-flip control shows as "on": the raw flag, except for a coupler, where it is "differs from the sense the backend chose by default"
+	## (the raw flag depends on which way each axis happens to point, so it means nothing on its own).
+	var shown := shown_secondary_flip()
+	if is_coupler() and _flip_base >= 0:
+		return shown >= 0 and shown != _flip_base
+	return shown == 1
+
+
 func toggle_secondary_flip() -> void:
 	var shown := shown_secondary_flip()
 	if shown >= 0:
@@ -615,7 +802,7 @@ func branch_text() -> String:
 		parts.append("%s%s" % [alignment_label(mate_type, alignment), " (auto)" if mate_alignment == "" else ""])
 	var flip := shown_secondary_flip()
 	if flip >= 0:
-		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip == 1 else "off", " (auto)" if mate_secondary_flip < 0 else ""])
+		parts.append("%s: %s%s" % [secondary_flip_label(mate_type), "on" if flip_is_on() else "off", " (auto)" if mate_secondary_flip < 0 and not is_coupler() else ""])
 	if branch_alternatives.size() > 1:
 		var index := alternative_index(branch_alternatives, alignment, flip)
 		parts.append("solution %s of %d" % [str(index + 1) if index >= 0 else "-", branch_alternatives.size()])
@@ -639,10 +826,17 @@ func _run_preview(seq: int) -> void:
 		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
 		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
 		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
+		preview_limit_value = float(json["limit_value"]) if is_limit() and json.get("limit_value") != null else null
+		if is_coupler():
+			preview_coupler_value = float(json["coupler_value"]) if json.get("coupler_value") != null else -1.0
+			if _flip_choice < 0 and branch_resolved.get("secondary_flip") != null:
+				_flip_base = 1 if branch_resolved["secondary_flip"] == true else 0 # the default sense: Reverse is measured from it
 		var found = json.get("branch_changes", [])
 		_branch_changes = found if found is Array else []
 		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
 	_clear_ghost()
+	if is_coupler() or is_limit():
+		members = [] # a coupler / limit places nothing: no ghost (the preview only brings the default value and sense)
 	for member in members:
 		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
 		if part != null:
@@ -688,7 +882,8 @@ func _clear_ghost() -> void:
 
 
 func can_create() -> bool:
-	return _picks.size() == pick_target() and _width_error == "" and not _busy
+	return _picks.size() == pick_target() and _width_error == "" and not _busy and not (mate_type == "screw" and mate_value <= 0.0) \
+		and not (is_limit() and limit_range_error(limit_min, limit_max) != "")
 
 
 func build_create_payload(with_branch_changes := false) -> Dictionary:
@@ -719,6 +914,13 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 		pass # a plain coincident mate: no value
 	elif mate_type in ["distance", "angle"]:
 		payload["value"] = mate_value
+	elif is_coupler() and mate_value > 0.0:
+		payload["value"] = mate_value # left out for Auto (gear, rack and pinion): the backend reads the teeth
+	elif is_limit():
+		if limit_min != null:
+			payload["limit_min"] = float(limit_min)
+		if limit_max != null:
+			payload["limit_max"] = float(limit_max)
 	if with_branch_changes and not _branch_changes.is_empty():
 		payload["branch_changes"] = confirmed_changes(_branch_changes)
 	return payload
@@ -794,7 +996,7 @@ func create_mate() -> Dictionary:
 	if relaxed:
 		note_sandbox_mate(owner_part_id, driven_occurrence_id)
 	if atomic:
-		await _adopt_backend_poses(owner_part_id, "mate %s" % (str(part.name) if part != null else driven_occurrence_id))
+		await _adopt_backend_poses(owner_part_id, "mate %s" % (label_or(part, str(part.name)) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
 	if not relaxed and driven_fixed:
 		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
@@ -876,7 +1078,7 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 	if relaxed:
 		note_sandbox_mate(owner_part_id, driven_id)
 	if atomic:
-		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (str(part.name) if part != null else driven_id))
+		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (label_or(part, str(part.name)) if part != null else driven_id))
 	await refresh_mates(owner_part_id)
 	if not relaxed and driven_fixed:
 		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
@@ -909,7 +1111,7 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 		return {"ok": false, "error": _friendly_error(result)}
 	# /solve now moves the WHOLE mate-graph component (followers included) and stores it: adopt every
 	# moved occurrence's stored pose, one undo entry for the lot.
-	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (str(part.name) if part != null else occurrence_id))
+	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (label_or(part, str(part.name)) if part != null else occurrence_id))
 	if not adopted:
 		var transform_json: Dictionary = result["json"].get("transform", {})
 		if part != null and not transform_json.is_empty():
@@ -1278,10 +1480,55 @@ func refresh_state(owner_part_id: String) -> void:
 	if result["ok"] and result["json"] is Array:
 		for occ in result["json"]:
 			occurrences[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+		await _load_labels(owner_part_id, result["json"])
 	await refresh_mates(owner_part_id)
 	await refresh_nested_state(owner_part_id)
 	if relaxed:
 		_rebase_sandbox()
+
+
+func part_label(node: Node3D) -> String:
+	## A short readable name for a placed part (its name on the assembly, else the Part's own name, else its file's name), or "" when there is nothing
+	## useful to say (the glb's own node names, "Mesh 1", mean nothing to a person).
+	if not is_instance_valid(node):
+		return ""
+	return str(_labels.get("%s|%s" % [owner_of(node), _occ_id(node)], ""))
+
+
+func label_or(node: Node3D, fallback: String) -> String:
+	var label := part_label(node)
+	return label if label != "" else fallback
+
+
+static func shorten_label(raw: String, max_length: int = 18) -> String:
+	## Trims a name for a status line; "" for a name that says nothing (empty, "Mesh 1", "Occurrence d3c1...", an id).
+	var name := raw.strip_edges()
+	if name.get_extension().to_lower() in ["didsa", "didsaprt", "didsacad", "step", "stp", "stl", "obj", "glb"]:
+		name = name.get_basename()
+	var lower := name.to_lower()
+	var generic := RegEx.new()
+	generic.compile("^(mesh|node|occurrence|part|object)[ _-]?[0-9a-f]*$")
+	var id_like := RegEx.new()
+	id_like.compile("^[0-9a-f]{8}(-[0-9a-f]{4}){0,4}$")
+	if name == "" or generic.search(lower) != null or id_like.search(lower) != null:
+		return ""
+	return name if name.length() <= max_length else name.substr(0, max_length - 1).strip_edges() + "…"
+
+
+func _load_labels(owner_part_id: String, rows: Array) -> void:
+	## Names the owner's occurrences: name_override, else the Part's name (GET /parts/{id}, once per Part), else the file's base name.
+	for occ in rows:
+		var key := "%s|%s" % [owner_part_id, str(occ.get("id", ""))]
+		var label := shorten_label(str(occ.get("name_override", "")) if occ.get("name_override") != null else "")
+		if label == "":
+			var part_id := str(occ.get("resolved_part_id", "")) if occ.get("resolved_part_id") != null else ""
+			if part_id != "" and not _part_names.has(part_id):
+				var fetched := await _api_request(HTTPClient.METHOD_GET, "/parts/%s" % part_id, null)
+				_part_names[part_id] = str(fetched["json"].get("name", "")) if fetched["ok"] and fetched["json"] is Dictionary else ""
+			label = shorten_label(str(_part_names.get(part_id, "")))
+		if label == "" and occ.get("external_ref") != null:
+			label = shorten_label(str(occ["external_ref"]).get_file())
+		_labels[key] = label
 
 
 func refresh_nested_state(root_part_id: String) -> void:
@@ -1408,6 +1655,7 @@ func load_owner_state(owner_part_id: String) -> bool:
 	var occs := {}
 	for occ in occ_result["json"]:
 		occs[str(occ.get("id", ""))] = {"fixed": bool(occ.get("fixed", false))}
+	await _load_labels(owner_part_id, occ_result["json"])
 	var mated := {}
 	var mate_result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if mate_result["ok"] and mate_result["json"] is Array:
@@ -1463,7 +1711,7 @@ func notify_nested_locked(part: Node3D) -> void:
 	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
 		return
 	_last_locked_notice_ms = Time.get_ticks_msec()
-	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % str(part.name))
+	_report("%s is held by mates inside its sub-assembly: take the whole sub-assembly, Relax all mates, or open it as a room to move it." % label_or(part, "This part"))
 
 
 func _mates_dirty(part: Node3D) -> bool:
@@ -1480,7 +1728,7 @@ func notify_locked(part: Node3D) -> void:
 	if Time.get_ticks_msec() - _last_locked_notice_ms < 1500:
 		return # a held button would otherwise re-announce every physics frame
 	_last_locked_notice_ms = Time.get_ticks_msec()
-	_report("%s is grounded by a mate — Float it (Assembly > Mates) or Relax all mates to move it." % str(part.name))
+	_report("%s is grounded by a mate — Float it (Assembly > Mates) or Relax all mates to move it." % label_or(part, "This part"))
 
 
 func toggle_fixed(part: Node3D) -> void:
@@ -1495,11 +1743,11 @@ func toggle_fixed(part: Node3D) -> void:
 	var now_fixed := not bool(occs.get(occ, {}).get("fixed", false))
 	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner, occ], {"fixed": now_fixed})
 	if not result["ok"]:
-		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", str(part.name), _friendly_error(result)])
+		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", label_or(part, "the part"), _friendly_error(result)])
 		return
 	occs[occ] = {"fixed": now_fixed}
 	document_changed.emit()
-	_report("%s is now %s." % [str(part.name), "grounded (fixed)" if now_fixed else "floating (free to move)"])
+	_report("%s is now %s." % [label_or(part, "The part"), "grounded (fixed)" if now_fixed else "floating (free to move)"])
 
 
 func _choose_driven(first_occ: String, second_occ: String) -> String:
@@ -1791,6 +2039,18 @@ func end_drag(part: Node3D) -> bool:
 	return true
 
 
+func drag_member_nodes(part: Node3D) -> Dictionary:
+	## The nodes of the members the drag in progress on `part` moves (occurrence id -> Node3D; the grabbed part's followers once an anchor has named them): the Drive tool reads their turning.
+	var state: Dictionary = _drag.get(part, {})
+	return {} if state.is_empty() else (state["nodes"] as Dictionary).duplicate()
+
+
+func drag_at_limit(part: Node3D) -> bool:
+	## True while the drag in progress on `part` is held at a limit mate's bound (the part is stopped by it).
+	var state: Dictionary = _drag.get(part, {})
+	return not state.is_empty() and bool(state["at_limit"])
+
+
 func drag_model_ready(part: Node3D) -> bool:
 	## True once an anchor has been accepted for this part's drag (tests wait on it).
 	var state: Dictionary = _drag.get(part, {})
@@ -1809,6 +2069,7 @@ func _new_drag_state(part: Node3D) -> Dictionary:
 		"members": [] as Array, "nodes": {}, "starts": {}, # occurrence id -> Node3D / pre-grab Transform3D
 		"hold": false, "held": [], "shown": [], "shown_grabbed": _local_pose(part), "shown_pose": Se3.from_transform3d(_local_pose(part)),
 		"last_error_ms": -100000.0,
+		"limits": null, "at_limit": false, # a version-6 model (limit mates: read for their values) and whether the last frame was stopped by one
 	}
 
 
@@ -1844,11 +2105,73 @@ func _frame_poses(state: Dictionary) -> Array:
 	var hyst = state["hyst"]
 	var blender = state["blender"]
 	var frame: Dictionary = hyst.frame(state["wish"])
+	var projected: Array = _limit_stop(state, frame["poses"], true)
 	if frame["event"] == "adopted":
-		blender.on_anchor(frame["prev_poses"], frame["poses"])
-	var poses: Array = blender.shown(frame["poses"])
+		blender.on_anchor(_limit_stop(state, frame["prev_poses"]), projected)
+	var poses: Array = blender.shown(projected)
 	state["shown"] = poses
 	return poses
+
+
+func _adopt_limit_model(state: Dictionary, model_json) -> void:
+	## An anchor answer's `constraint_model`: kept (to read the limit mates' values) only when it holds a limit mate. A later answer that omits it keeps the one we
+	## have; one without limits drops it. The model's own solve is NOT run per frame here: with the whole group in it (a gear train: pinion, gear, rack, crank, 42
+	## rows) it costs 12 to 70 ms a frame in GDScript, which a headset cannot spare; the cheap stop below does the same job for the motion the mates allow.
+	if model_json == null:
+		return
+	var model = LocalRetraction.try_parse(model_json, 8, 1024)
+	state["limits"] = model if model != null and model.has_limits() else null
+
+
+func _limit_stop(state: Dictionary, poses: Array, record := false) -> Array:
+	## The projector (and so `poses`) is limit-blind: it would carry the part on through a stop and the next anchor would pop it back. This keeps the same motion
+	## but stops it where a limit mate's range ends: the displacement from the anchor's poses (a screw per member, the projector's own chart) is scaled back by the
+	## largest fraction that keeps every limit inside its range (bisection on the limit values, no derivatives). Exact for a rack or a hinge (one free motion), a
+	## uniform slow-down for a diagonal drag into a stop (the nearest-point solve in the flat app slides along it instead). Nothing here when no limit is violated.
+	## `record`: this is the frame being shown, so `state["at_limit"]` says whether it was stopped (the Drive readout and the release message read it).
+	if record:
+		state["at_limit"] = false
+	var model = state["limits"]
+	var hyst = state["hyst"]
+	if model == null or hyst.active == null or model.member_ids != state["members"]:
+		return poses
+	if model.limits_in_range(poses):
+		return poses
+	var refs: Array = hyst.active.refs
+	var twists: Array = []
+	for i in poses.size():
+		twists.append(Se3.screw_log(refs[i], poses[i]))
+	var lo := 0.0
+	var hi := 1.0
+	var measured: Array = model.limit_member_indices() # only these members' poses decide a limit's value: the search moves only them
+	for _step in 16: # the fraction to 1/65536: 56 mm of travel to a thousandth of a millimetre, 200 degrees to 0.003
+		var mid := (lo + hi) / 2.0
+		if model.limits_in_range(_scaled_poses(refs, twists, mid, measured)):
+			lo = mid
+		else:
+			hi = mid
+	if record:
+		state["at_limit"] = true
+	return _scaled_poses(refs, twists, lo)
+
+
+static func _scaled_poses(refs: Array, twists: Array, fraction: float, only: Array = []) -> Array:
+	## The anchor poses moved `fraction` of the way along their twists (every member, or only those in `only`: the rest stay at the anchor).
+	var out: Array = []
+	for i in refs.size():
+		if not only.is_empty() and not only.has(i):
+			out.append(refs[i])
+			continue
+		var d: Array = []
+		for c in 6:
+			d.append(float(twists[i][c]) * fraction)
+		out.append(Se3.screw_exp(refs[i], d))
+	return out
+
+
+func _projected(state: Dictionary, wish) -> Array:
+	## What the CURRENT model shows for `wish`, stopped at the limits (hyst.peek + _limit_stop).
+	return _limit_stop(state, state["hyst"].peek(wish))
 
 
 func _apply_followers(state: Dictionary, poses: Array) -> void:
@@ -1943,9 +2266,11 @@ func handle_anchor_response(state: Dictionary, response: Dictionary, wish_sent) 
 			for row in basis:
 				if not (row is Array) or (row as Array).size() != 6 * members.size():
 					converged = false
+	if converged:
+		_adopt_limit_model(state, json.get("constraint_model")) # before the acceptance test and the blend: both read what the model shows, stopped at the limits
 	var own = null
 	if hyst.active != null and converged and wish_sent != null:
-		own = hyst.peek(wish_sent)[0] # the grabbed pose the CURRENT model projects the SAME wish to
+		own = _projected(state, wish_sent)[0] # the grabbed pose the CURRENT model projects the SAME wish to (stopped at the limits)
 	var decision := ReanchorScheduler.accept_anchor(converged, quality.get("residual_inf"), refs[0] if converged else null, own, lever)
 	if not bool(decision["accept"]):
 		_anchor_missed(state, "transport" if not response["ok"] and int(response.get("code", 0)) == 0 else str(decision["reason"]), response)
@@ -1979,7 +2304,7 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 		# No free motion at all: the mates fix this part completely. Without saying so it just doesn't follow the hand, which reads as a dead grip.
 		state["stuck"] = false # (false until the hand that holds it has buzzed: take_stuck_notice)
 		var node: Node3D = state["part"]
-		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (str(node.name) if is_instance_valid(node) else "That part"))
+		_report("%s is fully constrained by its mates: it can't move. Relax all mates (or remove a mate) to move it." % (label_or(node, "That part") if is_instance_valid(node) else "That part"))
 	var wish = state["wish"]
 	if ids != state["members"]:
 		# first anchor, or the group changed under the drag: a fresh model and blender
@@ -1998,11 +2323,11 @@ func _accept_anchor(state: Dictionary, members: Array, refs: Array, basis: Array
 		state["hold"] = false
 	else:
 		var holding: bool = bool(state["hold"])
-		var old_projected: Array = state["held"] if holding else hyst.peek(wish)
+		var old_projected: Array = state["held"] if holding else _projected(state, wish)
 		if holding:
 			blender.reset(ids.size()) # resume from the held pose with a normal blend
 		hyst.on_anchor(model)
-		blender.on_anchor(old_projected, hyst.peek(wish))
+		blender.on_anchor(old_projected, _projected(state, wish))
 		state["hold"] = false
 	state["lever_arm"] = lever
 	state["sched"].on_accepted(quality.get("max_step"), quality.get("sigma_gap"))
@@ -2048,7 +2373,9 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			node.transform = after
 			if not before.is_equal_approx(after):
 				changes.append({"node": node, "before": before, "after": after})
-		_push_group_move("move %s" % part.name, changes)
+		_push_group_move("move %s" % label_or(part, str(part.name)), changes)
+		if bool(state["at_limit"]):
+			_report("%s stopped at its limit." % label_or(part, "The part"))
 	else:
 		# nothing is stored: put every member back where the grab found it
 		for occ in starts:
@@ -2141,7 +2468,7 @@ func _apply_solved_transform(part: Node3D, transform_json: Dictionary) -> void:
 	var after := json_to_pose(transform_json)
 	part.transform = after
 	if command_stack and not before.is_equal_approx(after):
-		command_stack.push("solve %s" % part.name,
+		command_stack.push("solve %s" % label_or(part, str(part.name)),
 			func() -> void:
 				if is_instance_valid(part):
 					part.transform = before

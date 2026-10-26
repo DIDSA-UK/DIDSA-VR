@@ -579,7 +579,7 @@ func _layout_tiles() -> void:
 	for i in count:
 		var text := str(_entries[i].get("label", ""))
 		texts.append(text)
-		var centre_y := Math.centre_direction(i, count).y * Math.CONTENT_RADIUS
+		var centre_y := Math.tile_centroid(_outlines[i]).y
 		var label := _labels[i]
 		label.font_size = int(float(tokens.font_small) * 1.9)
 		var lines := 1
@@ -592,18 +592,44 @@ func _layout_tiles() -> void:
 	for i in count:
 		var label := _labels[i]
 		label.font_size = best
-		var centre := Math.centre_direction(i, count) * Math.CONTENT_RADIUS
+		var base := Math.tile_centroid(_outlines[i])
+		var dir := Math.centre_direction(i, count)
+		var centre := base
 		var lines := 1
 		var span := Vector2.ZERO
+		# The block is centred on the tile's centroid. A name too wide for the tile there is moved outward along the tile's own direction, where
+		# it is wider, a few millimetres at a time, before it is allowed to run past the tile.
+		for nudge in 9:
+			centre = base + dir * 0.003 * float(nudge)
+			if centre.length() > Math.OUTER_RADIUS - 0.04:
+				centre = base + dir * 0.003 * float(maxi(nudge - 1, 0))
+				break
+			for pass_number in 2:
+				span = _span(_outlines[i], centre.y, lines, best)
+				lines = _fit_label(label, texts[i], maxf(span.y, 0.03))
+			if _name_width(label) <= span.y + NAME_PADDING * 0.5:
+				break
 		for pass_number in 2:
 			span = _span(_outlines[i], centre.y, lines, best)
 			lines = _fit_label(label, texts[i], maxf(span.y, 0.03))
 		var text_h := float(lines) * float(label.font_size) * LABEL_PIXEL_SIZE * LABEL_LINE_HEIGHT
 		var block := ICON_SIZE + ICON_LABEL_GAP + text_h
 		var top := centre.y + block * 0.5
-		var x := span.x
+		# across: as near the tile's centroid as the name's room allows (span.x is the middle of that room)
+		var slack := maxf((span.y + NAME_PADDING - _name_width(label)) * 0.5, 0.0)
+		var x := clampf(centre.x, span.x - slack, span.x + slack)
 		_icons[i].position = Vector3(x, top - ICON_SIZE * 0.5, 0.003)
 		label.position = Vector3(x, top - ICON_SIZE - ICON_LABEL_GAP, 0.004)
+
+
+func _name_width(label: Label3D) -> float:
+	## The widest line of the name as drawn now, in metres.
+	var font: Font = label.font if label.font != null else ThemeDB.fallback_font
+	var widest := 0.0
+	var lines: PackedStringArray = [label.text] if label.autowrap_mode == TextServer.AUTOWRAP_OFF else label.text.split(" ")
+	for line in lines:
+		widest = maxf(widest, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, label.font_size).x * LABEL_PIXEL_SIZE)
+	return widest
 
 
 func _span(outline: PackedVector2Array, centre_y: float, lines: int, font_size: int) -> Vector2:
@@ -662,6 +688,8 @@ func _paint() -> void:
 		if on:
 			fill = tokens.accent_deep
 			border_alpha = 0.95
+		if entry.has("tint"):
+			fill = fill.lerp(entry["tint"] as Color, 0.32) # an entry or exit button: its colour is in the tile, not only the border
 		if lit:
 			fill = tokens.surface_hover.lerp(accent, 0.28)
 			border_alpha = 1.0

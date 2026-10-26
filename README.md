@@ -25,7 +25,7 @@ Every feature is covered by headless tests, software renders and (where noted) a
 | Wrist tablet, tool wheel, themes | Built |
 | Multiplayer / observer client | Not built (idea in the vision brief) |
 
-Tests at the last recorded run (20 Oct 2026): 3312 headless SMOKE lines, 77 render lines, 452 live-backend lines over 35 tests, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
+Tests at the last recorded run (22 Oct 2026): 3519 headless SMOKE lines, 80 render lines, 508 live-backend lines, all passing (exact counts and what each covers: `docs/status.md`, `tests/README.md`).
 
 ## Quick start (desktop, no headset)
 
@@ -56,7 +56,7 @@ Right hand is the laser and the selector; left hand walks.
 | **Left thumbstick** | Walk (speed slider on the tablet: 1.5 to 30 m/s). |
 | **Right thumbstick** X / Y | Snap-turn / aim and blink a teleport (push forward, point at the floor, release). Scrolls a panel when the laser is on one. |
 | **Right thumbstick click** | Numeric keypad pre-filled with the scale; type an exact scale and press OK (undoable). |
-| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Paint, Shoot hide, Section, Visibility, Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
+| **Right trigger + grip together** | Open the **tool wheel**: move your hand towards a tile and let go to choose; let go in the middle to cancel. Mates, Measure, Summon table, Section, **Drive**, **Appearance**, **Show / Hide** (Isolate part, Invert, the Hide tool, Show all), Undo, Scenes, **Home** (back to the landing); a **Clear tool** pill sits under every top-level ring. Tips appear on your right wrist. |
 | **Laser at the wrist icon + trigger** | Open the **wrist tablet** (never opens by itself). |
 | **Grip a handle** (centre of a window's or the keyboard's lower edge, a room's move bar, a table's front edge) | Carry it somewhere else. |
 
@@ -71,15 +71,15 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** c
 |---|---|
 | **Design** | Summons the design table, or brings it to you. |
 | **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
-| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
-| **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Shoot hide, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
+| **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Gear / Rack and pinion / Screw (turning one part turns the other), Limit distance / Limit angle (a travel that stops at a minimum and a maximum), Drive (turn a mated part with the stick so its mechanism runs), Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
+| **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Hide tool, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
 | **Home** | Back to the landing: the demo models, the launcher and the tips. (The tool wheel has a Home wedge too.) |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
 | **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
 
-One mode tool is on at a time (Mates, Measure, Sections, Shoot hide); a badge above your right hand shows which. Anything needing real text opens a full QWERTY keyboard that you can carry by its handle.
+One mode tool is on at a time (Mates, Measure, Sections, Hide tool); a badge above your right hand shows which. Anything needing real text opens a full QWERTY keyboard that you can carry by its handle.
 
 ## Architecture
 
@@ -152,7 +152,7 @@ Headless tests cannot fake a real grip press, render for real, or judge feel. Te
 - **Multi-file assemblies** resolve on Open and Add the way the flat app does (`scripts/native_compose.gd`): each `external_ref` is looked for beside the opened file, then in the project folder and the models folders, under any native extension (`.didsa`, `.DIDSAprt`, `.didsacad`). A file whose Part id clashes with another file's is left out (the flat app re-mints it; not ported) and the status line names it.
 - **Rooms**: 0.5 to 40 m on a side, no overlapping rooms, no rooms inside rooms; the default room limit is 4 (Settings, Display).
 - **Sections** are one client-side plane; the backend's section endpoint is too slow for real-time dragging.
-- **Design table, not built**: surfacing, curves, gears, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Current list: [`docs/design-table.md`](docs/design-table.md), [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
+- **Design table, not built**: surfacing, curves, constrained sketch drag, sketch pattern/mirror, loft guide curves, feature mirror/pattern, extrude profile selection, dragging tree rows out, sub-assemblies on the table. Current list: [`docs/design-table.md`](docs/design-table.md), [`docs/design-table-gaps.md`](docs/design-table-gaps.md).
 - **"DIDSA-CAD as a flat window"** is not attempted; it needs a web build of the Flutter client.
 
 Roadmap and cross-repo order: DIDSA-CAD `docs/roadmap.md`; product vision: [`docs/vision-brief.md`](docs/vision-brief.md); what changed when: [`CHANGELOG.md`](CHANGELOG.md).

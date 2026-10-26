@@ -244,7 +244,11 @@ func _initialize() -> void:
 	stuck_answer["json"]["dof"] = 0
 	stuck_answer["json"]["basis"] = []
 	tool.handle_anchor_response(st3, stuck_answer, null)
-	print("SMOKE a fully constrained part (dof 0) says so on the wrist, naming the part: ", tool.status_text().contains("fully constrained by its mates") and tool.status_text().begins_with(str(mated.name)))
+	print("SMOKE a fully constrained part (dof 0) says so on the wrist (That part: a node name means nothing to a person): ", tool.status_text().contains("fully constrained by its mates") and tool.status_text().begins_with("That part"))
+	tool._labels["%s|%s" % [tool.owner_of(mated), tool._occ_id(mated)]] = "Pinion"
+	st3.erase("stuck")
+	tool.handle_anchor_response(st3, stuck_answer, null)
+	print("SMOKE ...and names the part when it has a readable name: ", tool.status_text().begins_with("Pinion is fully constrained"), " ", tool.status_text())
 	print("SMOKE ...and the hand buzzes once per drag, not every frame or every anchor: ", tool.take_stuck_notice(mated) and not tool.take_stuck_notice(mated))
 	tool.handle_anchor_response(st3, stuck_answer, st3["wish"])
 	print("SMOKE ...(a later anchor of the same drag doesn't repeat it): ", not tool.take_stuck_notice(mated))

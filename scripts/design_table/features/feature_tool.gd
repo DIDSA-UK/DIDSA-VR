@@ -14,6 +14,7 @@ extends RefCounted
 ##   preview_mode()            "none" | "eager" (create now, PATCH while the options change, Cancel deletes) | "coarse" (a translucent
 ##                             body from the coarse-preview route, nothing stored)
 ##   preview_route()           the coarse-preview route for "coarse"
+##   preview_aux(ed)           awaited before each preview run: a tool may ask the backend for something to show beside its settings (the Gear tool's circle sizes)
 ## `ed` is table_editor.gd. A tool reads and writes its settings through `ed.options` and its picks through `ed.edges` / `ed.faces`.
 
 const PartFeatures := preload("res://scripts/design_table/part_features.gd")
@@ -70,6 +71,10 @@ func preview_mode() -> String:
 
 func preview_route() -> String:
 	return ""
+
+
+func preview_aux(_ed) -> void:
+	pass
 
 
 func build_type() -> String:

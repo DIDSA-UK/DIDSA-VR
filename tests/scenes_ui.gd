@@ -76,13 +76,15 @@ func _initialize() -> void:
 
 	_check(_ids(flows.root_entries()).has("scenes") and flows.root_entries()[_ids(flows.root_entries()).find("scenes")].has("children"), "the root ring has a Scenes sub-wheel")
 	var ring: Array = flows.scenes_entries()
-	_check(_ids(ring) == ["scene_back", "scene_update", "scene_new", "scene_s1"], "the Scenes sub-wheel: Default, Update, Save new, then the scene")
-	_check(not bool(_entry(ring, "scene_back")["enabled"]) and not bool(_entry(ring, "scene_update")["enabled"]), "Default and Update are greyed with nothing shown")
+	_check(_ids(ring) == ["scene_start", "scene_s1", "scene_abandon", "scene_update", "scene_new"], "the Scenes sub-wheel: Start scene, the scene, Abandon, Update, Save new")
+	_check(bool(_entry(ring, "scene_start")["enabled"]) and not bool(_entry(ring, "scene_abandon")["enabled"]) and not bool(_entry(ring, "scene_update")["enabled"]), "outside a scene Start is on, Abandon and Update are greyed")
+	_check(_entry(ring, "scene_start")["tint"] != _entry(ring, "scene_abandon")["tint"] and _entry(ring, "scene_start")["tint"].g > _entry(ring, "scene_start")["tint"].r and _entry(ring, "scene_abandon")["tint"].r > _entry(ring, "scene_abandon")["tint"].g, "Start is filled green and Abandon red")
 
 	await (_entry(ring, "scene_s1")["run"] as Callable).call()
 	_check(main._mates_tool.relaxed and scenes.shown_id() == "s1" and a.position.is_equal_approx(Vector3(0, 0, 50)), "a scene's wedge shows it (relaxed, part a lifted 50 mm)")
 	ring = flows.scenes_entries()
 	_check(bool(_entry(ring, "scene_update")["enabled"]) and bool(_entry(ring, "scene_s1")["active"]), "then Update is offered and the scene's wedge is lit")
+	_check(not bool(_entry(ring, "scene_start")["enabled"]) and bool(_entry(ring, "scene_abandon")["enabled"]), "inside a scene Start is greyed and Abandon is on")
 	_check(flows.pill_entry()["id"] == "return_parts", "the pill under the ring is Return parts")
 
 	# --- unsaved: the Return pill asks on the tablet instead of losing it
@@ -122,6 +124,15 @@ func _initialize() -> void:
 	a.position += Vector3(10, 0, 0)
 	await (flows.pill_entry()["run"] as Callable).call()
 	_check(not main._mates_tool.relaxed and a.position.is_equal_approx(Vector3.ZERO) and scenes.pending_ask.is_empty(), "with no scene shown, Return parts returns without asking")
+
+	# --- the Scenes ring's own entry and exit: Start scene relaxes the mates, Abandon puts everything back
+	ring = flows.scenes_entries()
+	await (_entry(ring, "scene_start")["run"] as Callable).call()
+	_check(main._mates_tool.relaxed and not bool(_entry(flows.scenes_entries(), "scene_start")["enabled"]) and bool(_entry(flows.scenes_entries(), "scene_abandon")["enabled"]), "Start scene relaxes the mates; then Start is greyed and Abandon is on")
+	a.position += Vector3(10, 0, 0)
+	await (_entry(flows.scenes_entries(), "scene_abandon")["run"] as Callable).call()
+	await process_frame
+	_check(not main._mates_tool.relaxed and a.position.is_equal_approx(Vector3.ZERO) and bool(_entry(flows.scenes_entries(), "scene_start")["enabled"]), "Abandon puts every part back and the ring is back to Start")
 
 	_check(failures == 0, "no failures")
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)

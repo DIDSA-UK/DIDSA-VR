@@ -93,6 +93,7 @@ var _measure_dimensions: Node3D ## measure_dimensions.gd: Measure results drawn 
 var _keyboard: Node
 var _mates_tool: Node
 var _measure_tool: Node
+var drive_tool: Node ## drive_tool.gd: turns a mated part continuously so its whole mechanism runs
 var _appearance_tool: Node ## the Appearance tool (appearance_tool.gd): what paint does, where it goes
 var scenes_tool: Node ## Scenes (scenes_tool.gd): show / save / update scenes on the sandbox; the tablet's Scenes page and the wheel use it
 var _section_tool: Node
@@ -134,6 +135,7 @@ func _ready() -> void:
 	_add_two_hand_model()
 	_add_mates_tool()
 	_add_measure_tool()
+	_add_drive_tool()
 	_add_face_highlight()
 	_add_appearance_tool()
 	_add_scenes_tool()
@@ -160,6 +162,8 @@ func _ready() -> void:
 	$XROrigin3D/RightController.mates_tool = _mates_tool
 	$XROrigin3D/LeftController.measure_tool = _measure_tool
 	$XROrigin3D/RightController.measure_tool = _measure_tool
+	$XROrigin3D/LeftController.drive_tool = drive_tool
+	$XROrigin3D/RightController.drive_tool = drive_tool
 	$XROrigin3D/LeftController.appearance_tool = _appearance_tool
 	$XROrigin3D/RightController.appearance_tool = _appearance_tool
 	_appearance_tool.message.connect(_set_status)
@@ -215,6 +219,14 @@ func _add_measure_tool() -> void:
 	measure.name = "MeasureTool"
 	add_child(measure)
 	_measure_tool = measure
+
+
+func _add_drive_tool() -> void:
+	var drive := preload("res://scripts/drive_tool.gd").new()
+	drive.name = "DriveTool"
+	drive.mates_tool = _mates_tool
+	add_child(drive)
+	drive_tool = drive
 
 
 func _add_face_highlight() -> void:

@@ -16,7 +16,7 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
@@ -25,6 +25,11 @@ const MATE_TYPE_HINTS := {
 	"angle": "A set angle (you type it)",
 	"width": "Centre between two faces (4 picks)",
 	"symmetric": "Mirror two faces about a plane (3 picks)",
+	"gear": "Turning one turns the other (2 round things)",
+	"rack_pinion": "A gear turns a rack along its edge",
+	"screw": "A nut climbs a screw as it turns (you type the lead)",
+	"limit_distance": "A gap that stops at a min / max (you type them)",
+	"limit_angle": "A hinge that stops at a min / max angle",
 }
 
 var tokens: Resource
@@ -63,6 +68,9 @@ func setup(ctx: Dictionary, p_tokens: Resource) -> void:
 	if _mates.has_signal("sandbox_changed"):
 		_mates.sandbox_changed.connect(func(_on: bool) -> void: refresh_prompt())
 	_measure.picks_changed.connect(refresh_prompt)
+	var drive = _main.get("drive_tool")
+	if drive != null:
+		drive.status_changed.connect(refresh_prompt)
 	_measure.result_changed.connect(refresh_prompt)
 
 
@@ -98,9 +106,12 @@ func prompt_text() -> String:
 		"paint":
 			return "Appearance · %s\nClick paints the body; hold the trigger to choose what." % _paint_hex()
 		"shoot_hide":
-			return "Shoot hide\nTrigger hides the part you point at (undo brings it back)."
+			return "Hide tool\nTrigger hides the part you point at (undo brings it back)."
 		"sections":
 			return "Section\nGrip the plane to move it. Wheel: Flip."
+		"drive":
+			var drive = _main.get("drive_tool")
+			return "Drive\n%s" % (drive.status_text() if drive != null else "")
 	if _mates != null and _mates.relaxed:
 		return "Mates relaxed\nMoves are temporary. Wheel: Return parts (under the ring) puts everything back."
 	return ""
@@ -154,6 +165,10 @@ func entries() -> Array:
 			return _mates_entries()
 		"measure":
 			return _measure_entries()
+		"drive":
+			return _drive_entries()
+		"sections":
+			return _section_entries()
 		"paint":
 			return _colour_entries()
 	return root_entries()
@@ -209,23 +224,27 @@ func ring_title() -> String:
 			return "Mates"
 		"measure":
 			return "Measure"
+		"drive":
+			return "Drive"
 		"paint":
 			return "Appearance"
 	return "Tools"
 
 
 func root_entries() -> Array:
+	## Tools (they switch on and bring their own ring) and actions, then the two menus. Where a name goes is set by how wide its tile is at the height of the name
+	## (the tiles at three and nine o'clock are the narrow ones): the long names are on the wide tiles.
 	var has_selection: bool = _main.current_selected_part() != null
 	return [
 		_tool_entry("mates", "Mates", "mates", Color(0.37, 0.76, 1.00), "Mate two parts together"),
 		_tool_entry("measure", "Measure", "measure", Color(0.77, 0.55, 1.00), "Lengths, radii, volume, area"),
 		_action("table", "Summon table", "table", Color(1.00, 0.71, 0.33), "Sketch and extrude", _summon_table, true, _design_table != null and _design_table.is_open()),
-		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Paint colour, see-through, shine, glow"),
-		_tool_entry("shoot_hide", "Shoot hide", "shoot_hide", Color(0.48, 0.88, 0.69), "Shoot a part to hide it"),
 		_tool_entry("sections", "Section", "sections", Color(0.77, 0.55, 1.00), "Cut the model with a plane"),
-		_submenu("visibility", "Visibility", "visibility", Color(0.48, 0.88, 0.69), "Isolate · show all · invert", visibility_entries.bind(has_selection)),
+		_tool_entry("drive", "Drive", "movement", Color(0.37, 0.76, 1.00), "Turn a part so its gears run"),
+		_tool_entry("paint", "Appearance", "paint", Color(0.48, 0.88, 0.69), "Control the appearance of the models"),
+		_submenu("visibility", "Show / Hide", "visibility", Color(0.48, 0.88, 0.69), "Show / hide parts", visibility_entries.bind(has_selection)),
 		_action("undo", "Undo", "undo", Color(0.62, 0.70, 0.80), "Take back the last change", _main.command_stack.undo, _main.command_stack.can_undo()),
-		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Show · save · back to default", scenes_entries),
+		_submenu("scenes", "Scenes", "scenes", Color(0.96, 0.69, 0.25), "Temporarily change part positions and visibility", scenes_entries),
 		_action("home", "Home", "home", Color(0.62, 0.70, 0.80), "Back to the landing: demos, tips, logo", _main.go_home),
 	]
 
@@ -235,20 +254,28 @@ func _scenes():
 
 
 func scenes_entries() -> Array:
-	## The Scenes sub-wheel (scenes_tool.gd): Back to default, Update, Save as new, then a wedge per scene (the first six).
+	## The Scenes sub-wheel (scenes_tool.gd), clockwise from the top: Start scene (green: relaxes the mates, a sandbox where moves are temporary), the saved scenes
+	## (a wedge each, the first six: choosing one shows it, which starts a scene too), Abandon (red: every part back at its mate position; asks first if the scene
+	## has unsaved changes), then Update and Save new. Start and Abandon are the way in and the way out, at opposite ends of the ring and filled in their colours.
 	var scenes = _scenes()
 	if scenes == null:
 		return []
 	var accent := Color(0.96, 0.69, 0.25)
+	var green := Color(0.40, 0.90, 0.55)
+	var red := Color(0.95, 0.42, 0.42)
 	var shown_id: String = scenes.shown_id()
-	var out := [
-		_action("scene_back", "Default", "undo", accent, "Back to default: every part back where it is", _scene_back, _mates != null and _mates.relaxed, false, "Nothing is moved: this is the default"),
-		_action("scene_update", "Update", "check", accent, "Keep what is on screen in \"%s\"" % scenes.shown_name(), _scene_update, shown_id != "", false, "Show a scene first"),
-		_action("scene_new", "Save new", "scenes", accent, "Save what is on screen as a new scene", _scene_new),
-	]
+	var in_scene: bool = _mates != null and _mates.relaxed
+	var start := _action("scene_start", "Start scene", "play", green, "Relax the mates so you can move and hide parts; Abandon puts everything back", _relax_mates, not in_scene, false, "Already in a scene: Abandon it first")
+	start["tint"] = green
+	var out := [start]
 	for scene in scenes.scenes_of().slice(0, 6):
 		var id := str(scene.get("id", ""))
 		out.append(_action("scene_" + id, str(scene.get("name", "")), "image", accent, "Show this scene", _scene_show.bind(id), true, id == shown_id))
+	var abandon := _action("scene_abandon", "Abandon", "stop", red, "Abandon the scene: every part back at its mate position", _scene_back, in_scene, false, "No scene started")
+	abandon["tint"] = red
+	out.append(abandon)
+	out.append(_action("scene_update", "Update", "check", accent, "Keep what is on screen in \"%s\"" % scenes.shown_name(), _scene_update, shown_id != "", false, "Show a scene first"))
+	out.append(_action("scene_new", "Save new", "scenes", accent, "Save what is on screen as a new scene", _scene_new))
 	return out
 
 
@@ -289,9 +316,10 @@ func _open_scenes_tablet() -> void:
 
 func visibility_entries(has_selection: bool = true) -> Array:
 	var out := [
-		_action("show_all", "Show all", "eye", Color(0.48, 0.88, 0.69), "Bring every part back", _show_all),
-		_action("invert", "Invert", "invert", Color(0.48, 0.88, 0.69), "Hidden becomes shown and the reverse", _main.reverse_visibility),
 		_action("isolate", "Isolate part", "eye_half", Color(0.48, 0.88, 0.69), "Hide everything but the selected part", _main.isolate_selected, has_selection, false, "Select a part first (trigger on a part)"),
+		_action("invert", "Invert", "invert", Color(0.48, 0.88, 0.69), "Hidden becomes shown and the reverse", _main.reverse_visibility),
+		_tool_entry("shoot_hide", "Hide tool", "shoot_hide", Color(0.48, 0.88, 0.69), "Point at a part and pull the trigger to hide it"),
+		_action("show_all", "Show all", "eye", Color(0.48, 0.88, 0.69), "Bring every part back", _show_all),
 	]
 	if _design_table != null and _design_table.is_open() and _design_table.build != null:
 		out.append(_submenu("categories", "Categories", "layers", Color(0.48, 0.88, 0.69), "Isolate sketches, bodies, planes...", category_entries))
@@ -346,10 +374,16 @@ func _mates_entries() -> Array:
 		picks_entry = _action("mate_undo", "Undo pick", "undo", Color(0.96, 0.69, 0.25), "Take back the last face", _mates.back_pick, not _mates.picked_labels().is_empty(), false, "Nothing picked yet")
 	else:
 		picks_entry = _action("mate_clear", "Clear picks", "clear_picks", Color(0.96, 0.69, 0.25), "Start again", _mates.clear_picks)
+	var flip_label := "Flip"
+	var flip_hint := "Turn the preview round"
+	if _mates.is_coupler():
+		# A coupler has no ghost to turn round: the same wedge chooses which way the second part turns (Reverse; Left-hand for a screw).
+		flip_label = _mates.secondary_flip_label(_mates.mate_type)
+		flip_hint = "Which way the second part turns"
 	return [
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, need),
 		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
-		_action("mate_flip", "Flip", "flip", Color(0.37, 0.76, 1.00), "Turn the preview round", _flip_mate, _mates.can_create(), false, need),
+		_action("mate_flip", flip_label, "flip", Color(0.37, 0.76, 1.00), flip_hint, _flip_mate, _mates.can_create(), false, need),
 		picks_entry, # (straight down, above the pill: never a sub-wheel there)
 		_relax_entry(),
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
@@ -365,10 +399,31 @@ func _mates_pick_hint() -> String:
 	return "Pick two faces first"
 
 
+## The Type ring is kept to seven wedges (twelve crowded the labels and left no room for a distinct icon each): the five basic types, then two sub-rings.
+const MATE_RING_BASIC := ["coincident", "concentric", "parallel", "distance", "angle"]
+const MATE_RING_CENTRE := ["width", "symmetric"]
+const MATE_RING_MOTION := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
+
+
 func _mate_type_entries() -> Array:
+	var out := _mate_type_actions(MATE_RING_BASIC)
+	out.append(_submenu("type_centre", "Centre", "mate_width", Color(0.37, 0.76, 1.00), "Width and Symmetric", _mate_centre_entries))
+	out.append(_submenu("type_motion", "Motion", "mate_gear", Color(0.37, 0.76, 1.00), "Gear, rack, screw, limits", _mate_motion_entries))
+	return out
+
+
+func _mate_centre_entries() -> Array:
+	return _mate_type_actions(MATE_RING_CENTRE)
+
+
+func _mate_motion_entries() -> Array:
+	return _mate_type_actions(MATE_RING_MOTION)
+
+
+func _mate_type_actions(types: Array) -> Array:
 	var out := []
-	for type in _mates.MATE_TYPES:
-		out.append(_action("type_" + type, MATE_TYPE_LABELS[type], "mates", Color(0.37, 0.76, 1.00), MATE_TYPE_HINTS[type], _set_mate_type.bind(type), true, _mates.mate_type == type))
+	for type in types:
+		out.append(_action("type_" + type, MATE_TYPE_LABELS[type], "mate_" + type, Color(0.37, 0.76, 1.00), MATE_TYPE_HINTS[type], _set_mate_type.bind(type), true, _mates.mate_type == type))
 	return out
 
 
@@ -377,10 +432,38 @@ func _set_mate_type(type: String) -> void:
 	if type == "distance" or type == "angle":
 		var unit := "mm" if type == "distance" else "degrees"
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
+	elif type == "screw":
+		_main.open_keyboard_for("", _apply_mate_value.bind(type, "mm per turn"), {"title": _mates.value_prompt(type)})
+	elif type in _mates.LIMIT_TYPES:
+		_ask_limit_range(type)
 	elif type == "width":
 		# The optional offset from the centre (0 = centred exactly); the tablet's Set value button does the same.
 		_main.open_keyboard_for(("%.3f" % _mates.width_offset).rstrip("0").rstrip("."), _apply_width_offset, {"title": "Width offset from centre (mm, 0 = centred)"})
 	refresh_prompt()
+
+
+func _ask_limit_range(type: String) -> void:
+	## Minimum, then maximum (empty = none) on the keyboard; the same range the tablet's Set value asks.
+	var unit := "degrees" if type == "limit_angle" else "mm"
+	_main.open_keyboard_for("", func(min_text: String) -> void:
+		var parsed_min: Dictionary = _mates.parse_limit_bound(type, min_text)
+		if not parsed_min["ok"]:
+			say(str(parsed_min["error"]), 4.0)
+			return
+		_main.open_keyboard_for("", func(max_text: String) -> void:
+			var parsed_max: Dictionary = _mates.parse_limit_bound(type, max_text)
+			if not parsed_max["ok"]:
+				say(str(parsed_max["error"]), 4.0)
+				return
+			var problem: String = _mates.limit_range_error(parsed_min["value"], parsed_max["value"])
+			if problem != "":
+				say(problem, 4.0)
+				return
+			_mates.limit_min = parsed_min["value"]
+			_mates.limit_max = parsed_max["value"]
+			say("%s %s" % [MATE_TYPE_LABELS[type], _mates.limit_range_text(type, _mates.limit_min, _mates.limit_max)])
+		, {"title": "Maximum (%s, empty = none)" % unit})
+	, {"title": "Minimum (%s, empty = none)" % unit})
 
 
 func _apply_width_offset(text: String) -> void:
@@ -417,6 +500,38 @@ func _measure_entries() -> Array:
 		_action("measure_clear", "Clear", "clear_picks", Color(0.96, 0.69, 0.25), "Start a new measurement", _measure.clear_picks),
 		_action("measure_tablet", "Tablet", "tablet", Color(0.77, 0.55, 1.00), "Volume, area, mass", open_measure_tablet),
 	]
+
+
+func _section_entries() -> Array:
+	## The prompt says "Wheel: Flip", so the ring has it: Flip is on while the other side of the plane is the one that stays.
+	var section = _main.get("_section_tool")
+	var flipped: bool = section != null and bool(section.flipped)
+	return [
+		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
+		_action("section_flip", "Flip", "flip", Color(0.77, 0.55, 1.00), "Keep the other side of the plane", _flip_section, section != null, flipped, "Not available"),
+	]
+
+
+func _flip_section() -> void:
+	var section = _main.get("_section_tool")
+	if section != null:
+		section.set_flipped(not bool(section.flipped))
+
+
+func _drive_entries() -> Array:
+	var drive = _main.get("drive_tool")
+	var running: bool = drive != null and drive.running
+	return [
+		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
+		_action("drive_stop", "Stop", "close", Color(0.96, 0.69, 0.25), "Stop the drive (B does the same)", drive.stop if drive != null else Callable(), running, false, "Nothing is running"),
+		_action("drive_tablet", "Tablet", "tablet", Color(0.37, 0.76, 1.00), "The Drive page", open_drive_tablet),
+	]
+
+
+func open_drive_tablet() -> void:
+	if not _tablet.is_open():
+		_tablet.open_tablet()
+	_tablet.ui.select_tool("drive")
 
 
 func _colour_entries() -> Array:

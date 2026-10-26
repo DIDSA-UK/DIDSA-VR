@@ -53,7 +53,8 @@ const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular",
 const PICK_STATES := ["pick_edges", "pick_vertices", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## the states where the laser picks things on the part itself
 const PICK_FROM_STATES := ["sketch", "pick_plane", "extrude", "pick_edges", "pick_vertices", "pick_faces", "pick_bodies", "pick_curves", "pick_sketch"] ## where choosing a picking tool is allowed to switch the state
 const CURVE_REACH := 0.012 ## world metres around the laser in which a curve of an earlier sketch is picked
-const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot"] ## settings that may be negative or zero (a move along an axis)
+const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot", "g_helix", "g_shift"] ## settings that may be negative or zero (a move along an axis, a helix hand)
+const NONNEGATIVE_OPTIONS := ["g_bore", "g_fillet", "g_backlash", "r_backlash", "r_backing", "b_bore", "b_spiral"] ## settings that may be zero (none) but not negative
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
@@ -1668,9 +1669,22 @@ func type_option(key: String, title: String) -> void:
 
 func option_typed(key: String, text: String) -> void:
 	var cleaned := text.strip_edges()
+	if NONNEGATIVE_OPTIONS.has(key):
+		if not cleaned.is_valid_float() or cleaned.to_float() < 0.0:
+			table.set_status("Enter a number, zero or more.")
+			UiFeedback.haptic(table._right, "error")
+			return
+		options[key] = cleaned.to_float()
+		_update_options()
+		schedule_preview()
+		return
 	if SIGNED_OPTIONS.has(key):
 		if not cleaned.is_valid_float():
 			table.set_status("Enter a number (negative goes the other way).")
+			UiFeedback.haptic(table._right, "error")
+			return
+		if key == "g_helix" and absf(cleaned.to_float()) >= 90.0:
+			table.set_status("A helix angle has to be under 90 degrees.")
 			UiFeedback.haptic(table._right, "error")
 			return
 		options[key] = cleaned.to_float()
@@ -1680,6 +1694,14 @@ func option_typed(key: String, text: String) -> void:
 		return
 	if not cleaned.is_valid_float() or cleaned.to_float() <= 0.0:
 		table.set_status("Enter a number bigger than zero.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	if key in ["g_teeth", "r_teeth", "b_teeth", "g_mate", "b_mate"] and not is_equal_approx(cleaned.to_float(), roundf(cleaned.to_float())):
+		table.set_status("Enter a whole number of teeth.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	if key == "b_cone" and cleaned.to_float() > 90.0:
+		table.set_status("A pitch cone angle can't be more than 90 degrees.")
 		UiFeedback.haptic(table._right, "error")
 		return
 	if key == "ch_angle" and cleaned.to_float() >= 90.0:
@@ -1993,6 +2015,7 @@ func _run_preview() -> void:
 		return
 	if not editing.is_empty() and feature_tool.preview_mode() == "eager":
 		return # editing a feature that exists: nothing is created for a preview, Apply changes it
+	await feature_tool.preview_aux(self)
 	var req: Dictionary = feature_tool.request(self)
 	if not bool(req["ok"]):
 		await cancel_preview() # nothing valid to show (yet): what an earlier preview made goes

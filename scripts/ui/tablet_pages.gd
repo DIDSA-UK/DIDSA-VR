@@ -24,7 +24,7 @@ const NativeCompose := preload("res://scripts/native_compose.gd") ## which file 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
 const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
 const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
@@ -66,6 +66,7 @@ var _speed_label: Label
 var _speed_slider: HSlider
 var _mates_picks_label: Label
 var _mates_value_label: Label
+var _mates_toggles_row: Control ## Allow rotation / Minimal movement: neither means anything for a coupler (nothing moves when one is made)
 var _mates_create_button: Button
 var _mates_branch_label: Label ## which orientation / side the preview shows, and where Next solution is (MatesTool.branch_text)
 var _mates_alignment_button: Button
@@ -137,6 +138,10 @@ func register(reg) -> void:
 		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
+	reg.add_tool("assemble", "drive", "Drive", "movement", _build_drive_page, {
+		"kind": "mode", "on_activate": _set_drive.bind(true), "on_deactivate": _set_drive.bind(false), "status": _drive_status,
+		"caption": "turn a part, run the mechanism", "hint": "Point at a round face (or a straight edge) of a mated part and pull the trigger.",
+		"help": "Switch the tool on, then pull the right trigger on a round face or circular edge of a part held by mates (a gear, say) to turn it about that axis, or on a straight edge to slide it along it. Push the right stick sideways to run: full deflection is 30 rpm (50 mm/s when sliding), either way. A keeps it running at that speed with the stick at rest, B (or Stop) stops it. Everything the mates couple to it moves too; the readout shows each turning part's rpm. Stopping stores the pose as one undo step."})
 	reg.add_tool("assemble", "scenes", "Scenes", "scenes", _build_scenes_page, {
 		"caption": "show · save · back to default",
 		"help": "A scene is a named arrangement of the assembly (parts moved, hidden or painted, and where you look from) that changes nothing in the model. Show relaxes the mates and arranges the parts as the scene says; anything you move or paint then is temporary. Update scene keeps what is on screen in the shown scene; Save as new names a new one (from the default too: relax, move, paint, save). Back to default puts every part back, and asks first if the scene has unsaved changes. View on Show turns and places the model to the scene's viewpoint at the scale you have."})
@@ -151,7 +156,7 @@ func register(reg) -> void:
 	reg.add_tool("view", "visibility", "Visibility", "visibility", _build_visibility_page, {
 		"caption": "hide · show · isolate",
 		"help": "Hide or show every part at once, flip which parts are hidden, or isolate the selected part. All undoable."})
-	reg.add_tool("view", "shoot_hide", "Shoot hide", "shoot_hide", _build_shoot_hide_page, {
+	reg.add_tool("view", "shoot_hide", "Hide tool", "shoot_hide", _build_shoot_hide_page, {
 		"kind": "mode", "on_activate": _set_shoot_hide.bind(true), "on_deactivate": _set_shoot_hide.bind(false),
 		"caption": "point and hide",
 		"hint": "Point at a part and pull the right trigger to hide it.",
@@ -311,6 +316,14 @@ func _set_mates(on: bool) -> void:
 		_mates_tool.set_active(on)
 
 
+func _set_drive(on: bool) -> void:
+	var drive = _main.get("drive_tool") if _main != null else null
+	_left.drive_tool_active = on
+	_right.drive_tool_active = on
+	if drive != null:
+		drive.set_active(on)
+
+
 func _set_sections(on: bool) -> void:
 	if _section_tool:
 		_section_tool.set_active(on, _camera)
@@ -369,7 +382,8 @@ func _mode_toggle(label: String, apply: Callable, default_on: bool = true) -> Bu
 	return button
 
 
-func _choice_row(title: String, options: Array, selected: int, on_pick: Callable) -> Control:
+func _choice_row(title: String, options: Array, selected: int, on_pick: Callable, per_row := 0) -> Control:
+	## One of several choices as toggle buttons sharing a group. `per_row` > 0 wraps them into lines of that many (a long list would otherwise widen the page).
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	box.add_child(_hint(title))
@@ -377,6 +391,9 @@ func _choice_row(title: String, options: Array, selected: int, on_pick: Callable
 	box.add_child(row)
 	var group := ButtonGroup.new()
 	for i in options.size():
+		if per_row > 0 and i > 0 and i % per_row == 0:
+			row = _row()
+			box.add_child(row)
 		var button := Button.new()
 		button.text = str(options[i])
 		button.toggle_mode = true
@@ -495,7 +512,7 @@ func _build_visibility_page() -> Control:
 	row.add_child(_button("Show all", func() -> void: _main.show_all_parts()))
 	page.add_child(_button("Reverse visibility", func() -> void: _main.reverse_visibility()))
 	page.add_child(_button("Isolate selected", func() -> void: _main.isolate_selected()))
-	page.add_child(_hint("To hide parts by pointing at them, use Shoot hide."))
+	page.add_child(_hint("To hide parts by pointing at them, use the Hide tool."))
 	var rm = _main.room_manager if _main and _main.get("room_manager") else null
 	if rm != null:
 		page.add_child(_hint("Delete takes the selected part out of the assembly (its mates go too). Two presses; undo puts it back.", true))
@@ -654,8 +671,9 @@ func _build_mates_page() -> Control:
 	page.add_child(_choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
 		if _mates_tool:
 			_mates_tool.mate_type = _mates_tool.MATE_TYPES[i]
-	))
+	, 5))
 	var toggles := _row()
+	_mates_toggles_row = toggles
 	page.add_child(toggles)
 	var allow_rot := Button.new()
 	allow_rot.text = "Allow rotation"
@@ -773,13 +791,19 @@ func _refresh_mates_branch_controls() -> void:
 	if _mates_branch_label == null or _mates_tool == null:
 		return
 	var tool = _mates_tool
+	if _mates_toggles_row != null:
+		_mates_toggles_row.visible = not tool.is_coupler() and not tool.is_limit()
 	var text: String = tool.branch_text()
 	_mates_branch_label.text = text
 	_mates_branch_label.visible = text != ""
 	_mates_alignment_button.visible = tool.branch_controls.has("alignment")
 	_mates_alignment_button.text = "%s: %s" % [_MatesTool.alignment_title(tool.mate_type), _MatesTool.alignment_label(tool.mate_type, tool.shown_alignment())]
 	_mates_flip_button.visible = tool.branch_controls.has("secondary_flip")
-	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.shown_secondary_flip() == 1 else "off"]
+	_mates_flip_button.text = "%s: %s" % [_MatesTool.secondary_flip_label(tool.mate_type), "on" if tool.flip_is_on() else "off"]
+	if _mates_value_label != null and tool.is_coupler():
+		_mates_value_label.text = _coupler_value_label(tool)
+	elif _mates_value_label != null and tool.is_limit():
+		_mates_value_label.text = _limit_value_label(tool)
 	var steps: int = tool.branch_alternatives.size()
 	_mates_next_button.visible = steps > 1
 	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
@@ -797,8 +821,65 @@ func _mates_status() -> String:
 	return _mates_tool.status_text() if _mates_tool else ""
 
 
+func _coupler_value_label(tool) -> String:
+	## The value line of a coupler mate: what the value is, what it is now ("Auto" shows what the backend would take from the teeth).
+	var shown := ""
+	if tool.mate_value > 0.0:
+		shown = _trim_mate_value(tool.mate_value)
+	elif tool.mate_type == "screw":
+		shown = "(set it)"
+	else:
+		shown = "Auto" if tool.preview_coupler_value <= 0.0 else "Auto = %s" % _MatesTool.coupler_value_text(tool.mate_type, tool.preview_coupler_value)
+	return "%s: %s" % [_MatesTool.value_prompt(tool.mate_type).split(" (")[0], shown]
+
+
+func _limit_value_label(tool) -> String:
+	## The value line of a limit mate: its range as typed so far, and where the picked pair is now.
+	var range_text: String = _MatesTool.limit_range_text(tool.mate_type, tool.limit_min, tool.limit_max)
+	var now: String = _MatesTool.limit_now_text(tool.mate_type, tool.preview_limit_value)
+	return "Range: %s%s" % ["(set it)" if range_text == "" else range_text, "" if now == "" else "  (%s)" % now.trim_suffix(".")]
+
+
+func _ask_limit_range(type: String, lo, hi, on_done: Callable) -> void:
+	## Two keyboards, minimum then maximum (empty = no bound on that side); `on_done(lo, hi)` gets the pair only if both parsed and form a range.
+	var unit := "degrees" if type == "limit_angle" else "mm"
+	_main.open_keyboard_for("" if lo == null else _trim_mate_value(lo), func(min_text: String) -> void:
+		var parsed_min: Dictionary = _MatesTool.parse_limit_bound(type, min_text)
+		if not parsed_min["ok"]:
+			toast.emit(str(parsed_min["error"]), "error")
+			return
+		_main.open_keyboard_for("" if hi == null else _trim_mate_value(hi), func(max_text: String) -> void:
+			var parsed_max: Dictionary = _MatesTool.parse_limit_bound(type, max_text)
+			if not parsed_max["ok"]:
+				toast.emit(str(parsed_max["error"]), "error")
+				return
+			var problem: String = _MatesTool.limit_range_error(parsed_min["value"], parsed_max["value"])
+			if problem != "":
+				toast.emit(problem, "error")
+				return
+			on_done.call(parsed_min["value"], parsed_max["value"])
+		, {"title": "Maximum (%s, empty = none)" % unit})
+	, {"title": "Minimum (%s, empty = none)" % unit})
+
+
 func _on_set_mate_value_pressed() -> void:
 	if not _mates_tool:
+		return
+	if _mates_tool.is_limit():
+		_ask_limit_range(_mates_tool.mate_type, _mates_tool.limit_min, _mates_tool.limit_max, func(lo, hi) -> void:
+			_mates_tool.limit_min = lo
+			_mates_tool.limit_max = hi
+			_mates_value_label.text = _limit_value_label(_mates_tool))
+		return
+	if _mates_tool.is_coupler():
+		_main.open_keyboard_for(_trim_mate_value(_mates_tool.mate_value) if _mates_tool.mate_value > 0.0 else "", func(text: String) -> void:
+			var parsed: Dictionary = _MatesTool.parse_value(_mates_tool.mate_type, text)
+			if not parsed["ok"]:
+				toast.emit(str(parsed["error"]), "error")
+				return
+			_mates_tool.mate_value = float(parsed["value"])
+			_mates_value_label.text = _coupler_value_label(_mates_tool)
+		, {"title": _MatesTool.value_prompt(_mates_tool.mate_type)})
 		return
 	_main.open_keyboard_for(_trim_mate_value(_mates_tool.width_offset if _mates_tool.is_width() else _mates_tool.mate_value), func(text: String) -> void:
 		# A Width mate's value is its offset from the centre: a distance (never negative; empty / 0 = centred exactly).
@@ -838,16 +919,24 @@ func _mates_rows() -> Array:
 				is_width_mate = true
 		var refs_list: Array = mate.get("references", [])
 		var is_symmetric_mate: bool = refs_list.size() == 2 and refs_list[0] is Dictionary and refs_list[0].get("midplane") != null and refs_list[1] is Dictionary and refs_list[1].get("midplane") == null
-		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else type_str.capitalize())
-		var has_value: bool = mate.get("value") != null
+		var type_label: String = "Symmetric" if is_symmetric_mate else ("Width" if is_width_mate else _MatesTool.type_label(type_str))
+		var is_coupler_mate: bool = type_str in _MatesTool.COUPLER_TYPES
+		var is_limit_mate: bool = type_str in _MatesTool.LIMIT_TYPES
+		var has_value: bool = mate.get("value") != null and not is_coupler_mate
 		var mate_id := str(mate.get("id", ""))
 		var free_spin := bool(mate.get("allow_rotation", true))
 		var alignment = mate.get("alignment")
 		var secondary = mate.get("secondary_flip")
 		var notes := []
+		if is_coupler_mate:
+			notes.append(_MatesTool.coupler_value_text(type_str, mate.get("value"))) # (the raw sense means nothing on its own: only the Reverse action shows it)
+		if is_limit_mate:
+			notes.append(_MatesTool.limit_range_text(type_str, mate.get("limit_min"), mate.get("limit_max")))
+			if mate.get("limit_value") != null:
+				notes.append("now %s%s" % [_trim_mate_value(mate["limit_value"]), _MatesTool.limit_unit(type_str)])
 		if alignment != null:
 			notes.append(("swing %s" % _MatesTool.alignment_label(type_str, str(alignment))) if type_str == "angle" else ("aligned" if str(alignment) == "aligned" else "anti-aligned"))
-		if secondary != null:
+		if secondary != null and not is_coupler_mate:
 			notes.append("%s %s" % [_MatesTool.secondary_flip_label(type_str).to_lower(), "on" if bool(secondary) else "off"])
 		if type_str == "concentric":
 			notes.append("free to spin" if free_spin else "rotation locked")
@@ -859,8 +948,10 @@ func _mates_rows() -> Array:
 			actions.append({"label": _MatesTool.secondary_flip_label(type_str), "callback": _on_edit_mate.bind(mate_id, {"secondary_flip": not bool(secondary)})})
 		if type_str == "concentric":
 			actions.append({"label": "Lock rotation" if free_spin else "Free rotation", "callback": _on_edit_mate.bind(mate_id, {"allow_rotation": not free_spin})})
-		if type_str in ["distance", "angle"]:
+		if type_str in ["distance", "angle"] or is_coupler_mate:
 			actions.append({"label": "Value", "callback": _on_edit_mate_value.bind(mate_id, mate.get("value"))})
+		if is_limit_mate:
+			actions.append({"label": "Range", "callback": _on_edit_limit_range.bind(mate_id, type_str, mate.get("limit_min"), mate.get("limit_max"))})
 		actions.append({"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)})
 		rows.append({
 			"id": mate_id,
@@ -880,6 +971,13 @@ func _on_edit_mate(mate_id: String, fields: Dictionary) -> void:
 		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
 
 
+func _on_edit_limit_range(mate_id: String, type_str: String, lo, hi) -> void:
+	if _mates_tool == null or _main == null:
+		return
+	_ask_limit_range(type_str, lo, hi, func(new_lo, new_hi) -> void:
+		_on_edit_mate(mate_id, {"limit_min": new_lo, "limit_max": new_hi}))
+
+
 func _on_edit_mate_value(mate_id: String, current) -> void:
 	if _mates_tool == null or _main == null:
 		return
@@ -888,7 +986,7 @@ func _on_edit_mate_value(mate_id: String, current) -> void:
 		for mate in _mates_tool.mates:
 			if str(mate.get("id", "")) == mate_id:
 				type_str = str(mate.get("type", ""))
-		var parsed: Dictionary = _MatesTool.parse_value(type_str, text)
+		var parsed: Dictionary = _MatesTool.parse_value(type_str, text, false) # an existing mate has no Auto
 		if not parsed["ok"]:
 			toast.emit(str(parsed["error"]), "error")
 			return
@@ -932,6 +1030,26 @@ func _sections_status() -> String:
 	if not _section_tool or not _section_tool.active:
 		return "Off — switch the tool on to place the plane"
 	return "Sectioning%s — grip the plane to move it" % (" (flipped)" if _section_tool.flipped else "")
+
+
+# --- Assembly: Drive ---------------------------------------------------------------------
+
+func _build_drive_page() -> Control:
+	var page := _page()
+	page.add_child(_hint("Right stick sideways: speed. A: keep running. B: stop.", true))
+	page.add_child(_button("Stop", func() -> void:
+		var drive = _main.get("drive_tool") if _main != null else null
+		if drive != null:
+			drive.stop()
+	))
+	return page
+
+
+func _drive_status() -> String:
+	var drive = _main.get("drive_tool") if _main != null else null
+	if drive == null or not drive.active:
+		return "Off: switch the tool on, then pick the round face to turn."
+	return drive.status_text()
 
 
 # --- Assembly: Measure -----------------------------------------------------------------

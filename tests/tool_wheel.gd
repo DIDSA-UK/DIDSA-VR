@@ -46,7 +46,7 @@ func _initialize() -> void:
 
 	print("SMOKE the wheel is built and the right hand is wired for it (the left is not): ", wheel != null and r.wheel_enabled and not l.wheel_enabled)
 	var root_ids: Array = _ids(flows.entries())
-	print("SMOKE the root ring: mates, measure, table, paint tool, shoot hide, section, visibility, undo, scenes, home: ", root_ids == ["mates", "measure", "table", "paint", "shoot_hide", "sections", "visibility", "undo", "scenes", "home"])
+	print("SMOKE the root ring: mates, measure, table, section, drive, appearance, show / hide, undo, scenes, home (ten wedges; the long names on the wide tiles): ", root_ids == ["mates", "measure", "table", "sections", "drive", "paint", "visibility", "undo", "scenes", "home"])
 	print("SMOKE nothing is active and the wheel is closed at the start: ", manager.active_id == "" and not wheel.is_open() and not r.wheel_is_open())
 
 	# --- the chord takes the hand
@@ -100,11 +100,11 @@ func _initialize() -> void:
 	var type_index := mate_ids.find("mate_type")
 	var type_angle := Vector2(sin(TAU * type_index / float(mate_ids.size())), cos(TAU * type_index / float(mate_ids.size())))
 	_move(type_angle * 0.24)
-	print("SMOKE travelling out towards the Type wedge opens the type ring: ", _ids(wheel.current_entries()) == ["type_coincident", "type_concentric", "type_parallel", "type_distance", "type_angle", "type_width", "type_symmetric"])
+	print("SMOKE travelling out towards the Type wedge opens the type ring: ", _ids(wheel.current_entries()) == ["type_coincident", "type_concentric", "type_parallel", "type_distance", "type_angle", "type_centre", "type_motion"])
 	anchor = r.global_position # the new ring is centred where the hand is now
 	_move(Vector2(0.0, 0.0))
 	print("SMOKE the sub-wheel is centred where the hand is: ", wheel.hovered_index() == -1)
-	var conc := Vector2(sin(TAU * 1.0 / 7.0), cos(TAU * 1.0 / 7.0))
+	var conc := Vector2(sin(TAU * 1.0 / float(wheel.current_entries().size())), cos(TAU * 1.0 / float(wheel.current_entries().size())))
 	_move(conc * 0.12)
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
@@ -156,6 +156,13 @@ func _initialize() -> void:
 	wheel._on_released("grip_click")
 	print("SMOKE choosing Measure switches it on: ", manager.is_active("measure") and main._measure_tool.active and r.measure_tool_active)
 	print("SMOKE ...and opens the tablet on it for volume, area and mass: ", tablet.is_open() and tablet.ui.selected_tool_id == "measure")
+	manager.activate("sections")
+	var section_ids: Array = _ids(flows.entries())
+	print("SMOKE the Section ring is All tools / Flip (its prompt says Wheel: Flip), and Flip turns the plane over: ", section_ids == ["all_tools", "section_flip"] and not main._section_tool.flipped)
+	flows.entries()[1]["run"].call()
+	print("SMOKE ...Flip flips the section plane and shows as on: ", main._section_tool.flipped and bool(flows.entries()[1]["active"]))
+	main._section_tool.set_flipped(false)
+	manager.activate("measure")
 	print("SMOKE the Measure ring is All tools / Clear / Tablet: ", _ids(flows.entries()) == ["all_tools", "measure_clear", "measure_tablet"])
 	tablet.close_tablet()
 	manager.deactivate()
@@ -203,7 +210,7 @@ func _initialize() -> void:
 
 	# --- visibility sub-wheel
 	var vis: Array = flows.visibility_entries(false)
-	print("SMOKE Visibility: show all, invert, isolate part (greyed with nothing selected): ", _ids(vis) == ["show_all", "invert", "isolate"] and not bool(vis[2]["enabled"]))
+	print("SMOKE Show / Hide: isolate part (greyed with nothing selected), invert, the Hide tool, show all: ", _ids(vis) == ["isolate", "invert", "shoot_hide", "show_all"] and not bool(vis[0]["enabled"]))
 	print("SMOKE Visibility needs the design table open for its categories: ", not (_ids(vis).has("categories")))
 
 	# --- the Clear tool pill (under every top-level ring) and the wrist hint panel
@@ -227,7 +234,7 @@ func _initialize() -> void:
 	var hide_prompt: String = flows.prompt_text()
 	print("SMOKE with a tool in hand the wrist panel carries its prompt: ", hint.is_showing() and hint.title_text() == hide_prompt.split("\n")[0])
 	_open_at_anchor()
-	print("SMOKE the pill is live with a tool in hand: ", bool(wheel.pill_entry()["enabled"]) and "Shoot hide" in str(wheel.pill_entry()["hint"]))
+	print("SMOKE the pill is live with a tool in hand: ", bool(wheel.pill_entry()["enabled"]) and "Hide tool" in str(wheel.pill_entry()["hint"]))
 	_move(Vector2(0.0, -0.26))
 	wheel._on_released("trigger_click")
 	wheel._on_released("grip_click")
@@ -281,7 +288,7 @@ func _initialize() -> void:
 	print("SMOKE ...an arc fills along the tile, and nothing opens before 0.4 s: ", wheel._stack.is_empty() and (wheel._dwell_arc.mesh as ImmediateMesh).get_surface_count() == 1)
 	wheel._process(0.2)
 	print("SMOKE ...then it opens, centred where the hand rests: ", wheel._stack.size() == 1 and wheel.global_position.is_equal_approx(r.global_position) and wheel.hovered_index() == -1)
-	print("SMOKE the panel's title is the path, and says how to go back: ", wheel.ring_path() == "Tools › Visibility" and wheel.summary()["title"] == "Tools › Visibility" and str(wheel.summary()["body"]).contains("Rest in the middle to go back"))
+	print("SMOKE the panel's title is the path, and says how to go back: ", wheel.ring_path() == "Tools › Show / Hide" and wheel.summary()["title"] == "Tools › Show / Hide" and str(wheel.summary()["body"]).contains("Rest in the middle to go back"))
 	wheel._process(1.0)
 	print("SMOKE the hand starts in the middle of the new ring: resting there is not 'back' until it has been out: ", wheel._stack.size() == 1)
 	var sub_anchor: Vector3 = wheel.global_position

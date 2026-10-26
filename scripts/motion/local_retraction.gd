@@ -28,26 +28,62 @@ const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the head
 const MAX_ROWS := 64
 const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
 const PAIR_MODEL_VERSION := 4 ## 4 = 3 plus an optional `pair` on a side: the second face of a Width / Symmetric mid-plane over two members (the backend emits 4 only then)
+const COUPLER_MODEL_VERSION := 5 ## 5 = coupler mates (gear / rack_pinion / screw): rows on each side's MOVE from its `anchor` pose; `set_anchors` re-bases them at every accepted anchor
+const LIMIT_MODEL_VERSION := 6 ## 6 = limit mates (limit_distance / limit_angle): an inequality row with `min` / `max`, held at the nearest bound only while violated (see `retract`); a superset of 3 to 5
+const LIMIT_ROUNDS := 3 ## active-set rounds of one retraction
+const LIMIT_TOL := 1e-6 ## mm / degrees a value may sit outside its range before the limit counts as violated
 const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
 
 const _TYPES := ["coincident", "concentric", "parallel", "angle", "distance"]
+const _COUPLER_TYPES := ["gear", "rack_pinion", "screw"]
+const _LIMIT_TYPES := ["limit_distance", "limit_angle"]
 
 var members := 0
 var member_ids: Array = []
 var rows := 0
 var n := 0 ## 6 * members
 var _mates: Array = []
+var _anchors: Array = [] ## version 5: the pose each member had at the latest accepted anchor (the base of a coupler's rows); empty = the exported ones
 var _jac := true ## false = residual-only evaluation (no derivative arithmetic)
+var _held := {} ## the limits `retract` is holding at a bound, {mate id: bound}: set by the latest `retract` (reset at its start), so `residual` / `residual_inf` right after it include the held rows
+
+
+## Re-bases a coupler's rows on `poses` (one per member, the model's member order): call it with the members' poses of every accepted anchor.
+func set_anchors(poses: Array) -> void:
+	if poses.size() == members:
+		_anchors = poses.duplicate()
+
+
+## Whether the model holds a limit mate.
+func has_limits() -> bool:
+	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			return true
+	return false
+
+
+## The limits the latest `retract` held, {mate id: bound} (a copy).
+func held_limits() -> Dictionary:
+	return _held.duplicate()
+
+
+## Whether the model holds a coupler mate (rows measured from anchors).
+func has_coupler() -> bool:
+	for mate in _mates:
+		if _COUPLER_TYPES.has(mate["type"]):
+			return true
+	return false
 
 
 ## Parses an anchor's `constraint_model`. Returns null (= keep projecting) for no model, another version, an unknown mate type,
 ## a side missing geometry its residual needs, or a group the local solve is not meant for.
-static func try_parse(json, max_members: int = MAX_MEMBERS):
+static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_ROWS):
 	if not (json is Dictionary):
 		return null
 	var version := int(json.get("version", 0))
-	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION:
+	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION:
 		return null
+	var v6 := version == LIMIT_MODEL_VERSION
 	var ids: Array = json.get("members", [])
 	if ids.is_empty() or ids.size() > max_members:
 		return null
@@ -57,8 +93,13 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 	model.n = 6 * ids.size()
 	for raw in json.get("mates", []):
 		var type := str(raw["type"])
-		if not _TYPES.has(type):
+		var coupler := _COUPLER_TYPES.has(type)
+		var limit := _LIMIT_TYPES.has(type)
+		if not _TYPES.has(type) and not (coupler and (version == COUPLER_MODEL_VERSION or v6)) and not (limit and v6):
 			return null
+		if limit:
+			if not (raw.get("id") is String) or (raw.get("min") == null and raw.get("max") == null):
+				return null
 		var a = _parse_side(raw["a"])
 		var b = _parse_side(raw["b"])
 		if a == null or b == null:
@@ -66,12 +107,25 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 		if int(a["member"]) >= ids.size() or int(b["member"]) >= ids.size():
 			return null
 		for side in [a, b]:
+			# `anchor` belongs to version 5 (and 6, the superset) only.
+			if side["ar"] != null and version != COUPLER_MODEL_VERSION and not v6:
+				return null
 			if side["pair"] != null:
 				# `pair` belongs to version 4 only; a version-3 model carrying one is malformed. Out-of-range member => null.
 				if version == MODEL_VERSION or int(side["pair"]["member"]) >= ids.size():
 					return null
+		if coupler:
+			# A coupler's two sides each need an axis, a member side its anchor, and a positive value.
+			if raw.get("value") == null or float(raw["value"]) <= 0.0:
+				return null
+			for side in [a, b]:
+				if not (side["geo"].has("axis_origin") and side["geo"].has("direction")):
+					return null
+				if int(side["member"]) >= 0 and side["ar"] == null:
+					return null
 		model._mates.append({
 			"type": type,
+			"k": _sign(raw.get("k")),
 			"value": raw.get("value"),
 			"allow_rotation": bool(raw.get("allow_rotation", true)),
 			"alignment": _sign(raw.get("alignment")),
@@ -79,15 +133,25 @@ static func try_parse(json, max_members: int = MAX_MEMBERS):
 			"perp": _sign(raw.get("perp")),
 			"a": a,
 			"b": b,
+			"id": str(raw.get("id", "")),
+			"min": raw.get("min"),
+			"max": raw.get("max"),
 		})
 	# A dry evaluation at identity poses: tells the row count and fails on a missing field (a side lacking geometry).
 	var identity: Array = []
 	for i in ids.size():
 		identity.append(Se3.make_pose([0.0, 0.0, 0.0], Se3.identity()))
 	var r = model._evaluate(identity)
-	if r == null or (r[0] as PackedFloat64Array).size() > MAX_ROWS:
+	if r == null or (r[0] as PackedFloat64Array).size() > max_rows:
 		return null
 	model.rows = (r[0] as PackedFloat64Array).size()
+	for mate in model._mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			if model._limit_row(mate, identity) == null:
+				return null # a side lacking the geometry the limit measures
+			model.rows += 1 # (counted for the size cap; it adds a row only while held)
+			if model.rows > max_rows:
+				return null
 	return model
 
 
@@ -101,8 +165,14 @@ static func _parse_side(j: Dictionary):
 	if j.has("plane") and j["plane"] != null:
 		geo["porigin"] = _floats(j["plane"]["origin"])
 		geo["pnormal"] = _floats(j["plane"]["normal"])
-	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null, "pair": null}
+	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null, "pair": null, "ar": null, "at": null}
 	_parse_frozen(side, j)
+	if j.has("anchor") and j["anchor"] != null:
+		var ar: Array = []
+		for row in j["anchor"]["r"]:
+			ar.append_array(_floats(row))
+		side["ar"] = ar
+		side["at"] = _floats(j["anchor"]["t"])
 	if j.has("pair") and j["pair"] != null:
 		var pj: Dictionary = j["pair"]
 		if not (pj.get("plane") is Dictionary) or not (pj["plane"].has("origin") and pj["plane"].has("normal")) or not pj.has("member"):
@@ -275,10 +345,241 @@ func _unit(a: Array) -> Array:
 
 
 ## [residual PackedFloat64Array, jacobian Array of PackedFloat64Array rows (n each)] at `poses`; null if a field is missing.
+# --- coupler rows (version 5, projector-spec section 4b "gear, rack_pinion, screw") ---
+
+func _base_axis(side: Dictionary) -> Array:
+	## The side's axis in the world at its base pose (a constant).
+	var u := _unit_plain(side["geo"]["direction"])
+	if int(side["member"]) >= 0:
+		var r0: Array = _anchors[side["member"]]["r"] if not _anchors.is_empty() else side["ar"]
+		return Se3.mat_vec(r0, u)
+	return Se3.mat_vec(side["fr"], u) if side["fr"] != null else u
+
+
+static func _unit_plain(a: Array) -> Array:
+	var l := sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+	return [a[0] / l, a[1] / l, a[2] / l]
+
+
+func _motion(side: Dictionary, poses: Array, axis: Array) -> Array:
+	## [turn, d turn, travel, d travel] of a member side about / along the world unit `axis` since its anchor pose.
+	var zero := PackedFloat64Array()
+	zero.resize(n)
+	var m: int = side["member"]
+	if m < 0:
+		return [0.0, zero, 0.0, zero.duplicate()]
+	var r0: Array
+	var t0: Array
+	if not _anchors.is_empty():
+		r0 = _anchors[m]["r"]
+		t0 = _anchors[m]["t"]
+	else:
+		r0 = side["ar"]
+		t0 = side["at"]
+	var r: Array = poses[m]["r"]
+	var t: Array = poses[m]["t"]
+	var q := Se3.mat_mul(r, Se3.mat_transpose(r0))
+	# unit quaternion of q, w >= 0 (same branch as the backend)
+	var w: float
+	var v: Array
+	var tr: float = q[0] + q[4] + q[8]
+	if tr > 0.0:
+		var sc := sqrt(tr + 1.0) * 2.0
+		w = 0.25 * sc
+		v = [(q[7] - q[5]) / sc, (q[2] - q[6]) / sc, (q[3] - q[1]) / sc]
+	else:
+		var i := 0
+		if q[4] > q[0]:
+			i = 1
+		if q[8] > q[4 * i]:
+			i = 2
+		var j := (i + 1) % 3
+		var k := (i + 2) % 3
+		var sc := sqrt(q[4 * i] - q[4 * j] - q[4 * k] + 1.0) * 2.0
+		v = [0.0, 0.0, 0.0]
+		v[i] = 0.25 * sc
+		v[j] = (q[3 * j + i] + q[3 * i + j]) / sc
+		v[k] = (q[3 * k + i] + q[3 * i + k]) / sc
+		w = (q[3 * k + j] - q[3 * j + k]) / sc
+	if w < 0.0:
+		w = -w
+		v = [-v[0], -v[1], -v[2]]
+	var a: float = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2]
+	var vxa := Se3.cross(v, axis)
+	var den := w * w + a * a
+	var gturn := zero.duplicate()
+	for i in 3:
+		gturn[6 * m + 3 + i] = (w * w * axis[i] + w * vxa[i] + a * v[i]) / den
+	var p: Array = side["geo"]["axis_origin"]
+	var rp := Se3.mat_vec(r, p)
+	var r0p := Se3.mat_vec(r0, p)
+	var travel: float = ((rp[0] + t[0]) - (r0p[0] + t0[0])) * axis[0] \
+		+ ((rp[1] + t[1]) - (r0p[1] + t0[1])) * axis[1] \
+		+ ((rp[2] + t[2]) - (r0p[2] + t0[2])) * axis[2]
+	var gtravel := zero.duplicate()
+	var qxa := Se3.cross(rp, axis)
+	for i in 3:
+		gtravel[6 * m + i] = axis[i]
+		gtravel[6 * m + 3 + i] = qxa[i]
+	return [2.0 * atan2(a, w), gturn, travel, gtravel]
+
+
+func _coupler_row(mate: Dictionary, poses: Array) -> Array:
+	## The one row of a coupler mate: [value, gradient].
+	var axis_a := _base_axis(mate["a"])
+	var value: float = float(mate["value"])
+	var k: float = mate["k"]
+	var a: Array
+	var b: Array
+	var out := PackedFloat64Array()
+	out.resize(n)
+	match mate["type"]:
+		"gear":
+			a = _motion(mate["a"], poses, axis_a)
+			b = _motion(mate["b"], poses, _base_axis(mate["b"]))
+			for i in n:
+				out[i] = b[1][i] - k * value * a[1][i]
+			return [b[0] - k * value * a[0], out]
+		"rack_pinion":
+			a = _motion(mate["a"], poses, axis_a)
+			b = _motion(mate["b"], poses, _base_axis(mate["b"]))
+			var c := k * value / TAU
+			for i in n:
+				out[i] = b[3][i] - c * a[1][i]
+			return [b[2] - c * a[0], out]
+	# screw: everything about / along the screw's (A's) axis
+	a = _motion(mate["a"], poses, axis_a)
+	b = _motion(mate["b"], poses, axis_a)
+	var cs := k * value / TAU
+	for i in n:
+		out[i] = (b[3][i] - a[3][i]) - cs * (b[1][i] - a[1][i])
+	return [(b[2] - a[2]) - cs * (b[0] - a[0]), out]
+
+
+## `[value, gradient]` of a limit mate's measured value (mm for limit_distance, `(P_a - P_b) . N`, N = B's plane normal else A's;
+## degrees for limit_angle, `atan2((a x b) . h, a . b)`, h the hinge); the gradient is per unit of that value. Null if a side lacks geometry.
+func _limit_row(mate: Dictionary, poses: Array):
+	var d := _geo(mate["a"], poses)
+	var f := _geo(mate["b"], poses)
+	if mate["type"] == "limit_distance":
+		var origin_a = d["porigin"] if d.has("porigin") else d.get("point")
+		var origin_b = f["porigin"] if f.has("porigin") else f.get("point")
+		var normal = f["pnormal"] if f.has("pnormal") else d.get("pnormal")
+		if origin_a == null or origin_b == null or normal == null:
+			return null
+		return _dot(_sub(origin_a, origin_b), _unit(normal))
+	var hinge = d["hinge_direction"] if d.has("hinge_direction") else f.get("hinge_direction")
+	if hinge == null or not (d.has("direction") and f.has("direction")):
+		return null
+	var na := _unit(d["direction"])
+	var nb := _unit(f["direction"])
+	var sn := _dot(_cross(na, nb), _unit(hinge))
+	var cs := _dot(na, nb)
+	var den: float = sn[0] * sn[0] + cs[0] * cs[0]
+	var deg := 180.0 / PI
+	var grad := PackedFloat64Array()
+	if _jac:
+		grad.resize(n)
+		var sd: PackedFloat64Array = sn[1]
+		var cd: PackedFloat64Array = cs[1]
+		for c in n:
+			grad[c] = (cs[0] * sd[c] - sn[0] * cd[c]) / den * deg
+	return [rad_to_deg(atan2(sn[0], cs[0])), grad]
+
+
+## The measured value of a limit mate at `poses` (the same number as `_limit_row`'s first element) without building the whole side geometry or any
+## derivative: only the three vectors the value needs. The per-frame stop of a drag evaluates this a dozen times a frame.
+func _limit_value(mate: Dictionary, poses: Array) -> float:
+	var a: Dictionary = mate["a"]
+	var b: Dictionary = mate["b"]
+	if mate["type"] == "limit_distance":
+		var geo_a: Dictionary = a["geo"]
+		var geo_b: Dictionary = b["geo"]
+		var pa: Array = _world(a, poses, "porigin" if geo_a.has("porigin") else "point")[0]
+		var pb: Array = _world(b, poses, "porigin" if geo_b.has("porigin") else "point")[0]
+		var normal: Array = _world(b, poses, "pnormal")[0] if geo_b.has("pnormal") else _world(a, poses, "pnormal")[0]
+		var nn := Se3.norm3(normal)
+		return ((pa[0] - pb[0]) * normal[0] + (pa[1] - pb[1]) * normal[1] + (pa[2] - pb[2]) * normal[2]) / nn
+	var ga: Dictionary = a["geo"]
+	var hinge_side: Dictionary = a if ga.has("hinge_direction") else b
+	var da: Array = _world(a, poses, "direction")[0]
+	var db: Array = _world(b, poses, "direction")[0]
+	var h: Array = _world(hinge_side, poses, "hinge_direction")[0]
+	var x: Array = Se3.cross(da, db)
+	var hn := Se3.norm3(h)
+	var sine: float = (x[0] * h[0] + x[1] * h[1] + x[2] * h[2]) / (hn * Se3.norm3(da) * Se3.norm3(db))
+	var cosine: float = (da[0] * db[0] + da[1] * db[1] + da[2] * db[2]) / (Se3.norm3(da) * Se3.norm3(db))
+	return rad_to_deg(atan2(sine, cosine))
+
+
+## The indices of the members a limit mate measures (a limit's value reads only those members' poses).
+func limit_member_indices() -> Array:
+	var out: Array = []
+	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			for side in [mate["a"], mate["b"]]:
+				var m: int = side["member"]
+				if m >= 0 and not out.has(m):
+					out.append(m)
+	return out
+
+
+## Whether every limit mate's value at `poses` lies within its range (no solve, no derivatives): the cheap check a drag uses to stop at a limit.
+func limits_in_range(poses: Array) -> bool:
+	var was := _jac
+	_jac = false
+	var ok := true
+	for mate in _mates:
+		if not _LIMIT_TYPES.has(mate["type"]):
+			continue
+		var value: float = _limit_value(mate, poses)
+		if (mate["max"] != null and value > float(mate["max"]) + LIMIT_TOL) or (mate["min"] != null and value < float(mate["min"]) - LIMIT_TOL):
+			ok = false
+			break
+	_jac = was
+	return ok
+
+
+## {mate id: bound} of the limits not yet held whose range `poses` leave.
+func _violated(poses: Array) -> Dictionary:
+	var out := {}
+	var was := _jac
+	_jac = false
+	for mate in _mates:
+		if not _LIMIT_TYPES.has(mate["type"]) or _held.has(mate["id"]):
+			continue
+		var value: float = _limit_row(mate, poses)[0]
+		if mate["max"] != null and value > float(mate["max"]) + LIMIT_TOL:
+			out[mate["id"]] = float(mate["max"])
+		elif mate["min"] != null and value < float(mate["min"]) - LIMIT_TOL:
+			out[mate["id"]] = float(mate["min"])
+	_jac = was
+	return out
+
+
 func _evaluate(poses: Array):
 	var res := PackedFloat64Array()
 	var jac: Array = []
 	for mate in _mates:
+		if _LIMIT_TYPES.has(mate["type"]):
+			if _held.has(mate["id"]):
+				var lr = _limit_row(mate, poses)
+				var unit := PI / 180.0 if mate["type"] == "limit_angle" else 1.0
+				res.append((float(lr[0]) - float(_held[mate["id"]])) * unit)
+				if _jac:
+					var g := PackedFloat64Array()
+					g.resize(n)
+					var lg: PackedFloat64Array = lr[1]
+					for c in n:
+						g[c] = lg[c] * unit
+					jac.append(g)
+			continue
+		if _COUPLER_TYPES.has(mate["type"]):
+			var cr := _coupler_row(mate, poses)
+			res.append(cr[0])
+			if _jac:
+				jac.append(cr[1])
+			continue
 		var d := _geo(mate["a"], poses)
 		var f := _geo(mate["b"], poses)
 		var type: String = mate["type"]
@@ -508,7 +809,25 @@ func _scaled_rows(jac: Array, w: Array) -> Array:
 
 ## Sequential nearest-point retraction (spec §4b): `iterations` trust-region steps towards `wishes`, then `polish`
 ## constraint-only steps. `w` = per-coordinate metric (see local_scale).
+##
+## With limit mates (version 6) it is the active-set rounds: retract with none held, hold every limit the answer leaves at its nearest bound (an
+## equality row) and retract again from the SAME start and wish, at most LIMIT_ROUNDS times. Nothing is carried to the next call (a limit is released
+## the moment the wish no longer pushes past it); `held_limits()` says which were held.
 func retract(poses: Array, wishes: Array, w: Array, iterations: int = ITERATIONS, polish: int = POLISH) -> Array:
+	_held = {}
+	var got := _retract_once(poses, wishes, w, iterations, polish)
+	if not has_limits():
+		return got
+	for _round in LIMIT_ROUNDS:
+		var violated := _violated(got)
+		if violated.is_empty():
+			break
+		_held.merge(violated, true)
+		got = _retract_once(poses, wishes, w, iterations, polish)
+	return got
+
+
+func _retract_once(poses: Array, wishes: Array, w: Array, iterations: int, polish: int) -> Array:
 	var cur: Array = poses.duplicate()
 	for _it in iterations:
 		var ev = _evaluate(cur)
@@ -577,7 +896,9 @@ func frame(poses: Array, wishes: Array, fallback: Array, lever: float) -> Dictio
 	var got := retract(poses, wishes, w, local_iterations(wish_step))
 	var res := residual_inf(got)
 	var dist := Se3.weighted_dist(got[0], fallback[0], lever)
-	var ok := res <= ACCEPT_RESIDUAL and dist <= ACCEPT_DISTANCE * maxf(lever, wish_step)
+	# A held limit is a stop the projector (the fallback) knows nothing of - it would show the part going on through it - so the distance guard
+	# cannot judge the answer: a converged result with a limit held is accepted as it is.
+	var ok := res <= ACCEPT_RESIDUAL and (not _held.is_empty() or dist <= ACCEPT_DISTANCE * maxf(lever, wish_step))
 	return {
 		"accepted": ok,
 		"poses": got if ok else fallback,
