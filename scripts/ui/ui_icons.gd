@@ -114,6 +114,7 @@ const _ICONS := {
 	"tool_boolean": '<circle cx="18" cy="24" r="12"/><circle cx="30" cy="24" r="12"/>',
 	"tool_merge": '<path d="M6 14H22V34H6Z"/><path d="M26 14H42V34H26Z"/><path d="M22 24H26"/>',
 	"tool_gear": '<circle cx="24" cy="24" r="9"/><circle cx="24" cy="24" r="3"/><path d="M24 4V10M24 38V44M4 24H10M38 24H44M10 10L14 14M34 34L38 38M38 10L34 14M14 34L10 38"/>',
+	"tool_helix": '<path d="M10 40C10 34 38 34 38 28C38 22 10 22 10 16C10 10 38 10 38 6"/><path d="M10 40V44M38 6V4"/>',
 	"tool_rack": '<path d="M5 30H43V40H5Z"/><path d="M9 30V22H15V30M19 30V22H25V30M29 30V22H35V30M39 30V22H43"/>',
 	"tool_bevel_gear": '<path d="M10 40L18 12H30L38 40Z"/><path d="M14 26H34"/><path d="M18 12L16 6M30 12L32 6M24 12V6"/>',
 	"tool_split": '<rect x="8" y="10" width="32" height="28"/><path d="M24 4V44" stroke-dasharray="3 3"/>',

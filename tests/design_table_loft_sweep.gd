@@ -24,7 +24,7 @@ func _initialize() -> void:
 	# --- Loft
 	table.manager.activate("loft")
 	await rig.frames(3)
-	print("SMOKE choosing Loft with no sketch open offers the visible sketches (pick_sketch) with Apply greyed: ", ed.state == "pick_sketch" and table.props.option_button("apply").disabled and table.props.option_ids() == ["boss", "cut", "ruled", "lo_thin", "clear_curves", "targets", "apply"])
+	print("SMOKE choosing Loft with no sketch open offers the visible sketches (pick_sketch) with Apply greyed: ", ed.state == "pick_sketch" and table.props.option_button("apply").disabled and table.props.option_ids() == ["boss", "cut", "ruled", "lo_thin", "guide_add", "clear_curves", "targets", "apply"])
 	ed.curve_picks = [curve("sk_a", "ska", "l1")]
 	ed._update_options()
 	print("SMOKE one sketch is not a loft: ", table.props.option_button("apply").disabled and not ed.tools["loft"].request(ed)["ok"])

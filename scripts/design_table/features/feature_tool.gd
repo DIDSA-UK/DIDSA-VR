@@ -87,6 +87,11 @@ func edits_in_tool() -> bool:
 	return false
 
 
+func edits_row(_row: Dictionary) -> bool:
+	## false: this Build row has the tool's feature type but is not one it makes (the curve type is shared: the Helix tool does not edit an intersection curve)
+	return true
+
+
 func load_from_row(_ed, _row: Dictionary) -> void:
 	pass
 

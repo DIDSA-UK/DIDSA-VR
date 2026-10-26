@@ -12,7 +12,7 @@ const LABELS := {
 	"revolve": "Revolve", "sweep": "Sweep", "loft": "Loft", "surface": "Surface", "mirror": "Mirror", "pattern": "Pattern",
 	"merge": "Merge", "split": "Split", "shell": "Shell", "import": "Import", "delete_body": "Delete Body",
 	"scale_body": "Scale", "move_body": "Move Body", "delete_face": "Delete Face", "move_face": "Move Face",
-	"gear": "Gear", "rack": "Rack", "bevel_gear": "Bevel Gear",
+	"gear": "Gear", "rack": "Rack", "bevel_gear": "Bevel Gear", "curve": "Curve",
 }
 const EDITABLE := ["extrude", "revolve", "shell", "fillet", "chamfer"] ## the types whose value the table can change (a PATCH of one number)
 
@@ -66,6 +66,8 @@ static func glyph(type: String) -> String:
 			return "tool_gear"
 		"rack":
 			return "tool_rack"
+		"curve":
+			return "tool_helix"
 		"bevel_gear":
 			return "tool_bevel_gear"
 	return "cat_feature"

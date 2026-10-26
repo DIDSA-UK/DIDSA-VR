@@ -94,6 +94,9 @@ var bodies: Array = [] ## picked body entities {kind: "body", body_id, key} (Pat
 var curve_picks: Array = [] ## picked curves of earlier sketches {kind: "curve", sketch_feature_id, sketch_id, entity_type, entity_id, key} in pick order (Loft sections, Sweep paths, Pattern directions)
 var curve_limit := 0 ## how many curves one pick may hold (0 = any number)
 var seed_sketches: Array = [] ## Loft: the finished sketches picked as sections, in pick order (feature ids)
+var guides: Array = [] ## Loft: the finished guides, each an Array of picked curves (same shape as curve_picks) forming one chain; they shape the surface between the sections
+var guide_draft: Array = [] ## the curves picked so far for the guide being built (Done keeps it as a guide, Cancel drops it)
+var _guide_return := "" ## the state a guide pick goes back to (pick_sketch, or pick_curves when a loft is being edited); "" = no guide is being picked
 var activating_edit := false ## a Build row's Edit is opening the tool (a tool then keeps its own picking, not the seed picking)
 var _seed_tool := "" ## the tool the seed was picked for
 var _targets_return := "" ## the state Targets goes back to (pick_sketch, or pick_curves for a Sweep)
@@ -879,6 +882,88 @@ func toggle_target_picking() -> void:
 	_update_options()
 
 
+# --- Loft guides ---------------------------------------------------------------------------------
+
+func guide_option_rows() -> Array:
+	## The Loft panel's guide rows: one "Guide N (k curves) x" per finished guide, then Add guide, or Done / Cancel guide while one is being picked.
+	var rows: Array = []
+	for i in guides.size():
+		rows.append({"id": "guide_del_%d" % i, "text": "Remove guide %d (%d curve%s)" % [i + 1, (guides[i] as Array).size(), "" if (guides[i] as Array).size() == 1 else "s"], "disabled": _guide_return != ""})
+	if _guide_return != "":
+		rows.append({"id": "guide_done", "text": "Done: guide %d (%d curve%s)" % [guides.size() + 1, guide_draft.size(), "" if guide_draft.size() == 1 else "s"], "disabled": guide_draft.is_empty()})
+		rows.append({"id": "guide_cancel", "text": "Cancel guide"})
+	else:
+		rows.append({"id": "guide_add", "text": "Add guide"})
+	return rows
+
+
+func is_picking_guide() -> bool:
+	return _guide_return != ""
+
+
+func start_guide_pick() -> void:
+	## Add guide pressed: the laser picks the curves of the guide, each pull adds one to the chain (pull again to take it out); Done keeps it. The picked
+	## sections stay as they are. Needs the finished sketches' curves, so the editor moves to curve picking (and back when the guide is done).
+	if _guide_return != "" or session != null or not state in ["pick_sketch", "pick_curves"]:
+		return
+	_guide_return = state
+	guide_draft = []
+	if state != "pick_curves":
+		set_state("pick_curves") # from pick_sketch: the picked sections stay (the seed is kept for a curve pick)
+		await _load_sketch_picks()
+	table.set_status("Aim at the curves of the guide in order and pull the trigger on each, then press Done. It has to touch every section.")
+	_refresh_lit()
+	_update_options()
+
+
+func _toggle_guide_curve() -> void:
+	for i in guide_draft.size():
+		if guide_draft[i]["key"] == _hover_face["key"]:
+			guide_draft.remove_at(i)
+			_refresh_lit()
+			table.set_status("%d curve(s) in the guide." % guide_draft.size())
+			_update_options()
+			return
+	guide_draft.append(_hover_face.duplicate())
+	_refresh_lit()
+	table.set_status("%d curve(s) in the guide. Press Done when it is complete." % guide_draft.size())
+	_update_options()
+
+
+func finish_guide_pick(keep: bool) -> void:
+	## Done (keep) or Cancel guide: back to what was being picked.
+	if _guide_return == "":
+		return
+	var back := _guide_return
+	_guide_return = ""
+	if keep and not guide_draft.is_empty():
+		guides.append(guide_draft.duplicate())
+	guide_draft = []
+	if back == "pick_sketch":
+		set_state("pick_sketch")
+		_show_sketch_pick()
+		_relight_seed()
+	else:
+		_refresh_lit()
+	_update_options()
+	if keep:
+		schedule_preview()
+
+
+func remove_guide(index: int) -> void:
+	if index < 0 or index >= guides.size() or _guide_return != "":
+		return
+	guides.remove_at(index)
+	_refresh_lit()
+	_update_options()
+	schedule_preview()
+
+
+func guide_refs() -> Array:
+	## The finished guides as the backend's refs: an Array (one per guide) of Arrays of {sketch_id, entity_type, entity_id}.
+	return guides.map(func(g): return (g as Array).map(func(c): return sketch_picks.entity_ref(c) if sketch_picks != null and is_instance_valid(sketch_picks) else {"sketch_id": c["sketch_id"], "entity_type": c["entity_type"], "entity_id": c["entity_id"]}))
+
+
 func _relight_seed() -> void:
 	if rest_sketches == null or not is_instance_valid(rest_sketches):
 		return
@@ -1474,6 +1559,9 @@ func on_tool_changed(tool_id: String) -> void:
 	vertices.clear()
 	plane_base2 = {}
 	_targets_return = ""
+	guides.clear() # a loft's guides belong to the loft being made, not to the next tool
+	guide_draft.clear()
+	_guide_return = ""
 	if (seed_sketch != "" or not seed_sketches.is_empty()) and tool_id != _seed_tool:
 		seed_sketch = "" # the picked sketch was for another tool
 		seed_sketches.clear()
@@ -1757,7 +1845,10 @@ func _toggle_face() -> void:
 
 func _refresh_lit() -> void:
 	## Lights what is picked together (a tool may hold several kinds: bodies and curves, or edges and vertices).
-	highlight.set_set(table.table_copy, bodies + curve_picks + edges + vertices)
+	var guide_lit: Array = guide_draft.duplicate()
+	for guide in guides:
+		guide_lit.append_array(guide)
+	highlight.set_set(table.table_copy, bodies + curve_picks + edges + vertices + guide_lit)
 
 
 func set_pick_mode(mode: String) -> void:
@@ -1797,6 +1888,9 @@ func _load_sketch_picks() -> void:
 
 func _toggle_curve() -> void:
 	if _hover_face.is_empty() or str(_hover_face.get("kind", "")) != "curve":
+		return
+	if _guide_return != "":
+		_toggle_guide_curve()
 		return
 	for i in curve_picks.size():
 		if curve_picks[i]["key"] == _hover_face["key"]:
@@ -2059,7 +2153,7 @@ func begin_tool_edit(feature_id: String) -> void:
 	## as the tool shows them, Apply PATCHes the feature (one step on Undo), changing tool leaves it as it was.
 	var row: Dictionary = table.build.row(feature_id)
 	var feature_tool = FeatureTools.for_type(str(row.get("type", "")))
-	if row.is_empty() or feature_tool == null or not feature_tool.edits_in_tool() or session != null:
+	if row.is_empty() or feature_tool == null or not feature_tool.edits_in_tool() or not feature_tool.edits_row(row) or session != null:
 		if session != null:
 			table.set_status("Finish the open sketch first (Done), then edit a feature.")
 		return
@@ -2108,8 +2202,14 @@ func _apply_edit(feature_tool, req: Dictionary) -> void:
 	clear_picks()
 	table.manager.deactivate()
 	UiFeedback.haptic(table._right, "confirm")
-	table.set_status("Changed." if refreshed else "Changed, but the new shape couldn't be fetched.")
+	table.set_status(_with_warnings("Changed." if refreshed else "Changed, but the new shape couldn't be fetched.", result))
 	sync_undo_redo()
+
+
+static func _with_warnings(text: String, result: Dictionary) -> String:
+	## The backend's non-blocking notes on what it built (a loft guide bent to meet a section) go after the status text.
+	var warnings: Array = result.get("warnings", []) as Array
+	return text if warnings.is_empty() else "%s %s" % [text, " ".join(warnings.map(func(w): return str(w)))]
 
 
 func cancel_preview() -> void:
@@ -2145,7 +2245,7 @@ func apply_feature() -> void:
 		return
 	if preview_feature_id != "" and bool(req["ok"]):
 		var patched: Dictionary = await features.update_feature(part_id, tool, preview_feature_id, feature_tool.patch_body(req))
-		result = {"ok": patched["ok"], "id": preview_feature_id, "error": patched["error"]}
+		result = {"ok": patched["ok"], "id": preview_feature_id, "error": patched["error"], "warnings": patched.get("warnings", [])}
 		if patched["ok"]:
 			preview_feature_id = "" # the feature the preview made is the real one now
 	else:
@@ -2177,7 +2277,7 @@ func apply_feature() -> void:
 	if seeded and session == null and tool in ["extrude", "revolve", "sweep", "loft"]:
 		start_sketch_pick() # a coroutine, not waited for: back to offering the visible sketches for the next one
 	UiFeedback.haptic(table._right, "confirm")
-	table.set_status(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.")
+	table.set_status(_with_warnings(feature_tool.done_text() if refreshed else "Done, but the new shape couldn't be fetched.", result))
 	table.notify_edited(part_id, _edited_nodes)
 	_update_options()
 
@@ -2248,6 +2348,9 @@ func clear_picks() -> void:
 	bodies.clear()
 	curve_picks.clear()
 	seed_sketches.clear()
+	guides.clear()
+	guide_draft.clear()
+	_guide_return = ""
 	if highlight != null and table.table_copy != null:
 		highlight.set_set(table.table_copy, [])
 
