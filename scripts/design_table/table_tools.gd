@@ -21,7 +21,7 @@ const GROUP_CONSTRAIN := Color(0.96, 0.69, 0.25) ## amber: constraints and dimen
 const GROUP_EDIT := Color(0.78, 0.55, 0.98) ## violet: trim, offset (and later convert)
 const EDIT_IDS := ["trim", "offset"]
 const FEATURE_GROUPS := [ ## the Feature tab's groups, each a colour and the tools it holds (in FEATURE_TOOLS order within it)
-	["create", "Create", Color(0.31, 0.77, 1.00), ["extrude", "revolve", "loft", "sweep", "helix", "create_plane"]],
+	["create", "Create", Color(0.31, 0.77, 1.00), ["extrude", "revolve", "loft", "sweep", "helix", "spring", "create_plane"]],
 	["refine", "Refine", Color(0.96, 0.69, 0.25), ["fillet", "chamfer", "shell", "mirror"]],
 	["combine", "Modify", Color(0.78, 0.55, 0.98), ["pattern", "boolean", "merge", "split"]],
 	["gears", "Gears", Color(0.55, 0.85, 0.45), ["gear", "rack", "bevel_gear"]],
@@ -70,6 +70,7 @@ const FEATURE_TOOLS := [
 	["loft", "Loft", "tool_loft"],
 	["sweep", "Sweep", "tool_sweep"],
 	["helix", "Helix", "tool_helix"],
+	["spring", "Spring", "tool_spring"],
 	["pattern", "Pattern", "tool_pattern"],
 	["boolean", "Boolean", "tool_boolean"],
 	["merge", "Merge", "tool_merge"],
@@ -116,7 +117,8 @@ const HINTS := {
 	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",
 	"create_plane": "Aim at a flat face or a plane and pull the trigger, set the offset, then Make plane. The new plane can be picked to sketch on.",
 	"loft": "Pick a line of each of two or more sketches (each on its own plane): the loft goes through those sketches in order. Add guide, then pull the trigger on the curves of an earlier sketch that run through every section, and Done, to shape the surface between them (any number of guides). Set Boss or Cut, then Apply.",
-	"helix": "Set the radius, an optional taper (an end radius or an angle), and the segments (pitch and turns each, e.g. tight end coils), then Apply: a helix curve to sweep along. Pull the trigger on a plane or flat face first to stand it there.",
+	"helix": "Set the diameter, an optional taper (an end diameter or an angle), and the pitch: segments (pitch and turns each, e.g. tight end coils) or Pitch: varies, the pitch at distances along it, changing smoothly between them. Then Apply: a helix curve to sweep along. Pull the trigger on a plane or flat face first to stand it there.",
+	"spring": "Set the mean diameter, the wire, the free length and the active coils, and each end: open, closed, or closed and ground flat. Then Apply: a compression spring, one new body. Pull the trigger on a plane or flat face first to stand it there.",
 	"sweep": "With the profile sketch open, pick the lines of the path in an earlier sketch, in order. Set Boss or Cut, then Apply.",
 	"pattern": "Pick the body to repeat, choose Rectangular or Circular, a direction (X, Y, Z, or a line of an earlier sketch), the count and spacing, then Apply.",
 	"boolean": "Pick the body to change (the target), press Pick tool and pick the body to use on it, choose Subtract or Common, then Apply.",

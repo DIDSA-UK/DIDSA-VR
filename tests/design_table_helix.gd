@@ -27,13 +27,13 @@ func _initialize() -> void:
 	ed.preview_enabled = false
 
 	var create: Array = TableTools.FEATURE_GROUPS.filter(func(g): return g[0] == "create")
-	print("SMOKE the Create group holds Helix after Sweep: ", create[0][3] == ["extrude", "revolve", "loft", "sweep", "helix", "create_plane"])
+	print("SMOKE the Create group holds Helix after Sweep, then Spring: ", create[0][3] == ["extrude", "revolve", "loft", "sweep", "helix", "spring", "create_plane"])
 	print("SMOKE ...Helix has an icon, a hint and a feature tool that makes the 'curve' type: ", TableTools.HINTS.has("helix") and UiIcons.has_icon("tool_helix") and FeatureTools.make_all().has("helix") and FeatureTools.for_type("curve").id == "helix" and BuildTree.label("curve") == "Curve" and UiIcons.has_icon(BuildTree.glyph("curve")))
 
 	table.manager.activate("helix")
 	await rig.frames(3)
 	var ids: Array = table.props.option_ids()
-	print("SMOKE choosing Helix goes to plane picking and lists the diameter, the taper, a segment's pitch and turns, Add segment, the hand, the plane and Apply: ", ed.state == "pick_plane" and ids == ["h_diameter", "h_taper", "h_pitch_0", "h_turns_0", "h_add", "h_hand", "h_plane", "apply"], " ", ids)
+	print("SMOKE choosing Helix goes to plane picking and lists the diameter, the taper, the pitch mode, a segment's pitch and turns, Add segment, the hand, the plane and Apply: ", ed.state == "pick_plane" and ids == ["h_diameter", "h_taper", "h_pitch_mode", "h_pitch_0", "h_turns_0", "h_add", "h_hand", "h_plane", "apply"], " ", ids)
 	var tool = ed.tools["helix"]
 	var req: Dictionary = tool.request(ed)
 	print("SMOKE ...the default request is a constant, right-handed 10 mm diameter (radius 5) helix of one segment (pitch 2, 3 turns) on XY: ", req["ok"] and req["route"] == "curve-features" and req["body"] == {"curve_type": "helix", "axis_ref": {"fixed_plane": "XY"}, "radius": 5.0, "segments": [{"pitch": 2.0, "turns": 3.0}], "right_handed": true}, " ", req["body"])
@@ -94,6 +94,27 @@ func _initialize() -> void:
 	print("SMOKE ...but segments that go different ways are refused with a reason (Apply greyed): ", PartFeatures.helix_request({"radius": 5.0, "taper": "none", "taper_value": 0.0, "segments": [{"pitch": 2.0, "turns": 1.0}, {"pitch": -2.0, "turns": 1.0}], "right_handed": true}, {})["error"].contains("same way"))
 	tool.type_value(ed, "h_pitch_0", "2")
 
+	# a pitch that varies along the length
+	await ed.on_option("h_pitch_mode")
+	req = tool.request(ed)
+	ids = table.props.option_ids()
+	print("SMOKE Pitch: varies starts from the segment's pitch at 0 and at the height (2 at 0 and 4), and sends pitch_points only: ", table.props.option_button("h_pitch_mode").text == "Pitch: varies" and req["ok"] and req["body"]["pitch_points"] == [{"at": 0.0, "pitch": 2.0}, {"at": 4.0, "pitch": 2.0}] and not req["body"].has("segments") and not ids.has("h_pitch_0") and not ids.has("h_at_0") and ids.has("h_at_1") and ids.has("h_ppitch_0"), " ", req["body"], " ", ids)
+	tool.type_value(ed, "h_ppitch_1", "4")
+	await ed.on_option("h_padd")
+	tool.type_value(ed, "h_at_2", "20")
+	req = tool.request(ed)
+	print("SMOKE ...a point is added past the last, its distance and pitch typed (2 at 0, 4 at 4, 4 at 20), height 20: ", req["body"]["pitch_points"] == [{"at": 0.0, "pitch": 2.0}, {"at": 4.0, "pitch": 4.0}, {"at": 20.0, "pitch": 4.0}] and table.props.option_button("apply").text == "Apply (height 20 mm)", " ", req["body"]["pitch_points"])
+	tool.type_value(ed, "h_at_1", "25")
+	print("SMOKE ...a distance past the next point is refused: ", tool.request(ed)["body"]["pitch_points"][1]["at"] == 4.0 and table.status().contains("further along"))
+	tool.type_value(ed, "h_ppitch_1", "-4")
+	print("SMOKE ...a pitch the other way is refused by the request (Apply greyed): ", not tool.request(ed)["ok"] and not tool.can_apply(ed))
+	tool.type_value(ed, "h_ppitch_1", "4")
+	await ed.on_option("h_pdel_1")
+	print("SMOKE ...Remove point leaves the start and the end: ", tool.request(ed)["body"]["pitch_points"].size() == 2)
+	await ed.on_option("h_pitch_mode")
+	req = tool.request(ed)
+	print("SMOKE Pitch back to segments sends the segments again: ", req["body"].has("segments") and not req["body"].has("pitch_points"))
+
 	# a plane
 	ed._hover_plane = "XZ"
 	await ed._pick_plane()
@@ -130,5 +151,14 @@ func _initialize() -> void:
 	print("SMOKE Apply PATCHes the curve-features route (never curve_type), turning the taper off with an explicit end_radius: null: ", patched.size() == 1 and not patched[0][1].has("curve_type") and patched[0][1].has("end_radius") and patched[0][1]["end_radius"] == null and patched[0][1]["segments"][1]["turns"] == 4.0, " ", patched)
 	await ed.undo()
 	patched = rig.calls_to("PATCH /document/parts/PART_BOX/curve-features/" + helix_id)
+	var points_row := row.duplicate(true)
+	points_row["segments"] = []
+	points_row["pitch_points"] = [{"at": 0.0, "pitch": 1.0}, {"at": 10.0, "pitch": 3.0}]
+	points_row["total_turns"] = 5.49
+	fake.feature_rows["PART_BOX"] = [points_row]
+	await table.build.reload()
+	print("SMOKE the Build row of a varying-pitch helix says so, with the backend's turns: ", BuildTree.summary(table.build.features, 0) == "D 20 to 28 mm, 5.49 turns, pitch varies over 2 points, left-handed", " ", BuildTree.summary(table.build.features, 0))
+	fake.feature_rows["PART_BOX"] = [row]
+	await table.build.reload()
 	print("SMOKE Undo puts the old values back (the 14 mm end radius, the old turns): ", patched.size() == 2 and patched.back()[1]["end_radius"] == 14.0 and patched.back()[1]["segments"][1]["turns"] == 3.0 and patched.back()[1]["right_handed"] == false)
 	quit()
