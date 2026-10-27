@@ -164,10 +164,14 @@ static func loft_request(section_sketch_ids: Array, boss: bool, ruled: bool, tar
 
 static func helix_request(h: Dictionary, plane_ref: Dictionary) -> Dictionary:
 	## One helix curve (a curve feature, not a body) standing on `plane_ref` (the backend's axis_ref: the plane's normal is the axis, its origin the start, x axis
-	## the start direction; {} = the XY plane). `h`: {radius, taper ("none" | "end_radius" | "angle"), taper_value, segments (Array of {pitch, turns}), right_handed}.
-	## The backend takes an end radius OR a taper angle (it returns both) and a list of pitch + turns segments, every pitch the same sign.
+	## the start direction; {} = the XY plane). `h`: {radius, taper ("none" | "end_radius" | "angle"), taper_value, segments (Array of {pitch, turns}), right_handed,
+	## and optionally points (Array of {at, pitch}): when it is not empty the pitch is given at distances along the axis instead, varying smoothly between them}.
+	## The backend takes an end radius OR a taper angle (it returns both) and segments OR pitch points, every pitch the same sign.
 	if float(h["radius"]) <= 0.0:
 		return _bad("The radius has to be bigger than zero.")
+	var points: Array = h.get("points", [])
+	if not points.is_empty():
+		return _helix_points_request(h, points, plane_ref)
 	var segments: Array = h["segments"]
 	if segments.is_empty():
 		return _bad("A helix needs at least one segment (pitch and turns).")
@@ -183,6 +187,31 @@ static func helix_request(h: Dictionary, plane_ref: Dictionary) -> Dictionary:
 		out_segments.append({"pitch": float(seg["pitch"]), "turns": float(seg["turns"])})
 	var body := {"curve_type": "helix", "axis_ref": plane_ref if not plane_ref.is_empty() else {"fixed_plane": "XY"}, "radius": float(h["radius"]),
 		"segments": out_segments, "right_handed": bool(h["right_handed"])}
+	return _helix_taper(body, h)
+
+
+static func _helix_points_request(h: Dictionary, points: Array, plane_ref: Dictionary) -> Dictionary:
+	## A variable-pitch helix: the pitch at distances from the start (the first at 0, then further along each time; the last is the height).
+	if points.size() < 2:
+		return _bad("A varying pitch needs at least two points (the start and the end).")
+	if not is_zero_approx(float((points[0] as Dictionary)["at"])):
+		return _bad("The first pitch point is at the start (0 mm).")
+	var out_points: Array = []
+	for i in points.size():
+		var point: Dictionary = points[i]
+		if is_zero_approx(float(point["pitch"])):
+			return _bad("Point %d: the pitch can't be zero." % (i + 1))
+		if (float(point["pitch"]) > 0.0) != (float((points[0] as Dictionary)["pitch"]) > 0.0):
+			return _bad("Every pitch has to go the same way along the axis (the signs differ).")
+		if i > 0 and float(point["at"]) <= float((points[i - 1] as Dictionary)["at"]):
+			return _bad("Point %d has to be further along than point %d." % [i + 1, i])
+		out_points.append({"at": float(point["at"]), "pitch": float(point["pitch"])})
+	var body := {"curve_type": "helix", "axis_ref": plane_ref if not plane_ref.is_empty() else {"fixed_plane": "XY"}, "radius": float(h["radius"]),
+		"pitch_points": out_points, "right_handed": bool(h["right_handed"])}
+	return _helix_taper(body, h)
+
+
+static func _helix_taper(body: Dictionary, h: Dictionary) -> Dictionary:
 	match str(h["taper"]):
 		"end_radius":
 			if float(h["taper_value"]) <= 0.0:
@@ -193,6 +222,31 @@ static func helix_request(h: Dictionary, plane_ref: Dictionary) -> Dictionary:
 				return _bad("The taper angle has to be under 90 degrees.")
 			body["taper_angle_degrees"] = float(h["taper_value"])
 	return _good("curve-features", body)
+
+
+const SPRING_ENDS := ["closed_ground", "closed", "open"] ## the backend's SpringEnd values, in the order the tool cycles them
+
+
+static func spring_request(sp: Dictionary, plane_ref: Dictionary) -> Dictionary:
+	## One compression spring (a Boss: a new body) from its numbers, standing on `plane_ref` (its normal is the axis, its origin the base centre; {} = the XY plane).
+	## `sp`: {mean, wire, length, coils, start_end, finish_end, right_handed}; the mean diameter is through the wire centre. The backend works the pitch out
+	## from the free length and refuses a free length the coils cannot reach (it says the solid length).
+	var mean := float(sp["mean"])
+	var wire := float(sp["wire"])
+	if wire <= 0.0 or float(sp["length"]) <= 0.0:
+		return _bad("The wire diameter and the free length have to be bigger than zero.")
+	if mean <= wire:
+		return _bad("The mean diameter has to be bigger than the wire diameter.")
+	if float(sp["coils"]) < 1.0:
+		return _bad("A spring needs at least 1 active coil.")
+	for key in ["start_end", "finish_end"]:
+		if not SPRING_ENDS.has(str(sp[key])):
+			return _bad("An end is open, closed or closed and ground.")
+	var body := {"mean_diameter": mean, "wire_diameter": wire, "free_length": float(sp["length"]), "active_coils": float(sp["coils"]),
+		"start_end": str(sp["start_end"]), "finish_end": str(sp["finish_end"]), "right_handed": bool(sp["right_handed"])}
+	if not plane_ref.is_empty():
+		body["plane_ref"] = plane_ref
+	return _good("spring-features", body)
 
 
 static func sweep_request(sketch_feature_id: String, path_refs: Array, boss: bool, target_body_ids: Array) -> Dictionary:
