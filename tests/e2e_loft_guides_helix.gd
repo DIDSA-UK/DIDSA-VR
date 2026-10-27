@@ -3,7 +3,7 @@ extends SceneTree
 ## Loft: a 40 x 40 square on XY (centred) and a 20 x 20 square on a plane 30 mm up, with a two-line guide drawn on the XZ plane that runs through the middle of the +X edge of both
 ## squares and bulges out to x = 28 at mid-height. The laser's pulls (sections, Add guide, the two lines, Done) and Apply make a solid that is 40 mm wide without the guide and reaches
 ## x = 28 with it; the Build row says "1 guide"; Edit > remove the guide > Apply takes the bulge away again; a guide that misses by far is refused in the backend's words.
-## Helix: the Helix tool with a taper to an end radius and three segments makes a curve feature whose row carries the end radius, the taper angle, the segments and the height.
+## Helix: the Helix tool with a taper to an end diameter and three segments makes a curve feature whose row carries the end radius, the taper angle, the segments and the height.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_loft_guides_helix.gd  (needs secrets.cfg and a running backend)
 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
@@ -165,9 +165,9 @@ func _initialize() -> void:
 	table.manager.activate("helix")
 	await wait_for(func() -> bool: return ed.state == "pick_plane")
 	var tool = ed.tools["helix"]
-	tool.type_value(ed, "h_radius", "10")
-	await ed.on_option("h_taper") # end radius
-	tool.type_value(ed, "h_taper_value", "14")
+	tool.type_value(ed, "h_diameter", "20")
+	await ed.on_option("h_taper") # end diameter
+	tool.type_value(ed, "h_taper_value", "28")
 	await ed.on_option("h_add")
 	await ed.on_option("h_add")
 	tool.type_value(ed, "h_pitch_0", "2")
@@ -183,11 +183,11 @@ func _initialize() -> void:
 	var ok_row: bool = not row.is_empty() and str(row.get("curve_type", "")) == "helix" and absf(float(row.get("end_radius", 0.0)) - 14.0) < 1e-9 and (row.get("segments", []) as Array).size() == 3 and absf(float(row.get("total_height", 0.0)) - 26.0) < 1e-9 and row.get("right_handed") == false
 	print("SMOKE Apply makes a left-handed helix curve: R 10 to 14, three segments, 26 mm tall: ", ok_row, " ", row.get("segments"), " ", row.get("total_height"))
 	print("SMOKE ...the backend returns the taper as an angle too (atan(4 / 26) = 8.75 degrees) and a length: ", absf(float(row.get("taper_angle_degrees", 0.0)) - rad_to_deg(atan(4.0 / 26.0))) < 1e-6 and float(row.get("length", 0.0)) > 500.0, " ", row.get("taper_angle_degrees"), " ", row.get("length"))
-	print("SMOKE ...its Build row reads the radii, turns, segments and hand: ", BuildTree.summary(curves, 0) == "R 10 to 14 mm, 7 turns, 3 segments, left-handed", " ", BuildTree.summary(curves, 0))
+	print("SMOKE ...its Build row reads the diameters, turns, segments and hand: ", BuildTree.summary(curves, 0) == "D 20 to 28 mm, 7 turns, 3 segments, left-handed", " ", BuildTree.summary(curves, 0))
 	var helix_id: String = str(row.get("id", ""))
 	await table.build.reload()
 	await ed.begin_tool_edit(helix_id)
-	await ed.on_option("h_taper") # end radius -> angle
+	await ed.on_option("h_taper") # end diameter -> angle
 	tool.type_value(ed, "h_taper_value", "-5")
 	await ed.apply_feature()
 	curves = ((await ed.features.list_features(ed.part_id))["features"] as Array).filter(func(f): return str(f.get("type", "")) == "curve")
