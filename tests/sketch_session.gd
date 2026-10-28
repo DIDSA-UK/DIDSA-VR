@@ -296,6 +296,7 @@ func _initialize() -> void:
 
 	# --- the dimensions that exist, as a drawing draws them (dimension_items) and how their numbers are written
 	print("SMOKE a dimension's number is written like a drawing: 40, 12.5, 0.13, no trailing zeros; a radius R25, a diameter with the diameter sign, an angle in degrees: ", Session.format_value(40.0) == "40" and Session.format_value(12.5) == "12.5" and Session.format_value(0.126) == "0.13" and Session.format_value(3.0) == "3" and s.dimension_text("radius", 25.0) == "R25" and s.dimension_text("diameter", 50.0) == "\u230050" and s.dimension_text("angle", 45.0) == "45\u00b0")
+	print("SMOKE a signed (other side) dimension reads as its magnitude, no minus sign: ", s.dimension_text("linear", -12.5) == "12.5" and s.dimension_text("linear", -40.0) == "40" and s.dimension_text("radius", -25.0) == "R25" and s.dimension_text("diameter", -50.0) == "\u230050" and s.dimension_text("angle", -45.0) == "45\u00b0" and s.dimension_text("linear", 12.5) == "12.5")
 	await fresh("line")
 	await s.tap({"uv": Vector2(0, 0)})
 	await s.tap({"uv": Vector2(40, 0)})
