@@ -1931,6 +1931,8 @@ static func format_value(value: float) -> String:
 
 
 func dimension_text(kind: String, value: float) -> String:
+	## The label is the magnitude: a line-distance or point-line dimension is signed (the side of the line), and a minus on a label means nothing.
+	value = absf(value)
 	match kind:
 		"radius":
 			return "R" + format_value(value)
