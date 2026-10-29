@@ -37,6 +37,9 @@ class SnapModel extends RefCounted:
 	func is_reference(id: String) -> bool:
 		return references.has(id)
 
+	func merge_offered() -> bool:
+		return false ## (the menu asks the session whether Merge suits the selection; this stand-in has no entities to say)
+
 
 func _arrow_ok(view) -> bool:
 	var verts := PackedVector3Array()
