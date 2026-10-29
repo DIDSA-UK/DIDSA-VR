@@ -26,6 +26,7 @@ Start with [`status.md`](status.md) (what is built, what is verified, what is op
 | [`servers.md`](servers.md) | Servers: `servers.cfg`, the Servers page, switching, address rules, pre-loading with `adb push`, scanning a QR code. |
 | [`limit-mates-scope.md`](limit-mates-scope.md) | Limit mates (gears-and-motion M9): the scope note shown before building, and what the code does differently (as built). |
 | [`gears-and-motion-plan.md`](gears-and-motion-plan.md) | Next work (2026-10-22): gear tools on the design table, coupler mates (gear, rack and pinion, screw) in both apps and the backend, the Drive tool; milestones M1-M9 with test gates, test tooling and the baseline. |
+| DIDSA-CAD [`docs/point-merge-and-vr-sketcher-plan.md`](https://github.com/DIDSA-UK/DIDSA-CAD/blob/main/docs/point-merge-and-vr-sketcher-plan.md) | Plan (2026-10-29, not built): point Merge (backend and flat app), and the design-table sketcher catching up: origin welding and unheld snaps fixed, the line end resolved where the ghost shows it, inferred relationships, alignment guides, Merge in Select (steps V1-V5). Lives in DIDSA-CAD because the backend half is there. |
 | [`landing-scope.md`](landing-scope.md) | The landing (first screen): launcher, QR server pairing, tips, 3D logo, demo models (scope, 2026-10-20; L1 to L3, the offline demo, built; servers and QR not). |
 
 ## Gaps and live trackers
