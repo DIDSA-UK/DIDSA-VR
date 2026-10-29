@@ -273,6 +273,36 @@ func _initialize() -> void:
 	woken.touch("b", 3500)
 	print("SMOKE ...passing over one again keeps it, as the newest: ", woken.active(3600) == ["c", "d", "b"])
 	print("SMOKE ...each sleeps again 5 seconds after it was last passed over: ", woken.active(8100) == ["b"] and woken.active(8600).is_empty())
+	# --- V4: alignment guides (a snapping aid, no constraint)
+	var grid := SnapModel.new()
+	grid.points = {"o": Vector2.ZERO, "a": Vector2(50, 0), "b": Vector2(0, 40), "north": Vector2(80, 40)}
+	grid.origin_id = "o"
+	grid.circles = {"K": {"c": "a", "p": "b", "k": "", "cards": ["north"]}}
+	var align_opts := {"align": true}
+	var aligned_x := Snap.resolve(Vector2(51.2, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE a placed point within 6 mm (half the point radius) of another point's x is pulled to that x, with one guide from that point: ", aligned_x["uv"] == Vector2(50, 100) and aligned_x["id"] == "" and (aligned_x["guides"] as Array).size() == 1 and aligned_x["guides"][0]["from"] == Vector2(50, 0) and aligned_x["guides"][0]["to"] == Vector2(50, 100))
+	var both := Snap.resolve(Vector2(51.0, 41.0), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE ...both axes at once from two different points, two guides: ", both["uv"] == Vector2(50, 40) and (both["guides"] as Array).size() == 2)
+	var too_far_x := Snap.resolve(Vector2(52.0, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE ...but not beyond that reach: ", not too_far_x.has("guides") and too_far_x["uv"] == Vector2(52.0, 100))
+	var from_cardinal := Snap.resolve(Vector2(80.8, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE a circle's quadrant point is not a reference: ", not from_cardinal.has("guides"))
+	var from_origin := Snap.resolve(Vector2(0.9, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE the origin is: ", from_origin["uv"] == Vector2(0, 100) and (from_origin["guides"] as Array).size() == 1)
+	print("SMOKE an existing point wins over any alignment, and a tap that does not place (nothing asked) or Snap / Infer off is untouched: ", Snap.resolve(Vector2(51.2, 1.0), grid, 3.0, true, [], null, null, align_opts)["id"] == "a" and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, true).has("guides") and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, false, [], null, null, align_opts).has("guides") and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, true, [], null, null, {"align": true, "infer": false}).has("guides"))
+	var line_grid := SnapModel.new()
+	line_grid.points = {"S": Vector2(50, 0), "T": Vector2(60, 40), "a": Vector2(-40, -10), "U": Vector2(58, 90)}
+	line_grid.lines = {"prev": {"a": "a", "b": "S", "construction": false}}
+	var own_start := Snap.resolve(Vector2(51.0, 5.0), line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE a line's own start is not a reference for its end: ", not own_start.has("guides"))
+	var horizontal_aligned := Snap.resolve(Vector2(60.8, 0.6), line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE a line's end: its own horizontal fixes y, so only x aligns, and it stays horizontal: ", horizontal_aligned["infer"].get("kind", "") == "horizontal" and horizontal_aligned["uv"] == Vector2(60, 0) and (horizontal_aligned["guides"] as Array).size() == 1 and horizontal_aligned["guides"][0]["from"] == Vector2(60, 40))
+	var col_aim := Vector2(50, 0) + Vector2.from_angle(deg_to_rad(8.0)) * 60.0
+	var col_free := Snap.resolve(col_aim, line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	line_grid.points["V"] = Vector2(col_aim.x + 0.5, 150)
+	var col_aligned := Snap.resolve(col_aim, line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE alignment ranks above collinear / parallel / perpendicular: with a point to line up with they are dropped: ", col_free["infer"].get("kind", "") == "collinear" and col_aligned["infer"].is_empty() and (col_aligned["guides"] as Array).size() >= 1 and absf((col_aligned["uv"] as Vector2).x - (col_aim.x + 0.5)) < 0.001)
+	print("SMOKE the taps that place a point align, the ones that only measure do not (the flat app's table): ", Snap.aligns_tap("point", "centre", "corners", 0) and Snap.aligns_tap("rectangle", "centre", "corners", 1) and Snap.aligns_tap("rectangle", "centre", "three", 1) and not Snap.aligns_tap("rectangle", "centre", "three", 2) and Snap.aligns_tap("circle", "centre", "corners", 0) and not Snap.aligns_tap("circle", "centre", "corners", 1) and Snap.aligns_tap("circle", "three", "corners", 2) and Snap.aligns_tap("arc", "centre", "corners", 1) and not Snap.aligns_tap("arc", "centre", "corners", 2) and not Snap.aligns_tap("slot", "centre", "corners", 2) and Snap.aligns_tap("slot", "centre", "corners", 1) and Snap.aligns_tap("polygon", "centre", "corners", 1) and not Snap.aligns_tap("ellipse", "centre", "corners", 2) and Snap.aligns_tap("spline", "centre", "corners", 7) and not Snap.aligns_tap("text", "centre", "corners", 0) and Snap.aligns_tap("line", "centre", "corners", 0) and not Snap.aligns_tap("line", "centre", "corners", 1))
 	# --- handling the part on the table (table_pose.gd)
 	var id := Basis.IDENTITY
 	var spread := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.15, 0, 0), Vector3(0.15, 0, 0), Vector3(0, 0.2, 0), id, 1.0)

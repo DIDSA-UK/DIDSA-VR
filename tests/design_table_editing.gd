@@ -200,6 +200,22 @@ func _initialize() -> void:
 	table.manager.deactivate()
 	ed.session.finish_chain()
 
+	# --- alignment guides on the sheet
+	table.manager.activate("point")
+	var align_radius: float = ed.SNAP_RADIUS / ed.view.canvas_scale
+	await aim_uv(centre_uv + Vector2(-10 + align_radius * 0.3, 40))
+	var guided: Array = ed._snap.get("guides", [])
+	print("SMOKE a Point tool aimed a little off the x of a corner is pulled to it, and a dashed guide is drawn on the sheet: ", guided.size() == 1 and absf((ed._snap["uv"] as Vector2).x - (centre_uv.x - 10)) < 0.001 and ed.view._aids.mesh != null)
+	table.ui.infer_button().button_pressed = false
+	await frames(2)
+	await aim_uv(centre_uv + Vector2(-10 + align_radius * 0.3, 40))
+	print("SMOKE ...Infer off: no guide, no pull: ", ed._snap.get("guides", []).is_empty() and ed.view._aids.mesh == null)
+	table.ui.infer_button().button_pressed = true
+	await frames(2)
+	table.manager.deactivate()
+	await frames(2)
+	print("SMOKE ...and the guide goes when the tool does: ", ed.view._aids.mesh == null)
+
 	# --- Select: pick things with the laser, a menu of what applies, and the grips with a sketch open
 	table.manager.activate("select")
 	await aim_uv(centre_uv + Vector2(1, -10))

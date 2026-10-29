@@ -619,6 +619,12 @@ func _initialize() -> void:
 	var second_circle: String = s.circles.keys().back()
 	print("SMOKE a circle whose centre was inferred concentric is held concentric with that circle after it is made: ", r["done"] and conc_cons.size() == 1 and conc_cons[0][1] == {"type": "concentric", "entity1_id": first_circle, "entity2_id": second_circle})
 
+	# --- V4: an alignment is a snapping aid and nothing more
+	await fresh("point")
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(50, 100)}) # (the position the resolver pulled the aim to, in line with another point)
+	print("SMOKE a point placed in line with another makes a point and no constraint: ", r["done"] and fake.count("/points") == 1 and fake.count("/constraints") == 0)
+
 	# --- undo
 	await fresh("rectangle")
 	await s.tap({"uv": Vector2(0, 0)})

@@ -429,8 +429,10 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 			line_start = session.points.get(first_id, first.get("uv"))
 			snap_opts["start_id"] = first_id
 			snap_opts["chain_first"] = session.chain_first if session.chain_first != first_id else ""
-		elif (tool == "circle" and session.circle_method == "centre" or tool == "arc") and session.pending.is_empty():
-			snap_opts["concentric"] = true # a new centre near another circle's or arc's centre is put on it and held concentric
+		else:
+			snap_opts["align"] = SnapResolver.aligns_tap(tool, session.circle_method, session.rect_method, session.pending.size())
+			if (tool == "circle" and session.circle_method == "centre" or tool == "arc") and session.pending.is_empty():
+				snap_opts["concentric"] = true # a new centre near another circle's or arc's centre is put on it and held concentric
 		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs, snap_opts)
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		view.set_reference_hover(_snap.get("ref", {}))

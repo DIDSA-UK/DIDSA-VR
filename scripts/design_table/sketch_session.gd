@@ -243,11 +243,11 @@ func _ingest_entities(json: Dictionary) -> void:
 			"line":
 				lines[id] = {"a": str(e["start_point_id"]), "b": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
 			"circle":
-				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
+				circles[id] = {"c": str(e["center_point_id"]), "p": str(e["radius_point_id"]), "k": str(e.get("radius_constraint_id", "")), "cards": _strings(e.get("cardinal_point_ids", [])), "construction": bool(e.get("construction", false))}
 			"arc":
 				arcs[id] = {"c": str(e["center_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "k": str(e.get("radius_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"ellipse":
-				ellipses[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "km": str(e.get("major_constraint_id", "")), "kn": str(e.get("minor_constraint_id", "")), "construction": bool(e.get("construction", false))}
+				ellipses[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "man": str(e.get("major_point_neg_id", "")), "mnn": str(e.get("minor_point_neg_id", "")), "km": str(e.get("major_constraint_id", "")), "kn": str(e.get("minor_constraint_id", "")), "construction": bool(e.get("construction", false))}
 			"ellipse_arc":
 				ellipse_arcs[id] = {"c": str(e["center_point_id"]), "ma": str(e["major_point_id"]), "mi": str(e["minor_point_id"]), "s": str(e["start_point_id"]), "e": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
 			"spline":

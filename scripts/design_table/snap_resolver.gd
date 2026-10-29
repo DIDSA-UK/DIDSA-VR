@@ -30,11 +30,16 @@ extends RefCounted
 ## the start, then parallel / perpendicular to a WOKEN line (`opts.woken`: ids the laser has recently passed over) or to the segment the run is
 ## continuing. Angles: horizontal / vertical / parallel / perpendicular / collinear 4 degrees, tangent 6; reach for tangent / on-curve / concentric is
 ## CURVE_REACH times the point radius (15 mm world against 12).
+## ALIGNMENT GUIDES (no constraint, a snapping aid only): a free position within ALIGN_REACH of the x or the y of another point is pulled to it and the pick carries
+## `guides` ([{from, to}], at most two, drawn dashed on the sheet). Sketch points and the origin are references; not a circle's or ellipse's quadrant points, the
+## part's reference helpers or the line's own start. They apply to a line's end (after its own axis, which fixes one coordinate) and to the taps that place a point
+## (`opts.align`, see aligns_tap), never to a tap that only measures. Infer off turns them off too.
 ## The snap toggle on the console turns all of this off (`enabled` false): the position comes back untouched.
 
 const AXIS_DEGREES := 4.0
 const PARALLEL_DEGREES := 4.0 ## parallel, perpendicular and collinear: as the flat app (parallelPerpendicularSnapAngleDegrees, collinearSnapAngleDegrees)
 const TANGENT_DEGREES := 6.0
+const ALIGN_REACH := 0.5 ## alignment guides reach this multiple of the point radius (the flat app's 7 px against 14: 6 mm world against 12)
 const CURVE_REACH := 1.25 ## tangent, point-on-curve and concentric reach, as a multiple of the point snap radius (the flat app's 18 px against 14: 15 mm against 12)
 
 const EDGE_POINT_REACH := 0.6 ## along-an-edge snaps only within this fraction of the snap radius, like the sketch's own curves: a stray aim near an edge should not grab it
@@ -210,6 +215,11 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		var concentric := _concentric_candidate(uv, session, radius, curve_reach)
 		if not concentric.is_empty():
 			return concentric
+	if line_start == null and infer_on and bool(opts.get("align", false)):
+		var aligned := _align(uv, session, radius * ALIGN_REACH, [], true, true)
+		if not (aligned["guides"] as Array).is_empty():
+			out["uv"] = aligned["uv"]
+			out["guides"] = aligned["guides"]
 	return out
 
 
@@ -229,9 +239,21 @@ static func _end_inference(uv: Vector2, session, radius: float, start: Vector2, 
 			found = _collinear_candidate(uv, session, start, start_id)
 			if found.is_empty():
 				found = _parallel_candidate(uv, session, start, start_id, opts.get("woken", []))
+		# Lined up with other points (a guide), ranking above collinear / parallel / perpendicular and below the axis: a line's own horizontal or vertical
+		# already fixes one coordinate, so only the other can align; the others are dropped when an alignment applies.
+		var found_kind: String = found.get("kind", "")
+		var aligned := _align(found.get("pos", uv), session, radius * ALIGN_REACH, [start_id], found_kind != "vertical", found_kind != "horizontal")
+		var guides: Array = aligned["guides"]
+		if not guides.is_empty():
+			if found_kind != "horizontal" and found_kind != "vertical":
+				found = {}
+			else:
+				found["pos"] = aligned["uv"]
+			out = {"uv": aligned["uv"], "id": "", "kind": NAMES[Kind.FREE], "infer": {}, "guides": guides}
 		if not found.is_empty():
 			var kind: String = found["kind"]
-			out = {"uv": found["pos"], "id": "", "kind": NAMES[Kind.FREE], "infer": {"kind": kind}}
+			out["uv"] = found["pos"]
+			out["infer"] = {"kind": kind}
 			if found.has("target"):
 				out["infer"]["target"] = found["target"]
 				out["kind"] = kind
@@ -247,6 +269,68 @@ static func _end_inference(uv: Vector2, session, radius: float, start: Vector2, 
 			var landed_kind := Kind.ORIGIN if session.is_origin(landed) else Kind.POINT
 			return {"uv": session.points[landed], "id": landed, "kind": NAMES[landed_kind], "infer": {}}
 	return out
+
+
+static func aligns_tap(tool_id: String, circle_method: String, rect_method: String, tap_index: int) -> bool:
+	## Whether the tap about to be made (`tap_index` taps are already placed) places a point that may be lined up with other points. Taps that only measure never
+	## do (a radius, a sweep end, a width, the minor radius). The flat app's table; a line's second end is aligned by its own inference, not by this.
+	match tool_id:
+		"point", "polygon", "spline":
+			return true
+		"line":
+			return tap_index == 0 # the first point (the middle, for the midpoint method)
+		"rectangle":
+			return rect_method != "three" or tap_index < 2
+		"circle":
+			return circle_method == "three" or tap_index == 0
+		"arc", "slot", "ellipse", "ellipse_arc":
+			return tap_index < 2
+	return false
+
+
+static func _alignment_excluded(session) -> Dictionary:
+	## Points that never act as an alignment reference: a circle's four quadrant points and an ellipse's four axis ends would only add noise.
+	var skip := {}
+	for id in session.circles:
+		for pid in (session.circles[id] as Dictionary).get("cards", []):
+			skip[str(pid)] = true
+	var ellipse_map: Variant = session.get("ellipses")
+	if ellipse_map is Dictionary:
+		for id in ellipse_map:
+			var e: Dictionary = ellipse_map[id]
+			for key in ["ma", "mi", "man", "mnn"]:
+				if str(e.get(key, "")) != "":
+					skip[str(e[key])] = true
+	return skip
+
+
+static func _align(p: Vector2, session, reach: float, exclude: Array, align_x: bool, align_y: bool) -> Dictionary:
+	## {uv, guides}: `p` lined up vertically with the point whose x is within `reach` of its x (the nearest along y wins), and horizontally likewise; each
+	## coordinate on its own, so two guides can apply at once from two points. `guides` are [{from (the point aligned with), to (the new position)}].
+	var skip := _alignment_excluded(session)
+	var vertical := ""
+	var horizontal := ""
+	for id in session.points:
+		if exclude.has(id) or skip.has(id) or session.is_reference(id):
+			continue
+		var q: Vector2 = session.points[id]
+		if align_x and absf(q.x - p.x) <= reach:
+			if vertical == "" or absf(q.y - p.y) < absf((session.points[vertical] as Vector2).y - p.y):
+				vertical = id
+		if align_y and absf(q.y - p.y) <= reach:
+			if horizontal == "" or absf(q.x - p.x) < absf((session.points[horizontal] as Vector2).x - p.x):
+				horizontal = id
+	var at := p
+	if vertical != "":
+		at.x = (session.points[vertical] as Vector2).x
+	if horizontal != "":
+		at.y = (session.points[horizontal] as Vector2).y
+	var guides: Array = []
+	if vertical != "":
+		guides.append({"from": session.points[vertical], "to": at})
+	if horizontal != "":
+		guides.append({"from": session.points[horizontal], "to": at})
+	return {"uv": at, "guides": guides}
 
 
 static func _undirected_delta(a: float, b: float) -> float:
