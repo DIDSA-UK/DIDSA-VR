@@ -726,6 +726,64 @@ func _finish(label: String, calls: Array, with_entities: bool = true) -> Diction
 	return {"ok": true, "message": ""}
 
 
+static func infer_of(pick: Dictionary) -> Dictionary:
+	## The relationship a pick was inferred to have: {kind, target?} or {}. (A bare "horizontal" / "vertical" string, the older shape, still reads.)
+	var infer: Variant = pick.get("infer", {})
+	if infer is String:
+		return {"kind": infer} if infer != "" else {}
+	return infer if infer is Dictionary else {}
+
+
+static func inferred_body(infer: Dictionary, line_id: String, end_id: String) -> Dictionary:
+	## The request body of the constraint a line's inferred relationship makes (the new line `line_id`, ending on `end_id`), or {} for none.
+	var kind := str(infer.get("kind", ""))
+	var target: Dictionary = infer.get("target", {})
+	var target_id := str(target.get("id", ""))
+	match kind:
+		"horizontal", "vertical":
+			return {"type": kind, "line_id": line_id}
+		"parallel", "perpendicular", "collinear":
+			return {"type": kind, "line1_id": line_id, "line2_id": target_id} if target_id != "" else {}
+		"tangent":
+			return {"type": "tangent", "circle_or_arc_id": target_id, "line_id": line_id} if target_id != "" else {}
+		"on_curve":
+			if target_id == "":
+				return {}
+			if str(target.get("kind", "")) == "line":
+				return {"type": "point_on_line", "point_id": end_id, "line_id": target_id}
+			return {"type": "point_on_circle", "point_id": end_id, "circle_or_arc_id": target_id}
+	return {}
+
+
+static func concentric_body(infer: Dictionary, entity_id: String) -> Dictionary:
+	## A new circle or arc whose centre was put on another's: held concentric with it.
+	if str(infer.get("kind", "")) != "concentric" or str((infer.get("target", {}) as Dictionary).get("id", "")) == "":
+		return {}
+	return {"type": "concentric", "entity1_id": str(infer["target"]["id"]), "entity2_id": entity_id}
+
+
+func _finish_inferred(label: String, calls: Array, body: Dictionary, infer: Dictionary) -> Dictionary:
+	## `_finish`, with the one constraint the shape was inferred to have. If the solver will not take it with the rest of the sketch only IT is taken back
+	## out: the shape stays (a conflicting guess must not cost the line), and the status line says so.
+	if body.is_empty():
+		return await _finish(label, calls)
+	var made := await _post(SKETCH + sketch_id + "/constraints", body)
+	var undo_call: Array = []
+	if made["ok"]:
+		undo_call = [HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(made["json"]["id"])]
+		calls.push_front(undo_call)
+	var done := await _finish(label, calls)
+	var what := str(infer.get("kind", "")).replace("_", " ")
+	if not made["ok"]:
+		status.emit("Couldn't keep it %s: %s" % [what, str(made["error"])])
+	elif not converged:
+		await api.call(int(undo_call[0]), str(undo_call[1]), null)
+		(_undo.back()["calls"] as Array).erase(undo_call)
+		await refresh(false)
+		status.emit("Couldn't keep it %s: it conflicted." % what)
+	return done
+
+
 func _make_point(taps: Array) -> Dictionary:
 	var created: Array = []
 	var id := await _point(taps[0], created)
@@ -751,11 +809,7 @@ func _make_line(taps: Array) -> Dictionary:
 		return {"ok": false, "message": "Couldn't make the line: %s" % str(r["error"])}
 	var line_id := str(r["json"]["id"])
 	var calls: Array = [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/lines/" + line_id]]
-	var infer := str(taps[1].get("infer", ""))
-	if infer == "horizontal" or infer == "vertical":
-		var c := await _post(SKETCH + sketch_id + "/constraints", {"type": infer, "line_id": line_id})
-		if c["ok"]:
-			calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(c["json"]["id"])])
+	var infer := infer_of(taps[1])
 	if chain_first == "":
 		chain_first = a # the first line of a run: the run closes where it started
 	var closed := b == chain_first
@@ -764,7 +818,7 @@ func _make_line(taps: Array) -> Dictionary:
 		chain_first = ""
 	else:
 		pending = [{"uv": taps[1]["uv"], "id": b}] # the end is the next line's start
-	var done := await _finish("line", calls)
+	var done := await _finish_inferred("line", calls, inferred_body(infer, line_id, b), infer)
 	if closed:
 		status.emit("Closed.")
 	return done
@@ -792,12 +846,8 @@ func _make_line_from_middle(taps: Array) -> Dictionary:
 	var c := await _post(SKETCH + sketch_id + "/constraints", {"type": "at_midpoint", "point_id": mid, "line_id": line_id})
 	if c["ok"]:
 		calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(c["json"]["id"])])
-	var infer := str(taps[1].get("infer", ""))
-	if infer == "horizontal" or infer == "vertical": # the free end is decided the same way as a line's second end
-		var axis := await _post(SKETCH + sketch_id + "/constraints", {"type": infer, "line_id": line_id})
-		if axis["ok"]:
-			calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(axis["json"]["id"])])
-	return await _finish("line", calls)
+	var infer := infer_of(taps[1]) # the free end is decided the same way as a line's second end
+	return await _finish_inferred("line", calls, inferred_body(infer, line_id, b), infer)
 
 
 func _make_rectangle(taps: Array) -> Dictionary:
@@ -904,7 +954,8 @@ func _make_circle(taps: Array) -> Dictionary:
 	if not r["ok"]:
 		await _cleanup(created)
 		return {"ok": false, "message": "Couldn't make the circle: %s" % str(r["error"])}
-	return await _finish("circle", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/circles/" + str(r["json"]["id"])]])
+	var concentric := infer_of(taps[0])
+	return await _finish_inferred("circle", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/circles/" + str(r["json"]["id"])]], concentric_body(concentric, str(r["json"]["id"])), concentric)
 
 
 func _make_arc(taps: Array) -> Dictionary:
@@ -930,7 +981,8 @@ func _make_arc(taps: Array) -> Dictionary:
 	if not r["ok"]:
 		await _cleanup(created)
 		return {"ok": false, "message": "Couldn't make the arc: %s" % str(r["error"])}
-	return await _finish("arc", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/arcs/" + str(r["json"]["id"])]])
+	var concentric := infer_of(taps[0])
+	return await _finish_inferred("arc", [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/arcs/" + str(r["json"]["id"])]], concentric_body(concentric, str(r["json"]["id"])), concentric)
 
 
 func _make_slot(taps: Array) -> Dictionary:

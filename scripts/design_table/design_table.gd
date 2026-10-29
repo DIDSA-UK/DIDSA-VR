@@ -101,6 +101,7 @@ var ui: Control ## table_ui.gd
 var surface ## LaserSurface for the tool deck
 var handle ## PanelHandle on the slab's front edge
 var snap_enabled := true
+var infer_enabled := true ## the Infer switch beside Snap: on, the sketcher adds the relationships it infers (axis, parallel, tangent...); sticky for the table session
 var api ## cad_api.gd: the serial line to the backend
 var editor ## table_editor.gd: the editing session on the seated part
 var tree ## table_tree_window.gd: the assembly tree docked at the slab's left
@@ -435,6 +436,10 @@ func _build_deck() -> void:
 		UiFeedback.play(event, self))
 	ui.activity.connect(poke_render)
 	ui.snap_toggled.connect(func(on: bool) -> void: snap_enabled = on)
+	ui.infer_toggled.connect(func(on: bool) -> void:
+		infer_enabled = on
+		if editor != null:
+			editor.refresh_sketch_hint())
 	manager.active_changed.connect(func(_id: String) -> void: poke_render())
 
 

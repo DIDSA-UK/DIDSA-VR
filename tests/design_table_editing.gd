@@ -177,6 +177,29 @@ func _initialize() -> void:
 	print("SMOKE with Snap off the cursor is free: ", ed._snap["kind"] == "free" and ed._snap["id"] == "")
 	table.snap_enabled = true
 
+	# --- Infer: the switch beside Snap
+	print("SMOKE the deck has an Infer switch beside Snap, on by default: ", table.ui.infer_button() != null and table.ui.infer_on() and table.infer_enabled and table.ui.infer_button().text == "Infer")
+	table.manager.activate("line")
+	await aim_uv(centre_uv + Vector2(-40, 25))
+	await pull()
+	await aim_uv(centre_uv + Vector2(30, 26.5))
+	print("SMOKE with Infer on, a second end near horizontal is pulled onto the axis and carries horizontal: ", ed._snap["infer"].get("kind", "") == "horizontal")
+	table.ui.infer_button().button_pressed = false # (the switch pressed: it emits infer_toggled)
+	await frames(2)
+	print("SMOKE switching Infer off reaches the table, and the status line says nothing is added by itself: ", not table.infer_enabled and table.status().contains("Infer off: nothing is added automatically"))
+	await aim_uv(centre_uv + Vector2(31, 26.5))
+	print("SMOKE ...and the same aim is then a plain free position: no axis snap, nothing inferred: ", ed._snap["infer"].is_empty() and (ed._snap["uv"] as Vector2).distance_to(centre_uv + Vector2(31, 26.5)) < 0.5)
+	table.manager.activate("rectangle")
+	await frames(2)
+	table.manager.activate("line")
+	await frames(2)
+	print("SMOKE ...it stays off across tools (a switch, not a hold): ", not table.infer_enabled and not table.ui.infer_on())
+	table.ui.infer_button().button_pressed = true
+	await frames(2)
+	print("SMOKE ...and on again when switched back: ", table.infer_enabled and not table.status().contains("Infer off"))
+	table.manager.deactivate()
+	ed.session.finish_chain()
+
 	# --- Select: pick things with the laser, a menu of what applies, and the grips with a sketch open
 	table.manager.activate("select")
 	await aim_uv(centre_uv + Vector2(1, -10))
