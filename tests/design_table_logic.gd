@@ -169,6 +169,28 @@ func _initialize() -> void:
 	stacked.origin_id = "o"
 	var stacked_pick := Snap.resolve(Vector2(0.5, 0.5), stacked, 3.0, true)
 	print("SMOKE a point lying exactly on the origin (a shape started there) is taken rather than the origin itself: ", stacked_pick["id"] == "q" and stacked_pick["kind"] == "point")
+	# --- V2: the end of a line is decided where the ghost draws it
+	var loop := SnapModel.new()
+	loop.points = {"A": Vector2(0, 0), "S": Vector2(100, 0), "P": Vector2(300, 0), "X": Vector2(1, 0)}
+	var closes := Snap.resolve(Vector2(0, -6), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE a loop's last side: the raw aim is 6 under the first point (outside the 3 radius) but the axis snap puts the end on it, so it closes onto that point and the side is horizontal: ", closes["id"] == "A" and closes["uv"] == Vector2(0, 0) and closes["infer"] == "horizontal" and closes.get("closing", false))
+	var off_axis := Snap.resolve(Vector2(0, -20), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE ...outside the radius and off the axis it is a new point at the aim: ", off_axis["id"] == "" and off_axis["uv"] == Vector2(0, -20) and off_axis["infer"] == "")
+	var snapped_new := Snap.resolve(Vector2(60, 2.0), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE ...a free end within 4 degrees of the axis is a new point at the SNAPPED position, not at the aim: ", snapped_new["id"] == "" and snapped_new["uv"] == Vector2(60, 0) and snapped_new["infer"] == "horizontal")
+	var lands := Snap.resolve(Vector2(300, 2.5), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE the snapped end is tested against the points again: landing on one that is not the run's first makes that point the end (no axis constraint): ", lands["id"] == "P" and lands["uv"] == Vector2(300, 0) and lands["infer"] == "" and not lands.has("closing"))
+	var tilted_free := Snap.resolve(Vector2(1, 1), SnapModel.new(), 3.0, true, [], Vector2(100, 50), null, {})
+	loop.points["T"] = Vector2(100, 50)
+	var closing_tilted := Snap.resolve(Vector2(1, 1), loop, 3.0, true, [], Vector2(100, 50), null, {"chain_first": "A", "start_id": "T"})
+	print("SMOKE a closing edge that is not near an axis carries nothing (its slope is the loop's): ", closing_tilted["id"] == "A" and closing_tilted["infer"] == "" and tilted_free["id"] == "")
+	var first_wins := Snap.resolve(Vector2(0.9, 0), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE the run's first point wins over a nearer point: ", first_wins["id"] == "A")
+	var no_loop_opts := Snap.resolve(Vector2(0.9, 0), loop, 3.0, true, [], Vector2(100, 0))
+	print("SMOKE ...without the run (nothing passed) the nearest point is taken as before: ", no_loop_opts["id"] == "X")
+	var tiny_model := SnapModel.new()
+	tiny_model.points = {"a": Vector2(0, 0), "b": Vector2(0.1, 0)}
+	print("SMOKE zoomed in, two corners 0.1 apart with a 0.04 radius stay two points: ", Snap.resolve(Vector2(0.09, 0.005), tiny_model, 0.04, true)["id"] == "b" and Snap.resolve(Vector2(0.01, 0.0), tiny_model, 0.04, true)["id"] == "a" and Snap.resolve(Vector2(0.05, 0.0), tiny_model, 0.04, true)["id"] == "")
 	# --- handling the part on the table (table_pose.gd)
 	var id := Basis.IDENTITY
 	var spread := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.15, 0, 0), Vector3(0.15, 0, 0), Vector3(0, 0.2, 0), id, 1.0)

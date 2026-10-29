@@ -528,6 +528,26 @@ func _initialize() -> void:
 	s.set_tool("line")
 	print("SMOKE ...and so does changing tool: ", s.chain_first == "" and s.pending.is_empty())
 
+	# --- V2: the closing side of a loop
+	await fresh("line")
+	await s.tap({"uv": Vector2(0, 0)})
+	await s.tap({"uv": Vector2(0, 30)})
+	var loop_first: String = s.chain_first
+	await s.tap({"uv": Vector2(100, 30)})
+	await s.tap({"uv": Vector2(100, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(0, 0), "id": loop_first, "infer": "horizontal"})
+	var closing_lines: Array = fake.calls.filter(func(c): return c[0].ends_with("/lines"))
+	var closing_axis: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE the closing side reuses the first point (no new point), adds ONE horizontal, and ends the run: ", r["done"] and fake.count("/points") == 0 and closing_lines[0][1]["end_point_id"] == loop_first and closing_axis.size() == 1 and closing_axis[0][1]["type"] == "horizontal" and s.pending.is_empty() and s.lines.size() == 4)
+	await fresh("line")
+	s.set_method("line", "middle")
+	await s.tap({"uv": Vector2(0, 0)})
+	fake.calls.clear()
+	r = await s.tap({"uv": Vector2(30, 0), "infer": "horizontal"})
+	var mid_axis: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
+	print("SMOKE the midpoint method's free end is decided the same way: an inferred axis adds its horizontal besides the at-midpoint: ", r["done"] and mid_axis.size() == 2 and mid_axis.map(func(c): return c[1]["type"]).has("at_midpoint") and mid_axis.map(func(c): return c[1]["type"]).has("horizontal"))
+
 	# --- undo
 	await fresh("rectangle")
 	await s.tap({"uv": Vector2(0, 0)})

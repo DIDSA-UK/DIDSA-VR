@@ -792,6 +792,11 @@ func _make_line_from_middle(taps: Array) -> Dictionary:
 	var c := await _post(SKETCH + sketch_id + "/constraints", {"type": "at_midpoint", "point_id": mid, "line_id": line_id})
 	if c["ok"]:
 		calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(c["json"]["id"])])
+	var infer := str(taps[1].get("infer", ""))
+	if infer == "horizontal" or infer == "vertical": # the free end is decided the same way as a line's second end
+		var axis := await _post(SKETCH + sketch_id + "/constraints", {"type": infer, "line_id": line_id})
+		if axis["ok"]:
+			calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(axis["json"]["id"])])
 	return await _finish("line", calls)
 
 

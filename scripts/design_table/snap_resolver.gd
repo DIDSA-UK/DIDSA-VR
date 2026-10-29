@@ -20,6 +20,9 @@ extends RefCounted
 ##
 ## Axis inference for a line: with one end placed, a second end within AXIS_DEGREES of horizontal or vertical is
 ## pulled exactly onto the axis and flagged, so the session can add the Horizontal / Vertical constraint.
+## The END of a line is decided where the ghost draws it (the flat app's _resolveLineEnd): an existing point near the raw aim wins (the first point of the
+## run before any other, so a loop closes); otherwise the inferred end (the axis-snapped one) is tested against the existing points again, and if it lands
+## on one that point wins; else a new point goes at the snapped position. A closing edge within AXIS_DEGREES of an axis still carries horizontal / vertical.
 ## The snap toggle on the console turns all of this off (`enabled` false): the position comes back untouched.
 
 const AXIS_DEGREES := 4.0
@@ -46,13 +49,19 @@ static func nearest_on_arc(uv: Vector2, c: Vector2, s: Vector2, e: Vector2) -> V
 	return c + to.normalized() * r
 
 
-static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null, refs: Variant = null) -> Dictionary:
-	## {uv, id, kind (a name), infer, ref?}. `session` is a sketch_session.gd (points / lines / circles / arcs).
+static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null, refs: Variant = null, opts: Dictionary = {}) -> Dictionary:
+	## {uv, id, kind (a name), infer, ref?, target?}. `session` is a sketch_session.gd (points / lines / circles / arcs).
 	## `vertices` are plain positions to snap to (Vector2s); `refs` is the part's projected geometry (part_references.gd), whose vertices are snapped
 	## to as references. `line_start` is the first end of the line being drawn, if any.
+	## `opts`: `chain_first` (the id of the point the run of lines started on: ending on it closes the loop; "" when none or when it is the start itself),
+	## `start_id` (the id of the point at `line_start`, if it is an existing one).
 	var out := {"uv": uv, "id": "", "kind": NAMES[Kind.FREE], "infer": ""}
 	if not enabled or session == null:
 		return out
+	var chain_first := str(opts.get("chain_first", ""))
+	var start_id := str(opts.get("start_id", ""))
+	if line_start != null and chain_first != "" and session.points.has(chain_first) and uv.distance_to(session.points[chain_first]) <= radius:
+		return _closing(chain_first, session, line_start)
 
 	var best := radius
 	for id in session.points:
@@ -66,6 +75,8 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 	if out["id"] != "":
 		if session.is_origin(str(out["id"])):
 			out["kind"] = NAMES[Kind.ORIGIN] # the sketch's own origin: a real point, shown as such
+		elif line_start != null and chain_first != "" and str(out["id"]) == chain_first:
+			return _closing(chain_first, session, line_start)
 		return out
 
 	best = radius
@@ -164,11 +175,52 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		var start: Vector2 = line_start
 		var delta := uv - start
 		if delta.length() > radius:
-			var folded := fposmod(rad_to_deg(delta.angle()), 180.0) # a line and its reverse are the same line: 0..180
-			var from_x := minf(folded, 180.0 - folded)
-			var from_y := absf(folded - 90.0)
-			if from_x <= AXIS_DEGREES:
+			var axis := _axis_of(delta)
+			if axis == "horizontal":
 				out = {"uv": Vector2(uv.x, start.y), "id": "", "kind": NAMES[Kind.FREE], "infer": "horizontal"}
-			elif from_y <= AXIS_DEGREES:
+			elif axis == "vertical":
 				out = {"uv": Vector2(start.x, uv.y), "id": "", "kind": NAMES[Kind.FREE], "infer": "vertical"}
+		var end_uv: Vector2 = out["uv"]
+		if not end_uv.is_equal_approx(uv):
+			# The end as it will be drawn is not where the laser is: an existing point near THAT spot is the end (else a new point goes just off it, and a
+			# loop that looks closed is not).
+			if chain_first != "" and session.points.has(chain_first) and end_uv.distance_to(session.points[chain_first]) <= radius:
+				return _closing(chain_first, session, line_start)
+			var landed := _point_near(session, end_uv, radius, start_id)
+			if landed != "":
+				var kind := Kind.ORIGIN if session.is_origin(landed) else Kind.POINT
+				return {"uv": session.points[landed], "id": landed, "kind": NAMES[kind], "infer": ""}
 	return out
+
+
+static func _axis_of(delta: Vector2) -> String:
+	## "horizontal" / "vertical" when a segment of this direction is within AXIS_DEGREES of an axis (a line and its reverse are the same line), else "".
+	if delta.length() < 0.000001:
+		return ""
+	var folded := fposmod(rad_to_deg(delta.angle()), 180.0) # 0..180
+	if minf(folded, 180.0 - folded) <= AXIS_DEGREES:
+		return "horizontal"
+	if absf(folded - 90.0) <= AXIS_DEGREES:
+		return "vertical"
+	return ""
+
+
+static func _closing(first_id: String, session, start: Vector2) -> Dictionary:
+	## The first point of a run, as the end of a line that closes it. The closing edge still carries horizontal / vertical when it is within AXIS_DEGREES of an
+	## axis (nothing else is inferred for it: its slope is the loop's).
+	var at: Vector2 = session.points[first_id]
+	return {"uv": at, "id": first_id, "kind": NAMES[Kind.POINT], "infer": _axis_of(at - start), "closing": true}
+
+
+static func _point_near(session, at: Vector2, radius: float, skip_id: String = "") -> String:
+	## The nearest point of the sketch within `radius` of `at` (the part's reference helpers and `skip_id` left out; a point on the origin before the origin), or "".
+	var found := ""
+	var best := radius
+	for id in session.points:
+		if id == skip_id or session.is_reference(id):
+			continue
+		var d: float = at.distance_to(session.points[id])
+		if d < best or (d <= best and (found == "" or session.is_origin(found))):
+			best = d
+			found = id
+	return found

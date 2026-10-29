@@ -411,10 +411,13 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
+		var snap_opts := {}
 		if tool == "line" and session.pending.size() == 1:
 			var first: Dictionary = session.pending[0]
-			line_start = session.points.get(str(first.get("id", "")), first.get("uv"))
-		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs)
+			var first_id := str(first.get("id", ""))
+			line_start = session.points.get(first_id, first.get("uv"))
+			snap_opts = {"start_id": first_id, "chain_first": session.chain_first if session.chain_first != first_id else ""}
+		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs, snap_opts)
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
