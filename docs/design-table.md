@@ -85,16 +85,39 @@ This page is what was decided and built, what the code turned out to say, and wh
      an arc with arrowheads and **45 degrees** for an angle. The candidates offered for what you have selected are drawn the same way in yellow; point at the value to type it.
      A polygon's own corner angles and a circle's own structural constraints are not drawn as dimensions. `tests/sketch_style_render.gd` renders it to a PNG for a look.
    * **Select** (first slot of the Sketch row, on by default): pull on a point, line, circle or arc to select it (a point beats a line it is
-     on); pull on a selected one's label area or empty sheet to let go (empty clears everything). Any number can be selected. The **options
+     on); pull on a selected one's label area or empty sheet to let go (empty clears everything). Any number can be selected. **Two points on top of each other** cannot be told apart
+     by sight: the status line says "2 points here", and a pull on a point that is already selected with another unselected one within a quarter of the pick radius of it picks that
+     one, so pulling twice takes both. The **options
      row shows a menu of what applies**, ported from the flat app's selection matrix (`sketch_selection.gd`): one line: its Length (a
-     dimension: the number pad opens), Horizontal, Vertical; a circle or arc: Radius, Diameter; two points: Coincident, Distance, Horizontal,
-     Vertical; a point and a line: On line, Midpoint, Distance; a point and a circle: On curve; two lines: Parallel, Perpendicular, Equal,
+     dimension: the number pad opens), Horizontal, Vertical; a circle or arc: Radius, Diameter; two points: Coincident, **Merge**, Distance, Horizontal,
+     Vertical; three or more points: **Merge**; a point and a line: On line, Midpoint, Distance; a point and a circle: On curve; two lines: Parallel, Perpendicular, Equal,
      Collinear, Distance or Angle; three or more lines: Equal, Collinear; two or more circles / arcs: Concentric, Equal radius (two arcs
      sharing an end: Tangent); a line and a circle: Tangent; anything: **Fix**, **Construction / Solid** (lines, circles, arcs), **Delete**
      (not the origin; not undoable, as in the flat app) and **Clear**. A menu longer than the six-button row shows five and **More**.
+   * **Merge** (two or more points; not the origin, a circle's or ellipse's quadrant point, or two points of one shape) makes them ONE point, so one thing to drag, select and
+     dimension instead of two and a constraint (`POST /sketch/sketches/{id}/points/merge`, see `backend-api-notes.md`). The point that stays is shown by a cyan ring and named
+     on the status line before you press it: a pinned point, else the one with the most constraints (a rectangle corner over a loose line end), else the first picked; the others
+     move onto it. The backend refuses what it cannot do in its own words (two points of one line, a dimension between them, a part feature using one...). Undo restores the
+     whole sketch in place (`PUT .../state`, one step). Not built: Close gaps (merge every pair of points closer than the snap radius in one go).
    * **Slot:** pick the two end centres, then a third point; its distance from the line between them is the slot's half width.
-   * **Snap** (on the deck, on by default) snaps to existing points, the part's own corners on that plane, line midpoints, spots on a
-     line or circle, and pulls a line within 4° of horizontal/vertical onto the axis (adding the constraint). Off: the cursor is free.
+   * **Snap** (on the deck, on by default) snaps to existing points, the part's own corners on that plane, line midpoints, and spots on a line, circle or arc
+     (`snap_resolver.gd`; the reach is a size in the world, 12 mm, so it shrinks in sketch units as you zoom in). Off: the cursor is free, and Infer is off with it.
+     What a snap makes (as in the flat app): a snap on the **origin** gives the shape a point of its own exactly on it, held by a coincident constraint (never the
+     origin point itself); on a sketch line's **middle** a point held by an at-midpoint constraint (a point already there is reused); on a **line, circle or arc** a
+     point held by point-on-line / point-on-circle. A line that ends on the first point of its run **closes** it: the run ends ("Closed.") and the next pull starts a new one.
+     The end of a line is decided **where the ghost draws it**: a point near the raw aim wins (the run's first point before any other); otherwise the axis-snapped end is tested
+     against the points again; a closing side still gets horizontal / vertical.
+   * **Infer** (on the deck beside Snap, on by default, sticky for the table session: it stays as set across tools until switched back; a broken link when off, and the status
+     line says "Infer off: nothing is added automatically"). On, the sketcher adds the relationship it infers while a line is drawn, in this order after a point, the part and a
+     midpoint: **tangent** to a circle or arc (within 6 degrees), a **point on** a line, circle or arc (15 mm reach), the line's own **horizontal / vertical** (4 degrees),
+     **collinear** with a line that leaves the start, **parallel / perpendicular** (4 degrees) to the segment the run is continuing or to a **woken** line: one of the last three
+     lines the laser passed over in the last 5 seconds (lit faintly). Unlike the flat app, parallel / perpendicular are NOT tested against every line of the sketch (a laser
+     shakes). The cursor shows the glyph (H, //, |_, co, T, on) where it applies, the line it is held to is lit, and the constraint is made after the line; if the solver will
+     not take it only that constraint is taken back ("Couldn't keep it parallel: it conflicted.") and the line stays. A circle or arc **centre** placed 12 to 15 mm from another's
+     centre is put on it and held **concentric**. **Alignment guides** (no constraint): a point placed within 6 mm of another point's x or y is pulled to it with a dashed green
+     guide (sketch points and the origin; not circle / ellipse quadrant points, helpers or the line's own start; never on a tap that only measures). Off: none of this; the
+     snaps stay but are position only (a plain point), and the part's edges snap by position only.
+     The tolerances (6 degrees, 4 degrees, 15 mm, 6 mm) are first guesses, as is how the woken lines and guides look: not judged on a headset.
    * **Dimension:** pick a line (length), a circle or arc (radius, diameter), two points (distance, horizontal, vertical), two
      parallel lines (distance), two other lines (angle) or a point and a line. The candidates float on the sheet; **point at one
      and pull the trigger** to open the numeric pad, type, confirm. Typing over a value that already exists changes it.

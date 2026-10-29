@@ -10,7 +10,8 @@ extends RefCounted
 ##   1 line                  Horizontal, Vertical, Length
 ##   1 circle / arc          Radius, Diameter
 ##   1 point                 Fix
-##   2 points                Coincident, Distance (+ Horizontal / Vertical distance)
+##   2 points                Coincident, Merge, Distance (+ Horizontal / Vertical distance)
+##   3+ points               Merge (not the origin, not a circle's or ellipse's quadrant point, not two points of one shape)
 ##   2 lines                 Parallel, Perpendicular, Equal, Collinear, Distance or Angle
 ##   3+ lines                Equal, Collinear
 ##   2+ circles / arcs       Concentric, Equal radius (two arcs sharing an end also: Tangent)
@@ -23,7 +24,7 @@ extends RefCounted
 const TEXT := {
 	"horizontal": "Horizontal", "vertical": "Vertical", "parallel": "Parallel", "perpendicular": "Perpendicular",
 	"equal_length": "Equal", "collinear": "Collinear", "concentric": "Concentric", "equal_radius": "Equal radius",
-	"tangent": "Tangent", "coincident": "Coincident", "point_on_line": "On line", "at_midpoint": "Midpoint",
+	"tangent": "Tangent", "coincident": "Coincident", "merge": "Merge", "point_on_line": "On line", "at_midpoint": "Midpoint",
 	"point_on_curve": "On curve", "point_on_ellipse": "On ellipse", "fix": "Fix", "delete": "Delete", "clear": "Clear",
 }
 
@@ -82,6 +83,10 @@ static func options(selection: Array, session = null, ghosts: Array = []) -> Arr
 		out.append({"id": "dim:%s" % g["key"], "text": "%s %.2f" % [g["label"], float(g["value"])]})
 	for id in constraint_ids(selection, session):
 		out.append({"id": id, "text": TEXT[id]})
+		if id == "coincident" and session != null and session.merge_offered():
+			out.append({"id": "merge", "text": TEXT["merge"]}) # (not a constraint: the session special-cases it)
+	if session != null and counts(selection)["point"] > 2 and counts(selection)["point"] == selection.size() and session.merge_offered():
+		out.append({"id": "merge", "text": TEXT["merge"]}) # three or more points: Coincident is for two, Merge takes any number
 	out.append({"id": "fix", "text": TEXT["fix"]})
 	var c := counts(selection)
 	if int(c["line"]) + int(c["curve"]) + int(c.get("other", 0)) > 0:

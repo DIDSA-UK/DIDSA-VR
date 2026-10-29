@@ -42,6 +42,7 @@ const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
 const GUIDE_COLOUR := Color(0.45, 1.0, 0.6, 0.9) ## an alignment guide: the snap green
 const GUIDE_WIDTH := 0.0014
+const KEEP_COLOUR := Color(0.3, 0.92, 1.0, 1.0) ## the ring round the point Merge keeps: the snap-candidate cyan of the flat app
 const WOKEN_COLOUR := Color(0.75, 0.88, 1.0, 0.5) ## a line the laser has woken (parallel / perpendicular may be inferred against it): lit faintly
 const WOKEN_WIDTH := 0.0030
 const DIM_COLOUR := Color(0.55, 0.88, 1.0)
@@ -80,6 +81,7 @@ var _sheet_material: ShaderMaterial
 var _geo: MeshInstance3D
 var _preview: MeshInstance3D
 var _aids: MeshInstance3D ## the woken lines and the alignment guides
+var _keep: MeshInstance3D ## the ring round the point Merge would keep
 var _inference_label: Label3D ## the glyph of the relationship the line being drawn would get (H, //, |_, T, on...)
 var _cursor: MeshInstance3D
 var _cursor_material: StandardMaterial3D
@@ -128,6 +130,7 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_dims = _new_mesh_node("Dimensions")
 	_preview = _new_mesh_node("Preview")
 	_aids = _new_mesh_node("Aids")
+	_keep = _new_mesh_node("KeepRing")
 	_refs_node = _new_mesh_node("PartGeometry")
 	_refs_hover = _new_mesh_node("PartGeometryHover")
 	_cursor = MeshInstance3D.new()
@@ -673,6 +676,17 @@ func set_aids(woken: Array, guides: Array) -> void:
 	for g in guides:
 		_dashed(verts, colors, [g["from"], g["to"]], GUIDE_WIDTH, GUIDE_COLOUR, false, 1.3)
 	_set_surface(_aids, verts, colors)
+
+
+func set_keep_ring(uv: Variant) -> void:
+	## A ring round the point Merge would keep (null: none), so the rule is never a surprise.
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	if uv != null:
+		var ring := circle_points(uv, _u(POINT_SIZE * 3.6), CIRCLE_SEGMENTS)
+		_polyline(verts, colors, ring, LINE_WIDTH + PREVIEW_EDGE_EXTRA, PREVIEW_EDGE, true, 2.2)
+		_polyline(verts, colors, ring, LINE_WIDTH, KEEP_COLOUR, true, 2.4)
+	_set_surface(_keep, verts, colors)
 
 
 func set_inference(end_uv: Variant, marker: Variant, infer: Dictionary) -> void:

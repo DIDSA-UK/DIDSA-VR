@@ -47,7 +47,7 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
-const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
@@ -124,6 +124,8 @@ var _hover_uv: Variant = null
 var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
 var _aids_shown := false
+var _keep_shown := "" ## the point Merge would keep, as last ringed and named on the status line
+var _stack_hint := false ## the status line is saying that two points lie on top of each other under the laser
 var _woken := WokenLines.new() ## the lines the laser has passed over while the Line tool is active: what a new line may be inferred parallel / perpendicular to
 var _hover_plane := ""
 var _hover_face: Dictionary = {}
@@ -473,6 +475,8 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 			_hover_entity = part_refs.pick(uv, pick_mm, kinds) # nothing of the sketch there: the part's own corner or edge, to dimension to
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
 		view.set_preview("", [], null)
+		if tool == SELECT_TOOL:
+			_update_stack_hint(pick_mm)
 		var key := "%s:%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", ""), str(_hover_entity.get("ref", {}))]
 		if key != _last_view_key:
 			_last_view_key = key
@@ -482,6 +486,19 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		_clear_aids()
 		view.set_cursor(uv, "free")
 		view.set_preview("", [], null)
+
+
+func _update_stack_hint(pick_mm: float) -> void:
+	## Two points on top of each other cannot be told apart by looking: say so while the laser is on them, so it is clear to pull twice.
+	var stacked := 0
+	if str(_hover_entity.get("kind", "")) == "point":
+		stacked = session.points_stacked_at(str(_hover_entity["id"]), pick_mm * 0.25)
+	if stacked >= 2 and not _stack_hint:
+		_stack_hint = true
+		table.set_status("%d points here. Pull twice to pick both." % stacked)
+	elif stacked < 2 and _stack_hint:
+		_stack_hint = false
+		table.set_status(_sketch_hint())
 
 
 func _clear_aids() -> void:
@@ -1427,6 +1444,12 @@ func _refresh_view() -> void:
 	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
 	view.rebuild(session, session.selection, _hover_entity)
 	view.show_ghosts(session.ghosts)
+	var keep_id: String = session.merge_keep_id() if table.active_tool == SELECT_TOOL else ""
+	view.set_keep_ring(session.points[keep_id] if keep_id != "" else null)
+	if keep_id != _keep_shown:
+		_keep_shown = keep_id
+		if keep_id != "":
+			table.set_status("Merge: %s stays." % session.describe_point(keep_id))
 
 
 func refresh_sketch_hint() -> void:
@@ -1474,7 +1497,12 @@ func _sketch_trigger() -> void:
 			else:
 				_type_dimension(ghost)
 		elif not _hover_entity.is_empty():
-			await session.select(_hover_entity)
+			var picked: Dictionary = _hover_entity
+			if tool == SELECT_TOOL:
+				var other: Dictionary = session.stacked_alternative(picked, PICK_RADIUS / view.canvas_scale * 0.25)
+				if not other.is_empty():
+					picked = other # a second pull on a stack of points takes the other one
+			await session.select(picked)
 		else:
 			session.clear_selection()
 	elif tool == "trim":

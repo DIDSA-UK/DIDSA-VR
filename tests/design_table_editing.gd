@@ -216,6 +216,27 @@ func _initialize() -> void:
 	await frames(2)
 	print("SMOKE ...and the guide goes when the tool does: ", ed.view._aids.mesh == null)
 
+	# --- Merge: two points on top of each other (a profile that looks closed and is not)
+	table.snap_enabled = false
+	table.manager.activate("point")
+	await aim_uv(centre_uv + Vector2(-10, -10))
+	await pull()
+	table.snap_enabled = true
+	table.manager.activate("select")
+	await aim_uv(centre_uv + Vector2(-10, -10))
+	print("SMOKE with two points on top of each other under the laser the status line says so: ", table.status().contains("2 points here"))
+	await pull()
+	await pull()
+	print("SMOKE the second pull adds the point under the first instead of letting it go: ", ed.session.selection.size() == 2 and ed.session.merge_offered())
+	print("SMOKE Merge is on the deck, and the point it keeps is ringed and named on the status line: ", table.ui.option_button("merge") != null and ed.view._keep.mesh != null and table.status().contains("Merge:") and table.status().contains("stays"))
+	var points_before: int = ed.session.points.size()
+	await ed.on_option("merge")
+	print("SMOKE Merge makes ONE merge call, takes one point away, and the ring goes with the selection: ", calls_to("/points/merge").size() == 1 and ed.session.points.size() == points_before - 1 and ed.session.selection.is_empty() and ed.view._keep.mesh == null)
+	await ed.session.undo()
+	print("SMOKE ...and Undo puts it back (a PUT of the snapshot): ", calls_to("PUT /sketch/sketches/sk1/state").size() == 1 and ed.session.points.size() == points_before)
+	table.manager.deactivate()
+	await frames(2)
+
 	# --- Select: pick things with the laser, a menu of what applies, and the grips with a sketch open
 	table.manager.activate("select")
 	await aim_uv(centre_uv + Vector2(1, -10))

@@ -1565,6 +1565,221 @@ func menu() -> Array:
 	return SketchSelection.options(selection, self, ghosts)
 
 
+# --- Merge: two or more points become one ----------------------------------------------------------------------------------
+
+func merge_ids() -> Array:
+	## The selected points, in the order they were picked.
+	return _ids_of("point")
+
+
+func _quadrant_ids() -> Dictionary:
+	## A circle's four quadrant points and an ellipse's four axis ends: they belong to their shape, and v1 refuses to merge them (Coincident ties them).
+	var out := {}
+	for id in circles:
+		for pid in circles[id].get("cards", []):
+			out[str(pid)] = true
+	for id in ellipses:
+		for key in ["ma", "mi", "man", "mnn"]:
+			if str(ellipses[id].get(key, "")) != "":
+				out[str(ellipses[id][key])] = true
+	return out
+
+
+func _entity_point_sets() -> Array:
+	## Each entity's own points, as a list of Dictionaries used as sets (id -> true): the mirror of the backend's _entity_defining_point_ids.
+	var out: Array = []
+	for id in lines:
+		out.append(_set_of([lines[id]["a"], lines[id]["b"]]))
+	for id in circles:
+		out.append(_set_of([circles[id]["c"], circles[id]["p"]] + circles[id].get("cards", [])))
+	for id in arcs:
+		out.append(_set_of([arcs[id]["c"], arcs[id]["s"], arcs[id]["e"]]))
+	for id in ellipses:
+		out.append(_set_of([ellipses[id]["c"], ellipses[id]["ma"], ellipses[id]["mi"], ellipses[id].get("man", ""), ellipses[id].get("mnn", "")]))
+	for id in ellipse_arcs:
+		out.append(_set_of([ellipse_arcs[id]["c"], ellipse_arcs[id]["ma"], ellipse_arcs[id]["mi"], ellipse_arcs[id]["s"], ellipse_arcs[id]["e"]]))
+	for id in shapes:
+		out.append(_set_of(shapes[id].get("own_point_ids", [])))
+	for id in splines:
+		out.append(_set_of(splines[id].get("through", []) + splines[id].get("control", [])))
+	for id in texts:
+		out.append(_set_of([texts[id]["anchor"]]))
+	return out
+
+
+static func _set_of(ids: Array) -> Dictionary:
+	var out := {}
+	for pid in ids:
+		if str(pid) != "":
+			out[str(pid)] = true
+	return out
+
+
+func merge_offered(picked: Variant = null) -> bool:
+	## Whether Merge suits these points (the selected ones by default): two or more, none the origin or a quadrant point, and no single entity using two of
+	## them (merging would collapse it). The rest (a dimension between them, a part feature, a conflict) is the backend's to refuse, in words.
+	var ids: Array = merge_ids() if picked == null else picked
+	var distinct := {}
+	for id in ids:
+		distinct[str(id)] = true
+	if distinct.size() < 2:
+		return false
+	var quadrant := _quadrant_ids()
+	for id in distinct:
+		if is_origin(id) or quadrant.has(id) or not points.has(id):
+			return false
+	for set in _entity_point_sets():
+		var n := 0
+		for id in distinct:
+			if set.has(id):
+				n += 1
+		if n >= 2:
+			return false
+	return true
+
+
+func _constraint_points(c: Dictionary) -> Dictionary:
+	## Every point a backend constraint holds (a set): the point ids it names, and the ends of the lines it names (the backend's Constraint.point_ids).
+	var out := {}
+	for key in c:
+		if key == "id" or key == "type":
+			continue
+		var value = c[key]
+		var values: Array = value if value is Array else [value]
+		for v in values:
+			var text := str(v)
+			if points.has(text):
+				out[text] = true
+			elif lines.has(text):
+				out[str(lines[text]["a"])] = true
+				out[str(lines[text]["b"])] = true
+	return out
+
+
+func merge_keep_order(picked: Variant = null) -> Array:
+	## `ids` ordered by which stays when they are merged (the backend's rule, so the point that will stay can be ringed first): a pinned point, then the one
+	## with the most constraints on it (not counting a provisional dimension or a Coincident between two of these points), then the one picked first. The
+	## backend also knows which points a part feature uses; in that rare case its answer wins.
+	var ids: Array = merge_ids() if picked == null else picked
+	var distinct: Array = []
+	for id in ids:
+		if not distinct.has(str(id)):
+			distinct.append(str(id))
+	var chosen := _set_of(distinct)
+	var counts := {}
+	for id in distinct:
+		counts[id] = 0
+	for cid in constraints:
+		var c: Dictionary = constraints[cid]
+		if str(c.get("type", "")) == "distance" and bool(c.get("provisional", false)):
+			continue
+		if str(c.get("type", "")) == "coincident" and chosen.has(str(c.get("point_a_id", ""))) and chosen.has(str(c.get("point_b_id", ""))):
+			continue
+		for pid in _constraint_points(c):
+			if counts.has(pid):
+				counts[pid] += 1
+	var order := distinct.duplicate()
+	order.sort_custom(func(a, b) -> bool:
+		var pinned_a := bool(point_locked.get(a, false))
+		var pinned_b := bool(point_locked.get(b, false))
+		if pinned_a != pinned_b:
+			return pinned_a
+		if counts[a] != counts[b]:
+			return counts[a] > counts[b]
+		return distinct.find(a) < distinct.find(b))
+	return order
+
+
+func merge_keep_id() -> String:
+	## The point Merge would keep for the selection, or "" when Merge is not on offer.
+	var ids := merge_ids()
+	return str(merge_keep_order(ids)[0]) if merge_offered(ids) else ""
+
+
+func describe_point(point_id: String) -> String:
+	## What the point is, in a few words, for the status line: "the rectangle corner", "the line end", "a pinned point"...
+	if bool(point_locked.get(point_id, false)):
+		return "the pinned point"
+	for id in shapes:
+		if (shapes[id].get("own_point_ids", []) as Array).has(point_id):
+			return "the %s corner" % shapes[id]["kind"] if shapes[id]["kind"] == "rectangle" else "the %s point" % shapes[id]["kind"]
+	for id in circles:
+		if circles[id]["c"] == point_id:
+			return "the circle centre"
+	for id in arcs:
+		if arcs[id]["c"] == point_id:
+			return "the arc centre"
+	for id in lines:
+		if lines[id]["a"] == point_id or lines[id]["b"] == point_id:
+			return "the line end"
+	return "the first point"
+
+
+func stacked_alternative(entity: Dictionary, reach: float) -> Dictionary:
+	## Pick cycling on a stack of points. Two points on top of each other (a profile that looks closed and is not) cannot be picked one by one: a pull only ever
+	## finds the nearest. When the point pulled is already selected and another, unselected point lies within `reach` of it (a quarter of the pick radius), that one
+	## is the pick instead; a second pull on a stacked pair adds the other point. Anywhere else a pull on a selected point deselects it, as before. {} when none.
+	if str(entity.get("kind", "")) != "point" or not is_selected(entity) or not points.has(str(entity["id"])):
+		return {}
+	var here: Vector2 = points[str(entity["id"])]
+	var best := {}
+	var best_d := reach
+	for id in points:
+		if id == str(entity["id"]) or is_origin(id) or reference_ids.has(id) or is_selected({"kind": "point", "id": id}):
+			continue
+		var d: float = here.distance_to(points[id])
+		if d <= best_d:
+			best_d = d
+			best = {"kind": "point", "id": id, "distance": d}
+	return best
+
+
+func points_stacked_at(point_id: String, reach: float) -> int:
+	## How many points (this one included; not the origin, not reference helpers) lie within `reach` of this point.
+	if not points.has(point_id):
+		return 0
+	var here: Vector2 = points[point_id]
+	var n := 0
+	for id in points:
+		if is_origin(id) or reference_ids.has(id):
+			continue
+		if here.distance_to(points[id]) <= reach:
+			n += 1
+	return n
+
+
+func merge_selected() -> Dictionary:
+	## Merges the selected points into one (POST .../points/merge). The backend decides which stays and refuses what it can't, in words (a dimension holds the
+	## two apart, a part feature uses one, they would collapse an entity...), shown as they come. Undo is a restore of the whole sketch from the `before` snapshot
+	## the backend returns (PUT .../state), sent back as the exact text it came in.
+	var ids := merge_ids()
+	if busy or not merge_offered(ids):
+		return {"ok": false, "message": ""}
+	busy = true
+	var r := await _post(SKETCH + sketch_id + "/points/merge", {"point_ids": ids})
+	if not r["ok"]:
+		busy = false
+		var message := _refusal_text(r)
+		status.emit(message)
+		return {"ok": false, "message": message}
+	_undo.append({"label": "merge", "calls": [[HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/state", str(r["json"]["before"])]]})
+	selection.clear()
+	ghosts.clear()
+	await refresh(true)
+	busy = false
+	return {"ok": true, "message": ""}
+
+
+static func _refusal_text(r: Dictionary) -> String:
+	## The words the backend gave for a refused Merge: cad_api's own error text prefers a structured detail's `type` ("merge_refused"), which says nothing.
+	var json: Variant = r.get("json")
+	if json is Dictionary and (json as Dictionary).get("detail") is Dictionary:
+		var detail: Dictionary = json["detail"]
+		if str(detail.get("message", "")) != "":
+			return str(detail["message"])
+	return "Couldn't merge those points: %s" % str(r.get("error", ""))
+
+
 func apply_menu(option_id: String) -> Dictionary:
 	## Does one menu option on the current selection. Returns {ok, message}.
 	if busy or selection.is_empty():
@@ -1579,6 +1794,8 @@ func apply_menu(option_id: String) -> Dictionary:
 			return await toggle_construction()
 		"fix":
 			return await _constrain_selection("fix", _fix_bodies())
+	if option_id == "merge":
+		return await merge_selected()
 	var bodies := _bodies_for(option_id)
 	if bodies.is_empty():
 		return {"ok": false, "message": "That doesn't fit what is selected."}
