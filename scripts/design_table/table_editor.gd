@@ -1402,6 +1402,9 @@ func _sketch_trigger() -> void:
 		var pick := {"uv": _snap["uv"], "id": _snap["id"]}
 		if _snap.has("ref"):
 			pick["ref"] = _snap["ref"] # a corner of the part: made a pinned point that follows the part when the shape is made
+		if _snap.has("target"):
+			pick["target"] = _snap["target"] # the sketch's own line, circle or arc this lands on or in the middle of: the new point is held there
+			pick["snap"] = _snap["kind"]
 		if tool == "line" and session.pending.size() == 1:
 			pick["infer"] = _snap.get("infer", "")
 		await session.tap(pick)

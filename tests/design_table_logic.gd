@@ -155,6 +155,20 @@ func _initialize() -> void:
 	print("SMOKE a diagonal is left alone: ", diagonal["infer"] == "" and diagonal["uv"] == Vector2(200, 150))
 	print("SMOKE too close to the start to say which way it points: ", Snap.resolve(Vector2(101, 50.5), fake, 3.0, true, [], Vector2(100, 50))["infer"] == "")
 	print("SMOKE with Snap off the axis is not inferred either: ", Snap.resolve(Vector2(200, 53.0), fake, 3.0, false, [], Vector2(100, 50))["infer"] == "")
+	print("SMOKE a midpoint snap names the line it is the middle of (the session holds the new point there): ", mid["target"] == {"kind": "line", "id": "l1"})
+	print("SMOKE a snap onto a line or a circle names it too: ", on_line["target"] == {"kind": "line", "id": "l1"} and on_circle["target"] == {"kind": "circle", "id": "c1"})
+	print("SMOKE a plain point, a vertex and a free position name no shape: ", not near_pt.has("target") and not on_vertex.has("target") and not Snap.resolve(Vector2(500, 500), fake, 3.0, true).has("target"))
+	var arc_model := SnapModel.new()
+	arc_model.points = {"c": Vector2(0, 0), "s": Vector2(10, 0), "e": Vector2(0, 10)}
+	arc_model.arcs = {"a1": {"c": "c", "s": "s", "e": "e", "k": ""}}
+	var on_arc := Snap.resolve(Vector2(8, 8), arc_model, 3.0, true)
+	print("SMOKE near an arc it lands on the arc (counter-clockwise from its start to its end) and names it: ", on_arc["kind"] == "curve" and on_arc["target"] == {"kind": "arc", "id": "a1"} and on_arc["uv"].is_equal_approx(Vector2(8, 8).normalized() * 10.0))
+	print("SMOKE ...but not on the circle's other side, off its sweep: ", Snap.resolve(Vector2(-8, -8), arc_model, 3.0, true)["kind"] == "free")
+	var stacked := SnapModel.new()
+	stacked.points = {"o": Vector2.ZERO, "q": Vector2.ZERO}
+	stacked.origin_id = "o"
+	var stacked_pick := Snap.resolve(Vector2(0.5, 0.5), stacked, 3.0, true)
+	print("SMOKE a point lying exactly on the origin (a shape started there) is taken rather than the origin itself: ", stacked_pick["id"] == "q" and stacked_pick["kind"] == "point")
 	# --- handling the part on the table (table_pose.gd)
 	var id := Basis.IDENTITY
 	var spread := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.15, 0, 0), Vector3(0.15, 0, 0), Vector3(0, 0.2, 0), id, 1.0)

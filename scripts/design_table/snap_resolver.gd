@@ -15,8 +15,8 @@ extends RefCounted
 ##   4. the nearest spot ON a line, circle or arc (position only), or on an edge of the part (a `ref` of kind "edge_point": a new point on the pinned
 ##      line or circle, held there by a point-on-line / point-on-circle constraint);
 ##   5. otherwise the free position.
-## Only (1) carries an id and (2) a reference to the part. The sketch's own midpoints and curves snap the position exactly but make an ordinary new point:
-## the flat app makes a real constraint for those, which a later step here can add.
+## Only (1) carries an id and (2) a reference to the part. A snap to the sketch's own midpoint or curve (3, 4) carries a `target` ({kind: "line" | "circle" |
+## "arc", id}) so the session can HOLD the new point there with a constraint (at-midpoint / point-on-line / point-on-circle), as the flat app does.
 ##
 ## Axis inference for a line: with one end placed, a second end within AXIS_DEGREES of horizontal or vertical is
 ## pulled exactly onto the axis and flagged, so the session can add the Horizontal / Vertical constraint.
@@ -32,6 +32,20 @@ const NAMES := {Kind.FREE: "free", Kind.POINT: "point", Kind.VERTEX: "vertex", K
 	Kind.CENTRE: "centre", Kind.EDGE_MIDPOINT: "edge_midpoint", Kind.EDGE_POINT: "edge_point", Kind.FACE_AXIS: "face_axis"}
 
 
+static func nearest_on_arc(uv: Vector2, c: Vector2, s: Vector2, e: Vector2) -> Variant:
+	## The spot of the arc (counter-clockwise from its start to its end, as the backend's are) nearest `uv`, or null when `uv` lies off its sweep (the ends
+	## are points, snapped to as points).
+	var r := c.distance_to(s)
+	var to := uv - c
+	if to.length() < 0.000001:
+		return null
+	var a0 := fposmod((s - c).angle(), TAU)
+	var sweep := fposmod(fposmod((e - c).angle(), TAU) - a0, TAU)
+	if fposmod(to.angle() - a0, TAU) > sweep:
+		return null
+	return c + to.normalized() * r
+
+
 static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices: Array = [], line_start: Variant = null, refs: Variant = null) -> Dictionary:
 	## {uv, id, kind (a name), infer, ref?}. `session` is a sketch_session.gd (points / lines / circles / arcs).
 	## `vertices` are plain positions to snap to (Vector2s); `refs` is the part's projected geometry (part_references.gd), whose vertices are snapped
@@ -45,7 +59,8 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		if session.is_reference(id):
 			continue # plumbing to the part: the corner / centre it stands for is snapped to below as the part's own, whether or not it has been made yet
 		var d: float = uv.distance_to(session.points[id])
-		if d <= best:
+		# (a point lying exactly on the origin, as a shape started there has, is taken rather than the origin itself)
+		if d < best or (d <= best and (str(out["id"]) == "" or session.is_origin(str(out["id"])))):
 			best = d
 			out = {"uv": session.points[id], "id": id, "kind": NAMES[Kind.POINT], "infer": ""}
 	if out["id"] != "":
@@ -85,7 +100,7 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		var d := uv.distance_to(mid)
 		if d <= best:
 			best = d
-			out = {"uv": mid, "id": "", "kind": NAMES[Kind.MIDPOINT], "infer": ""}
+			out = {"uv": mid, "id": "", "kind": NAMES[Kind.MIDPOINT], "infer": "", "target": {"kind": "line", "id": id}}
 	if out["kind"] != NAMES[Kind.MIDPOINT] and refs != null and session.references_ok:
 		var em: Dictionary = refs.nearest_midpoint(uv, radius)
 		if not em.is_empty():
@@ -102,7 +117,7 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		var d := uv.distance_to(near)
 		if d <= best:
 			best = d
-			out = {"uv": near, "id": "", "kind": NAMES[Kind.CURVE], "infer": ""}
+			out = {"uv": near, "id": "", "kind": NAMES[Kind.CURVE], "infer": "", "target": {"kind": "line", "id": id}}
 	for id in session.circles:
 		var c: Dictionary = session.circles[id]
 		if session.is_reference(id) or not session.points.has(c["c"]) or not session.points.has(c["p"]):
@@ -116,7 +131,20 @@ static func resolve(uv: Vector2, session, radius: float, enabled: bool, vertices
 		var d := uv.distance_to(on_circle)
 		if d <= best:
 			best = d
-			out = {"uv": on_circle, "id": "", "kind": NAMES[Kind.CURVE], "infer": ""}
+			out = {"uv": on_circle, "id": "", "kind": NAMES[Kind.CURVE], "infer": "", "target": {"kind": "circle", "id": id}}
+	var arc_map: Variant = session.get("arcs")
+	if arc_map is Dictionary:
+		for id in arc_map:
+			var a: Dictionary = arc_map[id]
+			if session.is_reference(id) or not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
+				continue
+			var on_arc: Variant = nearest_on_arc(uv, session.points[a["c"]], session.points[a["s"]], session.points[a["e"]])
+			if on_arc == null:
+				continue
+			var d := uv.distance_to(on_arc)
+			if d <= best:
+				best = d
+				out = {"uv": on_arc, "id": "", "kind": NAMES[Kind.CURVE], "infer": "", "target": {"kind": "arc", "id": id}}
 	if refs != null and session.references_ok:
 		# An edge of the part, near enough (and at least as near as the sketch's own curve found above: a pinned line already lying on an edge is the
 		# edge, and must not turn it into a plain free point): a point on it held there by a constraint.

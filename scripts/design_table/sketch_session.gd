@@ -83,6 +83,8 @@ var _ref_points := {} ## "body:vertex index" -> the pinned point made for it; "b
 var reference_rows: Array = [] ## the backend's health of this sketch's references (GET .../external-references): [{point_id, body_id, kind, vertex_index, status, reason, candidates}]
 var ref_dims: Array = [] ## the sketch's persistent reference-only (driven) dimensions, as the backend last said (every solve brings them fresh, so a value follows the part): [{id, kind, refs: [{type, id}], value}]. They measure, they never drive: the solver does not see them
 var _undo: Array = [] ## [{label, calls: [[method, path]]}]
+var chain_first := "" ## the point the current run of lines started on: a line that ends on it closes the loop and ends the run ("" between runs)
+var _pending_holds: Array = [] ## ids of the constraints the picks of the shape being made are held by (a point welded to the origin, a midpoint, a point on a curve): taken back with it
 
 
 func _init(p_api: Callable = Callable()) -> void:
@@ -352,6 +354,7 @@ func entity_count() -> int:
 func set_tool(tool_id: String) -> void:
 	tool = tool_id
 	pending.clear()
+	chain_first = ""
 	selection.clear()
 	ghosts.clear()
 
@@ -380,11 +383,13 @@ func set_method(tool_id: String, method: String) -> void:
 		"rectangle": rect_method = method
 		"line": line_method = method
 	pending.clear()
+	chain_first = ""
 
 
 func finish_chain() -> void:
 	## Ends a run of lines: the next tap starts afresh.
 	pending.clear()
+	chain_first = ""
 
 
 func tap(pick: Dictionary) -> Dictionary:
@@ -398,6 +403,7 @@ func tap(pick: Dictionary) -> Dictionary:
 	busy = true
 	var taps := pending.duplicate()
 	pending.clear()
+	_pending_holds.clear()
 	var result: Dictionary
 	match tool:
 		"point": result = await _make_point(taps)
@@ -412,8 +418,10 @@ func tap(pick: Dictionary) -> Dictionary:
 		"text": result = await _make_text(taps)
 		_: result = {"ok": false, "message": ""}
 	busy = false
-	if not result["ok"] and str(result["message"]) != "":
-		status.emit(str(result["message"]))
+	if not result["ok"]:
+		await _drop_holds() # a failed shape leaves none of its constraints behind
+		if str(result["message"]) != "":
+			status.emit(str(result["message"]))
 	return {"ok": bool(result["ok"]), "done": bool(result["ok"]), "message": str(result["message"])}
 
 
@@ -613,16 +621,27 @@ func _post(path: String, body) -> Dictionary:
 	return await api.call(HTTPClient.METHOD_POST, path, body)
 
 
-func _point(pick: Dictionary, created: Array) -> String:
+func _point(pick: Dictionary, created: Array, hold_on_curve: bool = true) -> String:
 	## The id of a pick's point: the existing one it snapped to, the pinned reference point of a part vertex it snapped to (made now, if it is
-	## the first time), else a new one at its position.
+	## the first time), else a new one at its position. Three snaps make a point that is HELD by a constraint, as the flat app does:
+	##  - the sketch's ORIGIN: a new point exactly on it and a coincident constraint (a shape is never welded to the origin point itself, so it can be
+	##    freed from it later);
+	##  - the middle of a line of the sketch: a point and an at-midpoint constraint (a point already held at that middle is reused);
+	##  - a spot on a line, circle or arc of the sketch: a point and a point-on-line / point-on-circle constraint (unless `hold_on_curve` is false:
+	##    the second end of a line gets it from the line's own inference).
+	## The constraints go in `_pending_holds`, which _finish puts at the front of the undo.
 	if str(pick.get("id", "")) != "":
+		if is_origin(str(pick["id"])):
+			return await _point_at_origin(str(pick["id"]), created)
 		return str(pick["id"])
 	if pick.get("ref") is Dictionary:
 		if str((pick["ref"] as Dictionary).get("kind", "")) in ["edge_midpoint", "edge_point"]:
 			return await _point_on_reference(pick, created)
 		var made := await ensure_reference(pick["ref"])
 		return str(made["id"]) if made["ok"] else ""
+	var target: Variant = pick.get("target")
+	if target is Dictionary and not (target as Dictionary).is_empty() and (hold_on_curve or str(pick.get("snap", "")) == "midpoint"):
+		return await _point_on_sketch_shape(pick, target, created)
 	var uv: Vector2 = pick["uv"]
 	var r := await _post(SKETCH + sketch_id + "/points", {"x": uv.x, "y": uv.y})
 	if not r["ok"]:
@@ -631,13 +650,78 @@ func _point(pick: Dictionary, created: Array) -> String:
 	return str(r["json"]["id"])
 
 
+func _pick_position(pick: Dictionary) -> Vector2:
+	## Where a pick lands: the point it snapped to, else the spot tapped.
+	var id := str(pick.get("id", ""))
+	if id != "" and points.has(id):
+		return points[id]
+	return pick.get("uv", Vector2.ZERO)
+
+
+func _hold(constraint: Dictionary) -> bool:
+	## Makes one holding constraint for the shape being made. False if the backend refused it.
+	var c := await _post(SKETCH + sketch_id + "/constraints", constraint)
+	if c["ok"]:
+		_pending_holds.append(str(c["json"]["id"]))
+	return bool(c["ok"])
+
+
+func _point_at_origin(origin: String, created: Array) -> String:
+	var at: Vector2 = points.get(origin, Vector2.ZERO)
+	var r := await _post(SKETCH + sketch_id + "/points", {"x": at.x, "y": at.y})
+	if not r["ok"]:
+		return ""
+	var id := str(r["json"]["id"])
+	created.append(id)
+	if not await _hold({"type": "coincident", "point_a_id": id, "point_b_id": origin}):
+		return "" # the caller's cleanup takes the point back out
+	return id
+
+
+func _point_on_sketch_shape(pick: Dictionary, target: Dictionary, created: Array) -> String:
+	var kind := str(target.get("kind", ""))
+	var target_id := str(target.get("id", ""))
+	var at_middle := str(pick.get("snap", "")) == "midpoint"
+	if at_middle:
+		for cid in constraints:
+			var c: Dictionary = constraints[cid]
+			if str(c.get("type", "")) == "at_midpoint" and str(c.get("line_id", "")) == target_id and points.has(str(c.get("point_id", ""))):
+				return str(c["point_id"]) # the middle of that line already has its point
+	var uv: Vector2 = pick["uv"]
+	var r := await _post(SKETCH + sketch_id + "/points", {"x": uv.x, "y": uv.y})
+	if not r["ok"]:
+		return ""
+	var id := str(r["json"]["id"])
+	created.append(id)
+	var body: Dictionary
+	if at_middle:
+		body = {"type": "at_midpoint", "point_id": id, "line_id": target_id}
+	elif kind == "line":
+		body = {"type": "point_on_line", "point_id": id, "line_id": target_id}
+	else:
+		body = {"type": "point_on_circle", "point_id": id, "circle_or_arc_id": target_id}
+	if not await _hold(body):
+		status.emit("Couldn't hold that point on the %s, so it is just placed there." % ("middle of the line" if at_middle else kind))
+	return id
+
+
+func _drop_holds() -> void:
+	## Takes back the constraints made for a shape that did not get made.
+	for cid in _pending_holds:
+		await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(cid), null)
+	_pending_holds.clear()
+
+
 func _cleanup(created: Array) -> void:
+	await _drop_holds() # a point a constraint still names cannot be deleted
 	for id in created:
 		await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/points/" + str(id), null)
 
 
 func _finish(label: String, calls: Array, with_entities: bool = true) -> Dictionary:
-	_undo.append({"label": label, "calls": calls})
+	var held: Array = _pending_holds.map(func(cid): return [HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(cid)])
+	_pending_holds.clear()
+	_undo.append({"label": label, "calls": held + calls})
 	await refresh(with_entities)
 	return {"ok": true, "message": ""}
 
@@ -654,6 +738,8 @@ func _make_line(taps: Array) -> Dictionary:
 	if line_method == "middle":
 		return await _make_line_from_middle(taps)
 	var created: Array = []
+	if _pick_position(taps[0]).distance_to(_pick_position(taps[1])) < 0.000001:
+		return {"ok": false, "message": "A line needs two different points."}
 	var a := await _point(taps[0], created)
 	var b := await _point(taps[1], created)
 	if a == "" or b == "" or a == b:
@@ -670,8 +756,18 @@ func _make_line(taps: Array) -> Dictionary:
 		var c := await _post(SKETCH + sketch_id + "/constraints", {"type": infer, "line_id": line_id})
 		if c["ok"]:
 			calls.push_front([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(c["json"]["id"])])
-	pending = [{"uv": taps[1]["uv"], "id": b}] # the end is the next line's start
-	return await _finish("line", calls)
+	if chain_first == "":
+		chain_first = a # the first line of a run: the run closes where it started
+	var closed := b == chain_first
+	if closed:
+		pending.clear()
+		chain_first = ""
+	else:
+		pending = [{"uv": taps[1]["uv"], "id": b}] # the end is the next line's start
+	var done := await _finish("line", calls)
+	if closed:
+		status.emit("Closed.")
+	return done
 
 
 func _make_line_from_middle(taps: Array) -> Dictionary:
@@ -2268,6 +2364,7 @@ func undo() -> bool:
 	for entry in step["calls"]:
 		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
 	pending.clear()
+	chain_first = ""
 	selection.clear()
 	ghosts.clear()
 	await refresh(true)
