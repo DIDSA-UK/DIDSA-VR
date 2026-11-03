@@ -29,6 +29,7 @@ const MAX_ROWS := 64
 const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
 const PAIR_MODEL_VERSION := 4 ## 4 = 3 plus an optional `pair` on a side: the second face of a Width / Symmetric mid-plane over two members (the backend emits 4 only then)
 const COUPLER_MODEL_VERSION := 5 ## 5 = coupler mates (gear / rack_pinion / screw): rows on each side's MOVE from its `anchor` pose; `set_anchors` re-bases them at every accepted anchor
+const FOLLOW_MODEL_VERSION := 7 ## 7 = a side (and a `pair`) may carry `follow`: a pattern COPY that follows its source member, pose `(Rs R, Rs t + ts)` or, with `keep_rotation`, `(R, Rs t + ts)`; a superset of 3 to 6, emitted only when some side has one
 const LIMIT_MODEL_VERSION := 6 ## 6 = limit mates (limit_distance / limit_angle): an inequality row with `min` / `max`, held at the nearest bound only while violated (see `retract`); a superset of 3 to 5
 const LIMIT_ROUNDS := 3 ## active-set rounds of one retraction
 const LIMIT_TOL := 1e-6 ## mm / degrees a value may sit outside its range before the limit counts as violated
@@ -81,9 +82,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 	if not (json is Dictionary):
 		return null
 	var version := int(json.get("version", 0))
-	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION:
+	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION and version != FOLLOW_MODEL_VERSION:
 		return null
-	var v6 := version == LIMIT_MODEL_VERSION
+	var v6 := version == LIMIT_MODEL_VERSION or version == FOLLOW_MODEL_VERSION # 7 is a superset of 6 (limits, couplers, pairs)
 	var ids: Array = json.get("members", [])
 	if ids.is_empty() or ids.size() > max_members:
 		return null
@@ -107,6 +108,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 		if int(a["member"]) >= ids.size() or int(b["member"]) >= ids.size():
 			return null
 		for side in [a, b]:
+			# `follow` belongs to version 7 only (a malformed step makes `_parse_side` return null).
+			if (side["follow"] != null or (side["pair"] != null and side["pair"]["follow"] != null)) and version != FOLLOW_MODEL_VERSION:
+				return null
 			# `anchor` belongs to version 5 (and 6, the superset) only.
 			if side["ar"] != null and version != COUPLER_MODEL_VERSION and not v6:
 				return null
@@ -165,8 +169,10 @@ static func _parse_side(j: Dictionary):
 	if j.has("plane") and j["plane"] != null:
 		geo["porigin"] = _floats(j["plane"]["origin"])
 		geo["pnormal"] = _floats(j["plane"]["normal"])
-	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null, "pair": null, "ar": null, "at": null}
+	var side := {"member": int(j["member"]), "geo": geo, "fr": null, "ft": null, "pair": null, "ar": null, "at": null, "follow": null}
 	_parse_frozen(side, j)
+	if not _parse_follow(side, j):
+		return null
 	if j.has("anchor") and j["anchor"] != null:
 		var ar: Array = []
 		for row in j["anchor"]["r"]:
@@ -178,8 +184,10 @@ static func _parse_side(j: Dictionary):
 		if not (pj.get("plane") is Dictionary) or not (pj["plane"].has("origin") and pj["plane"].has("normal")) or not pj.has("member"):
 			return null
 		var pgeo := {"porigin": _floats(pj["plane"]["origin"]), "pnormal": _floats(pj["plane"]["normal"])}
-		var pair := {"member": int(pj["member"]), "geo": pgeo, "fr": null, "ft": null, "pair": null}
+		var pair := {"member": int(pj["member"]), "geo": pgeo, "fr": null, "ft": null, "pair": null, "follow": null}
 		_parse_frozen(pair, pj)
+		if not _parse_follow(pair, pj):
+			return null
 		side["pair"] = pair
 	return side
 
@@ -191,6 +199,22 @@ static func _parse_frozen(side: Dictionary, j: Dictionary) -> void:
 			fr.append_array(_floats(row))
 		side["fr"] = fr
 		side["ft"] = _floats(j["frozen"]["t"])
+
+
+## Version 7: a side's `follow` ({r, t, keep_rotation}) -> side["follow"] = {rs (9, row-major), ts (3), keep (bool)}. False for a malformed one.
+static func _parse_follow(side: Dictionary, j: Dictionary) -> bool:
+	if not j.has("follow") or j["follow"] == null:
+		return true
+	var f = j["follow"]
+	if not (f is Dictionary) or not (f.get("r") is Array) or not (f.get("t") is Array):
+		return false
+	var rs: Array = []
+	for row in f["r"]:
+		rs.append_array(_floats(row))
+	if rs.size() != 9 or f["t"].size() != 3:
+		return false
+	side["follow"] = {"rs": rs, "ts": _floats(f["t"]), "keep": f.get("keep_rotation", false) == true}
+	return true
 
 
 static func _sign(v) -> float:
@@ -225,6 +249,8 @@ func _world(side: Dictionary, poses: Array, name: String) -> Array:
 		rm = poses[m]["r"]
 		t = poses[m]["t"]
 	var w := Se3.mat_vec(rm, local)
+	if side["follow"] != null:
+		return _world_followed(side["follow"], m, w, t, point, d)
 	var v: Array = [w[0] + t[0], w[1] + t[1], w[2] + t[2]] if point else w
 	if m >= 0 and _jac:
 		var c0 := 6 * m
@@ -239,6 +265,41 @@ func _world(side: Dictionary, poses: Array, name: String) -> Array:
 		d[1 * n + c0 + 5] = w[0]
 		d[2 * n + c0 + 3] = w[1]
 		d[2 * n + c0 + 4] = -w[0]
+	return [v, d]
+
+
+## A follower side (version 7): the copy's pose is `(Rs R, Rs t + ts)`, or `(R, Rs t + ts)` with `keep`. `w` is `R local`.
+##   orient:        point `Rs (w + t) + ts`, d/dv = Rs, d/dw = -Rs [w]x;  direction `Rs w`, d/dw = -Rs [w]x
+##   keep rotation: point `w + Rs t + ts`,   d/dv = Rs, d/dw = -[w]x;     direction `w`,    d/dw = -[w]x
+func _world_followed(f: Dictionary, m: int, w: Array, t: Array, point: bool, d: PackedFloat64Array) -> Array:
+	var rs: Array = f["rs"]
+	var ts: Array = f["ts"]
+	var keep: bool = f["keep"]
+	var base: Array = w if keep else Se3.mat_vec(rs, w)
+	var v: Array = base
+	if point:
+		var rt := Se3.mat_vec(rs, t)
+		v = [base[0] + rt[0] + ts[0], base[1] + rt[1] + ts[1], base[2] + rt[2] + ts[2]]
+	if m >= 0 and _jac:
+		var c0 := 6 * m
+		if point:
+			for i in 3:
+				for j in 3:
+					d[i * n + c0 + j] = rs[3 * i + j]
+		# column k of the rotation block is `e_k x w` (= -[w]x e_k), rotated by Rs unless the copy keeps the source's rotation
+		for k in 3:
+			var c: Array = [0.0, 0.0, 0.0]
+			# e_k x w
+			match k:
+				0:
+					c = [0.0, -w[2], w[1]]
+				1:
+					c = [w[2], 0.0, -w[0]]
+				_:
+					c = [-w[1], w[0], 0.0]
+			var col: Array = c if keep else Se3.mat_vec(rs, c)
+			for i in 3:
+				d[i * n + c0 + 3 + k] = col[i]
 	return [v, d]
 
 
