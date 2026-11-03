@@ -584,6 +584,36 @@ must replace the anchors by the accepted poses at every anchor (`LocalRetractor.
 `alignment` stays null and `allow_rotation` / `flipped` mean nothing for a coupler. One turn per request is the limit: a wish more than about 170 degrees from the anchor in a single `mate-motion` is not
 supported (clients re-anchor every ~150 ms and send `reference` poses).
 
+## Pattern copies, mate status and dissolve (DIDSA-CAD `docs/pattern-followers-and-dissolve-plan.md`, branch `ccr-c5027d07-sd8k7a`)
+
+A component pattern's copies are never stored: the copy of occurrence `A` has the path segment `A#pattern:<pattern id>:<index>` (it is the `occurrence_path` the
+assembly mesh reports, the glb node's `instance_path`, and what a mate on a copy names in `occurrence_id` / `midplane.b_occurrence_id`). Never put that segment in a URL:
+the `#` starts a fragment (`mates_tool.gd` folds it with `mate_ref_top` and refuses it in `solve_occurrence`).
+
+- **A part mated to a copy FOLLOWS the copy's source.** In a solve the copy is a *follower*: its pose is the pattern step applied to its source's pose being evaluated, and a
+  mate on it joins the **source** to the mate graph. Move or solve `A` and the part mated to its copy moves with it (`/solve`, `/mate-motion` and an edit of the pattern all
+  do it); a fixed source stays put and the part mates onto the copy. A *group* solve of the mated part may move the source as well (as for a direct A-B mate); *minimal*
+  movement still moves only the part. A mate between a copy and an occurrence of the same source, or two copies of one source, is refused; `explicit occurrence_id=<copy>`
+  on create/edit stays a 422 (drive the source or the other part). Gear / rack-pinion / screw / limit mates on a copy are refused (422, "pattern copy").
+- **`constraint_model` is null** (`mate-motion`, the preview) for a group that holds a follower: no new version, `local_retraction.gd` keeps server projection for such a group.
+- **`PATCH /parts/{id}/component-patterns/{pid}`** always stores the edit, then solves every part mated to one of the pattern's copies with the pattern's sources frozen and commits
+  each group that converges. The response is the pattern plus **`broken_mate_ids`**: the mates on this pattern's copies still unsatisfied (a fixed part, a group that does not
+  converge). Mates naming copies that no longer exist are dropped, in every Part (a parent assembly's mate through `sub/src#pattern:...` too).
+- **`MateResponse.status`: `"ok"` | `"broken"`**, computed on every listing and response (never stored): the mate's residual at the stored poses is above the solver tolerance (1e-6), a
+  limit mate's value is outside its range, or a reference does not resolve. Suppressed mates and gear / rack-pinion / screw mates are `ok`. It also reports mates broken for other
+  reasons (a part file edited under them, an over-constrained import). VR shows it on the tablet's mate list ("<type> - Broken", error colour). Cost on DIDSA-CAD's frame fixture
+  (16 mates, 18 occurrences; a warm in-process `GET .../mates`): about 12 ms with `status` against about 4.4 ms without (the status pass itself about 6 ms; the very first call
+  tessellates the parts, about 220 ms).
+- **`GET /parts/{id}/assembly-mesh?geometry=false`** (default `true`, unchanged): the same `instances` (`occurrence_path`, `world_transform`, `hidden`, `color`, node-level
+  `appearance`; pattern copies and nested parts included) and an empty `geometry`: poses without meshes. VR calls it (`MatesTool._copy_pose_changes`) after solves, Enforce all
+  and a sandbox return to put every copy node (no occurrence of its own, so `GET .../occurrences` never moves it) at the world pose the backend gives it; `<root>` is the node's
+  `group_root`. Positions are the backend's millimetres, the same as the glb's nodes (no `spawn_scale`). An older backend ignores the parameter and sends the meshes too.
+  The per-face appearance is not computed with `geometry=false`.
+- **`POST /parts/{id}/component-patterns/{pid}/dissolve`** -> `{occurrences: [OccurrenceResponse...], renamed: {"<src>#pattern:<pid>:<i>": "<new id>"}}`: every live copy becomes a
+  real, **floating** occurrence at the copy's pose (named `<source override> (n)` when the source has an override), everything that named a copy in any Part is re-pointed, the
+  pattern's `scope: "pattern"` paint is split onto the source and each new occurrence, the pattern goes (422 for a suppressed pattern, 404 unknown). VR never calls it and does not
+  notice another client's dissolve until it reloads.
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.
