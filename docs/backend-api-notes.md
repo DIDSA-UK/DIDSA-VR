@@ -623,6 +623,25 @@ the `#` starts a fragment (`mates_tool.gd` folds it with `mate_ref_top` and refu
   pattern's `scope: "pattern"` paint is split onto the source and each new occurrence, the pattern goes (422 for a suppressed pattern, 404 unknown). VR never calls it and does not
   notice another client's dissolve until it reloads.
 
+## Point Merge and restoring a sketch (DIDSA-CAD `docs/point-merge-and-vr-sketcher-plan.md`, M1)
+
+```
+POST /sketch/sketches/{id}/points/merge   {"point_ids": [first picked, second, ...]}      2 or more distinct ids, in pick order
+  -> 200 {kept_id, absorbed_ids, dropped_constraint_ids, dropped_reference_dimension_ids, converged, before}
+  -> 400 {"detail": {"type": "merge_refused", "reason": <code>, "message": <words>, "ids": [...]}}
+PUT  /sketch/sketches/{id}/state   <the `before` text, sent unchanged>   -> 200 SketchResponse (the live sketch updated in place) | 422 "Invalid sketch file: ..."
+```
+**The float trap for `before`:** it is a JSON **string** (`json.dumps(sketch_to_dict(...))`, the whole sketch before the merge), not an embedded object, and the client must send it back **byte
+for byte**. Godot reads every JSON number as a float, so parsing and re-serialising it writes `rotation_quarter_turns: 0.0`, which the backend refuses (the same trap as native files above).
+`SketchSession.merge_selected` keeps the string as it came (`str(json["before"])`) and the undo step is `[METHOD_PUT, path, before]`; `cad_api.gd` `_send` sends a `String` body as it is.
+**Which point is kept:** an anchored one (a Fix, an external reference, or one a Part feature such as a Loft's `reference_point` uses), else the one with the most constraints on it (not counting a
+provisional dimension or a Coincident between the picked points), else the first in `point_ids`. Two or more anchored: refused. The kept point does not move; the others' references move onto it and
+the sketch is solved. The client runs the same rule locally (`merge_keep_order`) to ring the point before the call; the backend's answer (`kept_id`) wins when a feature reference decides.
+**Refusals are 400, not 409 or 422** (every sketch refusal is), with the reason in `detail`: `too_few`, `origin`, `two_anchored`, `same_entity` (one entity uses two of the points), `quadrant` (a circle's or
+ellipse's quadrant point; v1), `dimension_between` (a dimension holds the two apart: `ids` is that constraint), `degenerate_constraint`, `stacked_entities` (two lines would end up on the same two points),
+`conflict` (it converged before and does not after: rolled back). **`cad_api.gd`'s `error_text` prefers `detail.type` over `detail.message`**, so the generic error shows "merge_refused": the session reads
+`detail.message` itself (`_refusal_text`). The route is generic: `PUT .../state` could also undo a Trim (not done here).
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.

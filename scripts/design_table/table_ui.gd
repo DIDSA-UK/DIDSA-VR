@@ -25,6 +25,7 @@ extends Control
 
 signal option_pressed(option_id: String)
 signal snap_toggled(on: bool)
+signal infer_toggled(on: bool) ## the Infer switch beside Snap: while off, nothing is added to the sketch by itself
 signal visibility_toggled(on: bool) ## the eye: the Visibility drawer opens or closes
 signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
@@ -87,6 +88,7 @@ var _connector: Control
 var _options_row: HBoxContainer
 var _status := "" ## the tool tip text: shown in the side panel (table_props_window.gd), kept here for the host and tests
 var _snap_button: Button
+var _infer_button: Button
 var _eye_button: Button
 var _undo_button: Button
 var _redo_button: Button
@@ -259,6 +261,14 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		snap_toggled.emit(on))
 	view_row.add_child(_snap_button)
+	_infer_button = _utility("infer", "Infer", true)
+	_infer_button.set_pressed_no_signal(true)
+	_infer_button.tooltip_text = "Infer: add horizontal, parallel, tangent and the like by itself while you draw"
+	_infer_button.toggled.connect(func(on: bool) -> void:
+		feedback.emit("press")
+		_infer_button.icon = UiIcons.texture("infer" if on else "infer_off", 28) # broken link when off
+		infer_toggled.emit(on))
+	view_row.add_child(_infer_button)
 	_eye_button = _utility("eye", "Visibility", true)
 	_eye_button.toggled.connect(func(on: bool) -> void:
 		feedback.emit("press")
@@ -354,6 +364,7 @@ func _tint_glyphs() -> void:
 	_tint(_reset_button, tokens.warn)
 	_tint(_lock_button, tokens.warn)
 	_tint(_snap_button, tokens.accent)
+	_tint(_infer_button, tokens.accent)
 	_tint(_eye_button, tokens.accent)
 	_tint(_fit_button, tokens.accent)
 	_tint(_return_button, VIOLET)
@@ -633,6 +644,19 @@ func set_engaged(on: bool) -> void:
 
 func set_snap(on: bool) -> void:
 	_snap_button.set_pressed_no_signal(on)
+
+
+func set_infer(on: bool) -> void:
+	_infer_button.set_pressed_no_signal(on)
+	_infer_button.icon = UiIcons.texture("infer" if on else "infer_off", 28)
+
+
+func infer_on() -> bool:
+	return _infer_button.button_pressed
+
+
+func infer_button() -> Button:
+	return _infer_button
 
 
 func set_eye(on: bool) -> void:
