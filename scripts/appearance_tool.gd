@@ -177,6 +177,11 @@ func patterns_of(pid: String) -> Array:
 	return _patterns.get(pid, [])
 
 
+func all_patterns() -> Dictionary:
+	## Part id -> its component pattern rows, as far as they have been fetched (group_index.gd names pattern copies from them; no request is made for a Part not here).
+	return _patterns
+
+
 # --- which node is which -------------------------------------------------------------------------------------------
 
 static func root_of(node: Node, world_root: String) -> String:

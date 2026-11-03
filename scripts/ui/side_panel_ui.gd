@@ -118,7 +118,7 @@ func _signature_of(title: String, rows: Array, empty_text: String) -> String:
 		var labels := []
 		for a in row.get("actions", []):
 			labels.append([str(a.get("label", "")), bool(a.get("danger", false))])
-		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), labels])
+		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), bool(row.get("broken", false)), labels])
 	return JSON.stringify([title, empty_text, plain])
 
 
@@ -132,6 +132,8 @@ func _build_row(row: Dictionary) -> Control:
 	var title := Label.new()
 	title.text = str(row.get("title", ""))
 	title.clip_text = true
+	if bool(row.get("broken", false)): # a broken mate: the name itself in the error colour (a row's "error" state colours only its subtitle)
+		title.add_theme_color_override("font_color", tokens.danger)
 	inner.add_child(title)
 	var subtitle := str(row.get("subtitle", ""))
 	if subtitle != "":

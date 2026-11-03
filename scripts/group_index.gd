@@ -46,7 +46,7 @@ static func _walk(rows_by_part: Dictionary, part_names: Dictionary, part_id: Str
 		_walk(rows_by_part, part_names, child, part_id, id, path + [id], parts + [child], names + [label], ancestors + [child], out, depth + 1, bool(row.get("hidden", false)))
 
 
-static func assign(nodes: Array, entries: Array, root_part_id: String, include_hidden: bool = false) -> int:
+static func assign(nodes: Array, entries: Array, root_part_id: String, include_hidden: bool = false, patterns_by_part: Dictionary = {}) -> int:
 	## Lines the nodes (in glb order) up with the replayed walk and tags the ones that match. A node is matched to the next entry, at or after the last
 	## match, with its (owner Part, occurrence id); entries a node skips over are occurrences the mesh left out (hidden). Returns how many were tagged.
 	if not include_hidden:
@@ -61,7 +61,7 @@ static func assign(nodes: Array, entries: Array, root_part_id: String, include_h
 			continue
 		_clear(node)
 		if str(node.get_meta("instance_path", "")).find(PATTERN_SEGMENT) >= 0:
-			if _tag_pattern_copy(node, by_path, root_part_id):
+			if _tag_pattern_copy(node, by_path, root_part_id, patterns_by_part):
 				tagged += 1 # (a copy's empty occurrence id would otherwise match the root's own content)
 			continue
 		var owner := str(node.get_meta("owner_part_id", ""))
@@ -84,10 +84,11 @@ static func assign(nodes: Array, entries: Array, root_part_id: String, include_h
 	return tagged
 
 
-static func _tag_pattern_copy(node: Node, by_path: Dictionary, root_part_id: String) -> bool:
+static func _tag_pattern_copy(node: Node, by_path: Dictionary, root_part_id: String, patterns_by_part: Dictionary = {}) -> bool:
 	## A component pattern's copy carries no occurrence id, but a backend with the Appearance tool names it by its full path
 	## (`instance_path`, a `<source>#pattern:<pattern>:<index>` segment): it sits where its source does, so it takes the source's
-	## Parts and names (the copy's own segment labelled "<name> (copy <index>)"). Returns false if it can't be placed.
+	## Parts and names (the copy's own segment labelled like the flat app: "<name> [<pattern name> #<index + 1>]", or "<name> (copy <index>)" when the
+	## owning Part's pattern list is not at hand). Returns false if it can't be placed.
 	var instance_path := str(node.get_meta("instance_path", ""))
 	if instance_path.find(PATTERN_SEGMENT) < 0:
 		return false
@@ -100,12 +101,41 @@ static func _tag_pattern_copy(node: Node, by_path: Dictionary, root_part_id: Str
 	for i in path.size():
 		var segment := str(path[i])
 		if i < names.size() and segment.find(PATTERN_SEGMENT) >= 0:
-			names[i] = "%s (copy %s)" % [names[i], segment.get_slice(":", segment.get_slice_count(":") - 1)]
+			var owner := root_part_id if i == 0 else str((entry["parts"] as Array)[i - 1])
+			names[i] = copy_label(str(names[i]), segment, patterns_by_part.get(owner, []))
 	node.set_meta("group_path", path)
 	node.set_meta("group_parts", (entry["parts"] as Array).duplicate())
 	node.set_meta("group_names", names)
 	node.set_meta("group_root", root_part_id)
 	return true
+
+
+static func pattern_display_name(patterns: Array, pattern_id: String) -> String:
+	## The flat app's componentPatternDisplayName: "Linear N" / "Circular N", N counting the patterns of that type in the Part's list up to this one.
+	## "" when the pattern is not in the list.
+	var counts := {}
+	for p in patterns:
+		if not (p is Dictionary):
+			continue
+		var type := str(p.get("pattern_type", ""))
+		counts[type] = int(counts.get(type, 0)) + 1
+		if str(p.get("id", "")) == pattern_id:
+			var label := "Linear" if type == "linear" else ("Circular" if type == "circular" else type)
+			return "%s %d" % [label, int(counts[type])]
+	return ""
+
+
+static func copy_label(source_name: String, segment: String, patterns: Array) -> String:
+	## A copy's label: "<source name> [<pattern name> #<index + 1>]" like the flat app's occurrencePathDisplayName (copy indices are 1-based in the
+	## segment, the app shows index + 1: the source is #1). Without a pattern list that names the pattern: "<name> (copy <index>)", the old label.
+	var at := segment.find(PATTERN_SEGMENT)
+	var rest := segment.substr(at + PATTERN_SEGMENT.length()) if at >= 0 else ""
+	var colon := rest.rfind(":")
+	var index_text := rest.substr(colon + 1) if colon >= 0 else ""
+	var pattern_name := pattern_display_name(patterns, rest.substr(0, colon)) if colon >= 0 else ""
+	if pattern_name == "" or not index_text.is_valid_int():
+		return "%s (copy %s)" % [source_name, segment.get_slice(":", segment.get_slice_count(":") - 1)]
+	return "%s [%s #%d]" % [source_name, pattern_name, int(index_text) + 1]
 
 
 static func base_segment(segment: String) -> String:
@@ -119,8 +149,10 @@ static func _clear(node: Node) -> void:
 			node.remove_meta(key)
 
 
-static func index(api_edit, root_part_id: String, nodes: Array) -> int:
+static func index(api_edit, root_part_id: String, nodes: Array, patterns_by_part: Dictionary = {}) -> int:
 	## Fetches the occurrence rows of the root and every Part below it (cached by `api_edit`, a RoomEdit), replays the walk and tags `nodes`. A coroutine.
+	## `patterns_by_part` (Part id -> its component pattern rows, what the Appearance tool already fetched) names the copies like the flat app does;
+	## a Part with no list there keeps the plain "<name> (copy <index>)" label: no request is made for it.
 	if api_edit == null or root_part_id == "" or nodes.is_empty():
 		return 0
 	var rows_by_part := {}
@@ -140,7 +172,7 @@ static func index(api_edit, root_part_id: String, nodes: Array) -> int:
 	var names := {}
 	for pid in seen:
 		names[pid] = await api_edit.part_name(pid)
-	return assign(nodes, replay(rows_by_part, root_part_id, names), root_part_id, bool(api_edit.mesh_include_hidden))
+	return assign(nodes, replay(rows_by_part, root_part_id, names), root_part_id, bool(api_edit.mesh_include_hidden), patterns_by_part)
 
 
 # --- levels ---

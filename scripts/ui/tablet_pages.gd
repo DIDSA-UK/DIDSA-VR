@@ -953,10 +953,15 @@ func _mates_rows() -> Array:
 		if is_limit_mate:
 			actions.append({"label": "Range", "callback": _on_edit_limit_range.bind(mate_id, type_str, mate.get("limit_min"), mate.get("limit_max"))})
 		actions.append({"label": "Delete", "danger": true, "confirm": true, "callback": _on_delete_mate_pressed.bind(mate_id)})
+		# A mate the backend computes as broken (its residual at the stored poses is above tolerance, a limit is outside its range, or a reference
+		# no longer resolves - e.g. a pattern edit its part could not follow): "Broken" after the name, in the theme's error colour.
+		var broken: bool = _MatesTool.is_broken(mate)
+		if broken:
+			notes.push_front("can't be satisfied")
 		rows.append({
 			"id": mate_id,
-			"title": "%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else ""],
-			"subtitle": ", ".join(notes), "state": "normal",
+			"title": "%s%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else "", " - Broken" if broken else ""],
+			"subtitle": ", ".join(notes), "state": "error" if broken else "normal", "broken": broken,
 			"actions": actions,
 		})
 	return rows

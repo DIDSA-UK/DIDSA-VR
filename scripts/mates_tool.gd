@@ -57,6 +57,8 @@ signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved,
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const COPY_UNIT_SCALE := 1.0 ## pattern-copy nodes sit in the backend's millimetres like every placed part (assembly_root's scale is above them): the glb's own units, no spawn_scale (see _apply_solved_transform)
+const GroupIndex := preload("res://scripts/group_index.gd") ## base_segment: a pattern copy's segment folds to its source (mate_ref_top)
 const Se3 := preload("res://scripts/motion/se3.gd")
 const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
@@ -363,6 +365,10 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	if not active or _picks.size() >= pick_target():
 		return
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
+	if not occ_ref.is_empty() and str(occ_ref.get("occurrence_id", "")) == "":
+		var copy_ref := copy_occurrence_ref(part)
+		if not copy_ref.is_empty():
+			occ_ref = copy_ref # a pattern copy: mated by its own segment (the backend lets its source's pose drive it)
 	var subshape := MeshIdentity.subshape_ref_for_hit(part, face_index)
 	var kind := "face"
 	if not subshape.is_empty() and not entity.is_empty() and str(entity.get("kind", "face")) != "face":
@@ -427,6 +433,29 @@ static func width_rejection(picks: Array, occ_ref: Dictionary, subshape: Diction
 	return ""
 
 
+static func is_broken(mate: Dictionary) -> bool:
+	## The backend's computed mate status (`MateResponse.status`, "ok" | "broken"; a suppressed mate is always "ok"). An older backend sends none: not broken.
+	return str(mate.get("status", "ok")) == "broken" and not bool(mate.get("suppressed", false))
+
+
+static func is_copy_id(occurrence_id: String) -> bool:
+	## A pattern copy's segment (`A#pattern:P:1`): it is a fixed function of its source's pose, so it is never driven, and `#` never goes in a URL.
+	return occurrence_id.contains(GroupIndex.PATTERN_SEGMENT)
+
+
+static func copy_occurrence_ref(part: Node3D) -> Dictionary:
+	## {owner_part_id, occurrence_id} for a node that is a pattern COPY (the glb gives it occurrence_id "" and an `instance_path` whose last segment is
+	## `<source>#pattern:<pattern>:<index>`, read in the node's owner Part): the copy's own segment, which the backend accepts in a mate. Empty for
+	## anything else (root content, an ordinary part, an older backend that wrote no instance_path).
+	if not is_instance_valid(part) or not part.has_meta("owner_part_id"):
+		return {}
+	var path := str(part.get_meta("instance_path", ""))
+	var last := path.get_slice("/", path.get_slice_count("/") - 1)
+	if not is_copy_id(last):
+		return {}
+	return {"owner_part_id": part.get_meta("owner_part_id"), "occurrence_id": last}
+
+
 func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 	## Pure, no network — "" means OK, else a user-facing rejection reason.
 	if occ_ref.is_empty():
@@ -443,6 +472,10 @@ func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:
 			return "Both parts must belong to the same assembly."
 		if first["occurrence_id"] == occ_ref["occurrence_id"]:
 			return "Pick two different parts, not the same one twice."
+		if is_copy_id(str(first["occurrence_id"])) and is_copy_id(str(occ_ref["occurrence_id"])):
+			return "Mate a pattern copy to an ordinary part, not to another copy."
+		if GroupIndex.base_segment(str(first["occurrence_id"])) == GroupIndex.base_segment(str(occ_ref["occurrence_id"])):
+			return "A pattern copy follows its source: pick a different part."
 	return ""
 
 
@@ -959,7 +992,7 @@ func _driven_for_picks() -> String:
 	var order := [0, 1, 2] if is_symmetric() else [2, 3, 0, 1]
 	for i in order:
 		var occ: String = _picks[i]["occurrence_id"]
-		if not bool(occurrences.get(occ, {}).get("fixed", false)):
+		if not is_copy_id(occ) and not bool(occurrences.get(occ, {}).get("fixed", false)):
 			return occ
 	return _picks[0]["occurrence_id"] if is_symmetric() else _picks[2]["occurrence_id"]
 
@@ -1093,6 +1126,10 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	## without this it solved from wherever the part used to be, not where you
 	## left it. A grounded (fixed) occurrence can't be the driven side — say so
 	## rather than letting the backend's 422 vanish.
+	if occurrence_id.contains("#") or occurrence_id.contains("/"):
+		# A pattern copy's `#` would start a URL fragment (the request would hit the wrong occurrence), and a path is no occurrence id.
+		push_error("MatesTool.solve_occurrence: not an occurrence id: %s" % occurrence_id)
+		return {"ok": false, "error": "can't solve %s: not a top-level occurrence" % occurrence_id}
 	if bool(occurrence_state(owner_part_id).get("occurrences", {}).get(occurrence_id, {}).get("fixed", false)):
 		return {"ok": false, "error": "that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	_busy = true
@@ -1153,6 +1190,9 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 		else:
 			problems.append(result["error"])
 	await _adopt_nested_poses(owner_part_id)
+	var copy_changes := await _copy_pose_changes(owner_part_id) # sub-assembly solves above moved parts whose copies stand elsewhere in the scope
+	if not copy_changes.is_empty():
+		_push_group_move("enforce mates (copies)", copy_changes)
 	if problems.is_empty():
 		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
 	else:
@@ -1319,6 +1359,15 @@ func return_parts(record_undo: bool = true) -> Dictionary:
 		var result: Dictionary = await solve_occurrence(str(item["owner"]), str(item["occ"]))
 		if not result["ok"]:
 			problems.append(result["error"])
+	if not solve.is_empty():
+		# solve_occurrence adopted each solve's poses (copies included); a last pass settles any copy a later solve moved again
+		var owners := {}
+		for item in solve:
+			owners[str(item["owner"])] = true
+		var copy_changes: Array = []
+		for owner in owners:
+			copy_changes.append_array(await _copy_pose_changes(str(owner)))
+		_push_group_move("return parts (copies)", copy_changes)
 	if problems.is_empty():
 		_report("Parts returned (%d moved back)." % arrangement.size() if not arrangement.is_empty() else "Mates enforced: nothing had moved.")
 	else:
@@ -1574,7 +1623,9 @@ func _walk_nested(part_id: String, ancestors: Array, rows_by_part: Dictionary) -
 static func mate_ref_top(occurrence_id: String) -> String:
 	## The top-level occurrence a mate reference moves. A reference into a sub-assembly is a `/`-joined path (`outer/inner`); the solver moves
 	## `outer` as a whole (the backend's mate_ref_tops), so that is the occurrence that is mated, and the one Enforce all solves.
-	return occurrence_id.get_slice("/", 0)
+	## A pattern copy's segment (`A#pattern:P:1`) folds to its source `A` (the backend's mate_ref_drivers): the copy is a fixed function of
+	## A's pose, so a mate on it is a mate on A, and `#` must never reach a URL.
+	return GroupIndex.base_segment(occurrence_id.get_slice("/", 0))
 
 
 static func mated_tops(mate_list: Array) -> Dictionary:
@@ -1753,7 +1804,11 @@ func toggle_fixed(part: Node3D) -> void:
 func _choose_driven(first_occ: String, second_occ: String) -> String:
 	## By convention the second pick is driven, unless it's grounded (a grounded
 	## occurrence can never be the driven side — the backend 422s it) and the
-	## first isn't.
+	## first isn't. A pattern copy is never driven either (it follows its source): the other pick is.
+	if is_copy_id(second_occ) and not is_copy_id(first_occ):
+		return first_occ
+	if is_copy_id(first_occ) and not is_copy_id(second_occ):
+		return second_occ
 	if bool(occurrences.get(second_occ, {}).get("fixed", false)) and not bool(occurrences.get(first_occ, {}).get("fixed", false)):
 		return first_occ
 	return second_occ
@@ -2404,10 +2459,60 @@ func _push_group_move(label: String, changes: Array) -> void:
 		true)
 
 
+static func copy_poses_from_instances(instances: Array, unit_scale: float = 1.0) -> Dictionary:
+	## Pure — `instance_path` -> Transform3D for every instance of an assembly-mesh answer that sits on a pattern copy: its `occurrence_path` has a
+	## `#pattern:` segment somewhere (the copy itself, a part nested inside a copied sub-assembly, a copy inside a sub-assembly). The path is joined
+	## with "/" like the node's `instance_path`; the pose is the instance's `world_transform` (the backend composes the whole chain), its translation
+	## times `unit_scale` (1 for a node in the backend's millimetres). Rows that are not shaped like an instance are ignored.
+	var out := {}
+	for instance in instances:
+		if not (instance is Dictionary) or not (instance.get("occurrence_path") is Array) or not (instance.get("world_transform") is Dictionary):
+			continue
+		var segments := PackedStringArray((instance["occurrence_path"] as Array).map(func(x) -> String: return str(x)))
+		var path := "/".join(segments)
+		if not path.contains(GroupIndex.PATTERN_SEGMENT):
+			continue
+		var pose := json_to_pose(instance["world_transform"])
+		out[path] = Transform3D(pose.basis, pose.origin * unit_scale)
+	return out
+
+
+func _copy_pose_changes(owner_part_id: String) -> Array:
+	## [{node, before, after}] for every loaded pattern-copy node of the scope rooted at `owner_part_id` that is not where the backend now puts it.
+	## A copy has no occurrence of its own, so `GET .../occurrences` never moves it; with a copy mate the backend moves a part along with the copy's source
+	## (the copy is a fixed function of it), and this is what keeps the copy on screen with its source. One lean request (`geometry=false`: poses only);
+	## none at all when the scope has no copy node. An older backend ignores the flag and sends the meshes too: slower, same answer.
+	var nodes: Array = []
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if node is Node3D and is_instance_valid(node) and str(node.get_meta("instance_path", "")).contains(GroupIndex.PATTERN_SEGMENT) and str(node.get_meta("group_root", "")) == owner_part_id:
+			nodes.append(node)
+	if nodes.is_empty():
+		return []
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/assembly-mesh?geometry=false" % owner_part_id, null)
+	if not result["ok"] or not (result["json"] is Dictionary):
+		return []
+	var poses := copy_poses_from_instances(result["json"].get("instances", []), COPY_UNIT_SCALE)
+	var changes: Array = []
+	for node in nodes:
+		if not is_instance_valid(node):
+			continue
+		var key := str(node.get_meta("instance_path", ""))
+		if not poses.has(key):
+			continue
+		var after: Transform3D = poses[key]
+		var before := _local_pose(node)
+		if before.is_equal_approx(after):
+			continue
+		node.transform = after
+		changes.append({"node": node, "before": before, "after": after})
+	return changes
+
+
 func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
 	## Reads the stored occurrence poses and moves every LOADED node that differs
 	## (what /solve just did to the driven part AND its followers) — one undo entry.
 	## Nodes with a pose write still in flight are left alone (their write wins).
+	## The copies of a patterned part follow in the same entry (`_copy_pose_changes`).
 	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner_part_id, null)
 	if not result["ok"] or not (result["json"] is Array):
 		return false
@@ -2426,6 +2531,7 @@ func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
 			continue
 		node.transform = after
 		changes.append({"node": node, "before": before, "after": after})
+	changes.append_array(await _copy_pose_changes(owner_part_id))
 	_push_group_move(label, changes)
 	return true
 

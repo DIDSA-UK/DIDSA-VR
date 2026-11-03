@@ -711,6 +711,11 @@ func open_keyboard_for(initial_text: String, on_confirm: Callable, options: Dict
 	_keyboard.open_for(initial_text, on_confirm, options)
 
 
+func appearance_patterns() -> Dictionary:
+	## The component pattern lists the Appearance tool has fetched (Part id -> rows), for naming pattern copies like the flat app; empty before it has any.
+	return _appearance_tool.all_patterns() if _appearance_tool != null else {}
+
+
 func current_root_part_id() -> String:
 	## The loaded assembly's own root Part id — every top-level Occurrence's
 	## own owner_part_id (see mesh_identity.gd) matches this, so it's what

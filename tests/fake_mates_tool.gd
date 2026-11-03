@@ -7,6 +7,7 @@ var doc_mates: Dictionary = {} ## Part id -> Array of {id, references: [{occurre
 var doc_names: Dictionary = {} ## Part id -> name
 var solve_moves: Dictionary = {} ## "part|occurrence" -> the transform json a /solve stores for it
 var solve_fails: Dictionary = {} ## "part|occurrence" -> the 422 detail a /solve answers with
+var doc_instances: Dictionary = {} ## Part id -> Array of assembly-mesh instance rows {occurrence_path, world_transform, ...} (what ?geometry=false answers)
 var calls: Array = [] ## [{method, path}] in order
 
 
@@ -30,6 +31,8 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 		return {"ok": true, "code": 200, "json": {"id": pid, "name": doc_names.get(pid, "Part 1")}, "error": ""}
 	if parts.size() == 3 and parts[2] == "occurrences" and method == HTTPClient.METHOD_GET:
 		return {"ok": true, "code": 200, "json": (doc_occurrences.get(pid, []) as Array).duplicate(true), "error": ""}
+	if parts.size() == 3 and parts[2] == "assembly-mesh" and method == HTTPClient.METHOD_GET:
+		return {"ok": true, "code": 200, "json": {"geometry": [], "instances": (doc_instances.get(pid, []) as Array).duplicate(true)}, "error": ""}
 	if parts.size() == 3 and parts[2] == "mates" and method == HTTPClient.METHOD_GET:
 		return {"ok": true, "code": 200, "json": (doc_mates.get(pid, []) as Array).duplicate(true), "error": ""}
 	if parts.size() == 5 and parts[2] == "occurrences" and parts[4] == "solve" and method == HTTPClient.METHOD_POST:
