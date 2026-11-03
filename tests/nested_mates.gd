@@ -116,4 +116,30 @@ func _initialize() -> void:
 	var problems: Array = outcome["problems"]
 	print("SMOKE a failing sub-assembly solve is reported with the sub-assembly's name, and the rest still run: ", not outcome["ok"] and problems.size() == 2 and str(problems[0]).contains("in sub-assembly Frame") and int(outcome["solved"]) == 1)
 	print("SMOKE ...a mate naming a part that isn't there says so: ", str(problems[1]).contains("isn't in the assembly") and str(problems[1]).contains("S/X/A"))
+	# --- mates on pattern copies fold to their source (a copy is a fixed function of its source's pose; V1 of pattern-followers-and-dissolve-plan)
+	var copy_mate := [{"id": "c1", "references": [{"occurrence_id": "B"}, {"occurrence_id": "A#pattern:P:1"}]}]
+	var copy_tops := FakeMates.mated_tops(copy_mate)
+	print("SMOKE a mate on a pattern copy marks its source mated, never the copy's id: ", copy_tops.has("A") and copy_tops.has("B") and copy_tops.size() == 2 and not copy_tops.has("A#pattern:P:1"))
+	var nested_copy := FakeMates.mated_tops([{"id": "c2", "references": [{"occurrence_id": "B"}, {"occurrence_id": "S/A#pattern:P:1"}]}])
+	print("SMOKE ...a nested copy (S/A#pattern:P:1) marks S: ", nested_copy.has("S") and not nested_copy.has("A") and nested_copy.size() == 2)
+	var copy_width := FakeMates.mated_tops([{"id": "c3", "references": [
+		{"occurrence_id": "TOP", "midplane": {"a": {"face_ref": {"index": 0}}, "b": {"face_ref": {"index": 1}}, "b_occurrence_id": "A#pattern:P:2"}},
+		{"occurrence_id": "FR#pattern:Q:1"}]}])
+	print("SMOKE ...a Width mate whose midplane.b_occurrence_id is a copy marks its source: ", copy_width.has("A") and copy_width.has("FR") and copy_width.has("TOP") and copy_width.size() == 3)
+	var mt2 = FakeMates.new()
+	holder.add_child(mt2)
+	await process_frame
+	mt2.configure_backend("http://fake", "key")
+	mt2.doc_names = {"R": "Root"}
+	mt2.doc_occurrences = {"R": [FakeMates.row("A", "PA"), FakeMates.row("B", "PB", false, [100.0, 0.0, 0.0])], "PA": [], "PB": []}
+	mt2.doc_mates = {"R": copy_mate}
+	await mt2.refresh_state("R")
+	print("SMOKE a source whose only mates are on its copies counts as mated (is the Enforce all / save-gate set): ", mt2._mated_ids.has("A") and not mt2._mated_ids.has("A#pattern:P:1"))
+	mt2.calls.clear()
+	var copy_outcome: Dictionary = await mt2.enforce_all("R")
+	var copy_solves: Array = mt2.solves()
+	print("SMOKE Enforce all with such a mate solves A and B and no request path contains a fragment: ", copy_outcome["ok"] and copy_solves.has("/parts/R/occurrences/A/solve") and copy_solves.has("/parts/R/occurrences/B/solve") and mt2.calls.filter(func(c: Dictionary) -> bool: return str(c["path"]).contains("#")).is_empty())
+	mt2.calls.clear()
+	var guarded: Dictionary = await mt2.solve_occurrence("R", "A#pattern:P:1")
+	print("SMOKE solve_occurrence refuses a pattern copy's id (or a path) without sending a request: ", not guarded["ok"] and mt2.calls.is_empty() and not (await mt2.solve_occurrence("R", "S/A"))["ok"] and mt2.calls.is_empty())
 	quit()

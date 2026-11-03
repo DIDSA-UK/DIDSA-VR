@@ -57,6 +57,7 @@ signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved,
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const GroupIndex := preload("res://scripts/group_index.gd") ## base_segment: a pattern copy's segment folds to its source (mate_ref_top)
 const Se3 := preload("res://scripts/motion/se3.gd")
 const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
@@ -1093,6 +1094,10 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	## without this it solved from wherever the part used to be, not where you
 	## left it. A grounded (fixed) occurrence can't be the driven side — say so
 	## rather than letting the backend's 422 vanish.
+	if occurrence_id.contains("#") or occurrence_id.contains("/"):
+		# A pattern copy's `#` would start a URL fragment (the request would hit the wrong occurrence), and a path is no occurrence id.
+		push_error("MatesTool.solve_occurrence: not an occurrence id: %s" % occurrence_id)
+		return {"ok": false, "error": "can't solve %s: not a top-level occurrence" % occurrence_id}
 	if bool(occurrence_state(owner_part_id).get("occurrences", {}).get(occurrence_id, {}).get("fixed", false)):
 		return {"ok": false, "error": "that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	_busy = true
@@ -1574,7 +1579,9 @@ func _walk_nested(part_id: String, ancestors: Array, rows_by_part: Dictionary) -
 static func mate_ref_top(occurrence_id: String) -> String:
 	## The top-level occurrence a mate reference moves. A reference into a sub-assembly is a `/`-joined path (`outer/inner`); the solver moves
 	## `outer` as a whole (the backend's mate_ref_tops), so that is the occurrence that is mated, and the one Enforce all solves.
-	return occurrence_id.get_slice("/", 0)
+	## A pattern copy's segment (`A#pattern:P:1`) folds to its source `A` (the backend's mate_ref_drivers): the copy is a fixed function of
+	## A's pose, so a mate on it is a mate on A, and `#` must never reach a URL.
+	return GroupIndex.base_segment(occurrence_id.get_slice("/", 0))
 
 
 static func mated_tops(mate_list: Array) -> Dictionary:
