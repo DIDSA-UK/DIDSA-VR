@@ -1,0 +1,341 @@
+{
+ "schema_version": 1,
+ "document": {
+  "id": "copy-doc",
+  "root_part_id": "da35e593-1e00-4e4c-bdf6-62d587f3ed72",
+  "parts": [
+   {
+    "id": "8f182991-6146-4f57-9497-dd959dbfd363",
+    "name": "Leaf",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "ea1cac8d-91de-438f-b235-cc57093a5ac8",
+      "sketch_id": "5789f79f-6a29-42b7-9426-c7cb36a83723",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "fcc7ba89-34b1-42aa-b9c0-d95835598779",
+      "sketch_feature_id": "ea1cac8d-91de-438f-b235-cc57093a5ac8",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "df7ee52c-ac3d-4dc5-a606-ca5379fced8f",
+    "name": "Mover",
+    "features": [
+     {
+      "type": "sketch",
+      "id": "d9d9df94-2482-4217-87ac-23219235d024",
+      "sketch_id": "6b55caf6-fb6c-45d5-8315-dd6849338886",
+      "plane_feature_id": null
+     },
+     {
+      "type": "extrude",
+      "id": "08d15711-565e-44cf-aa41-3f16ccb2b3fa",
+      "sketch_feature_id": "d9d9df94-2482-4217-87ac-23219235d024",
+      "extrude_type": "boss",
+      "start_distance": 0.0,
+      "end_distance": 10.0,
+      "target_body_ids": [],
+      "profile_refs": [],
+      "thickness": null,
+      "thickness_direction": "outward",
+      "draft_angle": null,
+      "draft_outward": true
+     }
+    ],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [],
+    "mates": [],
+    "component_patterns": []
+   },
+   {
+    "id": "da35e593-1e00-4e4c-bdf6-62d587f3ed72",
+    "name": "Top",
+    "features": [],
+    "part_number": null,
+    "description": null,
+    "revision": null,
+    "remarks": null,
+    "supplier": null,
+    "supplier_part_number": null,
+    "default_material": null,
+    "body_material_assignments": {},
+    "occurrences": [
+     {
+      "id": "src",
+      "external_ref": "parts/8f182991-6146-4f57-9497-dd959dbfd363.didsa",
+      "resolved_part_id": "8f182991-6146-4f57-9497-dd959dbfd363",
+      "name_override": null,
+      "transform": {
+       "translation": [
+        1.6244283039053518e-11,
+        4.06107108326321e-11,
+        489.9810491609918
+       ],
+       "rotation_axis": [
+        0.9284766909298222,
+        -0.37139067624269645,
+        0.0
+       ],
+       "rotation_angle_degrees": 0.0020157637535452083
+      },
+      "suppressed": false,
+      "hidden": false,
+      "fixed": false,
+      "color": null,
+      "ref_part_id": "8f182991-6146-4f57-9497-dd959dbfd363"
+     },
+     {
+      "id": "mover",
+      "external_ref": "parts/df7ee52c-ac3d-4dc5-a606-ca5379fced8f.didsa",
+      "resolved_part_id": "df7ee52c-ac3d-4dc5-a606-ca5379fced8f",
+      "name_override": null,
+      "transform": {
+       "translation": [
+        500.0,
+        500.0,
+        499.9999951001895
+       ],
+       "rotation_axis": [
+        0.9284766908779796,
+        -0.3713906763723031,
+        0.0
+       ],
+       "rotation_angle_degrees": 0.002015763753819566
+      },
+      "suppressed": false,
+      "hidden": false,
+      "fixed": false,
+      "color": null,
+      "ref_part_id": "df7ee52c-ac3d-4dc5-a606-ca5379fced8f"
+     }
+    ],
+    "mates": [
+     {
+      "id": "54711fb1-44d2-4dce-bb12-ccfebe4eb0b6",
+      "type": "coincident",
+      "references": [
+       {
+        "occurrence_id": "mover",
+        "subshape_ref": {
+         "body_id": "08d15711-565e-44cf-aa41-3f16ccb2b3fa",
+         "shape_type": "face",
+         "index": 4
+        },
+        "plane_ref": null,
+        "point_ref": null
+       },
+       {
+        "occurrence_id": "src#pattern:af772bd0-2c3c-4569-94df-bafc5a90c3ce:1",
+        "subshape_ref": {
+         "body_id": "fcc7ba89-34b1-42aa-b9c0-d95835598779",
+         "shape_type": "face",
+         "index": 5
+        },
+        "plane_ref": null,
+        "point_ref": null
+       }
+      ],
+      "value": null,
+      "flipped": false,
+      "suppressed": false,
+      "allow_rotation": true,
+      "alignment": "anti_aligned",
+      "secondary_flip": null,
+      "branch_source": "auto"
+     }
+    ],
+    "component_patterns": [
+     {
+      "id": "af772bd0-2c3c-4569-94df-bafc5a90c3ce",
+      "source_occurrence_ids": [
+       "src"
+      ],
+      "pattern_type": "linear",
+      "direction": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "count": 3,
+      "spacing": 300.0,
+      "reverse": false,
+      "direction_2": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "count_2": 1,
+      "spacing_2": 0.0,
+      "reverse_2": false,
+      "axis": null,
+      "count_angular": 1,
+      "angle_total": 360.0,
+      "reverse_angular": false,
+      "skip_indices": [],
+      "orient_with_rotation": true,
+      "suppressed": false
+     }
+    ]
+   }
+  ]
+ },
+ "sketches": [
+  {
+   "id": "5789f79f-6a29-42b7-9426-c7cb36a83723",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "19b9067d-24e8-47a9-9bfe-a1bab9114b08",
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "id": "476f439d-a7b9-491e-9c78-d525e501060c",
+     "x": 10.0,
+     "y": 0.0
+    },
+    {
+     "id": "6aa6a40a-72da-4c28-8fa9-78f97855cd89",
+     "x": 10.0,
+     "y": 10.0
+    },
+    {
+     "id": "32f91305-9621-4402-9cb3-69c70c02bfe9",
+     "x": 0.0,
+     "y": 10.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "line",
+     "id": "54aff795-9e89-491c-ac34-27c65eed8c61",
+     "construction": false,
+     "start_point_id": "19b9067d-24e8-47a9-9bfe-a1bab9114b08",
+     "end_point_id": "476f439d-a7b9-491e-9c78-d525e501060c"
+    },
+    {
+     "type": "line",
+     "id": "60a13b9a-f135-47bc-b5f7-8550e56c8bad",
+     "construction": false,
+     "start_point_id": "476f439d-a7b9-491e-9c78-d525e501060c",
+     "end_point_id": "6aa6a40a-72da-4c28-8fa9-78f97855cd89"
+    },
+    {
+     "type": "line",
+     "id": "50fcf089-c3e4-4b17-84d2-d70229f17679",
+     "construction": false,
+     "start_point_id": "6aa6a40a-72da-4c28-8fa9-78f97855cd89",
+     "end_point_id": "32f91305-9621-4402-9cb3-69c70c02bfe9"
+    },
+    {
+     "type": "line",
+     "id": "1b769554-3ded-48d0-8093-7d5ac7fba475",
+     "construction": false,
+     "start_point_id": "32f91305-9621-4402-9cb3-69c70c02bfe9",
+     "end_point_id": "19b9067d-24e8-47a9-9bfe-a1bab9114b08"
+    }
+   ],
+   "constraints": [],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  },
+  {
+   "id": "6b55caf6-fb6c-45d5-8315-dd6849338886",
+   "plane": "XY",
+   "origin_point_id": null,
+   "flip": false,
+   "rotation_quarter_turns": 0,
+   "points": [
+    {
+     "id": "ee416c79-a612-4908-8f22-fe5d380b09db",
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "id": "8e628c33-1fbd-4084-8888-b24a7fdd82d4",
+     "x": 10.0,
+     "y": 0.0
+    },
+    {
+     "id": "f7788770-930f-435c-8a37-c324db0438ee",
+     "x": 10.0,
+     "y": 10.0
+    },
+    {
+     "id": "e08dca56-04b0-4e3c-886f-c541fd6b418f",
+     "x": 0.0,
+     "y": 10.0
+    }
+   ],
+   "entities": [
+    {
+     "type": "line",
+     "id": "04bdef1d-435f-485e-8de8-3b36f38b8023",
+     "construction": false,
+     "start_point_id": "ee416c79-a612-4908-8f22-fe5d380b09db",
+     "end_point_id": "8e628c33-1fbd-4084-8888-b24a7fdd82d4"
+    },
+    {
+     "type": "line",
+     "id": "405725dd-4052-4844-90ce-1579b06f56ed",
+     "construction": false,
+     "start_point_id": "8e628c33-1fbd-4084-8888-b24a7fdd82d4",
+     "end_point_id": "f7788770-930f-435c-8a37-c324db0438ee"
+    },
+    {
+     "type": "line",
+     "id": "a581e098-93d2-4787-a6ac-86cf274f9257",
+     "construction": false,
+     "start_point_id": "f7788770-930f-435c-8a37-c324db0438ee",
+     "end_point_id": "e08dca56-04b0-4e3c-886f-c541fd6b418f"
+    },
+    {
+     "type": "line",
+     "id": "202c34fc-899d-4cb2-bbfb-9b74f970a4b4",
+     "construction": false,
+     "start_point_id": "e08dca56-04b0-4e3c-886f-c541fd6b418f",
+     "end_point_id": "ee416c79-a612-4908-8f22-fe5d380b09db"
+    }
+   ],
+   "constraints": [],
+   "external_references": [],
+   "pattern_instances": [],
+   "mirror_instances": []
+  }
+ ]
+}
