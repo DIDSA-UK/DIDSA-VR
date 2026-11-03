@@ -310,14 +310,14 @@ func index_world() -> void:
 	var e := edit_api()
 	if root == "" or e == null:
 		return
-	await GroupIndex.index(e, root, RoomRegistry.world_parts(get_tree()))
+	await GroupIndex.index(e, root, RoomRegistry.world_parts(get_tree()), _main.appearance_patterns() if _main != null and _main.has_method("appearance_patterns") else {})
 
 
 func index_room(room) -> void:
 	var e := edit_api()
 	if e == null or not is_instance_valid(room):
 		return
-	await GroupIndex.index(e, room.part_id, room.parts)
+	await GroupIndex.index(e, room.part_id, room.parts, _main.appearance_patterns() if _main != null and _main.has_method("appearance_patterns") else {})
 
 
 # --- world preview (world_preview.gd) ---

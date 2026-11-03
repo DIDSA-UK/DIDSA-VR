@@ -3,10 +3,14 @@ extends SceneTree
 ## V2: a copy node has no occurrence of its own, so adopting the stored poses after a solve never moved it. `copy_poses_from_instances` (pure) reads the
 ## copies' world poses out of an `assembly-mesh?geometry=false` answer; `_adopt_backend_poses` then moves every copy node of the scope in the SAME undo
 ## entry as the solved parts, asks for nothing when the scope has no copy node, and Enforce all settles the copies too.
+## V3: a copy can be picked for a mate (by its own segment), is never the driven side, and two copies (or a source and its copy) can't be mated;
+## a broken mate (the backend's computed status) reads "Broken" in the tablet's list; copies are named like the flat app.
 ## Run: "$GODOT" --headless --path . --script res://tests/pattern_followers.gd
 
 const FakeMates := preload("res://tests/fake_mates_tool.gd")
 const MatesTool := preload("res://scripts/mates_tool.gd")
+const GroupIndex := preload("res://scripts/group_index.gd")
+const TabletPages := preload("res://scripts/ui/tablet_pages.gd")
 
 
 func _instance(path: Array, x: float, y: float = 0.0, z: float = 0.0, angle: float = 0.0) -> Dictionary:
@@ -96,4 +100,90 @@ func _initialize() -> void:
 	print("SMOKE returning from the relaxed sandbox settles the copy as well: ", copy.position.is_equal_approx(Vector3(300, 0, 50)))
 	mt.set_relaxed(false)
 
+	# --- V3: picking a copy
+	var plain := Node3D.new()
+	plain.set_meta("owner_part_id", "R")
+	plain.set_meta("occurrence_id", "")
+	plain.set_meta("instance_path", "")
+	var root_content_ref := MatesTool.copy_occurrence_ref(plain)
+	print("SMOKE root content is not a copy (its pick is still refused): ", root_content_ref.is_empty())
+	var copy_ref := MatesTool.copy_occurrence_ref(copy)
+	print("SMOKE a copy node yields its own segment read in its owner Part: ", copy_ref == {"owner_part_id": "R", "occurrence_id": "A#pattern:P:1"})
+	var nested := _node(holder, "PS", "", "S/A#pattern:P:2", "R", Vector3.ZERO)
+	print("SMOKE a nested copy yields the last segment, in the Part that owns it: ", MatesTool.copy_occurrence_ref(nested) == {"owner_part_id": "PS", "occurrence_id": "A#pattern:P:2"})
+	print("SMOKE an ordinary placed part is not a copy: ", MatesTool.copy_occurrence_ref(a).is_empty())
+
+	var picker = FakeMates.new()
+	holder.add_child(picker)
+	await process_frame
+	picker.configure_backend("", "") # no backend: nothing is requested
+	picker.set_active(true)
+	picker.occurrences = {"A": {"fixed": false}, "B": {"fixed": false}}
+	var root_content := _node(holder, "R", "", "", "R", Vector3.ZERO)
+	root_content.name = "RootContent"
+	picker.try_pick(root_content, 0)
+	print("SMOKE picking true root content is refused with the same message: ", picker.status_text() == "Can't mate the assembly's own root content — pick a placed part.")
+	print("SMOKE a copy's occurrence reference is accepted by the pick validation (the face identity is the next check): ", picker._validate_pick(copy_ref, {"body_id": "b", "shape_type": "face", "index": 1}) == "")
+	picker._picks.append({"owner_part_id": "R", "occurrence_id": "A#pattern:P:1", "subshape_ref": {"body_id": "b", "shape_type": "face", "index": 1}, "label": "Copy", "part": copy, "face_index": 0, "entity": {}, "kind": "face"})
+	var second := {"owner_part_id": "R", "occurrence_id": "B"}
+	# a real pick through try_pick: a copy node with face identity, then an ordinary part
+	var pick_tool = FakeMates.new()
+	holder.add_child(pick_tool)
+	await process_frame
+	pick_tool.set_active(true)
+	pick_tool.occurrences = {"A": {"fixed": false}, "B": {"fixed": false}}
+	var face_copy := _node(holder, "R", "", "A#pattern:P:1", "R", Vector3.ZERO)
+	face_copy.set_meta("face_ids", [7, 8])
+	face_copy.set_meta("body_ids", ["leaf-body", "leaf-body"])
+	face_copy.name = "FaceCopy"
+	var face_b := _node(holder, "R", "B", "B", "R", Vector3.ZERO)
+	face_b.set_meta("face_ids", [3])
+	face_b.set_meta("body_ids", ["mover-body"])
+	face_b.name = "FaceB"
+	pick_tool.try_pick(face_copy, 1)
+	pick_tool.try_pick(face_b, 0)
+	var picked: Array = pick_tool._picks
+	print("SMOKE try_pick accepts a copy: its pick carries the copy's segment and the face the laser hit: ", picked.size() == 2 and picked[0]["occurrence_id"] == "A#pattern:P:1" and picked[0]["owner_part_id"] == "R" and picked[0]["subshape_ref"] == {"body_id": "leaf-body", "shape_type": "face", "index": 8} and not pick_tool.status_text().begins_with("Can't"))
+	var pick_body: Dictionary = pick_tool.build_create_payload()
+	print("SMOKE ...and builds the MateEntityRef the backend takes (copy first, the driven B second): ", pick_body["references"][0] == {"occurrence_id": "A#pattern:P:1", "subshape_ref": {"body_id": "leaf-body", "shape_type": "face", "index": 8}} and pick_body["references"][1]["occurrence_id"] == "B" and pick_tool._driven_for_picks() == "B")
+	print("SMOKE a copy and an ordinary part is a valid pair: ", picker._validate_pick(second, {"body_id": "b", "shape_type": "face", "index": 2}) == "")
+	print("SMOKE ...two copies, or a source with its own copy, are refused: ", picker._validate_pick({"owner_part_id": "R", "occurrence_id": "C#pattern:P:3"}, {"body_id": "b", "shape_type": "face", "index": 2}).contains("not to another copy") and picker._validate_pick({"owner_part_id": "R", "occurrence_id": "A"}, {"body_id": "b", "shape_type": "face", "index": 2}).contains("follows its source"))
+	print("SMOKE the driven side is never the copy, whichever pick it was: ", picker._choose_driven("A#pattern:P:1", "B") == "B" and picker._choose_driven("B", "A#pattern:P:1") == "B")
+	var payload_picks := [picker._picks[0], {"owner_part_id": "R", "occurrence_id": "B", "subshape_ref": {"body_id": "b", "shape_type": "face", "index": 2}, "label": "B", "part": b, "face_index": 0, "entity": {}, "kind": "face"}]
+	picker._picks.clear()
+	for pick in payload_picks:
+		picker._picks.append(pick)
+	var body: Dictionary = picker.build_create_payload()
+	print("SMOKE the create payload carries the copy's segment in its MateEntityRef and the driven id is B: ", body["references"][0]["occurrence_id"] == "A#pattern:P:1" and body["references"][0]["subshape_ref"] == {"body_id": "b", "shape_type": "face", "index": 1} and picker._driven_for_picks() == "B")
+
+	# --- V3: broken mates in the tablet's list
+	var pages := TabletPages.new()
+	pages._mates_tool = mt
+	mt.mates = [{"id": "ok1", "type": "coincident", "references": [], "status": "ok"},
+		{"id": "bad1", "type": "coincident", "references": [], "status": "broken"},
+		{"id": "old1", "type": "coincident", "references": []},
+		{"id": "sup1", "type": "coincident", "references": [], "status": "broken", "suppressed": true}]
+	var rows: Array = pages._mates_rows()
+	print("SMOKE a broken mate reads Broken after its name, in the error state, with the reason: ", rows[1]["title"] == "Coincident - Broken" and rows[1]["state"] == "error" and bool(rows[1]["broken"]) and str(rows[1]["subtitle"]).contains("can't be satisfied"))
+	print("SMOKE an ok mate, one from an older backend (no status) and a suppressed one are plain: ", rows[0]["title"] == "Coincident" and rows[0]["state"] == "normal" and rows[2]["title"] == "Coincident" and not bool(rows[2]["broken"]) and rows[3]["title"] == "Coincident" and rows[3]["state"] == "normal")
+	var panel_script := load("res://scripts/ui/side_panel_ui.gd")
+	var panel = panel_script.new()
+	print("SMOKE a broken row and a plain row differ in the list's signature (the row is rebuilt when the status changes): ", panel._signature_of("Mates", [rows[0]], "") != panel._signature_of("Mates", [rows[1]], ""))
+	panel.free()
+
+	# --- V3: copy names like the flat app
+	var patterns := [{"id": "p1", "pattern_type": "linear"}, {"id": "p2", "pattern_type": "circular"}, {"id": "p3", "pattern_type": "linear"}]
+	print("SMOKE pattern names count by type in list order (Linear 1, Circular 1, Linear 2): ", GroupIndex.pattern_display_name(patterns, "p1") == "Linear 1" and GroupIndex.pattern_display_name(patterns, "p2") == "Circular 1" and GroupIndex.pattern_display_name(patterns, "p3") == "Linear 2" and GroupIndex.pattern_display_name(patterns, "nope") == "")
+	print("SMOKE a copy is labelled <source> [<pattern> #<index + 1>]: ", GroupIndex.copy_label("Short Rail", "rail#pattern:p3:1", patterns) == "Short Rail [Linear 2 #2]" and GroupIndex.copy_label("Short Rail", "rail#pattern:p2:3", patterns) == "Short Rail [Circular 1 #4]")
+	print("SMOKE ...and keeps the old label when the pattern list is not at hand: ", GroupIndex.copy_label("Bolt", "bolt#pattern:p1:2", []) == "Bolt (copy 2)" and GroupIndex.copy_label("Bolt", "bolt#pattern:zzz:2", patterns) == "Bolt (copy 2)")
+	var tag_node := Node3D.new()
+	tag_node.set_meta("instance_path", "rail#pattern:p3:1")
+	tag_node.set_meta("owner_part_id", "R")
+	tag_node.set_meta("occurrence_id", "")
+	holder.add_child(tag_node)
+	var entries := [{"owner": "R", "occ": "", "path": [], "parts": [], "names": [], "part": "R", "hidden": false}, {"owner": "R", "occ": "rail", "path": ["rail"], "parts": ["PR"], "names": ["Short Rail"], "part": "PR", "hidden": false}]
+	GroupIndex.assign([tag_node], entries, "R", false, {"R": patterns})
+	print("SMOKE group_index.assign names a tagged copy from the owning Part's list: ", tag_node.get_meta("group_names", []) == ["Short Rail [Linear 2 #2]"])
+	GroupIndex.assign([tag_node], entries, "R", false, {})
+	print("SMOKE ...and without a list, the old label: ", tag_node.get_meta("group_names", []) == ["Short Rail (copy 1)"])
 	quit()
