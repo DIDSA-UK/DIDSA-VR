@@ -5,6 +5,9 @@ extends SceneTree
 ## A is moved 100 mm along z (the way a grip release does: the pose is on the node) and solved. Checks against the real thing: the mate marks A as the mated part
 ## (V1: the copy's id is never a part of a URL), the backend moves B by the same 100 mm (F1: B follows the copy), B's node adopts it, and the copy's node - which
 ## has no occurrence of its own - is put at A's pose plus the pattern step by the `?geometry=false` read (V2); Enforce all then leaves everything where it is.
+## S1 / S3 (DIDSA-CAD docs/pattern-followers-smoothness-plan.md; need the backend of that branch, so these lines only go green on CAD main once it is merged): the group's
+## `mate-motion` answer carries a version-7 constraint model (a follower side) that `local_retraction.gd` accepts, and a real drag of A shows the copy's node one pattern
+## step from A on EVERY frame, then the commit leaves it where the server puts it and one undo puts A, B and the copy back.
 ## Run: DIDSA_NO_LANDING=1 "$GODOT" --headless --path . --script res://tests/e2e_pattern_follow.gd  (needs secrets.cfg and a running backend from DIDSA-CAD with F1)
 
 var main
@@ -90,5 +93,49 @@ func _initialize() -> void:
 	print("SMOKE the copy's node follows A in the same step (V2): it stands at A's pose plus the pattern step (", copy_now - a.transform.origin, "): ", (copy_now - (a.transform.origin + step)).length() < 0.2)
 	var outcome: Dictionary = await mt.enforce_all(owner_id)
 	print("SMOKE Enforce all is happy, and nothing moves again: ", outcome["ok"] and (copy.transform.origin - (a.transform.origin + step)).length() < 0.2 and (b.transform.origin - (start_b + Vector3(0, 0, 100.0))).length() < 0.2)
+	# --- S1: the follower group has a constraint model, version 7, and VR's parser takes it
+	var motion: Dictionary = await mt._api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/mover/mate-motion" % owner_id, {"transform": null, "commit": false})
+	var model = motion["json"].get("constraint_model") if motion["json"] is Dictionary else null
+	var has_follow := false
+	if model is Dictionary:
+		for m in model["mates"]:
+			if m["a"].has("follow") or m["b"].has("follow"):
+				has_follow = true
+	print("SMOKE the follower group's mate-motion answer carries a version-7 constraint_model with a follower side (S1): ", model is Dictionary and int(model["version"]) == 7 and has_follow)
+	print("SMOKE ...and local_retraction.gd's try_parse accepts it (a version it did not know would have switched its limit stops off): ", model is Dictionary and mt.LocalRetraction.try_parse(model) != null)
+
+	# --- S3: a real drag of A moves the copy's node with it on every frame; the commit settles it; one undo puts everything back
+	var before_a: Vector3 = a.transform.origin
+	var before_b: Vector3 = b.transform.origin
+	var before_copy: Vector3 = copy.transform.origin
+	var undo_before: int = mt.command_stack.history_labels().size() if mt.command_stack != null else 0
+	var grab := a.global_transform
+	var frames_following := 0
+	var frames := 0
+	for i in 240: # ask for the first anchor and the scope's patterns (a real round trip each)
+		a.global_transform = mt.constrain_drag(a, Transform3D(grab.basis, grab.origin))
+		await process_frame
+		if mt.drag_model_ready(a) and mt._pattern_cache.has(owner_id):
+			break
+	var ready: bool = mt.drag_model_ready(a) and mt._pattern_cache.has(owner_id)
+	print("SMOKE the real drag got its first anchor and the scope's component patterns: ", ready)
+	if ready:
+		for i in 30:
+			var wish := Transform3D(grab.basis, grab.origin + Vector3(0.001 * 5.0 * (i + 1), 0, 0)) # global units: the assembly root scales mm to m
+			a.global_transform = mt.constrain_drag(a, wish)
+			frames += 1
+			if (copy.transform.origin - (a.transform.origin + step)).length() < 0.2:
+				frames_following += 1
+			await process_frame
+	print("SMOKE ...and on every frame of the drag the copy's node stood one pattern step from A (S3): ", ready and frames > 0 and frames_following == frames, " ", frames_following, "/", frames)
+	mt.end_drag(a)
+	var settled: bool = await wait_for(func() -> bool: return not mt._drag.has(a), 1800)
+	var stored_now := await stored()
+	var server_copy_ok: bool = (copy.transform.origin - (a.transform.origin + step)).length() < 0.2 and (b.transform.origin - Vector3(stored_now["mover"])).length() < 0.2
+	print("SMOKE the commit finished and A, B and the copy's node stand where the backend stored them: ", settled and server_copy_ok, " ", (copy.transform.origin - (a.transform.origin + step)).length())
+	if mt.command_stack != null:
+		print("SMOKE the drag is ONE undo entry (A, B and the copy together): ", mt.command_stack.history_labels().size() == undo_before + 1)
+		mt.command_stack.undo()
+		print("SMOKE ...and undo puts A, B and the copy back where the grab found them: ", (a.transform.origin - before_a).length() < 0.2 and (b.transform.origin - before_b).length() < 0.2 and (copy.transform.origin - before_copy).length() < 0.2)
 	await process_frame
 	quit()

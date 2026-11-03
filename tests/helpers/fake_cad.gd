@@ -44,6 +44,8 @@ var face_axes := {} ## "body:face index" -> Vector2: where a round face's axis i
 var reference_dimensions := {} ## id -> {id, kind, refs: [{type, id}]}: the reference (driven) dimensions POST .../reference-dimensions made (value computed on read, like the real backend)
 var face_made := {} ## "body:face index" -> the answer that route gave (idempotent per face, like the real one)
 var coarse_bodies: Array = [] ## what POST .../coarse-preview answers with: [{body_id, source, mesh: {vertices, normals, triangle_indices, ...}}]
+var merge_refusal: Variant = null ## a Dictionary: POST .../points/merge answers 400 with {"detail": that} (the backend's structured refusal)
+var restores := 0 ## how many PUT .../state the fake has taken
 var split_trim_fails := false ## POST .../split-trim answers 422 (the client then falls back to trim)
 var trim_fails := false ## POST .../trim (and a circle / arc trim) answers 422
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
@@ -75,8 +77,12 @@ func next_id(prefix: String) -> String:
 
 
 func handle(method: int, path: String, body) -> Dictionary:
-	var verb: String = {HTTPClient.METHOD_POST: "POST", HTTPClient.METHOD_GET: "GET", HTTPClient.METHOD_DELETE: "DELETE", HTTPClient.METHOD_PATCH: "PATCH"}[method]
+	var verb: String = {HTTPClient.METHOD_POST: "POST", HTTPClient.METHOD_GET: "GET", HTTPClient.METHOD_DELETE: "DELETE", HTTPClient.METHOD_PATCH: "PATCH", HTTPClient.METHOD_PUT: "PUT"}[method]
 	calls.append([verb + " " + path, body])
+	if verb == "POST" and path.ends_with("/points/merge"):
+		return _merge_points(body["point_ids"])
+	if verb == "PUT" and path.ends_with("/state"):
+		return _restore_state(body)
 	if fail != "" and path.contains(fail) and (verb == "POST" or verb == "PATCH"):
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
 	if verb == "GET" and path.ends_with("/features"):
@@ -380,6 +386,96 @@ func handle(method: int, path: String, body) -> Dictionary:
 		reference_dimensions[rid] = {"id": rid, "kind": body["kind"], "refs": (body["refs"] as Array).duplicate(true)}
 		return {"ok": true, "code": 201, "json": _reference_dimension_row(reference_dimensions[rid]), "error": ""}
 	return {"ok": false, "code": 404, "json": null, "error": "unrouted " + path}
+
+func _snapshot() -> String:
+	## The sketch as the JSON TEXT a real merge returns as `before` (integers stay integers: the text is sent back unchanged).
+	var pts := {}
+	for id in points:
+		pts[id] = [points[id].x, points[id].y]
+	return JSON.stringify({"id": "sk1", "rotation_quarter_turns": 0, "flip": false, "points": pts, "entities": entities, "constraints": cons})
+
+
+func _restore_state(body) -> Dictionary:
+	restores += 1
+	var data: Variant = JSON.parse_string(str(body))
+	if not (data is Dictionary):
+		return {"ok": false, "code": 422, "json": {"detail": "Invalid sketch file: not an object"}, "error": "Invalid sketch file"}
+	points.clear()
+	for id in data["points"]:
+		points[id] = Vector2(float(data["points"][id][0]), float(data["points"][id][1]))
+	entities = data["entities"]
+	cons = data["constraints"]
+	return _ok({"id": "sk1"})
+
+
+func _ids_in(d: Dictionary) -> Array:
+	var out: Array = []
+	for key in d:
+		if key == "id" or key == "type":
+			continue
+		var value = d[key]
+		if value is String:
+			out.append(value)
+		elif value is Array:
+			for item in value:
+				if item is String:
+					out.append(item)
+	return out
+
+
+func _merge_points(ids: Array) -> Dictionary:
+	## The real route's behaviour on this fake's model: the point kept is a pinned one, else the one with the most constraints, else the first; the others'
+	## references move to it (every string in an entity or constraint); a coincident between the same point twice goes; two points of one entity are refused.
+	if merge_refusal != null:
+		return {"ok": false, "code": 400, "json": {"detail": merge_refusal}, "error": "merge_refused"}
+	for e in entities:
+		var inside: Array = _ids_in(e).filter(func(i): return ids.has(i))
+		var seen := {}
+		for i in inside:
+			seen[i] = true
+		if seen.size() >= 2:
+			return {"ok": false, "code": 400, "json": {"detail": {"type": "merge_refused", "reason": "same_entity", "message": "These points both belong to the same %s: merging them would collapse it." % e["type"], "ids": [e["id"]]}}, "error": "merge_refused"}
+	var order: Array = ids.duplicate()
+	var count := func(pid: String) -> int:
+		var n := 0
+		for cid in cons:
+			if cons[cid].get("provisional", false) == true:
+				continue
+			if cons[cid].get("type", "") == "coincident" and ids.has(cons[cid].get("point_a_id", "")) and ids.has(cons[cid].get("point_b_id", "")):
+				continue
+			if _ids_in(cons[cid]).has(pid):
+				n += 1
+		return n
+	order.sort_custom(func(a, b) -> bool:
+		if pinned.has(a) != pinned.has(b):
+			return pinned.has(a)
+		var ca: int = count.call(a)
+		var cb: int = count.call(b)
+		if ca != cb:
+			return ca > cb
+		return ids.find(a) < ids.find(b))
+	var keep: String = order[0]
+	var before := _snapshot()
+	var dropped: Array = []
+	for group in [entities, cons.values()]:
+		for item in group:
+			for key in item.keys():
+				if key == "id" or key == "type":
+					continue
+				var value = item[key]
+				if value is String and ids.has(value) and value != keep:
+					item[key] = keep
+				elif value is Array:
+					item[key] = value.map(func(v): return keep if v is String and ids.has(v) and v != keep else v)
+	for cid in cons.keys():
+		var c: Dictionary = cons[cid]
+		if c.get("type", "") == "coincident" and c.get("point_a_id", "") == c.get("point_b_id", ""):
+			cons.erase(cid)
+			dropped.append(cid)
+	for pid in order.slice(1):
+		points.erase(pid)
+	return _ok({"kept_id": keep, "absorbed_ids": order.slice(1), "dropped_constraint_ids": dropped, "dropped_reference_dimension_ids": [], "converged": true, "before": before})
+
 
 func _reference_dimension_rows() -> Array:
 	return reference_dimensions.values().map(func(d): return _reference_dimension_row(d))

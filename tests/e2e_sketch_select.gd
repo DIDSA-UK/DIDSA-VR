@@ -1,7 +1,7 @@
 extends SceneTree
 ## Talks to a real backend, same caveat as the other e2e_*.gd tests (LOCAL ONLY, never against a shared backend): the design table's
 ## sketch origin point and the Select tool's contextual menu, against the REAL constraint schemas. A new part, a sketch on the XY
-## plane; the sketch's origin is read (the backend makes it lazily) and is a real point; a line started on the origin shares it; every
+## plane; the sketch's origin is read (the backend makes it lazily) and is a real point; a line started on the origin gets a point of its own held on it; every
 ## menu option is applied to a real selection (horizontal, vertical, parallel, perpendicular, equal length, collinear, midpoint,
 ## point on line / curve, concentric, equal radius, tangent, curve tangent, fixed, a distance from the origin), construction is
 ## toggled and read back, and Delete removes entities (never the origin).
@@ -124,10 +124,17 @@ func _initialize() -> void:
 	await s.tap({"uv": Vector2.ZERO, "id": s.origin_id})
 	await s.tap({"uv": Vector2(40, 3)})
 	var base: String = ""
+	var base_start: String = ""
 	for id in s.lines:
-		if s.lines[id]["a"] == s.origin_id:
+		if s.points[s.lines[id]["a"]] == Vector2.ZERO and s.lines[id]["a"] != s.origin_id:
 			base = id
-	print("SMOKE a line started on the origin shares it as its start point (no second point at 0, 0): ", base != "" and s.points.values().filter(func(p): return p == Vector2.ZERO).size() == 1)
+			base_start = s.lines[id]["a"]
+	var held_on_origin := false
+	for cid in s.constraints:
+		var c: Dictionary = s.constraints[cid]
+		if str(c.get("type", "")) == "coincident" and [str(c.get("point_a_id", "")), str(c.get("point_b_id", ""))].has(base_start) and [str(c.get("point_a_id", "")), str(c.get("point_b_id", ""))].has(s.origin_id):
+			held_on_origin = true
+	print("SMOKE a line started on the origin is NOT welded to it: its start is a point of its own at (0, 0), held on the origin by a coincident constraint: ", base != "" and held_on_origin and s.converged)
 	s.finish_chain()
 
 	var l2: String = await line(Vector2(0, 30), Vector2(45, 33))

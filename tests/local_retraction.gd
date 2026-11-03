@@ -43,6 +43,10 @@ func _poses_in(list: Array) -> Array:
 	return list.map(func(p): return Se3.pose_from_json(p))
 
 
+func follow_cases_limit(cases: Array) -> Dictionary:
+	return cases.filter(func(x): return x["id"] == "local-follow-limit-stops-at-min")[0]["input"]
+
+
 func _initialize() -> void:
 	var doc = JSON.parse_string(FileAccess.get_file_as_string(FIXTURE))
 	var tol := float(doc["tolerance"])
@@ -62,6 +66,8 @@ func _initialize() -> void:
 	_num(Local.MODEL_VERSION, float(c["local_model_version"]), "const local_model_version", 0.5)
 	if c.has("local_coupler_model_version"):
 		_num(Local.COUPLER_MODEL_VERSION, float(c["local_coupler_model_version"]), "const local_coupler_model_version", 0.5)
+	if c.has("local_follow_model_version"):
+		_num(Local.FOLLOW_MODEL_VERSION, float(c["local_follow_model_version"]), "const local_follow_model_version", 0.5)
 	if c.has("local_limit_model_version"):
 		_num(Local.LIMIT_MODEL_VERSION, float(c["local_limit_model_version"]), "const local_limit_model_version", 0.5)
 		_num(Local.LIMIT_ROUNDS, float(c["local_limit_rounds"]), "const local_limit_rounds", 0.5)
@@ -144,7 +150,7 @@ func _initialize() -> void:
 	# a row cap below the model's own count refuses it; a larger one (the limit read of a big group) takes it
 	print("SMOKE try_parse honours its row cap: ", Local.try_parse(base, 8, base_rows - 1) == null and Local.try_parse(base, 8, base_rows) != null, " rows ", base_rows)
 	var bad_version: Dictionary = base.duplicate(true)
-	bad_version["version"] = Local.LIMIT_MODEL_VERSION + 1
+	bad_version["version"] = Local.FOLLOW_MODEL_VERSION + 1 # (was LIMIT_MODEL_VERSION + 1 before version 7 existed)
 	var old_version: Dictionary = base.duplicate(true)
 	old_version["version"] = 1 # the pre-branch model (sign-agnostic residuals) is not evaluated
 	var bad_type: Dictionary = base.duplicate(true)
@@ -192,9 +198,13 @@ func _initialize() -> void:
 		for m in mdl["mates"]:
 			if ["limit_distance", "limit_angle"].has(m["type"]):
 				has_limit = true
-		if int(mdl["version"]) != (6 if has_limit else (5 if has_coupler else (4 if has_pair else 3))):
+		var has_follow := false
+		for m in mdl["mates"]:
+			if m["a"].has("follow") or m["b"].has("follow"):
+				has_follow = true
+		if int(mdl["version"]) != (7 if has_follow else (6 if has_limit else (5 if has_coupler else (4 if has_pair else 3)))):
 			versions_ok = false
-	print("SMOKE every golden model is version 6 with a limit, 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
+	print("SMOKE every golden model is version 7 with a follower side, 6 with a limit, 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
 	if not versions_ok:
 		failures += 1
 
@@ -258,6 +268,33 @@ func _limit_rules(cases: Array) -> void:
 		and absf(float(freed[0]["t"][0]) - (float(stopped[0]["t"][0]) - 4.0)) < 1e-5
 	print("SMOKE limit held at the stop, released the next frame the hand pulls back: ", held_ok)
 	if not held_ok:
+		failures += 1
+
+	# version 7 (follower sides: a pattern copy that follows its source) -- mirrors client/test/local_retraction_test.dart. Without it a version-7 model
+	# would make try_parse return null and switch off the limit stops of any group that holds a copy mate.
+	var follow_ids := ["local-follow-linear-slide-and-spin", "local-follow-circular-orient-slide-and-spin", "local-follow-circular-keep-rotation-slide-and-spin", "local-follow-limit-stops-at-min"]
+	var v7_parse := true
+	for fid in follow_ids:
+		var fm: Dictionary = (cases.filter(func(x): return x["id"] == fid)[0]["input"]["model"] as Dictionary).duplicate(true)
+		v7_parse = v7_parse and int(fm["version"]) == 7 and Local.try_parse(fm) != null
+		for older in [Local.MODEL_VERSION, Local.PAIR_MODEL_VERSION, Local.COUPLER_MODEL_VERSION, Local.LIMIT_MODEL_VERSION]:
+			var old: Dictionary = fm.duplicate(true)
+			old["version"] = older
+			v7_parse = v7_parse and Local.try_parse(old) == null # `follow` belongs to version 7 only
+	var no_step: Dictionary = (cases.filter(func(x): return x["id"] == follow_ids[0])[0]["input"]["model"] as Dictionary).duplicate(true)
+	no_step["mates"][0]["a"]["follow"] = {"keep_rotation": false}
+	v7_parse = v7_parse and Local.try_parse(no_step) == null
+	print("SMOKE version 7 parsing (follower models parse, also with a limit; follow in v3-6 or without its step -> null): ", v7_parse)
+	if not v7_parse:
+		failures += 1
+	var f_inp: Dictionary = follow_cases_limit(cases)
+	var f_model = Local.try_parse(f_inp["model"])
+	var f_ok := false
+	if f_model != null:
+		f_model.retract(_poses_in(f_inp["poses"]), _poses_in(f_inp["wishes"]), Local.local_scale(2, float(f_inp["lever_arm"])), Local.ITERATIONS_MAX)
+		f_ok = f_model.held_limits().keys() == ["gap"]
+	print("SMOKE a version-7 model that holds a follower still holds its limit stop: ", f_ok)
+	if not f_ok:
 		failures += 1
 
 

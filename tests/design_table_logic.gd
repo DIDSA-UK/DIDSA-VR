@@ -12,6 +12,7 @@ const TableTools := preload("res://scripts/design_table/table_tools.gd")
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const TableSeat := preload("res://scripts/design_table/table_seat.gd")
 const Snap := preload("res://scripts/design_table/snap_resolver.gd")
+const WokenLines := preload("res://scripts/design_table/woken_lines.gd")
 const TablePose := preload("res://scripts/design_table/table_pose.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
 
@@ -35,6 +36,9 @@ class SnapModel extends RefCounted:
 
 	func is_reference(id: String) -> bool:
 		return references.has(id)
+
+	func merge_offered() -> bool:
+		return false ## (the menu asks the session whether Merge suits the selection; this stand-in has no entities to say)
 
 
 func _arrow_ok(view) -> bool:
@@ -146,15 +150,162 @@ func _initialize() -> void:
 	print("SMOKE away from everything it stays free and untouched: ", Snap.resolve(Vector2(500, 500), fake, 3.0, true)["kind"] == "free" and Snap.resolve(Vector2(500, 500), fake, 3.0, true)["uv"] == Vector2(500, 500))
 	print("SMOKE with Snap off nothing moves: ", Snap.resolve(Vector2(1.0, 0.5), fake, 3.0, false)["kind"] == "free" and Snap.resolve(Vector2(1.0, 0.5), fake, 3.0, false)["uv"] == Vector2(1.0, 0.5))
 	var horiz := Snap.resolve(Vector2(200, 53.0), fake, 3.0, true, [], Vector2(100, 50))
-	print("SMOKE a line end within 4 degrees of horizontal is pulled onto the axis and flagged: ", horiz["infer"] == "horizontal" and horiz["uv"] == Vector2(200, 50))
+	print("SMOKE a line end within 4 degrees of horizontal is pulled onto the axis and flagged: ", horiz["infer"].get("kind", "") == "horizontal" and horiz["uv"] == Vector2(200, 50))
 	var vert := Snap.resolve(Vector2(104.0, 250), fake, 3.0, true, [], Vector2(100, 50))
-	print("SMOKE ...and likewise vertical: ", vert["infer"] == "vertical" and vert["uv"] == Vector2(100, 250))
+	print("SMOKE ...and likewise vertical: ", vert["infer"].get("kind", "") == "vertical" and vert["uv"] == Vector2(100, 250))
 	var back := Snap.resolve(Vector2(0, 52.0), fake, 3.0, true, [], Vector2(100, 50))
-	print("SMOKE ...drawing right-to-left counts too: ", back["infer"] == "horizontal")
+	print("SMOKE ...drawing right-to-left counts too: ", back["infer"].get("kind", "") == "horizontal")
 	var diagonal := Snap.resolve(Vector2(200, 150), fake, 3.0, true, [], Vector2(100, 50))
-	print("SMOKE a diagonal is left alone: ", diagonal["infer"] == "" and diagonal["uv"] == Vector2(200, 150))
-	print("SMOKE too close to the start to say which way it points: ", Snap.resolve(Vector2(101, 50.5), fake, 3.0, true, [], Vector2(100, 50))["infer"] == "")
-	print("SMOKE with Snap off the axis is not inferred either: ", Snap.resolve(Vector2(200, 53.0), fake, 3.0, false, [], Vector2(100, 50))["infer"] == "")
+	print("SMOKE a diagonal is left alone: ", diagonal["infer"].is_empty() and diagonal["uv"] == Vector2(200, 150))
+	print("SMOKE too close to the start to say which way it points: ", Snap.resolve(Vector2(101, 50.5), fake, 3.0, true, [], Vector2(100, 50))["infer"].is_empty())
+	print("SMOKE with Snap off the axis is not inferred either: ", Snap.resolve(Vector2(200, 53.0), fake, 3.0, false, [], Vector2(100, 50))["infer"].is_empty())
+	print("SMOKE a midpoint snap names the line it is the middle of (the session holds the new point there): ", mid["target"] == {"kind": "line", "id": "l1"})
+	print("SMOKE a snap onto a line or a circle names it too: ", on_line["target"] == {"kind": "line", "id": "l1"} and on_circle["target"] == {"kind": "circle", "id": "c1"})
+	print("SMOKE a plain point, a vertex and a free position name no shape: ", not near_pt.has("target") and not on_vertex.has("target") and not Snap.resolve(Vector2(500, 500), fake, 3.0, true).has("target"))
+	var arc_model := SnapModel.new()
+	arc_model.points = {"c": Vector2(0, 0), "s": Vector2(10, 0), "e": Vector2(0, 10)}
+	arc_model.arcs = {"a1": {"c": "c", "s": "s", "e": "e", "k": ""}}
+	var on_arc := Snap.resolve(Vector2(8, 8), arc_model, 3.0, true)
+	print("SMOKE near an arc it lands on the arc (counter-clockwise from its start to its end) and names it: ", on_arc["kind"] == "curve" and on_arc["target"] == {"kind": "arc", "id": "a1"} and on_arc["uv"].is_equal_approx(Vector2(8, 8).normalized() * 10.0))
+	print("SMOKE ...but not on the circle's other side, off its sweep: ", Snap.resolve(Vector2(-8, -8), arc_model, 3.0, true)["kind"] == "free")
+	var stacked := SnapModel.new()
+	stacked.points = {"o": Vector2.ZERO, "q": Vector2.ZERO}
+	stacked.origin_id = "o"
+	var stacked_pick := Snap.resolve(Vector2(0.5, 0.5), stacked, 3.0, true)
+	print("SMOKE a point lying exactly on the origin (a shape started there) is taken rather than the origin itself: ", stacked_pick["id"] == "q" and stacked_pick["kind"] == "point")
+	# --- V2: the end of a line is decided where the ghost draws it
+	var loop := SnapModel.new()
+	loop.points = {"A": Vector2(0, 0), "S": Vector2(100, 0), "P": Vector2(300, 0), "X": Vector2(1, 0)}
+	var closes := Snap.resolve(Vector2(0, -6), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE a loop's last side: the raw aim is 6 under the first point (outside the 3 radius) but the axis snap puts the end on it, so it closes onto that point and the side is horizontal: ", closes["id"] == "A" and closes["uv"] == Vector2(0, 0) and closes["infer"].get("kind", "") == "horizontal" and closes.get("closing", false))
+	var off_axis := Snap.resolve(Vector2(0, -20), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE ...outside the radius and off the axis it is a new point at the aim: ", off_axis["id"] == "" and off_axis["uv"] == Vector2(0, -20) and off_axis["infer"].is_empty())
+	var snapped_new := Snap.resolve(Vector2(60, 2.0), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE ...a free end within 4 degrees of the axis is a new point at the SNAPPED position, not at the aim: ", snapped_new["id"] == "" and snapped_new["uv"] == Vector2(60, 0) and snapped_new["infer"].get("kind", "") == "horizontal")
+	var lands := Snap.resolve(Vector2(300, 2.5), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE the snapped end is tested against the points again: landing on one that is not the run's first makes that point the end (no axis constraint): ", lands["id"] == "P" and lands["uv"] == Vector2(300, 0) and lands["infer"].is_empty() and not lands.has("closing"))
+	var tilted_free := Snap.resolve(Vector2(1, 1), SnapModel.new(), 3.0, true, [], Vector2(100, 50), null, {})
+	loop.points["T"] = Vector2(100, 50)
+	var closing_tilted := Snap.resolve(Vector2(1, 1), loop, 3.0, true, [], Vector2(100, 50), null, {"chain_first": "A", "start_id": "T"})
+	print("SMOKE a closing edge that is not near an axis carries nothing (its slope is the loop's): ", closing_tilted["id"] == "A" and closing_tilted["infer"].is_empty() and tilted_free["id"] == "")
+	var first_wins := Snap.resolve(Vector2(0.9, 0), loop, 3.0, true, [], Vector2(100, 0), null, {"chain_first": "A", "start_id": "S"})
+	print("SMOKE the run's first point wins over a nearer point: ", first_wins["id"] == "A")
+	var no_loop_opts := Snap.resolve(Vector2(0.9, 0), loop, 3.0, true, [], Vector2(100, 0))
+	print("SMOKE ...without the run (nothing passed) the nearest point is taken as before: ", no_loop_opts["id"] == "X")
+	var tiny_model := SnapModel.new()
+	tiny_model.points = {"a": Vector2(0, 0), "b": Vector2(0.1, 0)}
+	print("SMOKE zoomed in, two corners 0.1 apart with a 0.04 radius stay two points: ", Snap.resolve(Vector2(0.09, 0.005), tiny_model, 0.04, true)["id"] == "b" and Snap.resolve(Vector2(0.01, 0.0), tiny_model, 0.04, true)["id"] == "a" and Snap.resolve(Vector2(0.05, 0.0), tiny_model, 0.04, true)["id"] == "")
+	# --- V3: inferred relationships for the end of a line
+	var inf := SnapModel.new()
+	inf.points = {"S": Vector2(0, 0), "m": Vector2(50, 30), "r": Vector2(60, 30)}
+	inf.circles = {"C": {"c": "m", "p": "r", "k": ""}}
+	var tangent_aim := Vector2.from_angle(deg_to_rad(22.0)) * 60.0
+	var tan_pick := Snap.resolve(tangent_aim, inf, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	var tangent_angle := rad_to_deg(asin(10.0 / Vector2(50, 30).length())) # (the tangent lines leave the start on either side of the way to the centre)
+	var want_angle := rad_to_deg(Vector2(50, 30).angle()) - tangent_angle
+	print("SMOKE aiming along a tangent to a circle: the end is pulled onto the tangent line and carries tangent with the circle: ", tan_pick["infer"].get("kind", "") == "tangent" and tan_pick["infer"]["target"] == {"kind": "circle", "id": "C"} and absf(rad_to_deg((tan_pick["uv"] as Vector2).angle()) - want_angle) < 0.01 and absf((tan_pick["uv"] as Vector2).length() - 60.0) < 0.01 and tan_pick["kind"] == "tangent")
+	print("SMOKE ...its marker is where the tangent touches the circle: ", absf(((tan_pick["marker"] as Vector2) - Vector2(50, 30)).length() - 10.0) < 0.01)
+	var curve_aim := Vector2.from_angle(deg_to_rad(31.0)) * 48.3
+	var on_circle_pick := Snap.resolve(curve_aim, inf, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	print("SMOKE aiming at the circle but not along a tangent (more than 6 degrees off) puts the end ON the circle (a point on the curve): ", on_circle_pick["infer"].get("kind", "") == "on_curve" and on_circle_pick["infer"]["target"]["id"] == "C" and absf(((on_circle_pick["uv"] as Vector2) - Vector2(50, 30)).length() - 10.0) < 0.01 and not on_circle_pick.has("target"))
+	var near_miss := Snap.resolve(Vector2.from_angle(deg_to_rad(22.0 + 6.5)) * 60.0, inf, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	print("SMOKE ...tangent is 6 degrees, not more: ", near_miss["infer"].get("kind", "") != "tangent")
+	inf.lines = {"L": {"a": "la", "b": "lb", "construction": false}}
+	inf.points["la"] = Vector2(0, 200)
+	inf.points["lb"] = Vector2(100, 200)
+	inf.points["P2"] = Vector2(30, 120)
+	var on_line_pick := Snap.resolve(Vector2(60, 198), inf, 3.0, true, [], Vector2(30, 120), null, {"start_id": "P2"})
+	print("SMOKE the end of a line landing on a sketch line is a point on that line (within 15 mm of it, wider than the 12 mm point snap): ", on_line_pick["infer"].get("kind", "") == "on_curve" and on_line_pick["infer"]["target"] == {"kind": "line", "id": "L"} and (on_line_pick["uv"] as Vector2).is_equal_approx(Vector2(60, 200)))
+	var wide := Snap.resolve(Vector2(60, 196.5), inf, 3.0, true, [], Vector2(30, 120), null, {"start_id": "P2"})
+	var too_far := Snap.resolve(Vector2(60, 195.0), inf, 3.0, true, [], Vector2(30, 120), null, {"start_id": "P2"})
+	print("SMOKE ...3.5 away still counts (reach 1.25 x the radius), 5 away does not: ", wide["infer"].get("kind", "") == "on_curve" and too_far["infer"].is_empty())
+	var off_infer := Snap.resolve(Vector2(60, 198.5), inf, 3.0, true, [], Vector2(30, 120), null, {"start_id": "P2", "infer": false})
+	print("SMOKE with Infer off a line end near a line is a plain point (position only): ", off_infer["infer"].is_empty() and not off_infer.has("target") and off_infer["kind"] == "curve")
+
+	var run := SnapModel.new()
+	run.points = {"S": Vector2(0, 0), "p": Vector2(50, 40)}
+	run.lines = {"ls": {"a": "S", "b": "p", "construction": false}}
+	var along := Snap.resolve(Vector2(30, 25), run, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	print("SMOKE a line that leaves the start is not a place to put a point on: continuing straight along it is collinear instead: ", along["infer"].get("kind", "") == "collinear" and along["infer"]["target"] == {"kind": "line", "id": "ls"})
+	var straight := Snap.resolve(Vector2(-50, -37), run, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	print("SMOKE ...either way along it (the reverse counts, and the end is pulled onto the line): ", straight["infer"].get("kind", "") == "collinear" and absf(rad_to_deg(((straight["uv"] as Vector2) - Vector2.ZERO).angle()) - (rad_to_deg(Vector2(50, 40).angle()) - 180.0)) < 0.01)
+
+	var prev_model := SnapModel.new()
+	prev_model.points = {"S": Vector2(0, 0), "a": Vector2(-20, -10), "wa": Vector2(0, 100), "wb": Vector2(100, 130)}
+	prev_model.lines = {"prev": {"a": "a", "b": "S", "construction": false}, "W": {"a": "wa", "b": "wb", "construction": false}}
+	var perp_aim := Vector2.from_angle(deg_to_rad(-62.0)) * 50.0
+	var perp := Snap.resolve(perp_aim, prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	print("SMOKE perpendicular to the segment the run is continuing needs no waking: ", perp["infer"].get("kind", "") == "perpendicular" and perp["infer"]["target"]["id"] == "prev" and absf(rad_to_deg((perp["uv"] as Vector2).angle()) - (rad_to_deg(Vector2(20, 10).angle()) - 90.0)) < 0.01)
+	var w_angle := rad_to_deg(Vector2(100, 30).angle())
+	var parallel_aim := Vector2.from_angle(deg_to_rad(w_angle + 3.0)) * 60.0
+	var no_wake := Snap.resolve(parallel_aim, prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S"})
+	var woke := Snap.resolve(parallel_aim, prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	print("SMOKE parallel is NOT inferred against a line the laser has not passed over, and is once it has (the target, the pulled-on angle): ", no_wake["infer"].is_empty() and woke["infer"].get("kind", "") == "parallel" and woke["infer"]["target"]["id"] == "W" and absf(rad_to_deg((woke["uv"] as Vector2).angle()) - w_angle) < 0.01)
+	var edge_in := Snap.resolve(Vector2.from_angle(deg_to_rad(w_angle + 3.9)) * 60.0, prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	var edge_out := Snap.resolve(Vector2.from_angle(deg_to_rad(w_angle + 4.2)) * 60.0, prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	print("SMOKE ...within 4 degrees, not beyond: ", edge_in["infer"].get("kind", "") == "parallel" and edge_out["infer"].is_empty())
+	var axis_first := Snap.resolve(Vector2(60, 2.0), prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	print("SMOKE horizontal outranks everything below it (an axis line beside a woken one): ", axis_first["infer"].get("kind", "") == "horizontal")
+	var prev_model2 := SnapModel.new()
+	prev_model2.points = {"S": Vector2(0, 0), "a": Vector2(-40, -10), "wa": Vector2(0, 100), "wb": Vector2(40, 110.5)}
+	prev_model2.lines = {"prev": {"a": "a", "b": "S", "construction": false}, "W": {"a": "wa", "b": "wb", "construction": false}}
+	var col_pick := Snap.resolve(Vector2.from_angle(deg_to_rad(13.0)) * 60.0, prev_model2, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	print("SMOKE collinear outranks parallel: ", col_pick["infer"].get("kind", "") == "collinear" and col_pick["infer"]["target"]["id"] == "prev")
+	var point_beats := Snap.resolve(Vector2(60, 2.0), prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	prev_model.points["q"] = Vector2(60, 1.0)
+	var beats := Snap.resolve(Vector2(60, 2.0), prev_model, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"]})
+	print("SMOKE an existing point outranks any inference: ", point_beats["infer"].get("kind", "") == "horizontal" and beats["id"] == "q" and beats["infer"].is_empty())
+	var infer_off := Snap.resolve(Vector2(60, 2.0), prev_model2, 3.0, true, [], Vector2(0, 0), null, {"start_id": "S", "woken": ["W"], "infer": false})
+	print("SMOKE with Infer off a line near horizontal is not snapped to the axis and carries nothing: ", infer_off["infer"].is_empty() and infer_off["uv"] == Vector2(60, 2.0))
+	var mid_off := Snap.resolve(Vector2(20, 1.0), fake, 3.0, true, [], null, null, {"infer": false})
+	var near_off := Snap.resolve(Vector2(1.0, 0.5), fake, 3.0, true, [], null, null, {"infer": false})
+	print("SMOKE ...a midpoint snap is a plain point (no line named to hold it), and an existing point is still reused: ", mid_off["kind"] == "midpoint" and not mid_off.has("target") and near_off["id"] == "a")
+	var circ := SnapModel.new()
+	circ.points = {"M": Vector2(0, 0), "R": Vector2(10, 0)}
+	circ.circles = {"K": {"c": "M", "p": "R", "k": ""}}
+	var conc := Snap.resolve(Vector2(3.4, 0), circ, 3.0, true, [], null, null, {"concentric": true})
+	print("SMOKE a circle's centre placed 3.4 from another's centre (outside the 3 point snap, inside the wider reach) lands exactly on it and carries concentric: ", conc["infer"].get("kind", "") == "concentric" and conc["infer"]["target"] == {"kind": "circle", "id": "K"} and conc["uv"] == Vector2(0, 0) and conc["id"] == "")
+	print("SMOKE ...only for a centre (nothing asked: a plain free position), and not with Infer off: ", Snap.resolve(Vector2(3.4, 0), circ, 3.0, true)["infer"].is_empty() and Snap.resolve(Vector2(3.4, 0), circ, 3.0, true, [], null, null, {"concentric": true, "infer": false})["infer"].is_empty())
+	print("SMOKE ...within the point snap it is the centre point itself (concentric by sharing it): ", Snap.resolve(Vector2(2.0, 0), circ, 3.0, true, [], null, null, {"concentric": true})["id"] == "M")
+	var woken := WokenLines.new()
+	woken.touch("a", 0)
+	woken.touch("b", 1000)
+	woken.touch("c", 2000)
+	woken.touch("d", 3000)
+	print("SMOKE the laser wakes the last three lines it passed over: ", woken.active(3500) == ["b", "c", "d"])
+	woken.touch("b", 3500)
+	print("SMOKE ...passing over one again keeps it, as the newest: ", woken.active(3600) == ["c", "d", "b"])
+	print("SMOKE ...each sleeps again 5 seconds after it was last passed over: ", woken.active(8100) == ["b"] and woken.active(8600).is_empty())
+	# --- V4: alignment guides (a snapping aid, no constraint)
+	var grid := SnapModel.new()
+	grid.points = {"o": Vector2.ZERO, "a": Vector2(50, 0), "b": Vector2(0, 40), "north": Vector2(80, 40)}
+	grid.origin_id = "o"
+	grid.circles = {"K": {"c": "a", "p": "b", "k": "", "cards": ["north"]}}
+	var align_opts := {"align": true}
+	var aligned_x := Snap.resolve(Vector2(51.2, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE a placed point within 6 mm (half the point radius) of another point's x is pulled to that x, with one guide from that point: ", aligned_x["uv"] == Vector2(50, 100) and aligned_x["id"] == "" and (aligned_x["guides"] as Array).size() == 1 and aligned_x["guides"][0]["from"] == Vector2(50, 0) and aligned_x["guides"][0]["to"] == Vector2(50, 100))
+	var both := Snap.resolve(Vector2(51.0, 41.0), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE ...both axes at once from two different points, two guides: ", both["uv"] == Vector2(50, 40) and (both["guides"] as Array).size() == 2)
+	var too_far_x := Snap.resolve(Vector2(52.0, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE ...but not beyond that reach: ", not too_far_x.has("guides") and too_far_x["uv"] == Vector2(52.0, 100))
+	var from_cardinal := Snap.resolve(Vector2(80.8, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE a circle's quadrant point is not a reference: ", not from_cardinal.has("guides"))
+	var from_origin := Snap.resolve(Vector2(0.9, 100), grid, 3.0, true, [], null, null, align_opts)
+	print("SMOKE the origin is: ", from_origin["uv"] == Vector2(0, 100) and (from_origin["guides"] as Array).size() == 1)
+	print("SMOKE an existing point wins over any alignment, and a tap that does not place (nothing asked) or Snap / Infer off is untouched: ", Snap.resolve(Vector2(51.2, 1.0), grid, 3.0, true, [], null, null, align_opts)["id"] == "a" and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, true).has("guides") and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, false, [], null, null, align_opts).has("guides") and not Snap.resolve(Vector2(51.2, 100), grid, 3.0, true, [], null, null, {"align": true, "infer": false}).has("guides"))
+	var line_grid := SnapModel.new()
+	line_grid.points = {"S": Vector2(50, 0), "T": Vector2(60, 40), "a": Vector2(-40, -10), "U": Vector2(58, 90)}
+	line_grid.lines = {"prev": {"a": "a", "b": "S", "construction": false}}
+	var own_start := Snap.resolve(Vector2(51.0, 5.0), line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE a line's own start is not a reference for its end: ", not own_start.has("guides"))
+	var horizontal_aligned := Snap.resolve(Vector2(60.8, 0.6), line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE a line's end: its own horizontal fixes y, so only x aligns, and it stays horizontal: ", horizontal_aligned["infer"].get("kind", "") == "horizontal" and horizontal_aligned["uv"] == Vector2(60, 0) and (horizontal_aligned["guides"] as Array).size() == 1 and horizontal_aligned["guides"][0]["from"] == Vector2(60, 40))
+	var col_aim := Vector2(50, 0) + Vector2.from_angle(deg_to_rad(8.0)) * 60.0
+	var col_free := Snap.resolve(col_aim, line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	line_grid.points["V"] = Vector2(col_aim.x + 0.5, 150)
+	var col_aligned := Snap.resolve(col_aim, line_grid, 3.0, true, [], Vector2(50, 0), null, {"start_id": "S"})
+	print("SMOKE alignment ranks above collinear / parallel / perpendicular: with a point to line up with they are dropped: ", col_free["infer"].get("kind", "") == "collinear" and col_aligned["infer"].is_empty() and (col_aligned["guides"] as Array).size() >= 1 and absf((col_aligned["uv"] as Vector2).x - (col_aim.x + 0.5)) < 0.001)
+	print("SMOKE the taps that place a point align, the ones that only measure do not (the flat app's table): ", Snap.aligns_tap("point", "centre", "corners", 0) and Snap.aligns_tap("rectangle", "centre", "corners", 1) and Snap.aligns_tap("rectangle", "centre", "three", 1) and not Snap.aligns_tap("rectangle", "centre", "three", 2) and Snap.aligns_tap("circle", "centre", "corners", 0) and not Snap.aligns_tap("circle", "centre", "corners", 1) and Snap.aligns_tap("circle", "three", "corners", 2) and Snap.aligns_tap("arc", "centre", "corners", 1) and not Snap.aligns_tap("arc", "centre", "corners", 2) and not Snap.aligns_tap("slot", "centre", "corners", 2) and Snap.aligns_tap("slot", "centre", "corners", 1) and Snap.aligns_tap("polygon", "centre", "corners", 1) and not Snap.aligns_tap("ellipse", "centre", "corners", 2) and Snap.aligns_tap("spline", "centre", "corners", 7) and not Snap.aligns_tap("text", "centre", "corners", 0) and Snap.aligns_tap("line", "centre", "corners", 0) and not Snap.aligns_tap("line", "centre", "corners", 1))
 	# --- handling the part on the table (table_pose.gd)
 	var id := Basis.IDENTITY
 	var spread := TablePose.two_hand(Vector3(-0.1, 0, 0), Vector3(0.1, 0, 0), Vector3(-0.15, 0, 0), Vector3(0.15, 0, 0), Vector3(0, 0.2, 0), id, 1.0)

@@ -33,6 +33,7 @@ const SketchClip := preload("res://scripts/design_table/sketch_clip.gd")
 const SketchPicks := preload("res://scripts/design_table/sketch_picks.gd")
 const PartReferences := preload("res://scripts/design_table/part_references.gd")
 const SnapResolver := preload("res://scripts/design_table/snap_resolver.gd")
+const WokenLines := preload("res://scripts/design_table/woken_lines.gd")
 const PlaneMarkers := preload("res://scripts/design_table/plane_markers.gd")
 const OriginAxes := preload("res://scripts/design_table/origin_axes.gd")
 const Visibility := preload("res://scripts/design_table/visibility.gd")
@@ -46,7 +47,7 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
-const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
@@ -122,6 +123,10 @@ var hovering := false ## the laser is on the part or the sheet this frame, and t
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
+var _aids_shown := false
+var _keep_shown := "" ## the point Merge would keep, as last ringed and named on the status line
+var _stack_hint := false ## the status line is saying that two points lie on top of each other under the laser
+var _woken := WokenLines.new() ## the lines the laser has passed over while the Line tool is active: what a new line may be inferred parallel / perpendicular to
 var _hover_plane := ""
 var _hover_face: Dictionary = {}
 var part_refs: RefCounted = null ## part_references.gd: the part's vertices and edges projected onto the sketch plane (null if they can't be used)
@@ -398,6 +403,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_cursor(null)
 		view.set_preview("", [], null)
 		view.set_reference_hover({})
+		_clear_aids()
 		return
 	var copy_xf: Transform3D = table.table_copy.global_transform
 	var plane: Dictionary = session.plane
@@ -411,15 +417,47 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
+		var now_ms := Time.get_ticks_msec()
+		if tool == "line":
+			var passed: Dictionary = session.nearest_entity(uv, PICK_RADIUS / view.canvas_scale, ["line"])
+			if not passed.is_empty():
+				_woken.touch(str(passed["id"]), now_ms) # passing over a line wakes it: the next line may be parallel / perpendicular to it
+		else:
+			_woken.clear()
+		var snap_opts := {"infer": table.infer_enabled, "woken": _woken.active(now_ms)}
 		if tool == "line" and session.pending.size() == 1:
 			var first: Dictionary = session.pending[0]
-			line_start = session.points.get(str(first.get("id", "")), first.get("uv"))
-		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs)
+			var first_id := str(first.get("id", ""))
+			line_start = session.points.get(first_id, first.get("uv"))
+			snap_opts["start_id"] = first_id
+			snap_opts["chain_first"] = session.chain_first if session.chain_first != first_id else ""
+		else:
+			snap_opts["align"] = SnapResolver.aligns_tap(tool, session.circle_method, session.rect_method, session.pending.size())
+			if (tool == "circle" and session.circle_method == "centre" or tool == "arc") and session.pending.is_empty():
+				snap_opts["concentric"] = true # a new centre near another circle's or arc's centre is put on it and held concentric
+		_snap = SnapResolver.resolve(uv, session, radius_mm, table.snap_enabled, _sheet_vertices, line_start, part_refs, snap_opts)
 		view.set_cursor(_snap["uv"], str(_snap["kind"]))
 		view.set_reference_hover(_snap.get("ref", {}))
 		var taps: Array = session.pending.map(func(p): return session.points.get(str(p.get("id", "")), p["uv"]))
 		view.set_preview(session.preview_id(), taps, _snap["uv"], session.polygon_sides)
+		var inferred: Dictionary = _snap.get("infer", {})
+		view.set_inference(_snap["uv"], _snap.get("marker"), inferred)
+		var woken_segments: Array = []
+		for woken_id in _woken.active(now_ms):
+			var woken_line: Dictionary = session.lines.get(woken_id, {})
+			if not woken_line.is_empty() and session.points.has(woken_line["a"]) and session.points.has(woken_line["b"]):
+				woken_segments.append([session.points[woken_line["a"]], session.points[woken_line["b"]]])
+		view.set_aids(woken_segments, _snap.get("guides", []))
+		_aids_shown = true
+		# what the line is about to be held to (a circle it is tangent to, the line it is parallel to) is lit the way a hovered entity is
+		var inferred_target: Dictionary = inferred.get("target", {})
+		_hover_entity = {"kind": str(inferred_target["kind"]), "id": str(inferred_target["id"])} if not inferred_target.is_empty() else {}
+		var target_key := "%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", "")]
+		if target_key != _last_view_key:
+			_last_view_key = target_key
+			_refresh_view()
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
+		_clear_aids()
 		var pick_mm: float = PICK_RADIUS / view.canvas_scale
 		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
@@ -437,14 +475,39 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 			_hover_entity = part_refs.pick(uv, pick_mm, kinds) # nothing of the sketch there: the part's own corner or edge, to dimension to
 		view.set_cursor(uv, "hover" if not _hover_entity.is_empty() else "free")
 		view.set_preview("", [], null)
+		if tool == SELECT_TOOL:
+			_update_stack_hint(pick_mm)
 		var key := "%s:%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", ""), str(_hover_entity.get("ref", {}))]
 		if key != _last_view_key:
 			_last_view_key = key
 			view.set_reference_hover(_hover_entity.get("ref", {}))
 			_refresh_view() # the drawing is rebuilt only when what's under the laser changes
 	else:
+		_clear_aids()
 		view.set_cursor(uv, "free")
 		view.set_preview("", [], null)
+
+
+func _update_stack_hint(pick_mm: float) -> void:
+	## Two points on top of each other cannot be told apart by looking: say so while the laser is on them, so it is clear to pull twice.
+	var stacked := 0
+	if str(_hover_entity.get("kind", "")) == "point":
+		stacked = session.points_stacked_at(str(_hover_entity["id"]), pick_mm * 0.25)
+	if stacked >= 2 and not _stack_hint:
+		_stack_hint = true
+		table.set_status("%d points here. Pull twice to pick both." % stacked)
+	elif stacked < 2 and _stack_hint:
+		_stack_hint = false
+		table.set_status(_sketch_hint())
+
+
+func _clear_aids() -> void:
+	## The woken lines, the alignment guides and the inference glyph belong to the drawing tools: gone with them.
+	if _aids_shown:
+		_aids_shown = false
+		view.set_aids([], [])
+		view.set_inference(null, null, {})
+	_woken.clear()
 
 
 func _sheet_hit(origin: Vector3, dir: Vector3) -> Variant:
@@ -1381,6 +1444,18 @@ func _refresh_view() -> void:
 	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
 	view.rebuild(session, session.selection, _hover_entity)
 	view.show_ghosts(session.ghosts)
+	var keep_id: String = session.merge_keep_id() if table.active_tool == SELECT_TOOL else ""
+	view.set_keep_ring(session.points[keep_id] if keep_id != "" else null)
+	if keep_id != _keep_shown:
+		_keep_shown = keep_id
+		if keep_id != "":
+			table.set_status("Merge: %s stays." % session.describe_point(keep_id))
+
+
+func refresh_sketch_hint() -> void:
+	## The status line again (the Infer switch changed): a switch left off says so there.
+	if state == "sketch" and session != null:
+		table.set_status(_sketch_hint())
 
 
 func _sketch_hint() -> String:
@@ -1389,6 +1464,8 @@ func _sketch_hint() -> String:
 	if def != null and def.hint != "":
 		hint = def.hint
 	var warning: String = session.reference_warning() if session != null else ""
+	if not table.infer_enabled:
+		hint = "Infer off: nothing is added automatically.  " + hint # a toggle left off explains itself
 	return hint if warning == "" else "%s  %s" % [warning, hint]
 
 
@@ -1400,10 +1477,13 @@ func _sketch_trigger() -> void:
 		if _snap.is_empty():
 			return
 		var pick := {"uv": _snap["uv"], "id": _snap["id"]}
+		if not (_snap.get("infer", {}) as Dictionary).is_empty():
+			pick["infer"] = _snap["infer"] # a relationship the shape is inferred to have (a line end's axis, parallel, tangent...; a centre's concentric)
 		if _snap.has("ref"):
 			pick["ref"] = _snap["ref"] # a corner of the part: made a pinned point that follows the part when the shape is made
-		if tool == "line" and session.pending.size() == 1:
-			pick["infer"] = _snap.get("infer", "")
+		if _snap.has("target"):
+			pick["target"] = _snap["target"] # the sketch's own line, circle or arc this lands on or in the middle of: the new point is held there
+			pick["snap"] = _snap["kind"]
 		await session.tap(pick)
 		if tool == "spline":
 			_update_options() # the Finish button counts the points
@@ -1417,7 +1497,12 @@ func _sketch_trigger() -> void:
 			else:
 				_type_dimension(ghost)
 		elif not _hover_entity.is_empty():
-			await session.select(_hover_entity)
+			var picked: Dictionary = _hover_entity
+			if tool == SELECT_TOOL:
+				var other: Dictionary = session.stacked_alternative(picked, PICK_RADIUS / view.canvas_scale * 0.25)
+				if not other.is_empty():
+					picked = other # a second pull on a stack of points takes the other one
+			await session.select(picked)
 		else:
 			session.clear_selection()
 	elif tool == "trim":

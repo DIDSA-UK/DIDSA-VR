@@ -17,6 +17,7 @@ const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const GRID_SHADER := preload("res://shaders/sketch_grid.gdshader")
 const LINE_SHADER := preload("res://shaders/sketch_lines.gdshader")
 const DimensionLayout := preload("res://scripts/design_table/dimension_layout.gd")
+const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
 
 const LINE_WIDTH := 0.00245 ## world metres: the rubber band, the cursor ring and the sheet's marks
 const OBJECT_WIDTH := 0.00294 ## the visible outline of the sketch: the heaviest line, as on a drawing
@@ -39,6 +40,11 @@ const REF_USED_COLOUR := Color(0.55, 0.85, 1.0, 1.0) ## a part corner / edge / h
 const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
+const GUIDE_COLOUR := Color(0.45, 1.0, 0.6, 0.9) ## an alignment guide: the snap green
+const GUIDE_WIDTH := 0.0014
+const KEEP_COLOUR := Color(0.3, 0.92, 1.0, 1.0) ## the ring round the point Merge keeps: the snap-candidate cyan of the flat app
+const WOKEN_COLOUR := Color(0.75, 0.88, 1.0, 0.5) ## a line the laser has woken (parallel / perpendicular may be inferred against it): lit faintly
+const WOKEN_WIDTH := 0.0030
 const DIM_COLOUR := Color(0.55, 0.88, 1.0)
 const DRIVEN_COLOUR := Color(0.72, 0.76, 0.82, 0.9) ## a reference (driven) dimension: it measures, it does not drive, so it is quieter and in brackets
 const ORIGIN_COLOUR := Color(1.0, 0.92, 0.45)
@@ -74,6 +80,9 @@ var _sheet: MeshInstance3D
 var _sheet_material: ShaderMaterial
 var _geo: MeshInstance3D
 var _preview: MeshInstance3D
+var _aids: MeshInstance3D ## the woken lines and the alignment guides
+var _keep: MeshInstance3D ## the ring round the point Merge would keep
+var _inference_label: Label3D ## the glyph of the relationship the line being drawn would get (H, //, |_, T, on...)
 var _cursor: MeshInstance3D
 var _cursor_material: StandardMaterial3D
 var _dims: MeshInstance3D
@@ -120,6 +129,8 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_geo = _new_mesh_node("Drawing")
 	_dims = _new_mesh_node("Dimensions")
 	_preview = _new_mesh_node("Preview")
+	_aids = _new_mesh_node("Aids")
+	_keep = _new_mesh_node("KeepRing")
 	_refs_node = _new_mesh_node("PartGeometry")
 	_refs_hover = _new_mesh_node("PartGeometryHover")
 	_cursor = MeshInstance3D.new()
@@ -141,6 +152,20 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_constraint_labels = Node3D.new()
 	_constraint_labels.name = "ConstraintGlyphs"
 	_canvas.add_child(_constraint_labels)
+	_inference_label = Label3D.new()
+	_inference_label.name = "InferenceGlyph"
+	_inference_label.font_size = LABEL_FONT
+	_inference_label.pixel_size = LABEL_PIXEL * 0.9 / canvas_scale
+	_inference_label.modulate = CONSTRAINT_GLYPH_COLOUR
+	_inference_label.outline_size = 12
+	_inference_label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
+	_inference_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	_inference_label.double_sided = true
+	_inference_label.shaded = false
+	_inference_label.no_depth_test = true
+	_inference_label.render_priority = 6
+	_inference_label.visible = false
+	_canvas.add_child(_inference_label)
 	_readout = Label3D.new()
 	_readout.name = "Readout"
 	_readout.font_size = 32
@@ -633,10 +658,55 @@ func set_cursor(uv: Variant, kind: String = "free") -> void:
 	var colour: Color = _tokens.text
 	match kind:
 		"point": colour = Color(0.45, 1.0, 0.6)
-		"vertex", "midpoint", "curve", "centre", "edge_midpoint", "edge_point", "face_axis": colour = _tokens.accent
+		"vertex", "midpoint", "curve", "centre", "edge_midpoint", "edge_point", "face_axis", "parallel", "perpendicular", "collinear", "tangent", "on_curve", "concentric": colour = _tokens.accent
 		"origin": colour = ORIGIN_COLOUR
 		"hover": colour = _tokens.warn
 	_cursor_material.albedo_color = colour
+
+
+func set_aids(woken: Array, guides: Array) -> void:
+	## `woken`: [[a, b]] sheet positions of the lines to light faintly; `guides`: [{from, to}] alignment guides, dashed from the point aligned with to the
+	## snapped cursor. Both are drawn on the sheet like the rest of the sketch (so the window clips them), at a constant width on screen.
+	if woken.is_empty() and guides.is_empty() and _aids.mesh == null:
+		return
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for seg in woken:
+		_ribbon(verts, colors, seg[0], seg[1], WOKEN_WIDTH, WOKEN_COLOUR, 0.9)
+	for g in guides:
+		_dashed(verts, colors, [g["from"], g["to"]], GUIDE_WIDTH, GUIDE_COLOUR, false, 1.3)
+	_set_surface(_aids, verts, colors)
+
+
+func set_keep_ring(uv: Variant) -> void:
+	## A ring round the point Merge would keep (null: none), so the rule is never a surprise.
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	if uv != null:
+		var ring := circle_points(uv, _u(POINT_SIZE * 3.6), CIRCLE_SEGMENTS)
+		_polyline(verts, colors, ring, LINE_WIDTH + PREVIEW_EDGE_EXTRA, PREVIEW_EDGE, true, 2.2)
+		_polyline(verts, colors, ring, LINE_WIDTH, KEEP_COLOUR, true, 2.4)
+	_set_surface(_keep, verts, colors)
+
+
+func set_inference(end_uv: Variant, marker: Variant, infer: Dictionary) -> void:
+	## The glyph of the relationship the line being drawn is about to get, at the marker (the tangent point, the nearest point on the curve, the middle of the
+	## target line), or beside the end when there is none (an axis). Hidden when there is none.
+	if end_uv == null or infer.is_empty():
+		_inference_label.visible = false
+		return
+	var glyph: String = SketchSession.CONSTRAINT_GLYPHS.get(str(infer.get("kind", "")).replace("on_curve", "point_on_line"), "")
+	if glyph == "":
+		_inference_label.visible = false
+		return
+	var at: Vector2 = marker if marker != null else (end_uv as Vector2) + Vector2(_u(GLYPH_OFFSET), _u(GLYPH_OFFSET))
+	_inference_label.text = glyph
+	_inference_label.transform = Transform3D(Basis.IDENTITY, canvas_point(at + Vector2(0, _u(GLYPH_OFFSET)), 4.0))
+	_inference_label.visible = contains(at)
+
+
+func inference_text() -> String:
+	return _inference_label.text if _inference_label != null and _inference_label.visible else ""
 
 
 func set_preview(tool_id: String, taps: Array, cursor_uv: Variant, sides: int = 6) -> void:

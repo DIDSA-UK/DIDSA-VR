@@ -177,6 +177,66 @@ func _initialize() -> void:
 	print("SMOKE with Snap off the cursor is free: ", ed._snap["kind"] == "free" and ed._snap["id"] == "")
 	table.snap_enabled = true
 
+	# --- Infer: the switch beside Snap
+	print("SMOKE the deck has an Infer switch beside Snap, on by default: ", table.ui.infer_button() != null and table.ui.infer_on() and table.infer_enabled and table.ui.infer_button().text == "Infer")
+	table.manager.activate("line")
+	await aim_uv(centre_uv + Vector2(-40, 25))
+	await pull()
+	await aim_uv(centre_uv + Vector2(30, 26.5))
+	print("SMOKE with Infer on, a second end near horizontal is pulled onto the axis and carries horizontal: ", ed._snap["infer"].get("kind", "") == "horizontal")
+	table.ui.infer_button().button_pressed = false # (the switch pressed: it emits infer_toggled)
+	await frames(2)
+	print("SMOKE switching Infer off reaches the table, and the status line says nothing is added by itself: ", not table.infer_enabled and table.status().contains("Infer off: nothing is added automatically"))
+	await aim_uv(centre_uv + Vector2(31, 26.5))
+	print("SMOKE ...and the same aim is then a plain free position: no axis snap, nothing inferred: ", ed._snap["infer"].is_empty() and (ed._snap["uv"] as Vector2).distance_to(centre_uv + Vector2(31, 26.5)) < 0.5)
+	table.manager.activate("rectangle")
+	await frames(2)
+	table.manager.activate("line")
+	await frames(2)
+	print("SMOKE ...it stays off across tools (a switch, not a hold): ", not table.infer_enabled and not table.ui.infer_on())
+	table.ui.infer_button().button_pressed = true
+	await frames(2)
+	print("SMOKE ...and on again when switched back: ", table.infer_enabled and not table.status().contains("Infer off"))
+	table.manager.deactivate()
+	ed.session.finish_chain()
+
+	# --- alignment guides on the sheet
+	table.manager.activate("point")
+	var align_radius: float = ed.SNAP_RADIUS / ed.view.canvas_scale
+	await aim_uv(centre_uv + Vector2(-10 + align_radius * 0.3, 40))
+	var guided: Array = ed._snap.get("guides", [])
+	print("SMOKE a Point tool aimed a little off the x of a corner is pulled to it, and a dashed guide is drawn on the sheet: ", guided.size() == 1 and absf((ed._snap["uv"] as Vector2).x - (centre_uv.x - 10)) < 0.001 and ed.view._aids.mesh != null)
+	table.ui.infer_button().button_pressed = false
+	await frames(2)
+	await aim_uv(centre_uv + Vector2(-10 + align_radius * 0.3, 40))
+	print("SMOKE ...Infer off: no guide, no pull: ", ed._snap.get("guides", []).is_empty() and ed.view._aids.mesh == null)
+	table.ui.infer_button().button_pressed = true
+	await frames(2)
+	table.manager.deactivate()
+	await frames(2)
+	print("SMOKE ...and the guide goes when the tool does: ", ed.view._aids.mesh == null)
+
+	# --- Merge: two points on top of each other (a profile that looks closed and is not)
+	table.snap_enabled = false
+	table.manager.activate("point")
+	await aim_uv(centre_uv + Vector2(-10, -10))
+	await pull()
+	table.snap_enabled = true
+	table.manager.activate("select")
+	await aim_uv(centre_uv + Vector2(-10, -10))
+	print("SMOKE with two points on top of each other under the laser the status line says so: ", table.status().contains("2 points here"))
+	await pull()
+	await pull()
+	print("SMOKE the second pull adds the point under the first instead of letting it go: ", ed.session.selection.size() == 2 and ed.session.merge_offered())
+	print("SMOKE Merge is on the deck, and the point it keeps is ringed and named on the status line: ", table.ui.option_button("merge") != null and ed.view._keep.mesh != null and table.status().contains("Merge:") and table.status().contains("stays"))
+	var points_before: int = ed.session.points.size()
+	await ed.on_option("merge")
+	print("SMOKE Merge makes ONE merge call, takes one point away, and the ring goes with the selection: ", calls_to("/points/merge").size() == 1 and ed.session.points.size() == points_before - 1 and ed.session.selection.is_empty() and ed.view._keep.mesh == null)
+	await ed.session.undo()
+	print("SMOKE ...and Undo puts it back (a PUT of the snapshot): ", calls_to("PUT /sketch/sketches/sk1/state").size() == 1 and ed.session.points.size() == points_before)
+	table.manager.deactivate()
+	await frames(2)
+
 	# --- Select: pick things with the laser, a menu of what applies, and the grips with a sketch open
 	table.manager.activate("select")
 	await aim_uv(centre_uv + Vector2(1, -10))

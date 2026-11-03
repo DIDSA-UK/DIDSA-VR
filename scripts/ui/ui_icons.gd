@@ -131,6 +131,8 @@ const _ICONS := {
 	"tool_spline": '<path d="M6 34C14 6 24 44 42 14"/><circle cx="6" cy="34" r="2"/><circle cx="42" cy="14" r="2"/>',
 	"tool_text": '<path d="M10 12H38M24 12V38M18 38H30"/>',
 	"tool_more": '<path d="M11 24V24.5M24 24V24.5M37 24V24.5"/>',
+	"infer": '<path d="M19 29L29 19"/><path d="M17 22L11 28A7.5 7.5 0 0 0 21.500 38.500L27 33"/><path d="M31 26L37 20A7.5 7.5 0 0 0 26.500 9.500L21 15"/>',
+	"infer_off": '<path d="M17 22L11 28A7.5 7.5 0 0 0 21.500 38.500L27 33"/><path d="M31 26L37 20A7.5 7.5 0 0 0 26.500 9.500L21 15"/><path d="M8 40L40 8"/>',
 	"snap": '<path d="M10 8V26a14 14 0 0 0 28 0V8H28V26a4 4 0 0 1-8 0V8Z"/><path d="M10 14H20M28 14H38"/>',
 	"feat_plane": '<path d="M8 32L20 14H42L30 32Z"/><path d="M24 36V42"/>',
 	"plus": '<path d="M24 10V38M10 24H38"/>',
