@@ -595,7 +595,16 @@ the `#` starts a fragment (`mates_tool.gd` folds it with `mate_ref_top` and refu
   do it); a fixed source stays put and the part mates onto the copy. A *group* solve of the mated part may move the source as well (as for a direct A-B mate); *minimal*
   movement still moves only the part. A mate between a copy and an occurrence of the same source, or two copies of one source, is refused; `explicit occurrence_id=<copy>`
   on create/edit stays a 422 (drive the source or the other part). Gear / rack-pinion / screw / limit mates on a copy are refused (422, "pattern copy").
-- **`constraint_model` is null** (`mate-motion`, the preview) for a group that holds a follower: no new version, `local_retraction.gd` keeps server projection for such a group.
+- **`constraint_model` version 7: follower sides** (DIDSA-CAD `pattern-followers-smoothness-plan.md` S1). A group that holds a follower now HAS a `constraint_model` (`mate-motion`, the
+  preview), version **7**, a superset of 3 to 6 (limits, couplers and pairs may sit in it) emitted only when some side has a follower; every other group still gets 3 to 6. A side (and a
+  `pair`) may carry `follow: {r: 3x3 row-major, t: [3], keep_rotation: bool}`: the constant step `(Rs, ts)` that places the copy after the member it follows, so the side's world pose is
+  `(Rs R, Rs t + ts)`, or `(R, Rs t + ts)` with `keep_rotation` (a Circular pattern that does not orient). `local_retraction.gd` reads it (it `try_parse`s version 7; before it, a version-7 model
+  made `try_parse` return null and VR's limit stops would have gone off for any group that holds a copy mate; `follow` in an older version, or without `r` / `t`, is malformed -> null). VR still
+  does not run the local retraction per frame (`_adopt_limit_model` reads limit values only); the follower step is used there only to evaluate the model. An older backend sends none for a follower (null).
+- **`GET /parts/{id}/component-patterns`** is also read by `mates_tool.gd` (once per scope, cached until the scope is reloaded) so a live drag can place the copies: `pattern_type`, `direction`, `count`, `spacing`,
+  `reverse`, `direction_2`, `count_2`, `spacing_2`, `reverse_2`, `axis {origin, direction}`, `count_angular`, `angle_total`, `reverse_angular`, `skip_indices`, `orient_with_rotation`, `suppressed`,
+  `source_occurrence_ids`. `scripts/motion/pattern_copy_pose.gd` is the GDScript mirror of the backend's `assembly.pattern_copy_pose`, checked against the backend-generated
+  `tests/fixtures/pattern_copy_pose_vectors.json`. The poses it computes during a drag are a display; the commit's `assembly-mesh?geometry=false` read is the authority.
 - **`PATCH /parts/{id}/component-patterns/{pid}`** always stores the edit, then solves every part mated to one of the pattern's copies with the pattern's sources frozen and commits
   each group that converges. The response is the pattern plus **`broken_mate_ids`**: the mates on this pattern's copies still unsatisfied (a fixed part, a group that does not
   converge). Mates naming copies that no longer exist are dropped, in every Part (a parent assembly's mate through `sub/src#pattern:...` too).

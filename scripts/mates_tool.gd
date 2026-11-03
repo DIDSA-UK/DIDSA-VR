@@ -64,6 +64,7 @@ const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const MotionBlender := preload("res://scripts/motion/motion_blender.gd")
 const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
+const CopyPose := preload("res://scripts/motion/pattern_copy_pose.gd") ## where a pattern copy stands for a source at a pose (live, during a drag)
 const LocalRetraction := preload("res://scripts/motion/local_retraction.gd") ## reads the limit mates of a version-6 model (their measured values); its solve is not run per frame (see _limit_stop)
 const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
 ## The coupler ("motion") mates (docs/gears-and-motion-plan.md): they place nothing, they keep a relation between how far the two parts MOVE, so turning
@@ -188,6 +189,8 @@ var _busy := false
 var _group_poses: Dictionary = {} ## "owner|occurrence" -> Transform3D of a sub-assembly occurrence, as last read or written (group_pose())
 var _group_persist: Dictionary = {}
 var _current_owner_part_id := "" ## the ACTIVE root: the one the Mates page lists and creates mates on (the world's loaded root)
+var _pattern_cache: Dictionary = {} ## owner Part id -> its component pattern rows (`GET .../component-patterns`), fetched once per scope: what a live drag moves the copies by
+var _pattern_fetching: Dictionary = {} ## owner Part id -> true while that fetch is in flight
 var _other_states: Dictionary = {} ## owner Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every OTHER root whose parts can be moved and saved: each open Assembly Room's Part (load_owner_state)
 var _nested_states: Dictionary = {} ## sub-assembly Part id -> {"occurrences": {occ: {"fixed"}}, "mated": {occ: true}} for every Part below the active root (refresh_nested_state)
 var _home: Dictionary = {} ## the sandbox's snapshot: part node -> its local transform when Relax went on (sandbox_snapshot() is the same, keyed for a scene)
@@ -205,6 +208,7 @@ func setup(stack) -> void:
 func configure_backend(url: String, key: String) -> void:
 	backend_url = url
 	api_key = key
+	_pattern_cache.clear() # another server, another document
 
 
 func is_busy() -> bool:
@@ -1522,6 +1526,7 @@ func refresh_state(owner_part_id: String) -> void:
 	_current_owner_part_id = owner_part_id
 	occurrences.clear()
 	_mated_ids.clear()
+	_pattern_cache.erase(owner_part_id) # a (re)load: the patterns are read again at the next drag
 	if backend_url.is_empty() or api_key.is_empty() or owner_part_id.is_empty():
 		mates_changed.emit()
 		return
@@ -1719,6 +1724,7 @@ func load_owner_state(owner_part_id: String) -> bool:
 
 func drop_owner_state(owner_part_id: String) -> void:
 	_other_states.erase(owner_part_id)
+	_pattern_cache.erase(owner_part_id)
 
 
 func is_fixed(part: Node3D) -> bool:
@@ -2041,6 +2047,7 @@ func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	if state.is_empty():
 		state = _new_drag_state(part)
 		_drag[part] = state
+		_ensure_patterns(str(state["owner"])) # not awaited: the copies follow from the frame the answer is in (see _apply_copies)
 	if bool(state["finishing"]):
 		return parent.global_transform * state["shown_grabbed"] # released: the commit round trip is in flight, nothing follows the hand any more
 	state["active"] = true
@@ -2057,6 +2064,7 @@ func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	state["shown_grabbed"] = grabbed_pose
 	state["shown_pose"] = poses[0]
 	_apply_followers(state, poses)
+	_apply_copies(state, poses)
 	var elapsed := Time.get_ticks_usec() - started
 	_stat_add("frames")
 	_stat_add("projection_us_total", elapsed)
@@ -2235,6 +2243,95 @@ func _apply_followers(state: Dictionary, poses: Array) -> void:
 		var node: Node3D = state["nodes"].get(members[m])
 		if node != null and is_instance_valid(node):
 			node.transform = Se3.to_transform3d(poses[m])
+
+
+func _ensure_patterns(owner_part_id: String) -> void:
+	## Reads the scope's component patterns once (a coroutine; nothing waits for it: a drag whose answer is not in yet moves no copies, and the commit
+	## settles them anyway). A failed read is not cached: the next drag asks again.
+	if owner_part_id == "" or _pattern_cache.has(owner_part_id) or _pattern_fetching.has(owner_part_id):
+		return
+	_pattern_fetching[owner_part_id] = true
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/component-patterns" % owner_part_id, null)
+	_pattern_fetching.erase(owner_part_id)
+	if result["ok"] and result["json"] is Array:
+		_pattern_cache[owner_part_id] = result["json"]
+
+
+func _copy_links(state: Dictionary) -> Array:
+	## The pattern copies a drag moves live: [{member, pattern, index, node, nested: [{node, rel}]}], one per live copy of every non-suppressed pattern
+	## whose source is a member of the group (the grabbed part or a follower), for the copy nodes of the dragged scope (the grabbed node's own copy of it: the
+	## world's or a room's). `nested` are the nodes standing under a copy (`<source>#pattern:P:i/inner`) with their pose relative to it, so they move by the
+	## same delta. Rebuilt when the members change; `copy_starts` keeps every copy node's pre-grab pose (the undo entry's "before"). Empty while the
+	## scope's patterns are not read yet.
+	var owner := str(state["owner"])
+	var members: Array = state["members"]
+	if not _pattern_cache.has(owner) or members.is_empty():
+		return []
+	if state.get("copy_links") != null and state["copy_links_for"] == members:
+		return state["copy_links"]
+	var part: Node3D = state["part"]
+	var in_room: bool = is_instance_valid(part) and part.has_meta("room_id")
+	var room_id = part.get_meta("room_id", 0) if is_instance_valid(part) else 0
+	var by_first := {} # "<source>#pattern:P:i" -> the copy's node (path of one segment)
+	var below := {} # the same key -> [nodes under it]
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if not (node is Node3D) or not is_instance_valid(node):
+			continue
+		var path := str(node.get_meta("instance_path", ""))
+		if not path.contains(GroupIndex.PATTERN_SEGMENT) or str(node.get_meta("group_root", "")) != owner:
+			continue
+		if node.has_meta("room_id") != in_room or (in_room and node.get_meta("room_id", 0) != room_id):
+			continue
+		var first := path.get_slice("/", 0)
+		if not CopyPose.parse_segment(first).has("source"):
+			continue # a copy somewhere deeper inside a sub-assembly: its pose is not a function of a top-level source alone
+		if path == first:
+			by_first[first] = node
+		else:
+			if not below.has(first):
+				below[first] = []
+			below[first].append(node)
+	var links: Array = []
+	var starts: Dictionary = state.get("copy_starts", {})
+	for m in members.size():
+		for pattern in _pattern_cache[owner]:
+			if not (pattern is Dictionary) or bool(pattern.get("suppressed", false)) or not (pattern.get("source_occurrence_ids", []) as Array).has(members[m]):
+				continue
+			for index in CopyPose.live_indices(pattern):
+				var key := "%s%s%s:%d" % [members[m], GroupIndex.PATTERN_SEGMENT, str(pattern.get("id", "")), index]
+				var copy: Node3D = by_first.get(key)
+				if copy == null:
+					continue
+				var nested: Array = []
+				for under in below.get(key, []):
+					nested.append({"node": under, "rel": copy.transform.affine_inverse() * (under as Node3D).transform})
+					if not starts.has(under):
+						starts[under] = _local_pose(under)
+				if not starts.has(copy):
+					starts[copy] = _local_pose(copy)
+				links.append({"member": m, "pattern": pattern, "index": index, "node": copy, "nested": nested})
+	state["copy_starts"] = starts
+	state["copy_links"] = links
+	state["copy_links_for"] = members.duplicate()
+	return links
+
+
+func _apply_copies(state: Dictionary, poses: Array) -> void:
+	## One frame: every copy of a moving member's pattern stands at `pattern_copy_pose(pattern, the member's pose this frame, index)`, and what is nested
+	## under a copy keeps its place relative to it. Plain doubles (Se3) until the node's float32 transform. The backend stays the authority: the commit
+	## (and every solve) puts the copies where the server says (`_copy_pose_changes`).
+	for link in _copy_links(state):
+		var m: int = link["member"]
+		if m >= poses.size():
+			continue
+		var node: Node3D = link["node"]
+		if not is_instance_valid(node):
+			continue
+		var pose := Se3.to_transform3d(CopyPose.copy_pose(link["pattern"], poses[m], int(link["index"])))
+		node.transform = pose
+		for under in link["nested"]:
+			if is_instance_valid(under["node"]):
+				(under["node"] as Node3D).transform = pose * (under["rel"] as Transform3D)
 
 
 func _drag_loop(part: Node3D, state: Dictionary) -> void:
@@ -2428,6 +2525,20 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			node.transform = after
 			if not before.is_equal_approx(after):
 				changes.append({"node": node, "before": before, "after": after})
+		# The copies of every moved member's pattern were shown live (`_apply_copies`): the server's poses are the authority, and the undo entry
+		# restores each copy node to where the grab found it (a copy has no occurrence of its own, so nothing above covered it).
+		var copy_starts: Dictionary = state.get("copy_starts", {})
+		var copy_changes := await _copy_pose_changes(str(state["owner"]), copy_starts)
+		if not is_instance_valid(part):
+			_drag.erase(part)
+			return
+		var settled := {}
+		for c in copy_changes:
+			settled[c["node"]] = true
+		for node in copy_starts:
+			if not settled.has(node) and is_instance_valid(node) and not (copy_starts[node] as Transform3D).is_equal_approx(_local_pose(node)):
+				copy_changes.append({"node": node, "before": copy_starts[node], "after": _local_pose(node)}) # the read failed: the live pose stays, undo still restores
+		changes.append_array(copy_changes)
 		_push_group_move("move %s" % label_or(part, str(part.name)), changes)
 		if bool(state["at_limit"]):
 			_report("%s stopped at its limit." % label_or(part, "The part"))
@@ -2437,6 +2548,10 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			var node: Node3D = part if occ == state["occ"] else state["nodes"].get(occ)
 			if node != null and is_instance_valid(node):
 				node.transform = starts[occ]
+		var copy_starts: Dictionary = state.get("copy_starts", {})
+		for node in copy_starts:
+			if is_instance_valid(node):
+				node.transform = copy_starts[node] # the copies that followed the live drag go back too
 		_report("Couldn't keep that move (nothing was changed): %s" % _friendly_error(result if not result["ok"] else {"json": {"detail": {"type": "mate_solve_did_not_converge"}}}))
 	_drag.erase(part)
 
@@ -2477,34 +2592,46 @@ static func copy_poses_from_instances(instances: Array, unit_scale: float = 1.0)
 	return out
 
 
-func _copy_pose_changes(owner_part_id: String) -> Array:
-	## [{node, before, after}] for every loaded pattern-copy node of the scope rooted at `owner_part_id` that is not where the backend now puts it.
-	## A copy has no occurrence of its own, so `GET .../occurrences` never moves it; with a copy mate the backend moves a part along with the copy's source
-	## (the copy is a fixed function of it), and this is what keeps the copy on screen with its source. One lean request (`geometry=false`: poses only);
-	## none at all when the scope has no copy node. An older backend ignores the flag and sends the meshes too: slower, same answer.
-	var nodes: Array = []
+func _copy_pose_changes(owner_part_id: String, before_poses: Dictionary = {}) -> Array:
+	## [{node, before, after}] for every loaded pattern-copy node whose scope contains `owner_part_id` that is not where the backend now puts it: the scope
+	## rooted at `owner_part_id` itself, AND every other loaded root with that Part somewhere below it (the world's root, an open room of it): a solve
+	## inside a sub-assembly moves parts that the world's glb shows under the world root, and their copies stand there. A copy has no occurrence of its own,
+	## so `GET .../occurrences` never moves it; with a copy mate the backend moves a part along with the copy's source (the copy is a fixed function of
+	## it), and this is what keeps the copy on screen with its source. One lean request per distinct root (`geometry=false`: poses only); none at all when
+	## no scope has a copy node. An older backend ignores the flag and sends the meshes too: slower, same answer.
+	## `before_poses` (node -> Transform3D): where a node stood before something moved it on screen (a live drag's grab); it is the undo's "before", and a node
+	## already shown at its `after` is still reported when that differs from it.
+	var by_root := {} # group_root -> [copy nodes]
 	for node in get_tree().get_nodes_in_group("grabbable_parts"):
-		if node is Node3D and is_instance_valid(node) and str(node.get_meta("instance_path", "")).contains(GroupIndex.PATTERN_SEGMENT) and str(node.get_meta("group_root", "")) == owner_part_id:
-			nodes.append(node)
-	if nodes.is_empty():
-		return []
-	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/assembly-mesh?geometry=false" % owner_part_id, null)
-	if not result["ok"] or not (result["json"] is Dictionary):
-		return []
-	var poses := copy_poses_from_instances(result["json"].get("instances", []), COPY_UNIT_SCALE)
+		if not (node is Node3D) or not is_instance_valid(node) or not str(node.get_meta("instance_path", "")).contains(GroupIndex.PATTERN_SEGMENT):
+			continue
+		var root_id := str(node.get_meta("group_root", ""))
+		if root_id == "":
+			continue
+		if root_id != owner_part_id and not (node.get_meta("group_parts", []) as Array).has(owner_part_id):
+			continue
+		if not by_root.has(root_id):
+			by_root[root_id] = []
+		by_root[root_id].append(node)
 	var changes: Array = []
-	for node in nodes:
-		if not is_instance_valid(node):
+	for root_id in by_root:
+		var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/assembly-mesh?geometry=false" % root_id, null)
+		if not result["ok"] or not (result["json"] is Dictionary):
 			continue
-		var key := str(node.get_meta("instance_path", ""))
-		if not poses.has(key):
-			continue
-		var after: Transform3D = poses[key]
-		var before := _local_pose(node)
-		if before.is_equal_approx(after):
-			continue
-		node.transform = after
-		changes.append({"node": node, "before": before, "after": after})
+		var poses := copy_poses_from_instances(result["json"].get("instances", []), COPY_UNIT_SCALE)
+		for node in by_root[root_id]:
+			if not is_instance_valid(node):
+				continue
+			var key := str(node.get_meta("instance_path", ""))
+			if not poses.has(key):
+				continue
+			var after: Transform3D = poses[key]
+			var current := _local_pose(node)
+			var before: Transform3D = before_poses.get(node, current)
+			if current.is_equal_approx(after) and before.is_equal_approx(after):
+				continue
+			node.transform = after
+			changes.append({"node": node, "before": before, "after": after})
 	return changes
 
 

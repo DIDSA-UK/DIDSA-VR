@@ -36,7 +36,7 @@ any other local model.
 
 ## `motion_vectors.json` — golden vectors for the free-motion projector
 
-A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (128 cases, tolerance 1e-9; constraint-model versions 3 and 4),
+A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (155 cases, tolerance 1e-9; constraint-model versions 3 to 7),
 the normative test data for `scripts/motion/*.gd` (and for the Dart port in
 DIDSA-CAD `client/lib/motion/`). `tests/motion_vectors.gd` runs every kind in it.
 Do not edit it here: regenerate it in DIDSA-CAD (`python tools/motion_vectors/generate.py`)
@@ -52,7 +52,8 @@ and copy it over.
   branch-specific residuals; the 18 older ones were re-expressed with the branch of their mates.
 - Re-copied for an ANGLE about a hinge (`docs/mate-solution-choice-plan.md`): constraint-model version 3 (`hinge_direction` on a side, one more ANGLE row), 4 new `local_retract` cases (35 now).
 - Re-copied for constraint model v4 (a side's `pair`, Width / Symmetric over moving parts), DIDSA-CAD branch `claude/constraint-model-v4` at `d6b303c` (PR #303): 17 new `local-width-*` cases (52 `local_retract`), `local_pair_model_version` constant.
-- sha256 `2f5e96a699d3bb0cf9e3cddb23debc3dc37d486c37946368b31a3c19c611bcf0`.
+- Re-copied for constraint model v7 (a side's `follow`: pattern copies that follow their source), DIDSA-CAD branch `ccr-8db48425-oxdljy` (S1 of `pattern-followers-smoothness-plan.md`): 8 new `local-follow-*` cases (79 `local_retract`), `local_follow_model_version` constant.
+- sha256 `804141041017a9d8921e6184bddedd88d67b99827c86846a1d17cf3942eb09db`.
 - `tests/motion_vectors.gd` FAILS if a DIDSA-CAD checkout is reachable (`DIDSA_CAD_DIR`,
   else `../DIDSA-CAD`) and its `docs/motion/vectors.json` differs from this copy, so a
   regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.
@@ -80,3 +81,9 @@ appearance), so its mesh is two indexed primitives. Used by `tests/appearance_gl
 Regenerate from `DIDSA-CAD/backend` with its environment:
 `python /path/to/didsa-vr/tests/fixtures/make_appearance_split_glb.py /path/to/didsa-vr/tests/fixtures/appearance_split.glb`
 (body ids are new each time; the tests read them from the file).
+
+## `pattern_copy_pose_vectors.json` — golden vectors for a pattern copy's pose
+
+A **copy** of DIDSA-CAD's `backend/tests/data/pattern_copy_pose_vectors.json` (= `client/test/fixtures/pattern_copy_pose_vectors.json`): 50 cases (every pattern kind x five source poses), the pose of each live copy
+as the BACKEND's `assembly.pattern_copy_pose` gives it, tolerance 1e-9, for `scripts/motion/pattern_copy_pose.gd` (`tests/pattern_copy_pose.gd`). Do not edit it here: regenerate it in DIDSA-CAD
+(`cd backend && python ../tools/motion_vectors/pattern_copy_pose_vectors.py`, with the backend's python: the backend is the reference) and copy it over.

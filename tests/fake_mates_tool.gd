@@ -8,6 +8,8 @@ var doc_names: Dictionary = {} ## Part id -> name
 var solve_moves: Dictionary = {} ## "part|occurrence" -> the transform json a /solve stores for it
 var solve_fails: Dictionary = {} ## "part|occurrence" -> the 422 detail a /solve answers with
 var doc_instances: Dictionary = {} ## Part id -> Array of assembly-mesh instance rows {occurrence_path, world_transform, ...} (what ?geometry=false answers)
+var doc_patterns: Dictionary = {} ## Part id -> Array of component pattern rows (what `GET .../component-patterns` answers)
+var doc_mate_motion: Dictionary = {} ## "part|occurrence" -> the JSON a `mate-motion` POST answers (the commit's answer in a drag test); absent = 404
 var calls: Array = [] ## [{method, path}] in order
 
 
@@ -33,8 +35,15 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 		return {"ok": true, "code": 200, "json": (doc_occurrences.get(pid, []) as Array).duplicate(true), "error": ""}
 	if parts.size() == 3 and parts[2] == "assembly-mesh" and method == HTTPClient.METHOD_GET:
 		return {"ok": true, "code": 200, "json": {"geometry": [], "instances": (doc_instances.get(pid, []) as Array).duplicate(true)}, "error": ""}
+	if parts.size() == 3 and parts[2] == "component-patterns" and method == HTTPClient.METHOD_GET:
+		return {"ok": true, "code": 200, "json": (doc_patterns.get(pid, []) as Array).duplicate(true), "error": ""}
 	if parts.size() == 3 and parts[2] == "mates" and method == HTTPClient.METHOD_GET:
 		return {"ok": true, "code": 200, "json": (doc_mates.get(pid, []) as Array).duplicate(true), "error": ""}
+	if parts.size() == 5 and parts[2] == "occurrences" and parts[4] == "mate-motion" and method == HTTPClient.METHOD_POST:
+		var motion_key := "%s|%s" % [pid, parts[3]]
+		if doc_mate_motion.has(motion_key):
+			return {"ok": true, "code": 200, "json": (doc_mate_motion[motion_key] as Dictionary).duplicate(true), "error": ""}
+		return {"ok": false, "code": 422, "json": {"detail": {"type": "mate_solve_did_not_converge"}}, "error": "422"}
 	if parts.size() == 5 and parts[2] == "occurrences" and parts[4] == "solve" and method == HTTPClient.METHOD_POST:
 		var key := "%s|%s" % [pid, parts[3]]
 		if solve_fails.has(key):
