@@ -187,6 +187,8 @@ keep it there. Render test screenshot from the standing eye point. Comfort can o
 
 ## T5. Sketch items selectable: lines, dimensions, constraints
 
+**DONE (4 Nov 2026), headless + live backend; not on the headset.** Built: dimension / constraint hit rectangles and annotation selection (`sketch_view.gd`, `sketch_session.gd`, `sketch_selection.gd` `annotation_options`), Edit value / Delete / double-pull number pad (`table_editor.gd`), the Select tool coming back when a tool is put down, the lighter hover look, the no-sketch part hover (`hover_part_entity`). **Corrections to the plan:** (1) a sketch already opened with the Select tool on; what was missing was getting it back after a drawing tool, and the labels, so "no tool" is implemented as "the Select tool is on again" rather than a second state. (2) Geometry picking through the real path already worked (the pick radius is already a constant 14 mm in the world, `PICK_RADIUS / canvas_scale`); the test now pins it. (3) Driven / Driving is not offered: the backend notes have no route. (4) The part's selection (a trigger on a lit face / edge) is not built here: it is T6's selection model; T5 provides `hover_part_entity`. (5) Hover on the part also runs in the plane-picking state (that is the state a part is in when no tool is chosen), not only in `idle`. **Try on the headset:** pull on a dimension and on a constraint letter, a quick double pull on a dimension, Delete, and whether the hover and selected looks are told apart.
+
 **Report:** "Items in sketches (lines, dimensions, constraints, etc.) are not selectable. They should be, to allow editing and deletion to modify the sketches."
 
 ### What the code does now

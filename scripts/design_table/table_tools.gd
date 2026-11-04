@@ -90,7 +90,7 @@ const MODIFY_TOOLS := [
 ]
 
 const HINTS := {
-	"select": "Aim at a point, line or curve and pull the trigger to pick it (again to let go; pick several for more options). What you can do with it appears below: Length, Radius, Horizontal, Fix, Construction, Delete...",
+	"select": "Pull the trigger on anything in the sketch to change or delete it, or pick a tool to draw. Aim at a point, line, curve, dimension value or constraint letter and pull to pick it (again to let go; pick several for more options). A quick second pull on a dimension opens its number pad; a pull on empty sheet lets go of everything. What is under the laser lights lighter than what is picked.",
 	"line": "Point at the sheet and pull the trigger to place the start, then the end. Each end starts the next line.",
 	"rectangle": "Pick two opposite corners.",
 	"circle": "Pick the centre, then a point on the circle.",

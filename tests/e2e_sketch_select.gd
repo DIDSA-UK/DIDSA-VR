@@ -5,6 +5,8 @@ extends SceneTree
 ## menu option is applied to a real selection (horizontal, vertical, parallel, perpendicular, equal length, collinear, midpoint,
 ## point on line / curve, concentric, equal radius, tangent, curve tangent, fixed, a distance from the origin), construction is
 ## toggled and read back, and Delete removes entities (never the origin).
+## T5 adds the selectable labels (dimensions and constraint glyphs) against the real backend: a line with a Length, the dimension selected, its value edited (the
+## line's length follows; Undo puts the old one back), a Horizontal deleted (its line stays; Undo POSTs it back and the backend has it again), a dimension deleted.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_sketch_select.gd
 ## Needs secrets.cfg to point at a running backend (a throwaway CAD_API_KEY, see docs/status.md "How this has been worked on").
 
@@ -202,5 +204,46 @@ func _initialize() -> void:
 	print("SMOKE Delete removes the line from the backend sketch: ", deleted["ok"] and s.lines.size() == before_lines - 1 and not s.lines.has(line_to_circle))
 	await pick([["point", s.origin_id]])
 	print("SMOKE the origin cannot be deleted: the menu does not offer it, and it is still there after: ", not menu_ids().has("delete") and s.points.has(s.origin_id) and s.points[s.origin_id] == Vector2.ZERO)
+	# --- T5: dimension labels and constraint glyphs are selectable, editable and deletable
+	var tl := await line(Vector2(-100, -100), Vector2(-40, -100))
+	await pick([["line", tl]])
+	await s.apply_menu("horizontal")
+	await pick([["line", tl]])
+	var typed: Dictionary = await s.confirm_ghost("length", 60.0)
+	var dim_id := ""
+	var hor_id := ""
+	for cid in s.constraints:
+		var c: Dictionary = s.constraints[cid]
+		if str(c.get("type", "")) == "distance" and absf(float(c.get("distance", 0.0)) - 60.0) < 0.001 and not bool(c.get("provisional", false)):
+			dim_id = cid
+		if str(c.get("type", "")) == "horizontal" and str(c.get("line_id", "")) == tl:
+			hor_id = cid
+	print("SMOKE a Horizontal and a typed Length of 60 are real constraints on the line: ", typed["ok"] and dim_id != "" and hor_id != "")
+	s.clear_selection()
+	s.toggle_annotation("dimension", dim_id)
+	print("SMOKE the dimension selected by its label has the menu Edit value, Delete, Clear: ", menu_ids() == ["edit_value", "delete", "clear"])
+	var edited: Dictionary = await s.edit_dimension(dim_id, 80.0)
+	var la_len: float = (s.points[s.lines[tl]["a"]] as Vector2).distance_to(s.points[s.lines[tl]["b"]])
+	print("SMOKE Edit value changes the dimension on the backend and the line's length follows (80 mm): ", edited["ok"] and absf(float(s.constraints[dim_id]["distance"]) - 80.0) < 0.001 and absf(la_len - 80.0) < 0.01)
+	await s.undo()
+	la_len = (s.points[s.lines[tl]["a"]] as Vector2).distance_to(s.points[s.lines[tl]["b"]])
+	print("SMOKE ...and Undo puts it back to 60 mm: ", absf(float(s.constraints[dim_id]["distance"]) - 60.0) < 0.001 and absf(la_len - 60.0) < 0.01)
+	s.clear_selection()
+	s.toggle_annotation("constraint", hor_id)
+	print("SMOKE a constraint glyph selected has the menu Delete, Clear: ", menu_ids() == ["delete", "clear"])
+	var lines_now: int = s.lines.size()
+	var removed: Dictionary = await s.apply_menu("delete")
+	var listed: Dictionary = await req(HTTPClient.METHOD_GET, "/sketch/sketches/%s/export" % s.sketch_id)
+	print("SMOKE Delete takes the Horizontal off the backend sketch and leaves the line: ", removed["ok"] and not s.constraints.has(hor_id) and s.lines.size() == lines_now and s.lines.has(tl))
+	await s.undo()
+	var back := false
+	for cid in s.constraints:
+		if str(s.constraints[cid].get("type", "")) == "horizontal" and str(s.constraints[cid].get("line_id", "")) == tl:
+			back = true
+	print("SMOKE ...and Undo makes a Horizontal on that line again (a POST of what it was): ", back)
+	s.clear_selection()
+	s.toggle_annotation("dimension", dim_id)
+	var gone: Dictionary = await s.apply_menu("delete")
+	print("SMOKE Delete on the Length takes it away and the line stays: ", gone["ok"] and not s.constraints.has(dim_id) and s.lines.has(tl))
 	print("SMOKE e2e done: ", true)
 	quit()

@@ -346,6 +346,11 @@ session, placed twice, edited on the table, saved, reopened) and **`e2e_design_t
 `design_table_render`, `design_table_perf`. See `tests/README.md` for what each line should say, and `docs/status.md` "How this has been
 worked on" for standing up a throwaway backend.
 
+## Selecting without a tool (T5)
+
+With a sketch open the Select tool is on whenever no drawing tool is (putting a tool down turns it back on), so a pull on anything picks it: points, lines, curves, text, **dimension values** and **constraint letters** (`sketch_view.gd` keeps a hit rectangle for each label; `annotation_near()`). Labels are selected as *annotations* in the session (`sketch_session.gd` `annotations`), separate from the geometry selection, so a constraint and a line can be selected together. One dimension offers **Edit value** (the number pad; a quick second pull on a dimension opens it straight away), **Delete** and Clear; constraints and mixed selections offer **Delete** and Clear (the constraints go, then the geometry with what depends on it). Undo takes back an edited value (PATCH of the old one) and a deleted constraint (a POST of it again); deleting geometry still has no undo, as before. The flat app's Driven / Driving switch is not offered (no route in `backend-api-notes.md`).
+What is under the laser lights *lighter* than what is picked: a hovered entity is its own colour pulled towards the accent, a hovered label has an accent outline, a hovered face / edge / corner of the part uses the highlighter's lower-alpha hover colour; selected stays the warning colour, solid. With no sketch open, the laser lights the face, edge or corner under it (`table_editor.gd` `hover_part_entity`, which T6's selection model will use).
+
 ## The sketch sheet at the front (T4)
 
 While a sketch is open the sheet is hinged on the slab's front edge (its lower edge on the edge, `sheet_hinge_clearance` above the glass) and leans back `sketch_lean_back_degrees` (15 by default; 10 / 15 / 25 in Settings > Design table, with *Sketch sheet: Front (hinged) / Middle*, where Middle is the older floating sheet at 60 degrees), so it is close to a user standing at the tool deck. The part is slid along the sketch plane only; Reset and Fit put it back on the sheet's middle.
