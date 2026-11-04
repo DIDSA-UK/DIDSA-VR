@@ -6,11 +6,11 @@ Nothing in here has been built yet. Do the items in order, T1 to T5. They do not
 
 | # | Report | Size | Owner decision needed first? |
 |---|---|---|---|
-| T1 | Unclear where the app stores files; project folder on first run; change it in Settings | M (L with option D) | **Yes**: which storage option (below) |
-| T2 | Clear "new / open" path on an empty room and an empty design table; first part fixed at the origin | M | No (defaults proposed) |
+| T1 | Unclear where the app stores files; project folder on first run; change it in Settings | M | Decided 4 Nov: **B + C** |
+| T2 | Clear "new / open" path on an empty room and an empty design table; first part fixed at the origin | M | Decided 4 Nov: rooms say *assembly*, the table says *part*; same files |
 | T3 | Selecting a mate on the tablet highlights the two mated entities | S | No |
 | T4 | Sketch canvas at the front edge of the table, hinged there, tilted back a little | S-M | Angle to start from (default proposed) |
-| T5 | Sketch lines, dimensions and constraints selectable, for editing and deleting | M | No |
+| T5 | Sketch lines, dimensions and constraints selectable, for editing and deleting | M | Decided 4 Nov: selectable with no tool chosen |
 
 ---
 
@@ -41,7 +41,7 @@ folder be set on app open if one is not set? With an option to change folder in 
 - **Project folder on first run:** yes, recommended. Ask once (the first time the app needs to save or open, or on the landing's first run), then keep it.
 - **Change it in Settings:** yes. Keep the Settings page, but replace the typed path with the same chooser.
 
-### The options (owner to pick one)
+### The options (decided 4 Nov 2026: **B + C**)
 
 | Option | How it works | For | Against |
 |---|---|---|---|
@@ -50,8 +50,7 @@ folder be set on app open if one is not set? With an option to change folder in 
 | C. B plus *All files access* | Add `MANAGE_EXTERNAL_STORAGE` to the export preset; a Settings button sends the user to the system page to grant it; then any folder works and the current path-based code is unchanged | Opens files copied in by USB or the flat app; fine for a sideloaded APK | A Store listing would need justification; one more system page for the user |
 | D. SAF folder picker, like the flat app | A small Kotlin Godot Android plugin for the picker and `content://` I/O | Same model as the flat app; works with cloud providers | Needs a native plugin (CLAUDE.md allows only the Vendors plugin, so the owner would have to allow it); every `DirAccess`/`FileAccess` call in `main.gd`, `native_compose.gd`, `file_lookup.gd`, `file_index.gd` would go through a new storage layer. Large |
 
-**Recommendation:** B now, with C as a switch in Settings (one permission line and one button). Leave D until the VR app has to share folders with the flat app
-through a cloud provider.
+**Decision (owner, 4 Nov 2026): B + C.** `Documents/DIDSA` by default, and *All files access* offered in Settings. D is not being built.
 
 ### Build (for B + C)
 
@@ -97,18 +96,17 @@ and *Open part* buttons floating on an empty design table. Large *New Assembly* 
 1. **Floating start buttons**, one small scene used in both places (`scripts/ui/start_buttons.gd`): two large laser buttons (about 0.30 x 0.12 m each, the
    theme's accent, a short line of help under them) on a `LaserSurface`, hidden as soon as the space holds anything.
 2. **Empty room** (room has no occurrences; listen for the room's parts changing):
-   - **New sub-assembly**: a new empty Part as an occurrence in the room's Part, at the origin, then opened as a nested room or (simpler first step) made the
-     room's target so later parts go into it. *Check with the owner* whether they mean this, or whether the room itself is already the new sub-assembly and
-     the buttons should be **New part** / **Add part...**. Their wording ("New Assembly", "Open Assembly") suggests: **New** = start the room's content
-     empty and put one new part on the design table for it; **Open** = add an existing `.didsa` / `.DIDSAprt` file. Build that reading unless told otherwise:
-     - **New part**: as the table's New part, but the occurrence goes into the room's Part (reuse `NewDocument.add_part()` with the room's part id) and the
-       table opens on it.
-     - **Open...**: the folder list from T1 step 4 filtered to model files, then `room_manager.add_file_to_room()`.
+   - **Decided (owner, 4 Nov 2026):** assembly files and part files are the same native files (`.didsa` / `.DIDSAprt`); only the words differ, because rooms
+     are for assemblies. So the room's buttons are **New assembly** and **Open assembly...**, and the table's are **New part** and **Open part...**. Behind them
+     the actions are the same:
+     - **New assembly**: a new empty Part as an occurrence in the room's Part, at the origin and fixed (step 3). The design table opens on it, so it can be
+       drawn on or have parts added to it.
+     - **Open assembly...**: the T1 folder list, filtered to native and model files, then `room_manager.add_file_to_room()`.
    - When there is no assembly loaded at all, **New room** on the Rooms page should start one (`NewDocument.start_assembly()`) instead of refusing.
 3. **First part fixed at the origin:** in `room_edit.gd`, when the room's Part has no occurrences, add the first part at the identity transform and with
    `fixed: true` (both `add_file()` and `add_copy()`, and the New part path). A toast says *"First part: fixed at the room's origin"*. Later parts are placed
    where they are dropped, unfixed, as now.
-4. **Room console:** add **Add part...** (the T1 file list, into this room) and **New part** rows, so "more parts from the console" works.
+4. **Room console:** add **New assembly** and **Open assembly...** rows (the same actions as step 2, for a room that already has parts), so "more parts from the console" works.
 5. **Empty design table:** the same two big buttons, **New part** (the existing New part) and **Open part...** (pick a part file: add it to the assembly
    beside the table with `add-component`, then seat it on the table as if carried there). Hide them while a part is seated.
 
@@ -185,15 +183,19 @@ keep it there. Render test screenshot from the standing eye point. Comfort can o
 
 - There **is** a Select tool (`table_tools.gd`, `table_editor.gd` `SELECT_TOOL`, `sketch_session.gd` `select()` / `toggle_select()` / `delete_selection()`,
   menu in `sketch_selection.gd`) that picks points, lines, circles, arcs, ellipses, splines and text, and offers Delete, Construction, Fix and constraints.
-  It is not the default tool when a sketch opens; the tester did not find it, or it did not pick. **Ask the owner which**: did they try Select?
+  It is not the default tool when a sketch opens. **Owner, 4 Nov 2026:** *"I expected to be able to select lines, dimensions etc without needing to open a
+  tool."* So selection must work with no tool chosen, not only inside a Select tool.
 - **Dimensions and constraint glyphs are `Label3D`s** (`sketch_view.gd` `_labels`, `_constraint_labels`) with no picking at all: they cannot be selected,
   edited or deleted. The only way to change a dimension value is the Build tree.
 - The flat app selects constraints and dimensions (`sketch_screen.dart`, `SelectionKind.constraint`), with delete and edit.
 
 ### Build
 
-1. **Select is the default** whenever a sketch opens and after a shape is finished (if the Infer/continuous-draw flow allows; otherwise after Escape / B).
-   The deck shows the Select button as active. Status line: *"Aim at a line, dimension or constraint and pull the trigger."*
+1. **No tool means select.** When a sketch opens, and whenever a drawing or constraint tool is finished or put down (B, or pressing its button again), the
+   sketch is in a no-tool state in which the trigger on a line, point, curve, dimension or constraint selects it and the options appear (the current
+   Select tool's behaviour). Drop the separate Select button from the deck, or keep it only as "put the tool down". Hover lights what the laser would pick in
+   every state, so it is clear what is selectable. Status line with no tool: *"Pull the trigger on anything in the sketch to change or delete it, or pick a
+   tool to draw."* Check that a tool-less trigger on empty sheet clears the selection and does not start drawing.
 2. **Geometry picking check:** a headless test that lays out a line and aims a laser ray at its middle on the tilted sheet, through the real
    `table_editor.gd` path (not `session.select()` directly), and gets it selected. If that fails, that is the bug; fix the hit radius / plane
    projection. Make the pick radius scale with zoom so it is a constant few millimetres in the world.
