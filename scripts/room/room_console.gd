@@ -32,8 +32,8 @@ func setup_console(p_room: Node3D, p_manager: Node, main: Node, left: XRControll
 	manager = p_manager
 	_main = main
 	panel_title = room.label
-	panel_size = Vector2(0.30, 0.46)
-	viewport_size = Vector2i(480, 736)
+	panel_size = Vector2(0.30, 0.52)
+	viewport_size = Vector2i(480, 832)
 	super.setup(left, right, camera)
 	set_title(room.label)
 	_build_pedestal()
@@ -70,6 +70,9 @@ func _build_content() -> Control:
 		world_row.add_child(b)
 	box.add_child(world_row)
 	manager.preview_changed.connect(_on_preview_changed)
+	var add_row := _row([["New assembly", func() -> void: manager.new_part_in_room(room)], ["Open assembly...", func() -> void: manager.open_file_picker(room)]])
+	add_row.name = "AddRow" # T2: the same two actions as the empty room's big buttons, for a room that already has parts
+	box.add_child(add_row)
 	_delete_button = Button.new()
 	_delete_button.text = "Delete selected part"
 	_delete_button.pressed.connect(_on_delete_pressed)

@@ -70,7 +70,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** c
 | Tile | Opens |
 |---|---|
 | **Design** | Summons the design table, or brings it to you. |
-| **Rooms** | **New room** (an empty sub-assembly, summoned with the laser), and a tile per open room: its picture, **Bring to me**, **Close**. |
+| **Rooms** | **New room** (an empty sub-assembly, summoned with the laser; with no assembly loaded it starts one), and an empty room shows two big buttons, **New assembly** and **Open assembly...** (the first part goes in fixed at the room's origin; the room console has the same two actions for later), and a tile per open room: its picture, **Bring to me**, **Close**. |
 | **Assemble** | Mates (face / edge / corner picking, Coincident, Concentric, Parallel, Distance, Angle, Gear / Rack and pinion / Screw (turning one part turns the other), Limit distance / Limit angle (a travel that stops at a minimum and a maximum), Drive (turn a mated part with the stick so its mechanism runs), Relax (a sandbox: moves are temporary and everything goes back) / Enforce all, Fix/Float). |
 | **View** | Navigate, Scale (1:10 to 10:1, lock, Fit, Home), Visibility, Hide tool, Display, Colours, Environment (Light / Dark / Mid / Passthrough). |
 | **Inspect** | Measure (vertex / edge / face, one or two picks) and Sections (a client-side clip plane). |

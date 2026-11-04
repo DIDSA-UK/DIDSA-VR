@@ -1575,7 +1575,16 @@ func add_component_file(path: String) -> void:
 	_load_busy = false
 
 
-func _add_component_file_impl(path: String) -> void:
+func add_component_to_world(path: String) -> bool:
+	## The design table's "Open part...": Add into the loaded assembly's root, never a room (the table is not a room). True if the file was added.
+	if not _claim_load("Add"):
+		return false
+	var ok: bool = await _add_component_file_impl(path)
+	_load_busy = false
+	return ok
+
+
+func _add_component_file_impl(path: String) -> bool:
 	## Files tab "Add": merges a second native file's own Part into the
 	## *currently loaded* assembly's root Part as a new Occurrence, via the
 	## backend's POST /parts/{root_id}/add-component
@@ -1590,21 +1599,21 @@ func _add_component_file_impl(path: String) -> void:
 	## round 2" for the blocker this closes.
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("Add needs a backend (see secrets.cfg.example).")
-		return
+		return false
 	if _resolved_part_id.is_empty():
 		_set_status("Load a backend-hosted assembly first — nothing to add %s onto." % path.get_file())
-		return
+		return false
 	var composed := compose_native(path) # a sub-assembly file brings the files it references (native_compose.gd)
 	if not composed["ok"]:
 		_set_status(composed["error"])
-		return
+		return false
 	var component_text: String = composed["text"]
 	var e = room_manager.edit_api()
 	if e != null:
 		var refusal: String = await e.file_conflict(_resolved_part_id, component_text) # (the server only checks the file's root; see room_edit.gd)
 		if refusal != "":
 			_set_status(refusal)
-			return
+			return false
 
 	var req := HTTPRequest.new()
 	add_child(req)
@@ -1616,7 +1625,7 @@ func _add_component_file_impl(path: String) -> void:
 	)
 	var add_result: Array = await req.request_completed
 	if _parse_import_response(add_result, "add %s to the assembly" % path.get_file(), req) == null:
-		return
+		return false
 
 	_set_status("Added. Refreshing assembly mesh...")
 	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
@@ -1631,11 +1640,12 @@ func _add_component_file_impl(path: String) -> void:
 	var mesh_body: PackedByteArray = mesh_result[3]
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
 		_set_status("Mesh refresh after adding %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
-		return
+		return false
 	if not _show_model(mesh_body, "", spawn_scale):
-		return
+		return false
 	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
+	return true
 
 
 var _reloading_world := false ## reload_world_model() is swapping the same document's model: open Assembly Rooms stay open

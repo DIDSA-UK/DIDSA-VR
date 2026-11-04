@@ -348,6 +348,8 @@ worked on" for standing up a throwaway backend.
 
 ## Starting from nothing: New assembly and New part
 
+**Start buttons (T2, 4 Nov 2026).** An open design table with no part on it floats two large buttons above the slab, **New part** and **Open part...** (`scripts/ui/start_buttons.gd`; the same panel shows in an empty Assembly Room as **New assembly** / **Open assembly...**: assembly files and part files are the same native files, only the words differ). They go the moment a part is seated and come back when it is taken off. **Open part...** lists native files (`folder_chooser.gd` in files mode, starting in the project folder); the file's Part is added to the assembly beside the table (`add-component`; a new assembly is started if none is loaded) and then seated as if carried there (`design_table.gd` `open_part_file()`, `main.gd` `add_component_to_world()`). Not built: the table opening on a part that lives inside a room (the table seats the world's own parts only; see the plan's T2 note).
+
 * **New assembly** (wrist tablet > Files > **New assembly**, pressed twice within four seconds because it discards what is loaded): `POST
   /document/new` (a fresh, empty backend document) then one empty root part named Assembly, shown as an empty arena. Save first if you want
   the old one. It needs the backend (a bare local `.glb` has no document to start). STEP / STL / OBJ import now does the same
