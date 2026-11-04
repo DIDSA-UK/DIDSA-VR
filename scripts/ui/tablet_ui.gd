@@ -704,7 +704,7 @@ func list_source() -> Dictionary:
 		return {"title": "History", "provider": _history_rows, "empty": "Nothing to undo yet."}
 	var def = registry.tool_def(selected_tool_id)
 	if def != null and def.has_list() and _tool_view.visible:
-		return {"title": def.label, "provider": def.list_provider, "empty": def.list_empty}
+		return {"title": def.label, "provider": def.list_provider, "empty": def.list_empty, "row_select": def.row_select}
 	return {}
 
 

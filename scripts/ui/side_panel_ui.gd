@@ -8,11 +8,16 @@ extends Control
 ## the visible content actually changed, so a provider can be polled cheaply
 ## without the list flickering or losing the scroll position. An action with
 ## "confirm": true needs a second press within 3 s ("Sure?") before it runs.
+## A row with "selectable": true can be selected (T3): a tap on its body, not on one of its buttons, draws it in the accent and emits row_selected(id);
+## a tap on the selected row clears it (row_selected("")).
 
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
 
+signal row_selected(id: String) ## a selectable row was tapped (its id), or the selected one was tapped again / the selection was cleared ("")
+
 var tokens: Resource
+var selected_id := "" ## the selected row's id ("" = none); kept while the list is polled, cleared by clear_selection()
 var _fx: ColorRect
 var _seen_revision := -1
 var scroll: ScrollContainer ## the host hands this to its LaserSurface as scroll_target
@@ -93,6 +98,36 @@ func set_list(title: String, rows: Array, empty_text: String = "Nothing here yet
 		_rows.add_child(_build_row(row))
 
 
+func clear_selection(emit: bool = false) -> void:
+	## Nothing selected (the page changed, or the thing the row stood for is gone). `emit` tells the host, which clears what the selection lit.
+	if selected_id == "":
+		return
+	selected_id = ""
+	_signature = ""
+	if emit:
+		row_selected.emit("")
+
+
+func _on_row_tapped(id: String) -> void:
+	selected_id = "" if selected_id == id else id
+	_signature = "" # the rows are drawn again, the new one in the accent (the host's next poll rebuilds them; so does the call below if it is in a hurry)
+	for card in _rows.get_children():
+		if card.has_meta("row_id"):
+			_style_card(card, str(card.get_meta("row_id")) == selected_id)
+	row_selected.emit(selected_id)
+
+
+func _style_card(card: PanelContainer, selected: bool) -> void:
+	if selected:
+		var base = theme.get_stylebox("panel", "PanelRaised") if theme != null else null
+		var flat: StyleBoxFlat = (base.duplicate() as StyleBoxFlat) if base is StyleBoxFlat else StyleBoxFlat.new()
+		flat.border_color = tokens.accent
+		flat.set_border_width_all(3)
+		card.add_theme_stylebox_override("panel", flat)
+	else:
+		card.remove_theme_stylebox_override("panel")
+
+
 func play_intro() -> void:
 	## Rows fade in one after another (25 ms apart, capped so the whole thing stays under
 	## ~300 ms) when the panel opens. Instant with Reduce motion.
@@ -118,8 +153,8 @@ func _signature_of(title: String, rows: Array, empty_text: String) -> String:
 		var labels := []
 		for a in row.get("actions", []):
 			labels.append([str(a.get("label", "")), bool(a.get("danger", false))])
-		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), bool(row.get("broken", false)), labels])
-	return JSON.stringify([title, empty_text, plain])
+		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), bool(row.get("broken", false)), bool(row.get("selectable", false)), labels])
+	return JSON.stringify([title, empty_text, selected_id, plain])
 
 
 func _build_row(row: Dictionary) -> Control:
@@ -153,6 +188,15 @@ func _build_row(row: Dictionary) -> Control:
 		inner.add_child(bar)
 		for action in actions:
 			bar.add_child(_build_action(action))
+	if bool(row.get("selectable", false)):
+		var id := str(row.get("id", ""))
+		card.set_meta("row_id", id)
+		card.mouse_filter = Control.MOUSE_FILTER_STOP
+		card.gui_input.connect(func(event: InputEvent) -> void:
+			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+				_on_row_tapped(id))
+		if selected_id == id:
+			_style_card(card, true)
 	return card
 
 

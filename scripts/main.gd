@@ -242,7 +242,10 @@ func _add_face_highlight() -> void:
 			entries = _mates_tool.picked_entities()
 		elif _measure_tool.active:
 			entries = _measure_tool.picked_entities()
+		if entries.is_empty():
+			entries = _mates_tool.mate_highlight_entries() # a mate selected on the tablet (T3)
 		highlight.set_picks(entries)
+	_mates_tool.highlight_changed.connect(refresh)
 	_mates_tool.picks_changed.connect(refresh)
 	_measure_tool.picks_changed.connect(refresh)
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:

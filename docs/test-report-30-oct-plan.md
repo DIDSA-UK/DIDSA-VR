@@ -124,6 +124,8 @@ the second does not. Render test for the button layout under Xvfb. Size and reac
 
 ## T3. Selecting a mate on the tablet highlights its two entities
 
+**DONE (4 Nov 2026), headless + live backend; not on the headset.** Built as planned: selectable rows in `side_panel_ui.gd` (a registry option `row_select`, a tap on the row body, accent border), `mates_tool.gd` `highlight_for()` / `highlight_mate()` / `clear_highlight()` / `direction_hint()`, main.gd feeding `face_highlight.set_picks()` when no tool pick is showing, the Mates rows marked `selectable`. **Corrections to the plan:** the "pulse of the two parts' outlines" is the referenced *bodies* lit with the highlighter's hover material for 0.9 s (there is no separate selection-outline function to reuse; the real selection tint is permanent and belongs to the user's own selection). The highlight is cleared when the list stops being shown (another page, the tablet closed), not only on the page change the plan named. **What the owner should try:** tap a mate in the list: do the two entities light in cyan and orange, can the faces of a mate between hidden faces be found with the pulse, and does the status line direction help when a part is behind you?
+
 **Report:** "Selecting a mate from the tablet should highlight the two entities that are mated (faces, edges, vertices etc.). This is a candidate for the
 Flutter client too."
 

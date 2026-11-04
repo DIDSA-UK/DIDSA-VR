@@ -257,6 +257,9 @@ func _build_side_panel() -> void:
 	add_child(_side_viewport)
 	side_ui = SidePanelUI.new()
 	side_ui.setup(tokens, Vector2(side_px))
+	side_ui.row_selected.connect(func(id: String) -> void:
+		if _side_row_select.is_valid():
+			_side_row_select.call(id))
 	_side_viewport.add_child(side_ui)
 	var cursor := LaserSurface.make_cursor()
 	side_ui.add_child(cursor)
@@ -444,8 +447,20 @@ func _on_right_pressed(action_name: String) -> void:
 		UiFeedback.play("open", self)
 
 
+var _side_title := "" ## which list the side panel showed last: a different one clears the row selection (and what it lit)
+var _side_row_select := Callable() ## that list's row_select callback
+
 func _refresh_side() -> void:
 	var src: Dictionary = ui.list_source() if ui else {}
+	var title: String = str(src.get("title", "")) if _open else ""
+	if title != _side_title:
+		var old := _side_row_select
+		_side_title = title
+		_side_row_select = src.get("row_select", Callable()) if _open else Callable()
+		if side_ui.selected_id != "":
+			side_ui.clear_selection(false)
+			if old.is_valid():
+				old.call("") # T3: leaving the list (another page, the tablet closed) puts away what the selected row lit
 	if src.is_empty() or not _open:
 		_set_side_open(false)
 		return

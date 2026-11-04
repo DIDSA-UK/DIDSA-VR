@@ -137,7 +137,7 @@ func register(reg) -> void:
 	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
 	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
-		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
+		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.", "row_select": _on_mate_row_selected,
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
 	reg.add_tool("assemble", "drive", "Drive", "movement", _build_drive_page, {
@@ -819,6 +819,14 @@ func _on_mates_selected() -> void:
 		_mates_tool.refresh_mates(owner_part_id)
 
 
+func _on_mate_row_selected(mate_id: String) -> void:
+	## T3: a mate row tapped in the list: its two entities light up (a second tap, or leaving the list, puts them out).
+	if _mates_tool == null:
+		return
+	var camera: Camera3D = _main.get_node_or_null("XROrigin3D/XRCamera3D") if _main != null else null
+	_mates_tool.highlight_mate(mate_id, camera)
+
+
 func _mates_status() -> String:
 	return _mates_tool.status_text() if _mates_tool else ""
 
@@ -961,7 +969,7 @@ func _mates_rows() -> Array:
 		if broken:
 			notes.push_front("can't be satisfied")
 		rows.append({
-			"id": mate_id,
+			"id": mate_id, "selectable": true,
 			"title": "%s%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else "", " - Broken" if broken else ""],
 			"subtitle": ", ".join(notes), "state": "error" if broken else "normal", "broken": broken,
 			"actions": actions,
