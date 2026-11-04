@@ -27,6 +27,8 @@ var sound_enabled: bool = true
 var sound_volume: float = 0.7
 var view_render_mode: int = 0 ## 0 shaded, 1 shaded + edges, 2 wireframe (view_modes.gd): like the flat app's view_render_mode
 var table_keep_turn: bool = false ## a part sent back to the arena keeps the turn it has on the design table (false: its original orientation)
+var table_sheet_front: bool = true ## the sketch sheet hinged at the slab's front edge, tilted back (false: floating at the slab's middle at 60 degrees, as before T4)
+var table_sheet_lean: int = 15 ## degrees the front-hinged sheet leans back from vertical: 10, 15 or 25
 var table_max_scale: float = 3.0 ## the biggest the part may be scaled to on the table (8x while a sketch is open regardless)
 var table_slab_size: Vector2 = Vector2.ZERO ## the design table's slab as the user last dragged it (zero = never changed)
 var wheel_enabled: bool = true ## the tool wheel (right trigger + grip)
@@ -70,6 +72,8 @@ func load_from_disk() -> void:
 	fx_enabled = bool(config.get_value("appearance", "effects", fx_enabled))
 	table_keep_turn = bool(config.get_value("table", "keep_turn", table_keep_turn))
 	table_max_scale = clampf(float(config.get_value("table", "max_scale", table_max_scale)), 1.5, 8.0)
+	table_sheet_front = bool(config.get_value("table", "sheet_front", table_sheet_front))
+	table_sheet_lean = clampi(int(config.get_value("table", "sheet_lean", table_sheet_lean)), 5, 45)
 	table_slab_size = Vector2(float(config.get_value("table", "slab_w", 0.0)), float(config.get_value("table", "slab_d", 0.0)))
 	sound_enabled = bool(config.get_value("comfort", "sound_enabled", sound_enabled))
 	sound_volume = clampf(float(config.get_value("comfort", "sound_volume", sound_volume)), 0.0, 1.0)
@@ -103,6 +107,8 @@ func save_to_disk() -> void:
 	config.set_value("appearance", "effects", fx_enabled)
 	config.set_value("table", "keep_turn", table_keep_turn)
 	config.set_value("table", "max_scale", table_max_scale)
+	config.set_value("table", "sheet_front", table_sheet_front)
+	config.set_value("table", "sheet_lean", table_sheet_lean)
 	config.set_value("table", "slab_w", table_slab_size.x)
 	config.set_value("table", "slab_d", table_slab_size.y)
 	config.set_value("comfort", "sound_enabled", sound_enabled)
@@ -134,6 +140,12 @@ func set_view_render_mode(mode: int) -> void:
 
 func set_table_keep_turn(on: bool) -> void:
 	table_keep_turn = on
+	save_to_disk()
+
+
+func set_table_sheet(front: bool, lean: int) -> void:
+	table_sheet_front = front
+	table_sheet_lean = clampi(lean, 5, 45)
 	save_to_disk()
 
 

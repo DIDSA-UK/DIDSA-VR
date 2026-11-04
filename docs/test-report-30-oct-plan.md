@@ -156,6 +156,8 @@ Add to `tests/run_all.sh`. Live-backend: a coincident mate made in `e2e_*`, then
 
 ## T4. Sketch canvas at the front of the table
 
+**DONE (4 Nov 2026), headless only.** Built: `design_table.gd` `sketch_tilt()`, `sheet_centre()`, `_plane_origin_at_sheet()`, `_slide_plane_to_sheet()` (orient, Reset and Fit use them; the window anchor is the sheet's middle), `sheet_hinge_clearance` (0.015 m, the one number to raise if the sheet hides the deck's top row), the settings `table_sheet_front` / `table_sheet_lean` and Settings > Design table rows. `tests/sketch_sheet_front.gd`. **Not done / not checked:** the plan's render test screenshot (a sketch session needs a backend to draw anything; the geometry and the eye-point ordering are asserted headless instead), the Properties and tree windows against the sheet, and comfort. Two older tests that pin the 60-degree middle sheet now set *Middle*. T6 still has to move the hinge back behind its drawer.
+
 **Report:** "On the design table, the sketch canvas should be at the front of the table (hinged at the front edge, tilted back slightly) so when the user is
 standing in a comfortable position to select tools, the canvas is close."
 

@@ -85,6 +85,9 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
 @export var sketch_tilt_degrees: float = 60.0 ## while a sketch is open the sketch plane stands this far up from the slab, top edge away, facing you (flat on the slab was awkward to draw on)
 @export var sheet_window_m := Vector2(0.80, 0.40) ## the sketch sheet's size in the WORLD, metres (wide by tall): a fixed window you draw in, however far the part is zoomed
+@export var sketch_sheet_front := true ## T4: the sketch sheet is hinged at the slab's front edge and leans back (false: the old floating sheet at the slab's middle)
+@export var sketch_lean_back_degrees: float = 15.0 ## T4: how far the front-hinged sheet leans back from vertical (so it stands 90 minus this above the slab)
+@export var sheet_hinge_clearance: float = 0.015 ## T4: metres the sheet's lower edge floats above the slab at the hinge (raise it if it hides the deck's top row from the eye)
 @export var sketch_hover_height: float = 0.26 ## metres: the least height the part floats at while it is tilted, so the sheet's lower edge clears the slab
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
@@ -480,6 +483,8 @@ func apply_settings(settings) -> void:
 	## main.gd, once everything exists: what the user chose last time.
 	keep_turn_on_return = settings.table_keep_turn
 	max_scale_setting = settings.table_max_scale
+	sketch_sheet_front = settings.table_sheet_front
+	sketch_lean_back_degrees = float(settings.table_sheet_lean)
 	var saved: Vector2 = settings.table_slab_size
 	if saved != Vector2.ZERO:
 		set_slab_size(saved.clamp(resizer.min_size, resizer.max_size))
@@ -777,6 +782,20 @@ func pin_sketch_plane() -> void:
 	pivot.position -= window_anchor_normal * window_anchor_normal.dot(on_plane - window_anchor)
 
 
+func _plane_origin_at_sheet(rotation: Basis, scale: float, plane: Dictionary) -> Vector3:
+	## The pivot position that puts the sketch plane's origin at the front-hinged sheet's middle.
+	var basis := rotation.orthonormalized() * scale
+	return sheet_centre() - basis * (table_copy.transform * (plane["origin"] as Vector3))
+
+
+func _slide_plane_to_sheet(rotation: Basis, centre: Vector3, scale: float, plane: Dictionary) -> Vector3:
+	## `centre` moved along the sketch plane's normal only, until the plane passes through the sheet's middle: the part keeps where it was along the sheet.
+	var basis := rotation.orthonormalized() * scale
+	var normal := (rotation.orthonormalized() * (table_copy.basis * (plane["n"] as Vector3))).normalized()
+	var on_plane: Vector3 = centre + basis * (table_copy.transform * (plane["origin"] as Vector3))
+	return centre + normal * normal.dot(sheet_centre() - on_plane)
+
+
 func _set_window_anchor(rotation: Basis, centre: Vector3, scale: float, plane: Dictionary) -> void:
 	## Fixes the sketch window where the sketch plane will be once the part has settled into `rotation`, `centre`, `scale`: on the
 	## plane, as near the part's middle as it gets.
@@ -784,6 +803,8 @@ func _set_window_anchor(rotation: Basis, centre: Vector3, scale: float, plane: D
 	var on_plane: Vector3 = centre + basis * (table_copy.transform * (plane["origin"] as Vector3))
 	window_anchor_normal = (rotation.orthonormalized() * (table_copy.basis * (plane["n"] as Vector3))).normalized()
 	window_anchor = centre - window_anchor_normal * window_anchor_normal.dot(centre - on_plane)
+	if sketch_sheet_front:
+		window_anchor = sheet_centre() # T4: the window is where the sheet's hinge puts it, not near the part's middle
 
 
 func part_radius() -> float:
@@ -1157,14 +1178,29 @@ func orient_to_plane(plane: Dictionary) -> void:
 		return
 	var at := pivot.position
 	at.y = maxf(at.y, sketch_hover_height)
+	if sketch_sheet_front:
+		at = _slide_plane_to_sheet(sketch_rotation(plane), at, user_scale, plane)
 	_set_window_anchor(sketch_rotation(plane), at, user_scale, plane)
 	_animate_pose(sketch_rotation(plane), at, user_scale)
+
+
+func sketch_tilt() -> float:
+	## Degrees the sketch plane stands up from the slab: 90 minus the lean-back when front-hinged, else sketch_tilt_degrees.
+	return 90.0 - sketch_lean_back_degrees if sketch_sheet_front else sketch_tilt_degrees
+
+
+func sheet_centre() -> Vector3:
+	## T4, console frame: where the front-hinged sheet's middle is. Its lower edge sits on the slab's front edge (a little clearance above the glass)
+	## and it leans back, so the middle is half the sheet's height up the lean: z = front - (h/2)cos(tilt), y = clearance + (h/2)sin(tilt).
+	var tilt := deg_to_rad(sketch_tilt())
+	var half_h := sheet_window_m.y * 0.5
+	return Vector3(0.0, sheet_hinge_clearance + half_h * sin(tilt), slab_size.y * 0.5 - half_h * cos(tilt))
 
 
 func sketch_rotation(plane: Dictionary) -> Basis:
 	## How the part is turned while a sketch on `plane` is open: the plane lies flat on the slab (x right, y away, normal up), then
 	## tips up about the slab's x axis by sketch_tilt_degrees so its top edge goes away and its face comes towards you.
-	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt_degrees)) * SketchMath.orient_to_table(plane)
+	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt())) * SketchMath.orient_to_table(plane)
 
 
 func reset_pose() -> void:
@@ -1178,6 +1214,8 @@ func reset_pose() -> void:
 		rotation = sketch_rotation(editor.session.plane)
 		text = "Back to the sketch plane."
 	var target := Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0)
+	if sketch_sheet_front and editing_sketch():
+		target = _plane_origin_at_sheet(rotation, 1.0, editor.session.plane)
 	if editing_sketch():
 		_set_window_anchor(rotation, target, 1.0, editor.session.plane)
 	_animate_pose(rotation, target, 1.0)

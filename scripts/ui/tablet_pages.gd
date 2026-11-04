@@ -1522,6 +1522,14 @@ func _build_settings_table() -> Control:
 	page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
 		_design_table.keep_turn_on_return = i == 1
 		settings.set_table_keep_turn(i == 1)))
+	page.add_child(_choice_row("Sketch sheet", ["Front (hinged)", "Middle"], 0 if settings.table_sheet_front else 1, func(i: int) -> void:
+		_design_table.sketch_sheet_front = i == 0
+		settings.set_table_sheet(i == 0, settings.table_sheet_lean)))
+	var leans := [10, 15, 25]
+	var lean_now := leans.find(settings.table_sheet_lean)
+	page.add_child(_choice_row("Front sheet leans back", ["10°", "15°", "25°"], lean_now if lean_now >= 0 else 1, func(i: int) -> void:
+		_design_table.sketch_lean_back_degrees = float(leans[i])
+		settings.set_table_sheet(settings.table_sheet_front, leans[i])))
 	var limits := [2.0, 3.0, 5.0, 8.0]
 	var current := limits.find(settings.table_max_scale)
 	page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
