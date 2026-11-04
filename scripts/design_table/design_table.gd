@@ -49,6 +49,7 @@ const TablePreview := preload("res://scripts/design_table/table_preview.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
 const NewDocument := preload("res://scripts/design_table/new_document.gd")
 const StartButtons := preload("res://scripts/ui/start_buttons.gd")
+const SelectionDrawer := preload("res://scripts/design_table/selection_drawer.gd")
 const TableBuild := preload("res://scripts/design_table/table_build.gd")
 const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
@@ -163,6 +164,7 @@ var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table w
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 var _new_part_busy := false
+var drawer: Node3D ## selection_drawer.gd: the selection drawer at the front of the slab (T6)
 var start_buttons: Node3D ## start_buttons.gd: "New part" / "Open part..." floating over an empty table (T2); null until the table is set up
 var _view_empty := false ## the Build tree has hidden / rolled back everything: the copy shows nothing
 
@@ -201,6 +203,13 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	props.setup_for_table(self, left, right, camera)
 	props.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	ui.options_sink = props
+	drawer = SelectionDrawer.new()
+	drawer.name = "SelectionDrawer"
+	add_child(drawer)
+	drawer.setup(self, tokens, right)
+	drawer.action_pressed.connect(func(id: String) -> void: editor.on_drawer_action(id))
+	drawer.rung_pressed.connect(func(rung: Dictionary) -> void: editor.on_drawer_rung(rung))
+	drawer.close_pressed.connect(func() -> void: editor.clear_part_selection())
 	start_buttons = StartButtons.new()
 	start_buttons.name = "StartButtons"
 	add_child(start_buttons)
@@ -284,6 +293,8 @@ func close() -> void:
 	if not _open:
 		return
 	return_part() # the real node comes back exactly where it was
+	if drawer != null:
+		drawer.hide_drawer()
 	if start_buttons != null:
 		start_buttons.empty = false
 	manager.deactivate()
@@ -507,6 +518,8 @@ func set_slab_size(new_size: Vector2) -> void:
 	## the tree at its left follow. The part keeps its place relative to the slab's middle.
 	slab_size = new_size
 	(_slab.mesh as PlaneMesh).size = new_size
+	if drawer != null:
+		drawer.place() # fixed size, centred on the front edge: it moves with the edge, it does not grow
 	_style_materials()
 	handle.layout(new_size)
 	_apply_deck_width()
@@ -566,6 +579,7 @@ func _process(delta: float) -> void:
 		poke_render()
 		return
 	surface.process(delta, true)
+	drawer.process(delta)
 	resizer.process()
 	_update_drop_ring()
 	manip.process(delta)
@@ -1194,7 +1208,8 @@ func sheet_centre() -> Vector3:
 	## and it leans back, so the middle is half the sheet's height up the lean: z = front - (h/2)cos(tilt), y = clearance + (h/2)sin(tilt).
 	var tilt := deg_to_rad(sketch_tilt())
 	var half_h := sheet_window_m.y * 0.5
-	return Vector3(0.0, sheet_hinge_clearance + half_h * sin(tilt), slab_size.y * 0.5 - half_h * cos(tilt))
+	var hinge_z := slab_size.y * 0.5 - SelectionDrawer.DRAWER_SIZE.y # T6: the sheet stands BEHIND the selection drawer, which takes the front of the slab
+	return Vector3(0.0, sheet_hinge_clearance + half_h * sin(tilt), hinge_z - half_h * cos(tilt))
 
 
 func sketch_rotation(plane: Dictionary) -> Basis:

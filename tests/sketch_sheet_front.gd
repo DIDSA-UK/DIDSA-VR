@@ -8,6 +8,7 @@ extends SceneTree
 
 const AppSettings := preload("res://scripts/app_settings.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const SelectionDrawer := preload("res://scripts/design_table/selection_drawer.gd")
 
 var main
 var table
@@ -66,7 +67,7 @@ func _initialize() -> void:
 		await frames(2)
 		var edge := lower_edge_and_angle()
 		var lower: Vector3 = edge[0]
-		check("lean %d: the sheet's lower edge is on the slab's front edge (z within 5 mm) and just above the glass" % int(lean), absf(lower.z - table.slab_size.y * 0.5) < 0.005 and lower.y > 0.0 and lower.y < 0.03)
+		check("lean %d: the sheet's lower edge is on the slab's front edge less the drawer's depth (z within 5 mm: the sheet stands behind the selection drawer) and just above the glass" % int(lean), absf(lower.z - (table.slab_size.y * 0.5 - SelectionDrawer.DRAWER_SIZE.y)) < 0.005 and lower.y > 0.0 and lower.y < 0.03)
 		check("lean %d: the sheet stands %d degrees up from the slab (the angle between their normals)" % [int(lean), int(90 - lean)], absf(float(edge[1]) - (90.0 - lean)) < 0.1)
 		check("lean %d: the window anchor is the sheet's middle and the sketch plane passes through it" % int(lean), table.window_anchor.is_equal_approx(table.sheet_centre()) and absf((table.window_anchor - table.pivot.position - table.pivot.basis * (table.table_copy.transform * Vector3.ZERO)).dot(table.window_anchor_normal)) < 0.002)
 		var back: Vector3 = table._plane_origin_at_sheet(table.sketch_rotation(plane()), 1.0, plane())
@@ -84,7 +85,7 @@ func _initialize() -> void:
 		table.orient_to_plane(plane())
 		await frames(2)
 		var lower2: Vector3 = lower_edge_and_angle()[0]
-		check("slab %s: the lower edge follows the front edge" % str(size), absf(lower2.z - size.y * 0.5) < 0.005)
+		check("slab %s: the lower edge follows the front edge (behind the drawer)" % str(size), absf(lower2.z - (size.y * 0.5 - SelectionDrawer.DRAWER_SIZE.y)) < 0.005)
 		eye.global_transform = camera.global_transform
 		var sheet_edge: Vector2 = eye.unproject_position(table.to_global(lower2))
 		var deck_top: Vector2 = eye.unproject_position(table.to_global(Vector3(0.0, -0.01, size.y * 0.5 + table.deck_gap)))

@@ -207,7 +207,9 @@ func _redraw_build() -> void:
 			b.custom_minimum_size = Vector2(0, 52)
 			b.add_theme_stylebox_override("pressed", tokens.selected_box(tokens.accent))
 			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			b.pressed.connect(func() -> void: build.select_body(str(body_id)))
+			b.pressed.connect(func() -> void:
+				build.select_body(str(body_id))
+				table.editor.select_body_row(str(body_id)))
 			_build_rows.add_child(b)
 
 
@@ -290,7 +292,9 @@ func _feature_row(build, index: int, f: Dictionary, is_hidden: bool) -> Button:
 	b.add_theme_stylebox_override("hover_pressed", _padded(tokens.selected_box(tokens.accent), EYE_LEFT))
 	if is_hidden or rolled:
 		b.modulate = Color(1, 1, 1, 0.5)
-	b.pressed.connect(func() -> void: build.select(id))
+	b.pressed.connect(func() -> void:
+		build.select(id)
+		table.editor.select_build_row(id)) # T6: the selection drawer offers what the row can do
 	var eye := Button.new()
 	eye.name = "Eye"
 	eye.flat = true

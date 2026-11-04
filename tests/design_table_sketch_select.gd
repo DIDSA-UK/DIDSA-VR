@@ -76,6 +76,7 @@ func _initialize() -> void:
 	l.position = Vector3(-0.5, 1.0, -0.2)
 	r.position = Vector3(1.0, 1.5, 1.0)
 	table = main.design_table
+	table.editor.selection_first = false # T6: this test pulls on a face to start a sketch (the older behaviour); the drawer is tests/design_table_selection_drawer.gd
 	table.sketch_sheet_front = false # this test pins the older middle-of-the-slab sheet at 60 degrees (the "Middle" setting); the front-hinged sheet is tests/sketch_sheet_front.gd
 	table.surface.settle_seconds = 0.0
 	ed = table.editor

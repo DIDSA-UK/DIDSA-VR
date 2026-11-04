@@ -44,6 +44,8 @@ const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
+const SelectionActions := preload("res://scripts/design_table/selection_actions.gd")
+const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrumbs.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
@@ -119,6 +121,9 @@ var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pic
 var revolve_axis_sketch := "" ## the sketch (its own id) the picked axis line is in, "" = the profile's own sketch
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
+var selection_first := true ## T6: a pull on the part (no tool chosen) SELECTS what it lights and the selection drawer offers what can be done with it; false: the older pull-on-a-face-starts-a-sketch
+var part_selection: Array = [] ## T6: what is selected on the part with no tool chosen: face / edge / vertex / body entities ({kind, body_id, index, key, planar})
+var _selected_build: Dictionary = {} ## T6: a Build tree row selected as a "sketch" or "feature" selection (the drawer's actions for it): {kind, feature_id, ...} or {}
 var hover_part_entity := {} ## T5: the face, edge or vertex of the part the laser is on with no tool chosen (T6 selects it); {} when none
 var _hover_annotation := {} ## T5: the dimension label or constraint glyph under the laser: {kind, id} or {}
 var _last_pull := {"key": "", "ms": 0} ## the last pull on a label: a second one on the same dimension inside DOUBLE_PULL_MS opens the number pad
@@ -666,12 +671,24 @@ func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 # --- The trigger ----------------------------------------------------------------------------
 
 func _on_right_pressed(action: String) -> void:
+	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
+		clear_part_selection() # B closes the drawer, like its X
+		return
+	if action == table.click_action and table.is_open() and not hovering and selection_first and state in ["pick_plane", "idle"] and (not part_selection.is_empty() or not _selected_build.is_empty()) \
+			and not table._right.get_meta("ui_hover", false):
+		clear_part_selection() # a pull on empty space (no part entity, no UI) lets go of the selection
+		return
 	if action != table.click_action or not hovering or not table.is_open():
 		return
 	UiFeedback.haptic(table._right, "press")
 	match state:
 		"pick_plane":
-			await _pick_plane()
+			if selection_first and _hover_plane == "" and not hover_part_entity.is_empty():
+				select_part_entity(hover_part_entity) # T6: the pull selects; New sketch on face is a drawer action
+			elif selection_first and _hover_plane == "" and hover_part_entity.is_empty() and not _hover_face.is_empty():
+				select_part_entity(_hover_face)
+			else:
+				await _pick_plane()
 		"sketch":
 			await _sketch_trigger()
 		"pick_edges":
@@ -686,6 +703,277 @@ func _on_right_pressed(action: String) -> void:
 			_toggle_curve()
 		"pick_sketch":
 			_pick_sketch()
+
+
+# --- T6: selection with no tool chosen, and the selection drawer -------------------------------------------------------
+
+func select_part_entity(entity: Dictionary) -> void:
+	## A pull on a lit face / edge / corner: it joins the selection, or (already in it) leaves. The drawer shows what can be done with the selection.
+	if entity.is_empty() or str(entity.get("kind", "")) not in ["face", "edge", "vertex", "body"]:
+		return
+	_selected_build = {}
+	for i in part_selection.size():
+		if str(part_selection[i].get("key", "")) == str(entity.get("key", "")):
+			part_selection.remove_at(i)
+			_sync_part_selection()
+			return
+	var e: Dictionary = entity.duplicate()
+	if str(e["kind"]) == "face":
+		e["planar"] = TopologyPick.is_planar_face(table.table_copy, str(e["body_id"]), int(e["index"]))
+	part_selection.append(e)
+	_sync_part_selection()
+	_say_selection()
+
+
+func set_part_selection(list: Array) -> void:
+	## A rung of the breadcrumb was taken: the selection becomes that level (a body, a feature, a sketch), and the drawer's actions change.
+	part_selection = list.filter(func(e) -> bool: return str(e.get("kind", "")) in ["face", "edge", "vertex", "body"])
+	_selected_build = {}
+	for e in list:
+		if str(e.get("kind", "")) in ["feature", "sketch"]:
+			_selected_build = e
+	if _selected_build.has("feature_id") and table.build != null and table.build.index_of(str(_selected_build["feature_id"])) >= 0:
+		table.build.select(str(_selected_build["feature_id"]))
+		_selected_build["type"] = str(table.build.row(str(_selected_build["feature_id"])).get("type", ""))
+		if str(_selected_build["type"]) == "sketch":
+			_selected_build["kind"] = "sketch"
+			_selected_build["closed"] = bool(rest_sketches.sketches.get(str(_selected_build["feature_id"]), {}).get("closed", false)) if rest_sketches != null and is_instance_valid(rest_sketches) else true
+		_selected_build["name"] = table.build.name_of_feature(str(_selected_build["feature_id"]))
+		_selected_build["suppressed"] = false
+	_sync_part_selection()
+
+
+func select_build_row(feature_id: String) -> void:
+	## A Build tree row selected on the tree window: the drawer offers what a sketch or a feature can do (selection_actions.gd).
+	if not selection_first or table.build == null or table.build.index_of(feature_id) < 0 or session != null:
+		return
+	part_selection.clear()
+	set_part_selection([{"kind": "feature", "feature_id": feature_id}])
+
+
+func select_body_row(body_id: String) -> void:
+	if not selection_first or session != null or state not in ["pick_plane", "idle"]:
+		return
+	set_part_selection([{"kind": "body", "body_id": body_id, "key": TopologyPick.body_key(body_id)}])
+
+
+func clear_part_selection() -> void:
+	part_selection.clear()
+	_selected_build = {}
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+	_sync_part_selection()
+
+
+func current_selection() -> Array:
+	## What the drawer is about: the part entities, or the selected Build row, or (a sketch open) the sketch's own picks.
+	if session != null:
+		var out: Array = []
+		for e in session.selection:
+			out.append(e)
+		for a in session.annotations:
+			out.append(a)
+		return out
+	if not _selected_build.is_empty():
+		return [_selected_build]
+	return part_selection
+
+
+func _drawer_context() -> Dictionary:
+	var copy: MeshInstance3D = table.table_copy
+	var ids: Array = copy.get_meta("body_ids") if copy != null and copy.has_meta("body_ids") else []
+	var feature_names := {}
+	if table.build != null:
+		for body in ids:
+			var fid := SelectionCrumbs.base_feature_id(str(body))
+			if not feature_names.has(fid) and table.build.index_of(fid) >= 0:
+				feature_names[fid] = table.build.name_of_feature(fid)
+	var sketch_name := "Sketch"
+	var sketch_feature := ""
+	return {"body_names": BuildTree.body_names(ids), "feature_names": feature_names, "part_name": table.build.part_name() if table.build != null else "Part",
+		"sketch_name": sketch_name, "sketch_feature_id": sketch_feature, "surface_bodies": [], "has_face_extrude": false}
+
+
+func _sync_part_selection() -> void:
+	## The highlight and the drawer follow the selection: lit on the part, the drawer out while something is selected and no tool is running.
+	if table == null or table.drawer == null:
+		return
+	if highlight != null and table.table_copy != null and session == null and _selected_build.is_empty():
+		highlight.set_set(table.table_copy, part_selection) # (a selected Build row keeps the faces build.select() lit)
+	var selection := current_selection()
+	var tool_running: bool = str(table.active_tool) != "" and session == null
+	if selection.is_empty() or tool_running or not table.is_open() or not selection_first or state in ["opening", "pick_curves", "pick_sketch"]:
+		table.drawer.hide_drawer()
+		return
+	var ctx := _drawer_context()
+	var rungs: Array = SelectionCrumbs.chain(selection, ctx)
+	var actions: Array = SelectionActions.actions_for(selection, ctx) if session == null else _sketch_actions()
+	table.drawer.show_for(rungs, actions)
+	if session == null and not part_selection.is_empty():
+		var key_entity: Dictionary = part_selection[part_selection.size() - 1]
+		var point = _entity_point(key_entity)
+		if point != null:
+			table.drawer.show_leader(table.to_local(point))
+
+
+func _sketch_actions() -> Array:
+	## The sketch selection's menu (T5) as drawer actions: the same ids the options row takes.
+	var out: Array = []
+	for o in session.menu():
+		out.append({"id": str(o["id"]), "text": str(o["text"]), "group": "refine" if str(o["id"]).begins_with("dim:") else "modify", "enabled": true, "reason": ""})
+	return out
+
+
+func _entity_point(entity: Dictionary) -> Variant:
+	## Roughly where an entity is, in the world, for the leader line: the middle of its face / the part's centre for others (never fatal if unknown).
+	if table.table_copy == null:
+		return null
+	return table.table_copy.global_transform * table.table_copy.get_aabb().get_center()
+
+
+func _say_selection() -> void:
+	var rungs: Array = SelectionCrumbs.chain(part_selection, _drawer_context())
+	if not rungs.is_empty():
+		table.set_status("%s selected: choose what to do in the drawer at the front of the table. A pull on empty space lets go." % str(rungs[0]["text"]))
+
+
+func on_drawer_action(id: String) -> void:
+	if session != null:
+		await on_option(id)
+		_sync_part_selection()
+		return
+	await begin_tool(id, current_selection())
+
+
+func on_drawer_rung(rung: Dictionary) -> void:
+	var picked: Array = rung.get("select", [])
+	if str(rung.get("level", "")) == "part":
+		part_selection.clear()
+		_selected_build = {}
+		if highlight != null and table.table_copy != null:
+			highlight.set_set(table.table_copy, [])
+		table.drawer.show_for([{"id": "part", "text": "Part \"%s\"" % (table.build.part_name() if table.build != null else "Part"), "level": "part", "select": []}], SelectionActions.part_actions())
+		return
+	set_part_selection(picked if not picked.is_empty() else part_selection)
+
+
+func begin_tool(tool_id: String, seed: Array) -> bool:
+	## Choosing an action in the drawer STARTS the existing tool with the selection already picked, so the user can still add or remove picks, then Apply. The ones that
+	## are not deck tools (New sketch on face, Edit sketch, the feature verbs, the Part rung) act directly. Returns false for an id nothing handles.
+	var edges_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "edge")
+	var faces_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "face")
+	var vertices_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "vertex")
+	var bodies_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "body")
+	match tool_id:
+		"sketch_on_face":
+			if faces_seed.is_empty():
+				return false
+			var f: Dictionary = faces_seed[0]
+			clear_part_selection()
+			await begin_sketch({"face": {"body_id": str(f["body_id"]), "index": int(f["index"])}})
+			return true
+		"edit_sketch", "edit_feature":
+			var id := str(seed[0].get("feature_id", "")) if not seed.is_empty() else ""
+			if id == "":
+				return false
+			table.build.select(id)
+			clear_part_selection()
+			await table.build.edit_selected()
+			return true
+		"rollback":
+			table.build.select(str(seed[0].get("feature_id", "")))
+			await table.build.toggle_rollback_selected()
+			return true
+		"delete_feature":
+			var del_id := str(seed[0].get("feature_id", ""))
+			if table.build.selected_id != del_id:
+				table.build.select(del_id)
+			await table.build.delete_selected() # asks twice, like the Build row's own Delete: the status line says Sure?
+			if table.build.index_of(del_id) < 0:
+				clear_part_selection()
+			else:
+				_sync_part_selection()
+			return true
+		"suppress":
+			table.set_status("Suppress is not built in VR yet (the flat app has it). Hide the feature from the Build tree's eye instead.")
+			return true
+		"return_arena":
+			table.return_to_arena()
+			return true
+		"properties":
+			table.props.set_wanted(true)
+			return true
+		"appearance":
+			table.set_status("Appearance on the table is not built yet: use the Appearance tool on the wrist tablet in the arena.")
+			return true
+	if table.registry.tool_def(tool_id) == null:
+		return false
+	var sketch_seed: Dictionary = seed[0] if not seed.is_empty() and str(seed[0].get("kind", "")) == "sketch" else {}
+	table.manager.activate(tool_id) # the tool's own on_activated starts its picking (and clears older picks)
+	if not sketch_seed.is_empty():
+		for i in 40:
+			if state == "pick_sketch":
+				break
+			await table.get_tree().process_frame
+		var sid := str(sketch_seed.get("feature_id", ""))
+		if tool_id == "loft":
+			seed_sketches = [sid]
+		else:
+			seed_sketch = sid
+			_seed_tool = tool_id
+			if rest_sketches != null and is_instance_valid(rest_sketches):
+				highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c) -> bool: return str(c["sketch_feature_id"]) == sid))
+		_selected_build = {}
+		part_selection.clear()
+		_update_options()
+		schedule_preview()
+		return true
+	# face edges: Fillet / Chamfer on a face rounds ITS edges
+	if tool_id in ["fillet", "chamfer"] and edges_seed.is_empty() and not faces_seed.is_empty():
+		edges_seed = _edges_of_faces(faces_seed)
+	edges = edges_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	faces = faces_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	vertices = vertices_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	bodies = bodies_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	part_selection.clear()
+	_selected_build = {}
+	_refresh_lit()
+	var feature_tool = tools.get(tool_id)
+	if feature_tool != null:
+		for kind in ["edge", "face", "vertex", "body"]:
+			if (kind == "edge" and not edges.is_empty()) or (kind == "face" and not faces.is_empty()) or (kind == "vertex" and not vertices.is_empty()) or (kind == "body" and not bodies.is_empty()):
+				feature_tool.on_pick(self, kind)
+	_sync_part_selection()
+	_update_options()
+	schedule_preview()
+	return true
+
+
+func _entity_copy(e: Dictionary) -> Dictionary:
+	var out := e.duplicate()
+	out.erase("planar")
+	return out
+
+
+func _edges_of_faces(face_entities: Array) -> Array:
+	## The edges of the faces, from the part's topology (mesh_identity.gd's face_edges), each once.
+	var out: Array = []
+	var seen := {}
+	var topo: Dictionary = table.table_copy.get_meta("topology", {}) if table.table_copy != null else {}
+	for f in face_entities:
+		var body: Dictionary = topo.get(str(f["body_id"]), {})
+		var face_edges: Variant = body.get("face_edges", {})
+		var list: Array = []
+		if face_edges is Dictionary:
+			list = face_edges.get(int(f["index"]), face_edges.get(str(f["index"]), []))
+		elif face_edges is Array and int(f["index"]) < (face_edges as Array).size():
+			list = face_edges[int(f["index"])]
+		for idx in list:
+			var key: String = TopologyPick.entity_key("edge", str(f["body_id"]), int(idx))
+			if not seen.has(key):
+				seen[key] = true
+				out.append({"kind": "edge", "body_id": str(f["body_id"]), "index": int(idx), "key": key})
+	return out
 
 
 func _pick_plane() -> void:
@@ -1473,6 +1761,7 @@ func _on_session_changed() -> void:
 	_refresh_view()
 	_update_options()
 	sync_undo_redo()
+	_sync_part_selection() # T6: the drawer carries the sketch selection's options
 
 
 func _refresh_view() -> void:
