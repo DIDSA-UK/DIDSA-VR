@@ -71,6 +71,7 @@ func _initialize() -> void:
 	main = packed.instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg" # the app under test starts with no server of its own
 	main.landing_enabled = true
+	main._settings.folder_asked = true # the first-run "where to save" page (T1) is tests/project_folder.gd's; here the launcher opens on Home
 	root.add_child(main)
 	await frames(2)
 	main.get_node("XROrigin3D/XRCamera3D").position = Vector3(0.0, 1.6, 0.0)

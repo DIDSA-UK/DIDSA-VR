@@ -18,6 +18,7 @@ static func path() -> String:
 	return override if override != "" else PATH
 
 var project_folder: String = ""
+var folder_asked: bool = false ## the first-run "where should projects be saved" question has been answered (an empty project_folder alone never means "not asked": it can be the app's own storage, chosen)
 var last_scene: String = "Mid"
 var reduce_motion: bool = false
 var ui_theme: String = "Navy" ## one of ui_themes.gd's ORDER
@@ -50,6 +51,7 @@ func load_from_disk() -> void:
 	if config.load(path()) != OK:
 		return # no settings saved yet, or unreadable — defaults stand
 	project_folder = config.get_value("files", "project_folder", project_folder)
+	folder_asked = bool(config.get_value("files", "folder_asked", folder_asked or not project_folder.is_empty())) # an older settings file that already has a folder counts as asked
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
@@ -82,6 +84,7 @@ func load_from_disk() -> void:
 func save_to_disk() -> void:
 	var config := ConfigFile.new()
 	config.set_value("files", "project_folder", project_folder)
+	config.set_value("files", "folder_asked", folder_asked)
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
@@ -115,6 +118,7 @@ func save_to_disk() -> void:
 
 func set_project_folder(path: String) -> void:
 	project_folder = path
+	folder_asked = true # choosing, clearing or typing a folder all answer the question
 	save_to_disk()
 
 

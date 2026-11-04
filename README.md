@@ -77,7 +77,7 @@ A 0.40 x 0.26 m panel with a **6 x 2 home grid** (all 12 tiles used). **Back** c
 | **Files** | Open `.glb`/`.gltf` (local, no backend), `.step`/`.stp`/`.stl`/`.obj` (via the backend), `.didsa`/`.DIDSAprt` (Open, or Add to the loaded assembly or the room you are in); New assembly; Save as new file. An Open that would lose unsaved changes asks: Discard and open, Save then open, or Cancel. |
 | **Home** | Back to the landing: the demo models, the launcher and the tips. (The tool wheel has a Home wedge too.) |
 | **Tree**, **Calculator**, **Images**, **Browser** | Free-floating, resizable windows (several Images and Browsers at once). The Browser is a headless Chromium behind the browser relay, and doubles as the PDF reader. |
-| **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder, Design table. |
+| **Settings** | Movement (Steadiness, travel speed), Display (fps/CPU/GPU, Shadows, Resolution, MSAA, Max rooms), Appearance (theme: Navy / Simple / Dark, shader effects, glass room walls), Comfort (reduce motion, haptics, sound, tool wheel), Project folder (a folder chooser; saves to `Documents/DIDSA` by default, asked once on the first run; *Allow opening files from other apps* for All files access), Design table. |
 
 One mode tool is on at a time (Mates, Measure, Sections, Hide tool); a badge above your right hand shows which. Anything needing real text opens a full QWERTY keyboard that you can carry by its handle.
 

@@ -18,6 +18,8 @@ selection from T5.
 
 ## T1. Storage: which folder, a project folder on first run, and changing it
 
+**DONE (4 Nov 2026), headless only.** Built as planned: `scripts/project_folder.gd`, `scripts/ui/folder_chooser.gd`, the launcher's `folder` page (the first-run card), Settings > Project folder, the Files header, `manage_external_storage` in the preset, `tests/project_folder.gd`. Differences from the plan: the first-run card is a launcher page (the launcher is where the landing's cards live), not a separate card; step 1 (the headset checks) is a checklist in `android-build.md` because it needs the owner. **Not checked:** everything about Horizon OS (see the checklist), the permission page, and how the chooser feels with the laser.
+
 **Report:** "It's not clear which folder the app is using for storage. Does the Quest have the same storage restrictions as the Android client? Should a project
 folder be set on app open if one is not set? With an option to change folder in options? What are the options?"
 
