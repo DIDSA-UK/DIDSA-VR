@@ -2,7 +2,7 @@
 
 The owner tested the 30 Oct 2026 build on the Quest and sent five items (4 Nov 2026). This doc is the plan for the session that will build them.
 Each item says what the code does now (with the file to start from), what to build, how to test it, and anything the owner still has to decide.
-Nothing in here has been built yet. Do the items in order, T1 to T6. They do not depend on each other, except that T2 uses the folder from T1 for **Open...**, and T6 builds on the no-tool hover and
+**Final, 4 Nov 2026: every owner decision is recorded below; nothing is left to ask before building.** Nothing in here has been built yet. Do the items in order, T1 to T6. They do not depend on each other, except that T2 uses the folder from T1 for **Open...**, and T6 builds on the no-tool hover and
 selection from T5.
 
 | # | Report | Size | Owner decision needed first? |
@@ -10,9 +10,9 @@ selection from T5.
 | T1 | Unclear where the app stores files; project folder on first run; change it in Settings | M | Decided 4 Nov: **B + C** |
 | T2 | Clear "new / open" path on an empty room and an empty design table; first part fixed at the origin | M | Decided 4 Nov: rooms say *assembly*, the table says *part*; same files |
 | T3 | Selecting a mate on the tablet highlights the two mated entities | S | No |
-| T4 | Sketch canvas at the front edge of the table, hinged there, tilted back a little | S-M | Angle to start from (default proposed) |
+| T4 | Sketch canvas at the front edge of the table, hinged there, tilted back a little | S-M | No: start at 15° back from vertical; a Settings switch lets the owner compare |
 | T5 | Sketch lines, dimensions and constraints selectable, for editing and deleting; hover highlight everywhere on the table | M-L | Decided 4 Nov: selectable with no tool chosen; hover on faces and edges too |
-| T6 | Contextual options for a selection on the design table, with breadcrumbs (added 4 Nov) | L | Placement: the drawer proposed below (owner to confirm on the headset) |
+| T6 | Contextual options for a selection on the design table, with breadcrumbs (added 4 Nov) | L | Decided 4 Nov: a fixed-size drawer on the front of the slab, clear of the deck, with Close; owner to judge on the headset |
 
 ---
 
@@ -262,12 +262,17 @@ Extrude, Revolve, etc. Breadcrumbs in the same place." The flat app has both, as
 
 ### Where it goes (recommendation)
 
-A **selection drawer**: a strip that rises out of the **front of the slab itself**, inside the slab's outline, the full width of the slab, about 0.10-0.12 m
-deep, a few millimetres above the glass and tipped up about 15° towards the user.
+A **selection drawer**: a panel that rises out of the **front of the slab itself**, inside the slab's outline, centred left to right on the slab's front edge,
+a few millimetres above the glass and tipped up about 15° towards the user.
+
+- **Fixed size (owner, 4 Nov): 0.40 m wide x 0.11 m deep**, the same at every slab size, so it always looks and reads the same. It fits the smallest slab
+  (`table_resize.gd` `min_size` 0.50 x 0.30 m). Layout at that size: the breadcrumb row on top; under it up to four action buttons (about 0.08 m each), then
+  **More** and the **X**. A breadcrumb chain too long for the row keeps its first and last rungs and folds the middle into "...", which opens the rest.
+  Make the size one constant (`DRAWER_SIZE`) so it can be tuned after the owner tries it.
 
 - **It must never cover the tool deck (owner, 4 Nov).** The deck sits only `deck_gap` (0.05 m) in front of the slab, so a drawer *between* slab and deck
   would overlap it. The drawer therefore never reaches past the slab's front edge, and the deck does not move when the drawer opens (controls that shift
-  under the laser are worse than a smaller drawer). It follows the slab when the slab is resized (`table_resize.gd`) and when the console is carried.
+  under the laser are worse than a smaller drawer). When the slab is resized (`table_resize.gd`) it stays centred on the front edge at its fixed size; it moves with the console when that is carried.
   The Properties and tree windows are also left clear. **Test:** from the standing eye point (the table's summon pose), the drawer's on-screen rectangle
   does not intersect any deck button, the Properties window or the tree window, at the smallest and largest slab sizes, with the drawer open and while a
   sketch is open.
