@@ -262,8 +262,21 @@ Extrude, Revolve, etc. Breadcrumbs in the same place." The flat app has both, as
 
 ### Where it goes (recommendation)
 
-A **selection drawer** that slides out from under the slab's front edge, between the slab and the tool deck, the full width of the slab, about 0.10-0.14 m
-deep and tipped up towards the user like the deck:
+A **selection drawer**: a strip that rises out of the **front of the slab itself**, inside the slab's outline, the full width of the slab, about 0.10-0.12 m
+deep, a few millimetres above the glass and tipped up about 15° towards the user.
+
+- **It must never cover the tool deck (owner, 4 Nov).** The deck sits only `deck_gap` (0.05 m) in front of the slab, so a drawer *between* slab and deck
+  would overlap it. The drawer therefore never reaches past the slab's front edge, and the deck does not move when the drawer opens (controls that shift
+  under the laser are worse than a smaller drawer). It follows the slab when the slab is resized (`table_resize.gd`) and when the console is carried.
+  The Properties and tree windows are also left clear. **Test:** from the standing eye point (the table's summon pose), the drawer's on-screen rectangle
+  does not intersect any deck button, the Properties window or the tree window, at the smallest and largest slab sizes, with the drawer open and while a
+  sketch is open.
+- If the part sits low over the front strip, it is lifted by the drawer's height while the drawer is open, so the drawer never cuts through the part.
+- **Close:** an **X** at the drawer's right end. It clears the selection and closes the drawer (one meaning for "close": nothing stays selected out of
+  sight). B on the right controller does the same.
+- **A trigger on empty space clears the selection** and closes the drawer: on the table that is a pull that hits no part entity, no sketch item and no UI
+  (the slab's glass, the air round the part). A pull on the deck, a window or the drawer itself never clears it. A pull out in the arena, past the table,
+  clears the table's selection too (and does whatever it does in the arena now).
 
 - **Top row: breadcrumbs.** **Middle: the action buttons**, large (a laser target of at least 4 x 4 cm), the most likely action first and in the accent of
   its deck group (Create blue, Refine amber, Modify violet), a **More** button for the rest. Disabled actions stay, greyed, with their reason on hover
@@ -271,13 +284,13 @@ deep and tipped up towards the user like the deck:
 - It **slides out** (about 150 ms, ease-out, and a soft click) when something is selected and slides back when the selection is cleared, so the user sees it
   arrive; nothing appears near the part, so the part is never covered. A thin leader line from the drawer's left end to the selected entity, fading after a
   second, links the two for a first-time user.
-- **Why here:** it is where the hand already is (just above the deck), it never covers the model or the sketch sheet, it does not drift with the laser, and
+- **Why here:** it is where the hand already is (just above the deck), it covers neither the deck nor the model or the sketch sheet, it does not drift with the laser, and
   the user learns one place for "what can I do with this". A menu at the hit point (a radial or a pop-up) feels quick on a flat screen, but in VR it covers
   the very thing selected, moves with every pick and is awkward to reach on a far side of the part. If the owner wants a quicker path later, a held trigger
   could pop the same first three actions at the hit point, as the arena's breadcrumb does; not in this pass.
 - **With T4:** the sketch sheet's hinge is at the slab's front edge too. While a sketch is open the drawer carries the **sketch** selection's options (T5's
-  menu moves here from the Properties window, so there is one place for options), and the sheet's hinge sits on the drawer's back edge. T4 step 3 ("raise the
-  hinge a few centimetres rather than cover the deck") then means "raise it by the drawer's height".
+  menu moves here from the Properties window, so there is one place for options), and the sheet's hinge moves back to the drawer's back edge (so the sheet
+  stands behind the drawer, still close to the user). T4's hinge is then "the front of the slab, behind the drawer", not the slab's very edge.
 - The Properties window keeps the tool's own fields (radius, distance...) once an action has started; the drawer hides while a tool runs and comes back when it
   finishes or is cancelled.
 
@@ -305,9 +318,22 @@ Gaps found (an action the flat app has that VR has no tool for) go in `design-ta
 
 ### Breadcrumbs
 
-- For a part entity: **Face 12 > Body 1 > Extrude 2 > Part "Bracket"**. Taking a rung selects that level and the drawer's actions change (Body: body actions;
-  feature: feature actions; part: Return to arena, Appearance, Properties). The **feature** rung is new compared with the flat app: check whether the backend can
-  say which feature made a face (`backend-api-notes.md`, the topology / history routes). If it cannot, leave the rung out, as the flat app does, and note it.
+- For a part entity: **Face 12 > Body 1 > made by Extrude 2 > Part "Bracket"**. Taking a rung selects that level and the drawer's actions change (Body: body
+  actions; feature: feature actions; part: Return to arena, Appearance, Properties).
+- **What the backend can tell (checked in DIDSA-CAD, 4 Nov):**
+  - **Face -> body: yes, already on the client.** Every face of the part's mesh carries its `body_id` (`mesh_identity.gd`: the part's `face_ids` /
+    `body_ids` metas; every `subshape_ref` has `body_id`). No backend call.
+  - **Body -> the feature that created it: yes, by the backend's naming rule.** A body's id *is* the id of the feature that created it (Extrude, Revolve,
+    Sweep, Import, ...), with a `#N` suffix when one operation made several solids (a multi-profile boss, a cut that splits a body, Mirror / Pattern copies).
+    The backend's own lookup is `backend/app/document/graph.py` `base_feature_id()` (strip `#N`) and `body_ids_for_feature_id()`. Port the one-line rule to
+    VR (and add it to `backend-api-notes.md` with that reference), then find the feature in the part's feature list (the Build tree already has it) for its
+    name. **Caveat:** this is the feature that *created* the body, not the last one that changed it: after a Cut, Fillet or Shell on it the body keeps its
+    creator's id, and when bodies are merged the survivor keeps one of their ids. So the rung reads "made by Extrude 2", not "Extrude 2".
+  - **Face -> the feature that created that particular face** (e.g. the face a Fillet made): the backend has the machinery (`reference_history.py`, OCCT
+    history, `lineage_for(body_id, index, "face")` returns a `LineageOrigin` with `feature_id`), but it is used internally for sketch references only, rebuilds
+    the part with recording on (the slow path), and has **no route**. Not in this pass. If wanted later it is a DIDSA-CAD change (a
+    `GET .../parts/{id}/faces/{body}/{index}/origin` or a per-face `feature_ids` array in the mesh metadata), and the flat app's breadcrumb could use it too
+    (its feature rung is missing for the same reason).
 - For a sketch entity (a sketch open): **Line 4 > Sketch 2 > Part "Bracket"**. For a selected dimension / constraint: **Length 40 mm > Sketch 2 > Part**.
 - Several entities selected: the first rung reads **"3 edges"**; the rungs above it appear only if they are shared.
 - Rungs are laser buttons, the selected rung lit. Same Control-in-SubViewport drawing as `group_breadcrumb.gd`, so the theme reaches it.
