@@ -74,6 +74,7 @@ func _initialize() -> void:
 	main._settings.folder_asked = true # the first-run "where to save" page (T1) is tests/project_folder.gd's; here the launcher opens on Home
 	root.add_child(main)
 	await frames(2)
+	main._settings.folder_asked = true # (again, after _ready: the test settings file may say "not asked") so the launcher opens on Home
 	main.get_node("XROrigin3D/XRCamera3D").position = Vector3(0.0, 1.6, 0.0)
 	await frames(3)
 	landing = main.landing
