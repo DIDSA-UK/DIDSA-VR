@@ -2,7 +2,8 @@
 
 The owner tested the 30 Oct 2026 build on the Quest and sent five items (4 Nov 2026). This doc is the plan for the session that will build them.
 Each item says what the code does now (with the file to start from), what to build, how to test it, and anything the owner still has to decide.
-Nothing in here has been built yet. Do the items in order, T1 to T5. They do not depend on each other, except that T2 uses the folder from T1 for **Open...**.
+Nothing in here has been built yet. Do the items in order, T1 to T6. They do not depend on each other, except that T2 uses the folder from T1 for **Open...**, and T6 builds on the no-tool hover and
+selection from T5.
 
 | # | Report | Size | Owner decision needed first? |
 |---|---|---|---|
@@ -10,7 +11,8 @@ Nothing in here has been built yet. Do the items in order, T1 to T5. They do not
 | T2 | Clear "new / open" path on an empty room and an empty design table; first part fixed at the origin | M | Decided 4 Nov: rooms say *assembly*, the table says *part*; same files |
 | T3 | Selecting a mate on the tablet highlights the two mated entities | S | No |
 | T4 | Sketch canvas at the front edge of the table, hinged there, tilted back a little | S-M | Angle to start from (default proposed) |
-| T5 | Sketch lines, dimensions and constraints selectable, for editing and deleting | M | Decided 4 Nov: selectable with no tool chosen |
+| T5 | Sketch lines, dimensions and constraints selectable, for editing and deleting; hover highlight everywhere on the table | M-L | Decided 4 Nov: selectable with no tool chosen; hover on faces and edges too |
+| T6 | Contextual options for a selection on the design table, with breadcrumbs (added 4 Nov) | L | Placement: the drawer proposed below (owner to confirm on the headset) |
 
 ---
 
@@ -188,6 +190,12 @@ keep it there. Render test screenshot from the standing eye point. Comfort can o
 - **Dimensions and constraint glyphs are `Label3D`s** (`sketch_view.gd` `_labels`, `_constraint_labels`) with no picking at all: they cannot be selected,
   edited or deleted. The only way to change a dimension value is the Build tree.
 - The flat app selects constraints and dimensions (`sketch_screen.dart`, `SelectionKind.constraint`), with delete and edit.
+- **Hover highlight (checked 4 Nov):** `table_editor.gd` `_process()` returns at once when `state == "idle"`, so with no tool chosen nothing under the laser is
+  lit, on the sketch or on the part. In a sketch, hover works only with Select, a constraint tool, Dimension, Trim/Offset or Revolve (`nearest_entity()` then
+  `sketch_view.gd` `rebuild(session, selection, hover)`). A drawing tool lights only the snap cursor, a part edge it would snap to and the entity an inferred
+  relationship would hold to. Faces / edges / vertices of the part light only inside a feature's pick state (`_hover_faces()`, `_hover_edges()`... through
+  `face_highlight.gd` `set_hover_entity()`). Dimension and constraint labels never light. And in `rebuild()` an entity is lit when it is selected **or**
+  hovered, in the same warn colour, so "about to pick" and "picked" look alike.
 
 ### Build
 
@@ -209,17 +217,126 @@ keep it there. Render test screenshot from the standing eye point. Comfort can o
    - mixed with geometry: **Delete** only (deletes the constraints, then the geometry with `delete_cascade()`).
 5. Also: **double-pull on a dimension** opens the number pad straight away (the common case). Undo must take back an edited value and a deleted constraint
    (use the sketch's existing `PUT .../state` undo).
-6. Update the Select tool help text in `table_tools.gd` and `docs/design-table.md`.
+6. **Hover in the no-tool state.** Remove the early return for `"idle"` in `table_editor.gd` `_process()` (keep it for a closed table / no part). With no tool
+   chosen, every frame:
+   - in a sketch: the nearest line, point, curve, text, **dimension label or constraint glyph** under the laser lights (`nearest_entity()` plus the new label
+     hit test from step 3);
+   - on the part (no sketch open): the **face, edge or vertex** under the laser lights, with the same reach rules as the feature pick states (`TopologyPick.pick()`,
+     edges and vertices win when the laser is close to them, as `_hover_edges()` / `_hover_vertices()` already decide), through
+     `face_highlight.set_hover_entity(table._right, table.table_copy, entity)`;
+   - the laser claims `ui_hover` as now, so the arena never also reacts. Keep the cost down: run the part's topology hit only when the ray hits the copy's
+     bounds, and reuse the per-part triangle cache `face_highlight.gd` already keeps.
+   A trigger on what is lit selects it (sketch: as step 1; on the part: the selection T6 acts on). A trigger on empty space clears the selection.
+7. **Hover looks different from selected.** Selected keeps the warn/accent colour, solid. Hover is a lighter, thinner version (sketch: the line's own colour
+   lightened plus a faint glow; labels: an outline in the accent; part entities: `face_highlight.gd`'s hover material at lower alpha, picks stay solid).
+   Something both hovered and selected shows as selected. Pass hover and selection separately to `sketch_view.gd` `rebuild()` and give it a `"hover"` style
+   distinct from `"selected"`.
+8. Update the Select tool help text in `table_tools.gd` and `docs/design-table.md`.
 
 **Tests:** headless (`sketch_selection` vectors): menus for 1 dimension, 2 constraints, constraint + line. Fake-backend: Edit value sends the right body;
 Delete of a constraint leaves its geometry. Live backend (`e2e_sketch_select.gd`, add to `tests/e2e_ci_list.txt`): make a line with a Length, select the
-dimension, change it, the line's length follows; delete a Horizontal, it is gone. How easy the labels are to hit with a laser can only be judged on the headset.
+dimension, change it, the line's length follows; delete a Horizontal, it is gone. Headless hover tests: with no tool, a ray at a line lights it with the
+hover style, not the selected one; a ray at a dimension label lights the label; with no sketch open, a ray at a face and then near one of its edges lights the
+face, then the edge; the idle state never lights anything once the table is closed. How easy the labels are to hit with a laser, and whether the hover style
+reads well against the selected one, can only be judged on the headset.
+
+---
+
+## T6. Contextual options and breadcrumbs on the design table (added 4 Nov 2026)
+
+**Request:** "When the user selects something on a model on the design table, contextual options are offered. Instead of selecting a tool from the menu,
+the user selects the thing they want to change: an edge offers Fillet, Chamfer; a face offers New sketch on face, Move face; a sketch offers Edit sketch,
+Extrude, Revolve, etc. Breadcrumbs in the same place." The flat app has both, as a reference, not a complete list.
+
+### What exists to build on
+
+- **Flat app** (DIDSA-CAD `client/lib/viewport3d/`): `selection_actions.dart` `contextActionsFor()` is a pure table from a selection to actions, with
+  disabled-with-reason entries; `selection_context_panel.dart` shows the breadcrumb row above the action row in one panel (it used to float over the
+  viewport and was moved because it covered things); `selection_breadcrumbs.dart` builds entity -> body -> component (no feature tier: the backend has no
+  per-face feature history); `feature_context_menu.dart` is the menu for a feature / sketch row (Extrude, Revolve, Sweep, Sketch orientation, Extrude surface,
+  Pattern, Mirror, Merge / Subtract / Common / Split, Show / Hide, Delete).
+- **VR:** every feature tool is chosen from the deck first, then picks (`table_editor.gd` states `pick_faces`, `pick_edges`, `pick_vertices`, `pick_bodies`,
+  `pick_curves`, `pick_sketch`), and a finished sketch can already be a **seed** for Extrude / Revolve / Loft (`seed_sketch`, `seed_sketches`). The deck has an
+  options row (`table_ui.gd` `_options_row`) and the Properties window has a selection list and options (`table_props_window.gd`). The arena has an
+  assembly-level breadcrumb on a held trigger (`scripts/group_breadcrumb.gd`), drawn as a themed Control in a SubViewport: reuse its look.
+
+### Where it goes (recommendation)
+
+A **selection drawer** that slides out from under the slab's front edge, between the slab and the tool deck, the full width of the slab, about 0.10-0.14 m
+deep and tipped up towards the user like the deck:
+
+- **Top row: breadcrumbs.** **Middle: the action buttons**, large (a laser target of at least 4 x 4 cm), the most likely action first and in the accent of
+  its deck group (Create blue, Refine amber, Modify violet), a **More** button for the rest. Disabled actions stay, greyed, with their reason on hover
+  (the flat app's rule: explain, don't hide).
+- It **slides out** (about 150 ms, ease-out, and a soft click) when something is selected and slides back when the selection is cleared, so the user sees it
+  arrive; nothing appears near the part, so the part is never covered. A thin leader line from the drawer's left end to the selected entity, fading after a
+  second, links the two for a first-time user.
+- **Why here:** it is where the hand already is (just above the deck), it never covers the model or the sketch sheet, it does not drift with the laser, and
+  the user learns one place for "what can I do with this". A menu at the hit point (a radial or a pop-up) feels quick on a flat screen, but in VR it covers
+  the very thing selected, moves with every pick and is awkward to reach on a far side of the part. If the owner wants a quicker path later, a held trigger
+  could pop the same first three actions at the hit point, as the arena's breadcrumb does; not in this pass.
+- **With T4:** the sketch sheet's hinge is at the slab's front edge too. While a sketch is open the drawer carries the **sketch** selection's options (T5's
+  menu moves here from the Properties window, so there is one place for options), and the sheet's hinge sits on the drawer's back edge. T4 step 3 ("raise the
+  hinge a few centimetres rather than cover the deck") then means "raise it by the drawer's height".
+- The Properties window keeps the tool's own fields (radius, distance...) once an action has started; the drawer hides while a tool runs and comes back when it
+  finishes or is cancelled.
+
+### What each selection offers (start list; not exhaustive)
+
+A new pure `scripts/design_table/selection_actions.gd`, a port of the flat app's table (unit-tested the same way), returning `{id, text, group, enabled, reason}`:
+
+| Selection | Actions (first is the default) |
+|---|---|
+| 1+ edges, one body | **Fillet**, Chamfer, Create plane (1 edge: normal to edge) |
+| edges on two bodies | Fillet / Chamfer disabled: "Pick edges on one body" |
+| 1 planar face | **New sketch on face**, Extrude face (if the backend has it; else leave out), Move face, Create plane (offset), Fillet / Chamfer (its edges), Shell (open this face), Delete face |
+| 1 curved face | Move face, Fillet / Chamfer, Delete face (no sketch or plane: not planar, as the flat app learned) |
+| 2 faces | Create plane (midplane), Move faces, Delete faces; 2+ faces: Shell (open these) |
+| 1 vertex | Create plane (with an edge or face added); a lone vertex: "Pick an edge or face as well" hint |
+| edge + vertex / face + vertex | the flat app's Create plane combinations |
+| a body (from the breadcrumb) | Move body, Scale body, Mirror, Pattern, Shell, Delete body |
+| a finished sketch (a pick on its lines with no sketch open, or its Build row) | **Edit sketch**, Extrude, Revolve, Sweep (as profile), Loft (start sections), Delete; Extrude disabled with "No closed shape" if it has none |
+| a feature (from the breadcrumb or the Build tree) | **Edit**, Roll back to here, Suppress / Unsuppress, Delete |
+| a surface body's face | Fillet / Chamfer / Shell left out (no solid), as the flat app does |
+
+Choosing an action **starts the existing tool with the selection already picked** (generalise the seed: `begin_tool(id, seed_entities)` that enters the tool's
+pick state with `face_highlight.set_set()` / picks pre-filled, so the user can still add or remove picks, then Apply). Nothing new is built in the backend.
+Gaps found (an action the flat app has that VR has no tool for) go in `design-table-gaps.md`, not into this pass.
+
+### Breadcrumbs
+
+- For a part entity: **Face 12 > Body 1 > Extrude 2 > Part "Bracket"**. Taking a rung selects that level and the drawer's actions change (Body: body actions;
+  feature: feature actions; part: Return to arena, Appearance, Properties). The **feature** rung is new compared with the flat app: check whether the backend can
+  say which feature made a face (`backend-api-notes.md`, the topology / history routes). If it cannot, leave the rung out, as the flat app does, and note it.
+- For a sketch entity (a sketch open): **Line 4 > Sketch 2 > Part "Bracket"**. For a selected dimension / constraint: **Length 40 mm > Sketch 2 > Part**.
+- Several entities selected: the first rung reads **"3 edges"**; the rungs above it appear only if they are shared.
+- Rungs are laser buttons, the selected rung lit. Same Control-in-SubViewport drawing as `group_breadcrumb.gd`, so the theme reaches it.
+
+### Build steps
+
+1. `selection_actions.gd` (pure) and its tests, ported from the flat app's cases plus the sketch / feature rows above.
+2. `selection_breadcrumbs.gd` (pure): the chain for a selection.
+3. The table's selection model for the no-tool state (T5 step 6 makes the hover; this keeps a list of picked part entities, multi-select by pulling on
+   more, a pull on a selected one drops it).
+4. `selection_drawer.gd`: the drawer node on the console (under the slab's front edge), breadcrumb row and action row, slide in / out, `LaserSurface`.
+   Hide it while a tool runs and while the table is moved.
+5. `begin_tool(id, seed)` in `table_editor.gd`: Fillet / Chamfer from edges, Move / Delete face and Shell from faces, New sketch on face from a face (the existing
+   pick-plane path with the face already chosen), Extrude / Revolve / Loft / Sweep from a sketch (the existing seed), Edit sketch, Edit / Delete / Suppress feature
+   through the Build tree's existing actions.
+6. T5's sketch menu moves from the Properties window into the drawer.
+7. Docs: `docs/design-table.md` (selection-first editing), `status.md`, the tablet's table help.
+
+**Tests:** headless: the action table (every row above, plus disabled reasons), the breadcrumb chains, that choosing Fillet with two edges selected enters
+`pick_edges` with both edges already picked, that the drawer shows only with a selection and hides while a tool runs. Live backend (`e2e_table_context.gd`, add to
+`tests/e2e_ci_list.txt`): select an edge, Fillet, Apply, the part has the fillet; select a planar face, New sketch on face, the sketch is on that face.
+Render test of the drawer layout from the standing eye point. Whether the drawer is the right place, and whether it feels quicker than the deck, only the owner
+can say on the headset.
 
 ---
 
 ## For the implementing session
 
 - Read `CLAUDE.md`, `docs/status.md`, `docs/backend-api-notes.md` and `tests/README.md` first. Branch per the session's instructions.
-- One commit per item (T1...T5), each with its tests passing (`tests/ci.sh`; `tests/ci_render.sh` and `tests/ci_e2e.sh` where the item adds to them).
+- One commit per item (T1...T6), each with its tests passing (`tests/ci.sh`; `tests/ci_render.sh` and `tests/ci_e2e.sh` where the item adds to them).
 - Update `docs/status.md` (a row or open item per item) and this doc (mark each item done, and what was **not** checked on the headset).
 - Do not write "works on the headset". List what the owner should try on the next APK, per item.
