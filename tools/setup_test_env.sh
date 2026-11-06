@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs everything the VR and CAD test suites need on a fresh Linux x86_64 box (a cloud session, a new laptop):
 #   Godot 4.7.2 (headless, CI's pinned version), Xvfb + Mesa software GL (render tests), micromamba and the DIDSA-CAD backend's
-#   conda environment (pythonocc-core, py-slvs, FastAPI: backend tests and the live backend for e2e), Flutter master (the flat app's tests).
+#   conda environment (pythonocc-core, py-slvs, FastAPI: backend tests and the live backend for e2e), Flutter stable 3.47.9 (the flat app's tests).
 # Idempotent: anything already in place is kept. Nothing is installed into either repo; secrets.cfg is not touched.
 #
 # Usage (from DIDSA-VR's root, DIDSA-CAD checked out next to it as ../DIDSA-CAD):
@@ -58,9 +58,14 @@ get_backend() {
 }
 
 get_flutter() {
+  # Flutter stable, pinned to the version DIDSA-CAD's CI uses (.github/workflows/client-verify.yml): client/'s flutter_scene needs >= 3.47.0.
+  # A leftover SDK of another version (e.g. an old master clone) is replaced.
+  local want_ver=3.47.9
+  if [ -d "$TOOLS_DIR/flutter" ] && [ "$(git -C "$TOOLS_DIR/flutter" describe --tags --exact-match 2>/dev/null)" != "$want_ver" ]; then
+    rm -rf "$TOOLS_DIR/flutter"
+  fi
   if [ ! -x "$TOOLS_DIR/flutter/bin/flutter" ]; then
-    # master, not stable: client/'s flutter_scene needs flutter_gpu API only master has (DIDSA-CAD .github/workflows/client-verify.yml)
-    git clone -q --depth 1 -b master https://github.com/flutter/flutter.git "$TOOLS_DIR/flutter"
+    git clone -q --depth 1 -b "$want_ver" https://github.com/flutter/flutter.git "$TOOLS_DIR/flutter"
   fi
   "$TOOLS_DIR/flutter/bin/flutter" --version
   if [ -d "$CAD_DIR/client" ]; then (cd "$CAD_DIR/client" && "$TOOLS_DIR/flutter/bin/flutter" pub get); fi
