@@ -125,7 +125,9 @@ func open_sketch(spec: Dictionary) -> bool:
 			busy = false
 			status.emit("The backend couldn't resolve a plane on that face.")
 			return false
-		feature_body = {"plane_feature_id": plane_feature_id}
+		# A sketch on a face gets the same default origin as in the flat app (the face's bottom-left corner, or a disc's centre), worked out once by the
+		# backend: there is no orientation step here and no flip or rotate. A reference or created plane sends nothing (the plane's own origin, as before).
+		feature_body = {"plane_feature_id": plane_feature_id, "origin": "auto"}
 	elif spec.has("plane_feature_id"):
 		plane_feature_id = str(spec["plane_feature_id"])
 		plane = spec.get("plane", {})
@@ -143,6 +145,7 @@ func open_sketch(spec: Dictionary) -> bool:
 		return false
 	sketch_id = str(sketch["json"]["sketch_id"])
 	feature_id = str(sketch["json"]["id"])
+	plane = SketchMath.with_origin(plane, sketch["json"]) # the sketch's (0, 0) may not be the plane's origin
 	_undo.clear()
 	# The backend makes the sketch's origin point lazily, the first time the sketch itself is read: read it, so the origin is a real point
 	# (snappable, constrainable, the end of a dimension) like in the flat app.

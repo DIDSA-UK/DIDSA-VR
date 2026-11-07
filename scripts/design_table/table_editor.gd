@@ -1187,6 +1187,7 @@ func reopen_sketch(feature_id: String) -> bool:
 		if not refs.is_empty() and refs[0] is Dictionary:
 			var ref: Dictionary = (refs[0] as Dictionary).get("face_ref", refs[0])
 			chosen_face = {"body_id": str(ref.get("body_id", "")), "index": int(ref.get("index", 0))}
+	plane = SketchMath.with_origin(plane, row) # a sketch whose origin was moved in the flat app (or "auto" on a face) is drawn from there
 	if plane.is_empty() or bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
 		chosen_plane = ""
 		chosen_face = {}
@@ -2460,9 +2461,9 @@ func _plane_for_row(row: Dictionary) -> Dictionary:
 	if bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
 		return {}
 	if info.get("plane") is String:
-		return SketchMath.fixed_basis(str(info["plane"]))
+		return SketchMath.with_origin(SketchMath.fixed_basis(str(info["plane"])), row)
 	if row.get("plane_feature_id") != null:
-		return SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"])))
+		return SketchMath.with_origin(SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"]))), row)
 	return {}
 
 

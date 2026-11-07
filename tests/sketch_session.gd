@@ -40,7 +40,7 @@ func _initialize() -> void:
 	ok = await s.open_sketch({"face": {"body_id": "B", "index": 4}})
 	print("SMOKE opening on a face makes a plane on it first, then a sketch on that plane: ", ok and fake.paths()[0] == "POST /document/parts/P/create-plane-features" and fake.paths()[1] == "POST /document/parts/P/features/sketch")
 	print("SMOKE ...an offset_face plane with the face as a body face ref: ", fake.calls[0][1] == {"plane_type": "offset_face", "face_refs": [{"face_ref": {"body_id": "B", "shape_type": "face", "index": 4}}], "offset": 0.0})
-	print("SMOKE ...the sketch is anchored to that plane, and the plane basis comes from the backend's answer: ", fake.calls[1][1] == {"plane_feature_id": "plane1"} and s.plane["origin"].is_equal_approx(Vector3(0, 0, 10)))
+	print("SMOKE ...the sketch is anchored to that plane (asking for the flat app's default origin), and the plane basis comes from the backend's answer: ", fake.calls[1][1] == {"plane_feature_id": "plane1", "origin": "auto"} and s.plane["origin"].is_equal_approx(Vector3(0, 0, 10)))
 	fake = Fake.new()
 	fake.fail = "create-plane"
 	s = Session.new(Callable(fake, "handle"))

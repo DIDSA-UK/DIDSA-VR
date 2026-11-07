@@ -48,6 +48,20 @@ static func basis_from_plane_response(response: Dictionary) -> Dictionary:
 	}
 
 
+static func with_origin(basis: Dictionary, row: Dictionary) -> Dictionary:
+	## `basis` with its origin moved to the sketch's own origin, when the backend's sketch-feature row carries one: `resolved_origin`
+	## (DIDSA-CAD's sketch origin, [x, y, z] in the part's frame, already projected onto the plane). The axes and the normal stay the plane's.
+	## A row with no `resolved_origin` key is a sketch from before the origin existed (an older backend), and a `resolved_origin` of null is
+	## an origin the backend could not resolve and fell back from: both keep the plane's own origin, which is what the backend drew with too.
+	## An empty basis stays empty.
+	var moved = row.get("resolved_origin")
+	if basis.is_empty() or not (moved is Array) or (moved as Array).size() != 3:
+		return basis
+	var out := basis.duplicate()
+	out["origin"] = _vec(moved)
+	return out
+
+
 static func orient_to_table(plane: Dictionary) -> Basis:
 	## The rotation to give the part (in console space) so the sketch plane lies flat on the
 	## table with its x axis to the right: maps plane x -> console +X, plane y -> console -Z,

@@ -642,6 +642,21 @@ ellipse's quadrant point; v1), `dimension_between` (a dimension holds the two ap
 `conflict` (it converged before and does not after: rolled back). **`cad_api.gd`'s `error_text` prefers `detail.type` over `detail.message`**, so the generic error shows "merge_refused": the session reads
 `detail.message` itself (`_refusal_text`). The route is generic: `PUT .../state` could also undo a Trim (not done here).
 
+## The sketch origin (DIDSA-CAD `docs/view-override-edit-alone-sketch-origin-plan.md`, 3a; this client: 3d)
+
+A Sketch's local `(0, 0)` is its anchor plane's origin **unless the Sketch has an `origin`** (a Body vertex, a Sketch Point of an earlier Sketch, or the centre of a circular Body edge, set in the flat app). The axes and the normal never change; only the origin moves, projected onto the plane. This client builds a Sketch's frame itself from the plane (`SketchMath.fixed_basis` / `basis_from_plane_response`), so it must apply the origin on top (`SketchMath.with_origin(basis, row)`).
+
+```
+GET  /document/parts/{id}/features                 each sketch row: {"origin": <stored ref> | null, "resolved_origin": [x, y, z] | null, ...}
+POST /document/parts/{id}/features/sketch         {"plane": "XY"} | {"plane_feature_id": id}   + optional "origin": <ref> | "auto"      -> the same row (201)
+PATCH /document/parts/{id}/features/{feature_id}/sketch-origin    {"origin": <ref> | "auto" | null}    -> the row (200)   (the flat app's Pick origin; not used here)
+```
+- `origin` ref: `{"point_ref": {"vertex_ref": {body_id, shape_type: "vertex", index} | null, "sketch_point_ref": {sketch_id, entity_type: "point", entity_id} | null}, "circle_centre_ref": {body_id, shape_type: "edge", index} | null}`, exactly one of `point_ref` / `circle_centre_ref`, and exactly one inside `point_ref`.
+- `resolved_origin` is in the Part's frame, **millimetres**, already projected onto the plane. It is `null` for a Sketch with no origin and for one whose reference was lost (the backend then drew from the plane's own origin, and the row says so in `lost_references`: `origin.point_ref.vertex_ref`, `origin.point_ref.sketch_point_ref` or `origin.circle_centre_ref`, with `has_lost_reference` true). **An older backend sends neither key**: that is a plane-origin Sketch, so leave the frame alone.
+- **`"auto"` is opt-in.** A create with no `origin` stores none, even on a face, so this client's (and the AI plan's) sketches are unchanged unless they ask. `"auto"` stores a concrete origin and never changes by itself afterwards: on a Body face (or a Plane offset from / parallel to one) the face's bottom-left corner as the Sketch is oriented (smallest local y, then x), or the centre of the rim when the face's outer boundary is one circular edge; the plane's own origin (stored as `null`) for a fixed plane, a Plane offset from one, or any plane kind with no single face.
+- 422 `{"detail": {"type": "origin_reference_not_upstream"}}`: a Sketch Point of the Sketch itself or of a later Sketch. 422 `not_a_circular_edge`, `missing_reference`: a reference that does not resolve now.
+- **This client:** `SketchSession.open_sketch` on a **face** sends `"origin": "auto"` (there is no orientation step here, so it is worked out once, at creation) and starts `plane["origin"]` at the response's `resolved_origin`; on a reference or made plane it sends nothing. `table_editor.gd`'s `reopen_sketch` and `_plane_for_row` (the plane a Loft / Sweep / Pattern curve pick places a finished sketch on) apply the row's `resolved_origin`. Picking an origin by hand in VR is not built (see `status.md`). The `.didsa` file: a sketch feature's `origin` is written only when set, and `scripts/native_compose.gd` carries it through untouched (the refs are Part-local, so nothing is renamed).
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.

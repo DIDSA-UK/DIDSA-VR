@@ -50,6 +50,7 @@ var split_trim_fails := false ## POST .../split-trim answers 422 (the client the
 var trim_fails := false ## POST .../trim (and a circle / arc trim) answers 422
 var view_filters := true ## whether the (fake) backend's OpenAPI lists the glb's hidden / rollback parameters
 var filtered_mesh_bytes := PackedByteArray() ## what a glb fetch WITH hidden_feature_ids / rollback_excluded_feature_ids answers
+var auto_origin: Variant = null ## an Array [x, y, z]: where POST .../features/sketch with "origin": "auto" says the sketch's origin landed (the flat app's face default); null = the backend's answer is "no origin" (resolved_origin null)
 
 
 func is_configured() -> bool:
@@ -186,7 +187,12 @@ func handle(method: int, path: String, body) -> Dictionary:
 			points[origin_id] = Vector2.ZERO
 		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
-		return _ok({"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")})
+		var made_sketch := {"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")}
+		if body is Dictionary and str(body.get("origin", "")) == "auto":
+			# Like the real route: "auto" is stored as a concrete origin (or none) and echoed with where it landed in the world.
+			made_sketch["origin"] = {"point_ref": {"vertex_ref": {"body_id": "B", "shape_type": "vertex", "index": 0}, "sketch_point_ref": null}, "circle_centre_ref": null} if auto_origin is Array else null
+			made_sketch["resolved_origin"] = auto_origin
+		return _ok(made_sketch)
 	if path.ends_with("/convert-entities/edge") and verb == "POST" and edge_ellipses.has("%s:%d" % [body["body_id"], int(body["edge_index"])]):
 		var ellipse_key := "%s:%d" % [body["body_id"], int(body["edge_index"])]
 		if not ellipse_made.has(ellipse_key):
