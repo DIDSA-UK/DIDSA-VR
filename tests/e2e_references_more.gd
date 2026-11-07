@@ -84,8 +84,10 @@ func _initialize() -> void:
 	await ed.begin_sketch({"face": top_face(node)})
 	var s = ed.session
 	table.manager.activate("circle")
-	await s.tap({"uv": Vector2(10, 5)}) # (off the sketch's own origin, which is a snap of its own)
-	await s.tap({"uv": Vector2(16, 5)})
+	# A sketch on a face now starts at the face's bottom-left corner (the flat app's default), not its centre: the hole goes 10, 5 off the face's centre (30, 20, 20).
+	var face_centre: Vector2 = SketchMath.to_sheet(Vector3(30, 20, 20), s.plane)
+	await s.tap({"uv": face_centre + Vector2(10, 5)}) # (off the sketch's own origin, which is a snap of its own)
+	await s.tap({"uv": face_centre + Vector2(16, 5)})
 	table.manager.activate("extrude")
 	ed.options["boss"] = false
 	ed.options["depth"] = 10.0
