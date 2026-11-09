@@ -154,21 +154,51 @@ func check_addable(room_part_id: String, definition_id: String) -> String:
 	return ""
 
 
+const FIRST_PART_NOTE := "First part: fixed at the room's origin"
+const ORIGIN_POSE := {"translation": [0.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}
+
+
+func is_empty_room(room_part_id: String) -> bool:
+	## The room's Part has no placed occurrences yet (T2): what is added next is its first part, which goes in fixed at the origin.
+	return (await occurrences_of(room_part_id, true)).is_empty()
+
+
+func add_new_part(room_part_id: String, name: String) -> Dictionary:
+	## "New assembly" in a room (T2): a new empty Part placed in the room's Part. The first one goes in at the origin and fixed. {ok, error, part_id,
+	## occurrence_id, first}.
+	var first := await is_empty_room(room_part_id)
+	var maker := NewDocument.new(Callable(api, "request"))
+	var made: Dictionary = await maker.add_part(room_part_id, name, ORIGIN_POSE.duplicate(true))
+	if not made["ok"]:
+		return {"ok": false, "error": str(made["error"]), "part_id": str(made.get("part_id", "")), "occurrence_id": "", "first": first}
+	if first:
+		var grounded: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/occurrences/%s" % [room_part_id, made["occurrence_id"]], {"fixed": true})
+		if not grounded["ok"]:
+			return {"ok": false, "error": "Added, but couldn't fix it at the origin: %s" % str(grounded["error"]), "part_id": made["part_id"], "occurrence_id": made["occurrence_id"], "first": first}
+	forget(room_part_id)
+	return {"ok": true, "error": "", "part_id": made["part_id"], "occurrence_id": made["occurrence_id"], "first": first}
+
+
 func add_copy(room_part_id: String, node: Node, world_pose: Transform3D, content_root: Node3D, label: String = "") -> Dictionary:
 	## A new occurrence of the Part `node` shows, in the room's Part, at `world_pose` (where it was put down). {ok, error, occurrence_id, definition_id, pose}.
 	var definition := await definition_of(node)
 	var refusal := await check_addable(room_part_id, definition)
 	if refusal != "":
 		return {"ok": false, "error": refusal, "occurrence_id": "", "definition_id": definition, "pose": {}}
-	var pose := pose_in_room(world_pose, content_root)
+	var first := await is_empty_room(room_part_id) # T2: the first part of a room is fixed at the origin, wherever it was let go
+	var pose := ORIGIN_POSE.duplicate(true) if first else pose_in_room(world_pose, content_root)
 	var occurrence_id := NewDocument.new_occurrence_id()
 	var placed: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/occurrences" % room_part_id, {
 		"id": occurrence_id, "resolved_part_id": definition, "name_override": label if label != "" else null, "transform": pose,
 	})
 	if not placed["ok"]:
-		return {"ok": false, "error": "Couldn't add it: %s" % str(placed["error"]), "occurrence_id": "", "definition_id": definition, "pose": pose}
+		return {"ok": false, "error": "Couldn't add it: %s" % str(placed["error"]), "occurrence_id": "", "definition_id": definition, "pose": pose, "first": first}
+	if first:
+		var grounded: Dictionary = await api.request(HTTPClient.METHOD_PATCH, "/document/parts/%s/occurrences/%s" % [room_part_id, occurrence_id], {"fixed": true})
+		if not grounded["ok"]:
+			return {"ok": false, "error": "Added, but couldn't fix it at the origin: %s" % str(grounded["error"]), "occurrence_id": occurrence_id, "definition_id": definition, "pose": pose, "first": first}
 	forget(room_part_id)
-	return {"ok": true, "error": "", "occurrence_id": occurrence_id, "definition_id": definition, "pose": pose}
+	return {"ok": true, "error": "", "occurrence_id": occurrence_id, "definition_id": definition, "pose": pose, "first": first}
 
 
 func chain_below(root_part_id: String, parts: Array, path: Array, depth: int) -> Transform3D:
@@ -217,13 +247,17 @@ static func pose_in_room(world_pose: Transform3D, content_root: Node3D) -> Dicti
 
 func add_file(room_part_id: String, file_text: String, pose: Dictionary, name_override: String = "") -> Dictionary:
 	## A native file's Part as a new occurrence in the room's Part (the file's own text is sent as it is: its integers stay integers), then placed at `pose`.
+	## T2: the first part of an empty room goes at the origin and fixed, whatever `pose` says.
 	var refusal := await file_conflict(room_part_id, file_text)
 	if refusal != "":
-		return {"ok": false, "error": refusal, "occurrence_id": ""}
+		return {"ok": false, "error": refusal, "occurrence_id": "", "first": false}
+	var first := await is_empty_room(room_part_id)
+	if first:
+		pose = ORIGIN_POSE.duplicate(true)
 	var body := '{"component": %s}' % file_text
 	var added: Dictionary = await api.request(HTTPClient.METHOD_POST, "/document/parts/%s/add-component" % room_part_id, body)
 	if not added["ok"] or not (added["json"] is Dictionary) or str((added["json"] as Dictionary).get("occurrence_id", "")) == "":
-		return {"ok": false, "error": "Couldn't add the file: %s" % str(added["error"]), "occurrence_id": ""}
+		return {"ok": false, "error": "Couldn't add the file: %s" % str(added["error"]), "occurrence_id": "", "first": first}
 	var occurrence_id := str((added["json"] as Dictionary)["occurrence_id"])
 	forget(room_part_id)
 	var patch := {"transform": pose}
@@ -239,8 +273,12 @@ func add_file(room_part_id: String, file_text: String, pose: Dictionary, name_ov
 		if placed["ok"]:
 			placed = await api.request(HTTPClient.METHOD_PATCH, occ_path, {"fixed": true})
 	if not placed["ok"]:
-		return {"ok": true, "error": "Added, but couldn't place it: %s" % str(placed["error"]), "occurrence_id": occurrence_id}
-	return {"ok": true, "error": "", "occurrence_id": occurrence_id}
+		return {"ok": true, "error": "Added, but couldn't place it: %s" % str(placed["error"]), "occurrence_id": occurrence_id, "first": first}
+	if first: # the backend grounds the first occurrence of an empty Part itself; say it too, so the rule does not depend on that
+		var grounded: Dictionary = await api.request(HTTPClient.METHOD_PATCH, occ_path, {"fixed": true})
+		if not grounded["ok"]:
+			return {"ok": true, "error": "Added at the origin, but couldn't fix it: %s" % str(grounded["error"]), "occurrence_id": occurrence_id, "first": first}
+	return {"ok": true, "error": "", "occurrence_id": occurrence_id, "first": first}
 
 
 func mates_naming(owner_part_id: String, occurrence_id: String) -> int:

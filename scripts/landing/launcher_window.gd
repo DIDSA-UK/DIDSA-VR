@@ -6,6 +6,8 @@ extends "res://scripts/diegetic_panel.gd"
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
+const FolderChooser := preload("res://scripts/ui/folder_chooser.gd")
+const ProjectFolder := preload("res://scripts/project_folder.gd")
 const PairingPayload := preload("res://scripts/landing/pairing_payload.gd")
 const ServerAddress := preload("res://scripts/landing/server_address.gd")
 
@@ -13,7 +15,8 @@ const LOWER_BY := 0.28 ## metres below where a window opens (10 cm under the eye
 
 signal page_changed(page: String)
 
-var page := "home" ## home | models | assemblies | servers | settings | about
+var page := "home" ## home | models | assemblies | servers | settings | about | folder | graphics | scan | open | discard
+var _choosing_folder := false ## the folder page is showing the chooser instead of the first-run card
 var landing: Node ## landing.gd
 var main: Node ## main.gd
 var _body: VBoxContainer
@@ -97,7 +100,7 @@ func _on_closed() -> void:
 
 
 func _on_opened() -> void:
-	show_page("home")
+	show_page("folder" if main != null and main.folder_needs_asking() else "home") # the first run asks where projects are saved, once
 	set_status(main.status_text if main != null else "")
 
 
@@ -137,11 +140,13 @@ func show_page(name: String) -> void:
 			_build_discard()
 		"open":
 			_build_open()
+		"folder":
+			_build_folder()
 		_:
 			page = "home"
 			_build_home()
 	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers", "scan": "Scan a QR code",
-		"settings": "Settings", "about": "About", "graphics": "Graphics check", "discard": "Unsaved changes", "open": "Open a file"}.get(page, "DIDSA Design Tools VR"))
+		"settings": "Settings", "about": "About", "graphics": "Graphics check", "discard": "Unsaved changes", "open": "Open a file", "folder": "Where to save your projects"}.get(page, "DIDSA Design Tools VR"))
 	page_changed.emit(page)
 
 
@@ -647,8 +652,55 @@ func _build_settings() -> void:
 	_body.add_child(_toggle("Show the landing on start", main.show_landing_on_start(), func(on: bool) -> void: main.set_show_landing_on_start(on)))
 	_body.add_child(_toggle("Show tips", main.show_tips(), func(on: bool) -> void: main.set_show_tips(on)))
 	_body.add_child(_toggle("Reduce motion (logo sway and pulse)", main.reduce_motion(), func(on: bool) -> void: main.set_reduce_motion(on)))
+	_body.add_child(_action("Project folder: %s" % ProjectFolder.short_name(main.project_folder()), func() -> void:
+		_choosing_folder = false
+		show_page("folder"), 0))
 	_body.add_child(_action("Graphics check (for a flicker)", show_page.bind("graphics"), 0))
 	_body.add_child(_action("More settings on the wrist tablet", landing.open_tablet_settings, 0))
+
+
+# --- Where to save your projects (T1): asked once on the first run, and from Settings ----------------------------------------------
+
+func _build_folder() -> void:
+	## The first-run card (or Settings > Project folder): use Documents/DIDSA, choose another folder, or keep files in the app's own storage.
+	if _choosing_folder:
+		var chooser := FolderChooser.new()
+		chooser.name = "FolderChooser"
+		_body.add_child(chooser)
+		chooser.setup(main, main.project_folder())
+		chooser.chosen.connect(func(_path: String) -> void: _folder_answered())
+		chooser.cancelled.connect(func() -> void:
+			_choosing_folder = false
+			show_page("folder"))
+		return
+	var proposed := ProjectFolder.default_folder()
+	var real := ProjectFolder.full_path(proposed)
+	_body.add_child(_info("Your projects will be saved in %s" % ProjectFolder.short_name(proposed)))
+	_body.add_child(_hint("That is %s. The headset's Files app and a USB cable can see it, and it stays if the app is removed. Files another app put there (a USB copy, the flat app) may need All files access: Settings on the wrist tablet, Project folder." % real))
+	var use := _action("Use this", func() -> void:
+		var result: Dictionary = main.use_default_project_folder()
+		if result["ok"]:
+			_folder_answered()
+		else:
+			set_status("Can't use %s: %s" % [real, result["error"]]), 0)
+	use.name = "FolderUse"
+	_body.add_child(use)
+	var other := _action("Choose another...", func() -> void:
+		_choosing_folder = true
+		show_page("folder"), 0)
+	other.name = "FolderChoose"
+	_body.add_child(other)
+	var keep := _action("Keep in app storage", func() -> void:
+		main.keep_in_app_storage()
+		_folder_answered(), 0)
+	keep.name = "FolderKeep"
+	_body.add_child(keep)
+	_body.add_child(_hint("App storage is private to this app: the Files app may not show it, and it goes if the app is removed."))
+
+
+func _folder_answered() -> void:
+	_choosing_folder = false
+	show_page("home")
 
 
 # --- Graphics check: switch the flicker suspects off one at a time on the headset (docs/quest-first-run-fixes.md B2) ---------------

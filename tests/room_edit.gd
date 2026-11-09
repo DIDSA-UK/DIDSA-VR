@@ -80,11 +80,12 @@ func _initialize() -> void:
 	var patch_call := api.last(HTTPClient.METHOD_PATCH, "/parts/S/occurrences/")
 	print("SMOKE a file is sent to add-component as its own text, unchanged: ", from_file["ok"] and add_call["body"] is String and (add_call["body"] as String).contains(file_text))
 	print("SMOKE ...and the new occurrence is then placed (and named): ", patch_call["path"].ends_with(from_file["occurrence_id"]) and patch_call["body"]["transform"]["translation"][2] == 3.0 and patch_call["body"]["name_override"] == "Plate")
-	# the first part put into an EMPTY Part (a New room) comes back grounded (fixed), and a fixed occurrence refuses a move
+	# the first part put into an EMPTY Part (a New room) comes back grounded (fixed), and a fixed occurrence refuses a move; since T2 (4 Nov 2026, owner) it also goes
+	# in at the ORIGIN, whatever pose was asked for (the second part is placed where it was asked: tests/empty_start.gd)
 	api.occurrences["E"] = []
 	var into_empty: Dictionary = await e.add_file("E", file_text, {"translation": [5.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}, "Peg")
 	var empty_row: Dictionary = api.occurrences["E"][0]
-	print("SMOKE a file added into an empty Part is still placed and named, and stays grounded: ", into_empty["ok"] and into_empty["error"] == "" and empty_row["transform"]["translation"][0] == 5.0 and empty_row["name_override"] == "Peg" and empty_row["fixed"] == true)
+	print("SMOKE a file added into an empty Part goes in at the origin (not at the pose asked), named, and stays grounded: ", into_empty["ok"] and into_empty["error"] == "" and empty_row["transform"]["translation"][0] == 0.0 and empty_row["name_override"] == "Peg" and empty_row["fixed"] == true)
 
 	# --- a file that would put the assembly inside itself
 	var calls_before := api.count(HTTPClient.METHOD_POST, "/add-component")

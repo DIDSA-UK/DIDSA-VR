@@ -56,6 +56,7 @@ class ToolDef extends RefCounted:
 	var status_provider: Callable = Callable() ## () -> String, live text for the status line
 	var on_select: Callable = Callable() ## runs whenever the tool becomes the one being viewed (refresh data)
 	var list_empty: String = "Nothing here yet." ## side-panel text when list_provider returns no rows
+	var row_select: Callable = Callable() ## (row_id: String) -> void: a selectable row of the list was tapped ("" = the selection was cleared)
 	var group: String = "" ## id of a CategoryDef group the design table's deck draws this tool under ("" = ungrouped)
 
 	func has_list() -> bool:
@@ -139,6 +140,7 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	def.status_provider = options.get("status", Callable())
 	def.on_select = options.get("on_select", Callable())
 	def.list_empty = str(options.get("list_empty", "Nothing here yet."))
+	def.row_select = options.get("row_select", Callable())
 	def.group = str(options.get("group", ""))
 	cat.tools.append(def)
 	_tools[id] = def

@@ -43,6 +43,9 @@ version/code=1
 version/name="0.1.0"
 ; Internet: Godot leaves it OFF by default, and without it every server fails with "Could not reach the server" (Quest 3, 22 Oct 2026)
 permissions/internet=true
+; All files access (T1, option C, 4 Nov 2026): lets the app read files other apps put in the project folder (Documents/DIDSA: a USB copy, the flat app). Scoped storage
+; blocks those without it. A Store listing would have to justify it; fine for a sideloaded APK. The Settings button "Allow opening files from other apps" sends the user to the system page.
+permissions/manage_external_storage=true
 ; XR Mode: 1 = OpenXR
 xr_features/xr_mode=1
 ; the Meta part of the OpenXR Vendors plugin (never tick two vendors in one preset)

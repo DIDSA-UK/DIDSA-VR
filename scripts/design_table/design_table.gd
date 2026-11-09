@@ -48,6 +48,8 @@ const TableManip := preload("res://scripts/design_table/table_manip.gd")
 const TablePreview := preload("res://scripts/design_table/table_preview.gd")
 const TableResize := preload("res://scripts/design_table/table_resize.gd")
 const NewDocument := preload("res://scripts/design_table/new_document.gd")
+const StartButtons := preload("res://scripts/ui/start_buttons.gd")
+const SelectionDrawer := preload("res://scripts/design_table/selection_drawer.gd")
 const TableBuild := preload("res://scripts/design_table/table_build.gd")
 const MatesToolScript := preload("res://scripts/mates_tool.gd")
 const GLASS_SHADER := preload("res://shaders/table_glass.gdshader")
@@ -84,6 +86,9 @@ const COPIED_METAS := ["occurrence_id", "owner_part_id", "face_ids", "body_ids",
 @export var hover_height: float = 0.20 ## metres above the slab where the part floats
 @export var sketch_tilt_degrees: float = 60.0 ## while a sketch is open the sketch plane stands this far up from the slab, top edge away, facing you (flat on the slab was awkward to draw on)
 @export var sheet_window_m := Vector2(0.80, 0.40) ## the sketch sheet's size in the WORLD, metres (wide by tall): a fixed window you draw in, however far the part is zoomed
+@export var sketch_sheet_front := true ## T4: the sketch sheet is hinged at the slab's front edge and leans back (false: the old floating sheet at the slab's middle)
+@export var sketch_lean_back_degrees: float = 15.0 ## T4: how far the front-hinged sheet leans back from vertical (so it stands 90 minus this above the slab)
+@export var sheet_hinge_clearance: float = 0.015 ## T4: metres the sheet's lower edge floats above the slab at the hinge (raise it if it hides the deck's top row from the eye)
 @export var sketch_hover_height: float = 0.26 ## metres: the least height the part floats at while it is tilted, so the sheet's lower edge clears the slab
 @export var fit_radius: float = 0.16 ## metres: the seated part's bounding sphere is this big
 @export var lift_reach: float = 0.06 ## metres beyond the seated part's sphere that a grip still catches it
@@ -159,6 +164,8 @@ var _seat_pivot_basis := Basis.IDENTITY ## the part's orientation on the table w
 var _last_suppressed := 0 ## mates the last Enforce suppressed because the edit changed their face
 var _orient_tween: Tween = null
 var _new_part_busy := false
+var drawer: Node3D ## selection_drawer.gd: the selection drawer at the front of the slab (T6)
+var start_buttons: Node3D ## start_buttons.gd: "New part" / "Open part..." floating over an empty table (T2); null until the table is set up
 var _view_empty := false ## the Build tree has hidden / rolled back everything: the copy shows nothing
 
 
@@ -196,6 +203,21 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	props.setup_for_table(self, left, right, camera)
 	props.option_pressed.connect(func(id: String) -> void: editor.on_option(id))
 	ui.options_sink = props
+	drawer = SelectionDrawer.new()
+	drawer.name = "SelectionDrawer"
+	add_child(drawer)
+	drawer.setup(self, tokens, right)
+	drawer.action_pressed.connect(func(id: String) -> void: editor.on_drawer_action(id))
+	drawer.rung_pressed.connect(func(rung: Dictionary) -> void: editor.on_drawer_rung(rung))
+	drawer.close_pressed.connect(func() -> void: editor.clear_part_selection())
+	start_buttons = StartButtons.new()
+	start_buttons.name = "StartButtons"
+	add_child(start_buttons)
+	start_buttons.setup_start(main, left, right, camera, {"title": "Empty table", "new": "New part", "open": "Open part...",
+		"help": "Start a new part here, or open one from a file. Or carry a part over the table and let go."},
+		func() -> void: new_part(),
+		func(path: String) -> void: open_part_file(path),
+		func() -> Transform3D: return start_buttons_pose())
 	enforce_button = EnforceButton.new()
 	enforce_button.name = "EnforceMates"
 	main.add_child(enforce_button) # a sibling, not a child: it must stay visible when the table is put away
@@ -264,12 +286,17 @@ func open() -> void:
 	set_status("Carry a part over the table and let go, or pick one in the tree, to edit it.")
 	UiFeedback.play("open", self)
 	opened.emit()
+	sync_start_buttons()
 
 
 func close() -> void:
 	if not _open:
 		return
 	return_part() # the real node comes back exactly where it was
+	if drawer != null:
+		drawer.hide_drawer()
+	if start_buttons != null:
+		start_buttons.empty = false
 	manager.deactivate()
 	resizer.cancel()
 	if tree.is_open():
@@ -467,6 +494,8 @@ func apply_settings(settings) -> void:
 	## main.gd, once everything exists: what the user chose last time.
 	keep_turn_on_return = settings.table_keep_turn
 	max_scale_setting = settings.table_max_scale
+	sketch_sheet_front = settings.table_sheet_front
+	sketch_lean_back_degrees = float(settings.table_sheet_lean)
 	var saved: Vector2 = settings.table_slab_size
 	if saved != Vector2.ZERO:
 		set_slab_size(saved.clamp(resizer.min_size, resizer.max_size))
@@ -489,6 +518,8 @@ func set_slab_size(new_size: Vector2) -> void:
 	## the tree at its left follow. The part keeps its place relative to the slab's middle.
 	slab_size = new_size
 	(_slab.mesh as PlaneMesh).size = new_size
+	if drawer != null:
+		drawer.place() # fixed size, centred on the front edge: it moves with the edge, it does not grow
 	_style_materials()
 	handle.layout(new_size)
 	_apply_deck_width()
@@ -548,6 +579,7 @@ func _process(delta: float) -> void:
 		poke_render()
 		return
 	surface.process(delta, true)
+	drawer.process(delta)
 	resizer.process()
 	_update_drop_ring()
 	manip.process(delta)
@@ -665,6 +697,7 @@ func seat(part: MeshInstance3D) -> bool:
 	poke_render()
 	UiFeedback.haptic(_right, "confirm")
 	part_seated.emit(part)
+	sync_start_buttons()
 	editor.on_seated() # finds which part this is, then opens plane picking (a coroutine: not waited for)
 	world_preview.on_seated()
 	return true
@@ -763,6 +796,20 @@ func pin_sketch_plane() -> void:
 	pivot.position -= window_anchor_normal * window_anchor_normal.dot(on_plane - window_anchor)
 
 
+func _plane_origin_at_sheet(rotation: Basis, scale: float, plane: Dictionary) -> Vector3:
+	## The pivot position that puts the sketch plane's origin at the front-hinged sheet's middle.
+	var basis := rotation.orthonormalized() * scale
+	return sheet_centre() - basis * (table_copy.transform * (plane["origin"] as Vector3))
+
+
+func _slide_plane_to_sheet(rotation: Basis, centre: Vector3, scale: float, plane: Dictionary) -> Vector3:
+	## `centre` moved along the sketch plane's normal only, until the plane passes through the sheet's middle: the part keeps where it was along the sheet.
+	var basis := rotation.orthonormalized() * scale
+	var normal := (rotation.orthonormalized() * (table_copy.basis * (plane["n"] as Vector3))).normalized()
+	var on_plane: Vector3 = centre + basis * (table_copy.transform * (plane["origin"] as Vector3))
+	return centre + normal * normal.dot(sheet_centre() - on_plane)
+
+
 func _set_window_anchor(rotation: Basis, centre: Vector3, scale: float, plane: Dictionary) -> void:
 	## Fixes the sketch window where the sketch plane will be once the part has settled into `rotation`, `centre`, `scale`: on the
 	## plane, as near the part's middle as it gets.
@@ -770,6 +817,8 @@ func _set_window_anchor(rotation: Basis, centre: Vector3, scale: float, plane: D
 	var on_plane: Vector3 = centre + basis * (table_copy.transform * (plane["origin"] as Vector3))
 	window_anchor_normal = (rotation.orthonormalized() * (table_copy.basis * (plane["n"] as Vector3))).normalized()
 	window_anchor = centre - window_anchor_normal * window_anchor_normal.dot(centre - on_plane)
+	if sketch_sheet_front:
+		window_anchor = sheet_centre() # T4: the window is where the sheet's hinge puts it, not near the part's middle
 
 
 func part_radius() -> float:
@@ -969,6 +1018,64 @@ func _new_part_impl() -> void:
 		set_status("Couldn't put %s on the table." % part_name)
 
 
+func sync_start_buttons() -> void:
+	## The two big buttons show while the table is open and holds no part, and go the moment a part is seated.
+	if start_buttons != null:
+		start_buttons.empty = _open and seated == null
+
+
+func start_buttons_pose() -> Transform3D:
+	## Floating above the middle of the slab, tipped like the console, where the part will appear.
+	var local := Transform3D(Basis.IDENTITY, Vector3(0.0, hover_height + 0.12, 0.0))
+	return global_transform * local
+
+
+func open_part_file(path: String) -> void:
+	## "Open part..." (T2): the file's Part is added to the assembly beside the table with add-component (a new assembly is started first if none is
+	## loaded: its first part is grounded by the backend), then seated on the table as if carried there. Part and assembly files are the same native files.
+	if _new_part_busy:
+		return
+	_new_part_busy = true
+	await _open_part_file_impl(path)
+	_new_part_busy = false
+
+
+func _open_part_file_impl(path: String) -> void:
+	if not api.is_configured():
+		set_status("Open part needs the DIDSA-CAD backend, and none is configured.")
+		return
+	if seated != null:
+		set_status("The table already holds %s. Lift it off first." % seated.name)
+		return
+	if _main.current_root_part_id() == "":
+		if not await _main.new_assembly():
+			return
+	var root_id: String = _main.current_root_part_id()
+	var before := await _occurrence_ids(root_id)
+	if not await _main.add_component_to_world(path):
+		return # main said why
+	if not _open or seated != null or _main.current_root_part_id() != root_id:
+		return
+	var added := ""
+	for id in await _occurrence_ids(root_id):
+		if id not in before:
+			added = id
+	var node := node_for_occurrence(added) if added != "" else null
+	if node == null:
+		set_status("%s was added to the assembly, but its part could not be found to put on the table. Pick it in the tree." % path.get_file())
+		return
+	set_status(seat_node(node))
+
+
+func _occurrence_ids(root_id: String) -> Array:
+	var listed: Dictionary = await api.request(HTTPClient.METHOD_GET, "/document/parts/%s/occurrences" % root_id, null)
+	var ids := []
+	if listed["ok"] and listed["json"] is Array:
+		for row in listed["json"]:
+			ids.append(str((row as Dictionary).get("id", "")))
+	return ids
+
+
 func _new_part_pose() -> Transform3D:
 	## Where a new part sits in the arena: to the right of the table and a little further off, in the assembly's own frame
 	## (millimetres, the frame the backend stores an occurrence's transform in), turned the way the assembly is.
@@ -1010,6 +1117,7 @@ func _clear_seat() -> void:
 	user_scale = 1.0
 	if build != null:
 		build.clear() # after the seat is gone: the tree window sees an empty table and goes back to Parts
+	sync_start_buttons()
 
 
 # --- Editing support (table_editor.gd) ----------------------------------------------------------
@@ -1084,14 +1192,30 @@ func orient_to_plane(plane: Dictionary) -> void:
 		return
 	var at := pivot.position
 	at.y = maxf(at.y, sketch_hover_height)
+	if sketch_sheet_front:
+		at = _slide_plane_to_sheet(sketch_rotation(plane), at, user_scale, plane)
 	_set_window_anchor(sketch_rotation(plane), at, user_scale, plane)
 	_animate_pose(sketch_rotation(plane), at, user_scale)
+
+
+func sketch_tilt() -> float:
+	## Degrees the sketch plane stands up from the slab: 90 minus the lean-back when front-hinged, else sketch_tilt_degrees.
+	return 90.0 - sketch_lean_back_degrees if sketch_sheet_front else sketch_tilt_degrees
+
+
+func sheet_centre() -> Vector3:
+	## T4, console frame: where the front-hinged sheet's middle is. Its lower edge sits on the slab's front edge (a little clearance above the glass)
+	## and it leans back, so the middle is half the sheet's height up the lean: z = front - (h/2)cos(tilt), y = clearance + (h/2)sin(tilt).
+	var tilt := deg_to_rad(sketch_tilt())
+	var half_h := sheet_window_m.y * 0.5
+	var hinge_z := slab_size.y * 0.5 - SelectionDrawer.DRAWER_SIZE.y # T6: the sheet stands BEHIND the selection drawer, which takes the front of the slab
+	return Vector3(0.0, sheet_hinge_clearance + half_h * sin(tilt), hinge_z - half_h * cos(tilt))
 
 
 func sketch_rotation(plane: Dictionary) -> Basis:
 	## How the part is turned while a sketch on `plane` is open: the plane lies flat on the slab (x right, y away, normal up), then
 	## tips up about the slab's x axis by sketch_tilt_degrees so its top edge goes away and its face comes towards you.
-	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt_degrees)) * SketchMath.orient_to_table(plane)
+	return Basis(Vector3.RIGHT, deg_to_rad(sketch_tilt())) * SketchMath.orient_to_table(plane)
 
 
 func reset_pose() -> void:
@@ -1105,6 +1229,8 @@ func reset_pose() -> void:
 		rotation = sketch_rotation(editor.session.plane)
 		text = "Back to the sketch plane."
 	var target := Vector3(0.0, sketch_hover_height if rotation != _seat_pivot_basis else hover_height, 0.0)
+	if sketch_sheet_front and editing_sketch():
+		target = _plane_origin_at_sheet(rotation, 1.0, editor.session.plane)
 	if editing_sketch():
 		_set_window_anchor(rotation, target, 1.0, editor.session.plane)
 	_animate_pose(rotation, target, 1.0)

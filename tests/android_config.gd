@@ -50,6 +50,7 @@ func _initialize() -> void:
 	check("an Android preset with the Gradle build, OpenXR mode and the Meta plugin", preset.get_value("preset.0", "platform", "") == "Android" and preset.get_value(o, "gradle_build/use_gradle_build", false) == true and preset.get_value(o, "xr_features/xr_mode", 0) == 1 and preset.get_value(o, "xr_features/enable_meta_plugin", false) == true)
 	check("one architecture only (arm64: every Quest), Quest 3 supported", preset.get_value(o, "architectures/arm64-v8a", false) == true and preset.get_value(o, "architectures/armeabi-v7a", true) == false and preset.get_value(o, "architectures/x86_64", true) == false and preset.get_value(o, "meta_xr_features/quest_3_support", false) == true)
 	check("the Internet permission is on (Godot's default is off: then no server can be reached)", preset.get_value(o, "permissions/internet", false) == true)
+	check("All files access is declared (T1 option C: files other apps put in Documents/DIDSA can be opened)", preset.get_value(o, "permissions/manage_external_storage", false) == true)
 	check("passthrough is optional (1), not required", preset.get_value(o, "meta_xr_features/passthrough", 0) == 1)
 	var include := str(preset.get_value("preset.0", "include_filter", ""))
 	var exclude := str(preset.get_value("preset.0", "exclude_filter", ""))

@@ -54,6 +54,7 @@ signal server_changed ## the backend this app talks to was switched (or went off
 signal status_changed(text: String) ## every _set_status(): the landing's launcher shows it in the headset
 signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
 signal references_changed() ## the opened file's moved / missing references (reference_review()) changed: the Files > References page redraws
+const ProjectFolder := preload("res://scripts/project_folder.gd") ## the project folder: default, probe, chooser helpers (T1)
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const STALE_MATES_KEY := "vr_stale_mates" ## the native-file extra that carries the design table's "mates need redoing" flags
 const DISCARD_CONFIRM_MS := 6000 ## how long a "this will discard your unsaved changes" warning stays armed for a second press
@@ -241,7 +242,10 @@ func _add_face_highlight() -> void:
 			entries = _mates_tool.picked_entities()
 		elif _measure_tool.active:
 			entries = _measure_tool.picked_entities()
+		if entries.is_empty():
+			entries = _mates_tool.mate_highlight_entries() # a mate selected on the tablet (T3)
 		highlight.set_picks(entries)
+	_mates_tool.highlight_changed.connect(refresh)
 	_mates_tool.picks_changed.connect(refresh)
 	_measure_tool.picks_changed.connect(refresh)
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
@@ -989,6 +993,64 @@ func set_project_folder(path: String) -> void:
 	_settings.set_project_folder(path)
 
 
+func folder_needs_asking() -> bool:
+	## True until the user has answered "where should your projects be saved" (the landing's first-run card, T1).
+	return not _settings.folder_asked
+
+
+func use_project_folder(path: String) -> Dictionary:
+	## Makes `path` the project folder if it can be used (ProjectFolder.probe): {ok, error, path}. A folder that can't be written is refused
+	## with the reason, and nothing changes.
+	var result := ProjectFolder.probe(path)
+	if not (result["exists"] and result["readable"] and result["writable"]):
+		_set_status("Can't use %s: %s" % [path, result["error"]])
+		return {"ok": false, "error": result["error"], "path": path}
+	_settings.set_project_folder(path)
+	_set_status("Project folder: %s" % ProjectFolder.full_path(path))
+	return {"ok": true, "error": "", "path": path}
+
+
+func use_default_project_folder() -> Dictionary:
+	return use_project_folder(ProjectFolder.default_folder())
+
+
+func keep_in_app_storage() -> void:
+	## "Keep in app storage": no project folder; saves go to user://models. The question counts as answered.
+	_settings.set_project_folder("")
+	_set_status("Project files stay in the app's own storage: %s" % ProjectSettings.globalize_path(ProjectFolder.APP_FOLDER))
+
+
+const ALL_FILES_PERMISSION := "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+func all_files_access_text() -> String:
+	## Settings > Project folder: the state of *All files access* in words. Only the Android build has it; whether OS.get_granted_permissions()
+	## reports this particular permission on Horizon OS is not verified (docs/android-build.md), so "not granted" can also mean "not reported".
+	if not OS.has_feature("android"):
+		return "All files access: not needed on this platform."
+	if ALL_FILES_PERMISSION in OS.get_granted_permissions():
+		return "All files access: allowed. Any folder can be read."
+	return "All files access: not allowed (or not reported). Files other apps put in the folder may not open."
+
+
+func request_all_files_access() -> void:
+	## Sends the user to the system's All files access page for this app (Android only).
+	if not OS.has_feature("android"):
+		_set_status("All files access is an Android setting; not needed here.")
+		return
+	OS.request_permission("MANAGE_EXTERNAL_STORAGE")
+	_set_status("Allow All files access on the system page that opened, then come back.")
+
+
+func save_dir() -> String:
+	## Where saves go: the project folder if set, else the app's own user://models.
+	return _settings.project_folder if not _settings.project_folder.is_empty() else ProjectFolder.APP_FOLDER
+
+
+func folder_label() -> String:
+	## "Project folder: Documents/DIDSA" (or "App storage"), for the Files page header.
+	return "Project folder: %s" % ProjectFolder.short_name(_settings.project_folder)
+
+
 func _process(delta: float) -> void:
 	_worst_frame_ms = maxf(_worst_frame_ms, delta * 1000.0)
 	if _section_tool.active: # no-ops internally when inactive, but skip the group lookup entirely when there's nothing to do
@@ -1516,7 +1578,16 @@ func add_component_file(path: String) -> void:
 	_load_busy = false
 
 
-func _add_component_file_impl(path: String) -> void:
+func add_component_to_world(path: String) -> bool:
+	## The design table's "Open part...": Add into the loaded assembly's root, never a room (the table is not a room). True if the file was added.
+	if not _claim_load("Add"):
+		return false
+	var ok: bool = await _add_component_file_impl(path)
+	_load_busy = false
+	return ok
+
+
+func _add_component_file_impl(path: String) -> bool:
 	## Files tab "Add": merges a second native file's own Part into the
 	## *currently loaded* assembly's root Part as a new Occurrence, via the
 	## backend's POST /parts/{root_id}/add-component
@@ -1531,21 +1602,21 @@ func _add_component_file_impl(path: String) -> void:
 	## round 2" for the blocker this closes.
 	if backend_url.is_empty() or api_key.is_empty():
 		_set_status("Add needs a backend (see secrets.cfg.example).")
-		return
+		return false
 	if _resolved_part_id.is_empty():
 		_set_status("Load a backend-hosted assembly first — nothing to add %s onto." % path.get_file())
-		return
+		return false
 	var composed := compose_native(path) # a sub-assembly file brings the files it references (native_compose.gd)
 	if not composed["ok"]:
 		_set_status(composed["error"])
-		return
+		return false
 	var component_text: String = composed["text"]
 	var e = room_manager.edit_api()
 	if e != null:
 		var refusal: String = await e.file_conflict(_resolved_part_id, component_text) # (the server only checks the file's root; see room_edit.gd)
 		if refusal != "":
 			_set_status(refusal)
-			return
+			return false
 
 	var req := HTTPRequest.new()
 	add_child(req)
@@ -1557,7 +1628,7 @@ func _add_component_file_impl(path: String) -> void:
 	)
 	var add_result: Array = await req.request_completed
 	if _parse_import_response(add_result, "add %s to the assembly" % path.get_file(), req) == null:
-		return
+		return false
 
 	_set_status("Added. Refreshing assembly mesh...")
 	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
@@ -1572,11 +1643,12 @@ func _add_component_file_impl(path: String) -> void:
 	var mesh_body: PackedByteArray = mesh_result[3]
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
 		_set_status("Mesh refresh after adding %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
-		return
+		return false
 	if not _show_model(mesh_body, "", spawn_scale):
-		return
+		return false
 	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
+	return true
 
 
 var _reloading_world := false ## reload_world_model() is swapping the same document's model: open Assembly Rooms stay open
@@ -2031,7 +2103,7 @@ func _remember_native_extras(parsed: Dictionary) -> void:
 func snapshot_path() -> String:
 	## Where a snapshot is written: next to the Settings project folder if one is set, else user://models (which the Files tab
 	## also scans, so it can be opened again), under a name that never overwrites the file the session came from.
-	var dir := _settings.project_folder if not _settings.project_folder.is_empty() else "user://models"
+	var dir := save_dir()
 	if not DirAccess.dir_exists_absolute(dir):
 		DirAccess.make_dir_recursive_absolute(dir)
 	var base := native_file_path.get_file().get_basename() if not native_file_path.is_empty() else "assembly"

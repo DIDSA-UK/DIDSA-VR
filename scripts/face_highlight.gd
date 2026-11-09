@@ -17,7 +17,7 @@ const RoomClip := preload("res://scripts/room/room_clip.gd")
 ## A part with no backend face identity (a bare local .glb) gets no highlight at all, because a pick on it
 ## is rejected anyway.
 
-const HOVER_COLOUR := Color(1.0, 0.93, 0.45, 0.55)
+const HOVER_COLOUR := Color(1.0, 0.93, 0.45, 0.38) ## T5: lighter than a pick (0.55), so "about to pick" never looks like "picked"
 const PICK_COLOURS: Array[Color] = [Color(0.25, 0.85, 1.0, 0.55), Color(1.0, 0.62, 0.22, 0.55)] ## the two-pick tools; a Width mate's four picks use them by pair (see `colour_slot`)
 const ClipShader := preload("res://shaders/highlight_clip.gdshader")
 const ClipGlobals := preload("res://scripts/clip_globals.gd")
