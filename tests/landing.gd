@@ -35,6 +35,7 @@ func make_main(landing_on: bool) -> void:
 	main = packed.instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg" # no backend => no network
 	main.landing_enabled = landing_on
+	main._settings.folder_asked = true # the first-run "where to save" page (T1) is tests/project_folder.gd's; here the launcher opens on Home
 	root.add_child(main)
 	await frames(1)
 	cam = main.get_node("XROrigin3D/XRCamera3D")

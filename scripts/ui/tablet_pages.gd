@@ -20,6 +20,8 @@ extends RefCounted
 signal toast(text: String, kind: String)
 
 const UiIcons := preload("res://scripts/ui/ui_icons.gd")
+const FolderChooser := preload("res://scripts/ui/folder_chooser.gd")
+const ProjectFolder := preload("res://scripts/project_folder.gd")
 const NativeCompose := preload("res://scripts/native_compose.gd") ## which file names are native files (any extension they have had)
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
@@ -135,7 +137,7 @@ func register(reg) -> void:
 	reg.add_category("assemble", "Assemble", "assembly", ACCENT_ASSEMBLY, {"subtitle": "mates · fix · relax"})
 	reg.add_tool("assemble", "mates", "Mates", "mates", _build_mates_page, {
 		"kind": "mode", "on_activate": _set_mates.bind(true), "on_deactivate": _set_mates.bind(false),
-		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.",
+		"on_select": _on_mates_selected, "status": _mates_status, "list": _mates_rows, "list_empty": "No mates yet.", "row_select": _on_mate_row_selected,
 		"help": "Switch the tool on, laser-target a face on one part, then a face on a different part. Choose a type (Distance and Angle take a value): a blue ghost shows where the part will go, so Flip it if it faces the wrong way, then Create mate. A mate in the list can be flipped, locked or given a new value afterwards."})
 
 	reg.add_tool("assemble", "drive", "Drive", "movement", _build_drive_page, {
@@ -817,6 +819,14 @@ func _on_mates_selected() -> void:
 		_mates_tool.refresh_mates(owner_part_id)
 
 
+func _on_mate_row_selected(mate_id: String) -> void:
+	## T3: a mate row tapped in the list: its two entities light up (a second tap, or leaving the list, puts them out).
+	if _mates_tool == null:
+		return
+	var camera: Camera3D = _main.get_node_or_null("XROrigin3D/XRCamera3D") if _main != null else null
+	_mates_tool.highlight_mate(mate_id, camera)
+
+
 func _mates_status() -> String:
 	return _mates_tool.status_text() if _mates_tool else ""
 
@@ -959,7 +969,7 @@ func _mates_rows() -> Array:
 		if broken:
 			notes.push_front("can't be satisfied")
 		rows.append({
-			"id": mate_id,
+			"id": mate_id, "selectable": true,
 			"title": "%s%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else "", " - Broken" if broken else ""],
 			"subtitle": ", ".join(notes), "state": "error" if broken else "normal", "broken": broken,
 			"actions": actions,
@@ -1168,9 +1178,16 @@ func chips() -> Array:
 
 # --- Files -------------------------------------------------------------------------------
 
+var _files_folder_label: Label
+
 func _build_files_page() -> Control:
 	var page := _page()
 	page.add_child(_hint("Loads from res://models, user://models, and the Settings project folder. Pick Open or Add beside the tablet."))
+	_files_folder_label = _hint("")
+	_files_folder_label.name = "FilesFolder"
+	page.add_child(_files_folder_label)
+	if _main != null:
+		_files_folder_label.text = _main.folder_label()
 	_files_count_label = Label.new()
 	page.add_child(_files_count_label)
 	_dirty_label = _hint("")
@@ -1261,6 +1278,8 @@ func _rescan_files() -> void:
 	_files_cache.clear()
 	if _main == null:
 		return
+	if _files_folder_label != null:
+		_files_folder_label.text = _main.folder_label()
 	for path in _main.list_model_files():
 		var native: bool = NativeCompose.native_extension(path) != ""
 		_files_cache.append({"path": path, "native": native, "root_id": _main.native_file_root_part_id(path) if native else ""})
@@ -1434,20 +1453,54 @@ func _build_settings_comfort() -> Control:
 
 
 func _build_settings_folder() -> Control:
+	## T1: the project folder. Shows the real path, whether it can be written to and how many model files it holds; a laser folder chooser
+	## replaces typing (typing stays as a secondary button); All files access is offered for files other apps put there.
 	var page := _page(14)
-	page.add_child(_hint("Where the Files tool looks for models, besides res://models and user://models."))
-	_project_folder_label = Label.new()
-	_project_folder_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	page.add_child(_project_folder_label)
-	_refresh_project_folder_label()
-	var folder_row := _row()
-	page.add_child(folder_row)
-	folder_row.add_child(_button("Set folder…", _on_set_project_folder_pressed))
-	folder_row.add_child(_button("Clear", func() -> void:
-		_main.set_project_folder("")
-		_refresh_project_folder_label()
-	))
+	_folder_box = VBoxContainer.new()
+	_folder_box.add_theme_constant_override("separation", 10)
+	page.add_child(_folder_box)
+	_rebuild_folder_page(false)
 	return page
+
+
+var _folder_box: VBoxContainer
+
+
+func _rebuild_folder_page(choosing: bool) -> void:
+	if _folder_box == null or _main == null:
+		return
+	for child in _folder_box.get_children():
+		_folder_box.remove_child(child)
+		child.queue_free()
+	if choosing:
+		var chooser := FolderChooser.new()
+		chooser.name = "FolderChooser"
+		_folder_box.add_child(chooser)
+		chooser.setup(_main, _main.project_folder())
+		chooser.chosen.connect(func(_p: String) -> void: _rebuild_folder_page(false))
+		chooser.cancelled.connect(func() -> void: _rebuild_folder_page(false))
+		return
+	_folder_box.add_child(_hint("Where saves go, and where the Files tool looks besides res://models and user://models."))
+	_project_folder_label = Label.new()
+	_project_folder_label.name = "FolderStatus"
+	_project_folder_label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	_folder_box.add_child(_project_folder_label)
+	_refresh_project_folder_label()
+	_folder_box.add_child(_button("Choose folder...", func() -> void: _rebuild_folder_page(true)))
+	_folder_box.add_child(_button("Use Documents/DIDSA", func() -> void:
+		_main.use_default_project_folder()
+		_rebuild_folder_page(false)))
+	_folder_box.add_child(_button("Keep in app storage", func() -> void:
+		_main.keep_in_app_storage()
+		_rebuild_folder_page(false)))
+	_folder_box.add_child(_button("Type a path...", _on_set_project_folder_pressed))
+	_folder_box.add_child(_hint("On the headset (Android scoped storage) a folder can be read only if this app made the files, or All files access is on. It is needed to open files copied in by USB or from the flat app."))
+	var access := _hint(_main.all_files_access_text())
+	access.name = "AllFilesState"
+	_folder_box.add_child(access)
+	_folder_box.add_child(_button("Allow opening files from other apps", func() -> void:
+		_main.request_all_files_access()
+		access.text = _main.all_files_access_text()))
 
 
 func _build_settings_table() -> Control:
@@ -1469,6 +1522,14 @@ func _build_settings_table() -> Control:
 	page.add_child(_choice_row("A part sent back to the arena", ["Original turn", "As turned"], 1 if settings.table_keep_turn else 0, func(i: int) -> void:
 		_design_table.keep_turn_on_return = i == 1
 		settings.set_table_keep_turn(i == 1)))
+	page.add_child(_choice_row("Sketch sheet", ["Front (hinged)", "Middle"], 0 if settings.table_sheet_front else 1, func(i: int) -> void:
+		_design_table.sketch_sheet_front = i == 0
+		settings.set_table_sheet(i == 0, settings.table_sheet_lean)))
+	var leans := [10, 15, 25]
+	var lean_now := leans.find(settings.table_sheet_lean)
+	page.add_child(_choice_row("Front sheet leans back", ["10°", "15°", "25°"], lean_now if lean_now >= 0 else 1, func(i: int) -> void:
+		_design_table.sketch_lean_back_degrees = float(leans[i])
+		settings.set_table_sheet(settings.table_sheet_front, leans[i])))
 	var limits := [2.0, 3.0, 5.0, 8.0]
 	var current := limits.find(settings.table_max_scale)
 	page.add_child(_choice_row("Biggest zoom of the part (a sketch always allows 8x)", ["2x", "3x", "5x", "8x"], current if current >= 0 else 1, func(i: int) -> void:
@@ -1507,8 +1568,12 @@ func _refresh_volume_label() -> void:
 
 func _on_set_project_folder_pressed() -> void:
 	_main.open_keyboard_for(_main.project_folder(), func(text: String) -> void:
-		_main.set_project_folder(text.strip_edges())
-		_refresh_project_folder_label()
+		var path := text.strip_edges()
+		if path.is_empty():
+			_main.keep_in_app_storage()
+		else:
+			_main.use_project_folder(path) # refused, with the reason in the status line, if it can't be written
+		_rebuild_folder_page(false)
 	, {"mode": "full", "title": "Project folder (absolute path)", "confirm_label": "Set"})
 
 
@@ -1516,4 +1581,5 @@ func _refresh_project_folder_label() -> void:
 	if not _project_folder_label:
 		return
 	var path: String = _main.project_folder()
-	_project_folder_label.text = "Scanning: %s" % path if not path.is_empty() else "Scanning res://models and user://models only — no project folder set."
+	var where := "App storage (no project folder)" if path.is_empty() else "Project folder"
+	_project_folder_label.text = "%s\n%s" % [where, ProjectFolder.status_line(path)]

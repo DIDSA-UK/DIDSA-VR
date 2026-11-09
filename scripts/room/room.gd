@@ -46,6 +46,7 @@ var _glass: MeshInstance3D ## the glass box (when `glass`)
 var _glass_material: ShaderMaterial
 var _grid_scale := -1.0 ## the content scale the grid step was last worked out for
 var handles: Node3D ## room_handles.gd: the face handles and the move bar
+var start_buttons: Node3D ## start_buttons.gd: "New assembly" / "Open assembly..." while the room is empty (null until the manager makes it)
 var console: Node3D ## room_console.gd: this room's own controls (null until the manager makes it, and in tests with no headset nodes)
 var _bounds := AABB() ## the content's bounds in content_root's own (mm) frame
 
@@ -251,6 +252,8 @@ func minimise() -> bool:
 		handles.set_enabled(false)
 	if console != null:
 		console.close()
+	if start_buttons != null:
+		start_buttons.empty = false # put away with the rest; update_start_buttons() brings it back if the room is still empty
 	minimised = true
 	RoomRegistry.push()
 	return true

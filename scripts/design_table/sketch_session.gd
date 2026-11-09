@@ -76,6 +76,7 @@ var dof := -1
 var converged := true
 
 var references_ok := false ## the part's own vertices and edges may be used as references (set by the editor: the topology it shows is the one the backend resolves against)
+var annotations: Array = [] ## T5: picked dimension labels and constraint glyphs: [{kind: "dimension" | "constraint", id}] (a dimension IS a constraint of the backend; it is a separate kind here because it is picked by its label)
 var selection: Array = [] ## picked entities for the constraint / dimension tools: [{kind, id}]
 var ghosts: Array = [] ## dimension candidates for the current selection (see _build_ghosts)
 
@@ -1565,6 +1566,9 @@ func toggle_select(entity: Dictionary) -> void:
 
 func menu() -> Array:
 	## The contextual menu for the current selection (sketch_selection.gd).
+	prune_annotations()
+	if not annotations.is_empty():
+		return SketchSelection.annotation_options(annotations, selection, self)
 	return SketchSelection.options(selection, self, ghosts)
 
 
@@ -1785,7 +1789,14 @@ static func _refusal_text(r: Dictionary) -> String:
 
 func apply_menu(option_id: String) -> Dictionary:
 	## Does one menu option on the current selection. Returns {ok, message}.
-	if busy or selection.is_empty():
+	if busy:
+		return {"ok": false, "message": ""}
+	if not annotations.is_empty() and option_id in ["delete", "clear"]:
+		if option_id == "clear":
+			clear_selection()
+			return {"ok": true, "message": ""}
+		return await delete_annotations()
+	if selection.is_empty():
 		return {"ok": false, "message": ""}
 	match option_id:
 		"clear":
@@ -2173,8 +2184,113 @@ func _select_for_dimension(entity: Dictionary) -> Dictionary:
 
 func clear_selection() -> void:
 	selection.clear()
+	annotations.clear()
 	ghosts.clear()
 	changed.emit()
+
+
+func is_annotation_selected(kind: String, id: String) -> bool:
+	for a in annotations:
+		if str(a["kind"]) == kind and str(a["id"]) == id:
+			return true
+	return false
+
+
+func toggle_annotation(kind: String, id: String) -> void:
+	## T5: a pull on a dimension label or constraint glyph: selected, or (already selected) let go again.
+	for i in annotations.size():
+		if str(annotations[i]["kind"]) == kind and str(annotations[i]["id"]) == id:
+			annotations.remove_at(i)
+			changed.emit()
+			return
+	if constraints.has(id):
+		annotations.append({"kind": kind, "id": id})
+		ghosts.clear() # dimension candidates belong to the geometry selection; the label's own menu takes over
+		changed.emit()
+
+
+func prune_annotations() -> void:
+	## Drops the selected labels whose constraint is gone (deleted, or rebuilt by a refresh).
+	annotations = annotations.filter(func(a) -> bool: return constraints.has(str(a["id"])))
+
+
+func dimension_value(id: String) -> Dictionary:
+	## The value of a dimension constraint as the label shows it: {ok, value, unit, kind}. Angles are degrees; everything else mm (a circle's size is its radius).
+	var c: Dictionary = constraints.get(id, {})
+	match str(c.get("type", "")):
+		"distance", "point_line_distance", "line_distance":
+			return {"ok": true, "value": float(c.get("distance", 0.0)), "unit": "mm", "kind": "distance"}
+		"angle":
+			return {"ok": true, "value": float(c.get("angle_degrees", 0.0)), "unit": "deg", "kind": "angle"}
+	return {"ok": false, "value": 0.0, "unit": "", "kind": ""}
+
+
+func edit_dimension(id: String, value: float) -> Dictionary:
+	## T5: sets an existing dimension's value (PATCH the constraint, as confirm_ghost does for a first value). Undo puts the old one back; a value the
+	## solver cannot meet is taken back at once with a message. {ok, message}.
+	var current := dimension_value(id)
+	if not current["ok"] or busy:
+		return {"ok": false, "message": "That isn't a dimension with a value."}
+	if value <= 0.0:
+		var msg := "A dimension has to be bigger than zero."
+		status.emit(msg)
+		return {"ok": false, "message": msg}
+	busy = true
+	var path := SKETCH + sketch_id + "/constraints/" + id
+	var r: Dictionary = await api.call(HTTPClient.METHOD_PATCH, path, {"value": value})
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't change that dimension: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	_undo.append({"label": "dimension value", "calls": [[HTTPClient.METHOD_PATCH, path, {"value": float(current["value"])}]]})
+	await refresh(false)
+	var kept := converged
+	if not kept:
+		busy = false
+		await undo()
+		busy = true
+		status.emit("That value conflicts with the other constraints, so it wasn't changed.")
+	annotations.clear()
+	busy = false
+	changed.emit()
+	return {"ok": kept, "message": "" if kept else "That value conflicts with the other constraints, so it wasn't changed."}
+
+
+func delete_annotations() -> Dictionary:
+	## T5: Delete with dimension labels / constraint glyphs selected: those constraints go (undo puts a deleted one back), and then, when geometry is
+	## selected too, that geometry with what depends on it (delete_selection: no undo, as there). {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	prune_annotations()
+	var ids: Array = []
+	for a in annotations:
+		if str(a["id"]) not in ids:
+			ids.append(str(a["id"]))
+	busy = true
+	var calls: Array = []
+	var failed := ""
+	for cid in ids:
+		var c: Dictionary = (constraints.get(cid, {}) as Dictionary).duplicate(true)
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + cid, null)
+		if r["ok"]:
+			c.erase("id")
+			calls.append([HTTPClient.METHOD_POST, SKETCH + sketch_id + "/constraints", c])
+		elif int(r.get("code", 0)) != 404:
+			failed = str(r["error"])
+	annotations.clear()
+	var with_geometry := not selection.is_empty()
+	if not calls.is_empty() and not with_geometry:
+		_undo.append({"label": "delete constraint", "calls": calls})
+	await refresh(false)
+	busy = false
+	if with_geometry:
+		var geometry := await delete_selection()
+		return {"ok": failed == "" and bool(geometry["ok"]), "message": failed if failed != "" else str(geometry.get("message", ""))}
+	changed.emit()
+	if failed != "":
+		status.emit("Couldn't delete: %s" % failed)
+	return {"ok": failed == "" and not calls.is_empty(), "message": failed}
 
 
 func _line_points(id: String) -> Array:

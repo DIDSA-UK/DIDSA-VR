@@ -52,6 +52,7 @@ signal picks_changed()
 signal sandbox_changed(on: bool) ## Relax all mates turned on (the sandbox) or off (the parts went home): the tablet's toggle and the wheel follow it
 signal document_changed() ## a mate was made or deleted, or a part grounded / floated: what a save would write is different
 signal mates_changed()
+signal highlight_changed() ## a mate was selected on the tablet (or the selection went): what it lights changed (T3)
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
 
 const API_PREFIX := "/document"
@@ -217,8 +218,178 @@ func is_busy() -> bool:
 
 func set_active(on: bool) -> void:
 	active = on
-	if not on:
+	if on:
+		clear_highlight() # picking starts: the pick colours are for the picks
+	else:
 		clear_picks()
+
+
+# --- Selecting a mate on the tablet lights the two things it mates (T3) -------------------------------------------------------
+
+var highlight_id := "" ## the mate selected on the tablet ("" = none)
+var _highlight_entries: Array = []
+var _pulse_sources: Array = []
+
+
+func mate_highlight_entries() -> Array:
+	## [{part, kind, body_id, index, key, colour_slot}] for face_highlight.gd's set_picks(): what the selected mate mates.
+	return _highlight_entries
+
+
+static func highlight_for(mate: Dictionary, nodes: Array) -> Dictionary:
+	## The faces, edges and vertices a mate's references name, as face_highlight entries in the two pick colours (side 1: slot 0, side 2: slot 1; a
+	## Width mate's gap faces are slot 0 and the part's slot 1, a Symmetric mate's mirrored pair slot 0 and its plane's face slot 1). `nodes` are the arena
+	## nodes to look in (tagged with occurrence_id). Plane, point and axis-less references name no face and are skipped, with the reason.
+	## Returns {entries, parts: [Node3D], skipped: [String]}.
+	var entries: Array = []
+	var parts: Array = []
+	var skipped: Array = []
+	var refs: Array = mate.get("references", [])
+	for side in refs.size():
+		var ref = refs[side]
+		if not (ref is Dictionary):
+			continue
+		var occ := str(ref.get("occurrence_id", ""))
+		if ref.get("subshape_ref") is Dictionary:
+			_add_entity(entries, parts, skipped, nodes, occ, ref["subshape_ref"], side)
+		elif ref.get("midplane") is Dictionary:
+			var mid: Dictionary = ref["midplane"]
+			for key in ["a", "b"]:
+				var plane = mid.get(key)
+				var occ_for := occ if key == "a" or mid.get("b_occurrence_id") == null else str(mid["b_occurrence_id"])
+				if plane is Dictionary and plane.get("face_ref") is Dictionary:
+					_add_entity(entries, parts, skipped, nodes, occ_for, plane["face_ref"], side)
+				else:
+					skipped.append("a plane")
+		elif ref.get("plane_ref") != null:
+			skipped.append("a plane")
+		elif ref.get("point_ref") != null:
+			skipped.append("a point")
+	return {"entries": entries, "parts": parts, "skipped": skipped}
+
+
+static func _add_entity(entries: Array, parts: Array, skipped: Array, nodes: Array, occurrence_id: String, subshape: Dictionary, side: int) -> void:
+	var part := _node_for(nodes, occurrence_id)
+	var kind := str(subshape.get("shape_type", "face"))
+	if part == null:
+		skipped.append("a part that is not on screen")
+		return
+	if kind not in ["face", "edge", "vertex"]:
+		skipped.append(kind)
+		return
+	var body_id := str(subshape.get("body_id", ""))
+	var index := int(subshape.get("index", -1))
+	entries.append({"part": part, "kind": kind, "body_id": body_id, "index": index, "face_index": -1,
+		"key": TopologyPick.entity_key(kind, body_id, index), "colour_slot": side})
+	if part not in parts:
+		parts.append(part)
+
+
+static func _node_for(nodes: Array, occurrence_id: String) -> Node3D:
+	## The arena node showing this occurrence: a visible one first (an open room's copy is the one you see, the world's is hidden under it).
+	var fallback: Node3D = null
+	for node in nodes:
+		if not is_instance_valid(node) or not node.has_meta("occurrence_id") or str(node.get_meta("occurrence_id")) != occurrence_id:
+			continue
+		if node is Node3D and (node as Node3D).is_visible_in_tree():
+			return node
+		if fallback == null:
+			fallback = node
+	return fallback
+
+
+static func direction_hint(camera_transform: Transform3D, point: Vector3, part_name: String) -> String:
+	## "" when the point is in front of you; else which way to look ("Bracket is behind you", "...off to your left").
+	var to_point := point - camera_transform.origin
+	if to_point.length() < 0.001:
+		return ""
+	var forward := -camera_transform.basis.z
+	var cos_angle := forward.dot(to_point.normalized())
+	if cos_angle > 0.5: # inside about 60 degrees of straight ahead
+		return ""
+	if cos_angle < -0.3:
+		return "%s is behind you." % part_name
+	var side := camera_transform.basis.x.dot(to_point.normalized())
+	if absf(camera_transform.basis.y.dot(to_point.normalized())) > absf(side):
+		return "%s is %s you." % [part_name, "above" if camera_transform.basis.y.dot(to_point.normalized()) > 0.0 else "below"]
+	return "%s is off to your %s." % [part_name, "right" if side > 0.0 else "left"]
+
+
+func highlight_mate(mate_id: String, camera: Camera3D = null) -> bool:
+	## Selecting a mate on the tablet (T3): lights the entities it mates (slot 0 and 1 pick colours), pulses the two parts' bodies for a moment so a
+	## mate between hidden faces can still be found, and says in the status line if a part is out of view. "" (or the selected one again) clears it.
+	## True when something was lit.
+	clear_highlight(false)
+	if mate_id == "":
+		highlight_changed.emit()
+		return false
+	var found := {}
+	for mate in mates:
+		if str(mate.get("id", "")) == mate_id:
+			found = mate
+	if found.is_empty():
+		highlight_changed.emit()
+		return false
+	var nodes: Array = get_tree().get_nodes_in_group("grabbable_parts") if is_inside_tree() else []
+	var result := highlight_for(found, nodes)
+	highlight_id = mate_id
+	_highlight_entries = result["entries"]
+	highlight_changed.emit()
+	if camera != null:
+		for part in result["parts"]:
+			var centre: Vector3 = part.global_transform * (part as MeshInstance3D).get_aabb().get_center() if part is MeshInstance3D else part.global_position
+			var hint := direction_hint(camera.global_transform, centre, str(part.name))
+			if hint != "":
+				_status = hint
+				picks_changed.emit() # the tablet's status line reads status_text()
+				break
+	_pulse(result["entries"])
+	return not _highlight_entries.is_empty()
+
+
+func clear_highlight(announce: bool = true) -> void:
+	_stop_pulse()
+	if highlight_id == "" and _highlight_entries.is_empty():
+		return
+	highlight_id = ""
+	_highlight_entries = []
+	if announce:
+		highlight_changed.emit()
+
+
+const PULSE_SECONDS := 0.9
+var _pulse_token := 0
+
+
+func _pulse(entries: Array) -> void:
+	## The two parts' referenced bodies outlined (face_highlight.gd's hover material, which is lighter than the pick colours) for a moment.
+	var highlight = get_parent().get("face_highlight") if get_parent() != null else null
+	if highlight == null or entries.is_empty():
+		return
+	_stop_pulse()
+	_pulse_token += 1
+	var token := _pulse_token
+	var seen := {}
+	for entry in entries:
+		var key := "%d:%s" % [(entry["part"] as Node).get_instance_id(), entry["body_id"]]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		var source := RefCounted.new()
+		_pulse_sources.append(source)
+		highlight.set_hover_entity(source, entry["part"], {"kind": "body", "body_id": entry["body_id"], "index": -1, "face_index": -1, "key": TopologyPick.body_key(str(entry["body_id"]))})
+	if is_inside_tree():
+		get_tree().create_timer(PULSE_SECONDS).timeout.connect(func() -> void:
+			if token == _pulse_token:
+				_stop_pulse())
+
+
+func _stop_pulse() -> void:
+	var highlight = get_parent().get("face_highlight") if get_parent() != null else null
+	if highlight != null:
+		for source in _pulse_sources:
+			highlight.clear_hover(source)
+	_pulse_sources.clear()
 
 
 func clear_picks() -> void:
@@ -368,6 +539,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 	## wrist tablet can show *why* a pick didn't count.
 	if not active or _picks.size() >= pick_target():
 		return
+	clear_highlight() # picking starts: a mate selected on the tablet stops lighting its entities
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
 	if not occ_ref.is_empty() and str(occ_ref.get("occurrence_id", "")) == "":
 		var copy_ref := copy_occurrence_ref(part)
@@ -1057,6 +1229,8 @@ func refresh_mates(owner_part_id: String) -> void:
 	if result["ok"]:
 		mates = result["json"]
 		_rebuild_mated_ids()
+		if highlight_id != "" and not mates.any(func(m) -> bool: return str(m.get("id", "")) == highlight_id):
+			clear_highlight() # the selected mate was deleted
 	mates_changed.emit()
 
 

@@ -146,6 +146,21 @@ If a headset shows that marker tracking does not read a code on a screen: the Pa
 The plugin has an export option (`permissions/camera`) that adds `horizonos.permission.HEADSET_CAMERA`; reading frames needs a small Kotlin Godot Android plugin
 with ZXing (Meta's QuestCameraKit has a sample). **Not built**: it breaks "no addons" further and needs this Gradle build first.
 
+## Storage on the Quest (T1, 4 Nov 2026)
+
+Horizon OS is Android, so **scoped storage** applies as it does to the flat app: a plain path such as `/storage/emulated/0/Documents/DIDSA` can be read only for files the
+app made itself, unless the app has *All files access*. Decision (owner, 4 Nov): **B + C**. The first run offers `Documents/DIDSA` as the project folder (no permission
+needed for files the app creates), Settings > Project folder has a laser folder chooser and a **Allow opening files from other apps** button, and the example preset sets
+`permissions/manage_external_storage=true` (a Store listing would have to justify that; a sideloaded APK does not). The flat app's Storage Access Framework picker (option
+D) is **not** built: it needs a native plugin, which `CLAUDE.md` does not allow.
+
+**To check on the headset (not verified; write the answers here):**
+
+1. What the launcher's Servers page prints for `OS.get_user_data_dir()`: is it under `Android/data/<app>/files` (the Files app shows it) or `/data/data/<app>/files` (nothing can)? ____
+2. Does a file saved to `Documents/DIDSA` show in the Quest Files app and over USB? ____
+3. Can a file copied into `Documents/DIDSA` over USB be opened **without** All files access? (Expected: no.) With it? ____
+4. Does *Allow opening files from other apps* open the system's All files access page for the app? Does Settings then say "allowed"? (Godot's `OS.request_permission("MANAGE_EXTERNAL_STORAGE")` and whether `OS.get_granted_permissions()` reports it are not verified: if the state line never says allowed, that is the reason, not the permission.) ____
+
 ## What was checked, and what was not
 
 Checked (`tests/android_config.gd`, headless, plus by hand in a scratch copy of the project):

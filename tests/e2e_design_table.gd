@@ -79,6 +79,7 @@ func _initialize() -> void:
 	var origin: XROrigin3D = main.get_node("XROrigin3D")
 	origin.get_node("XRCamera3D").position = Vector3(0, 1.6, 0)
 	table = main.design_table
+	table.sketch_sheet_front = false # this test pins the older 60-degree middle sheet (the "Middle" setting); the front sheet is tests/sketch_sheet_front.gd
 	table.configure_backend(str(cfg.get_value("backend", "url")), str(cfg.get_value("backend", "api_key")))
 	api = table.api
 	ed = table.editor

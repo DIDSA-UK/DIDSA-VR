@@ -107,6 +107,13 @@ The design table shows it:
 onto the corner itself it is flagged lost (`consumed_by_<fillet>`), shown, and re-picked. Not done: a re-attach for non-sketch features (open item 5), showing the
 backend's `candidates` for an ambiguous reference (the re-pick is free: aim at any corner).
 
+## Gaps found by T6 (selection drawer, 4 Nov 2026)
+
+- **Suppress / Unsuppress a feature, Appearance of a body** have no VR tool on the table; the drawer's buttons say so.
+- **The feature that made one particular face** (a Fillet's face): the backend has `reference_history.py` / `lineage_for()` but no route; a DIDSA-CAD change (`GET .../parts/{id}/faces/{body}/{index}/origin`, or per-face `feature_ids` in the mesh metadata). The breadcrumb stops at "made by <feature that created the body>".
+- **Extrude face / Move face on a surface body, Shell open faces on surface bodies:** the drawer leaves them out only if told which bodies are surfaces (`surface_bodies` is not filled yet).
+- **A pull out in the arena clears the table's selection** is not wired (the table only clears on its own empty-space pull).
+
 ## Gaps found while building it
 
 ### Work loss

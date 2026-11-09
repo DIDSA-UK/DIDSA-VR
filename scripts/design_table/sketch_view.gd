@@ -58,6 +58,7 @@ const GLYPH_STEP := 0.007 ## and the extra for each further glyph on the same en
 const CONSTRAINT_GLYPH_COLOUR := Color(0.55, 0.95, 0.80, 1.0)
 const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
+const GLYPH_HIT_MM := 0.007 ## world metres: half the side of the square a constraint glyph can be pointed at in (a glyph is small, so this is generous)
 
 var plane: Dictionary = {}
 var repick_point := "" ## the flagged reference point the user is choosing a replacement for: drawn extra large
@@ -90,6 +91,8 @@ var _labels: Node3D
 var _constraint_labels: Node3D
 var show_dimensions := true ## the Visibility drawer's Dims / Constr. tiles: the open sketch's existing dimensions and constraint glyphs (a dimension candidate of the Dimension tool always shows)
 var show_constraints := true
+var _annotation_hits: Array = [] ## T5: what a laser can pick among the labels: [{kind: "dimension" | "constraint", id, uv, angle, half: Vector2}] (sketch mm)
+var _annotation_hover := "" ## "kind:id" of the label under the laser
 var _ghost_text_uv := {} ## ghost key -> where its text sits on the drawing (what pointing at it means)
 var _line_material: ShaderMaterial
 var _tokens: Resource
@@ -542,9 +545,11 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.00056, REF_USED_COLOUR, 0.6)
 				continue
 			var key: String = "line:" + id
-			var lit: bool = selected.has(key) or key == hovered
+			var sel: bool = selected.has(key)
+			var hov: bool = key == hovered and not sel
+			var lit: bool = sel
 			var construction: bool = l.get("construction", false)
-			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
+			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
 			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, lit)
 		for id in session.circles:
 			var c: Dictionary = session.circles[id]
@@ -555,9 +560,11 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_stroke(verts, colors, circle_points(rim_centre, rim_centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS), true, false, REF_USED_COLOUR, false)
 				continue # the part's hole is lit; no construction circle, no centre cross of its own
 			var key: String = "circle:" + id
-			var lit: bool = selected.has(key) or key == hovered
+			var sel: bool = selected.has(key)
+			var hov: bool = key == hovered and not sel
+			var lit: bool = sel
 			var construction: bool = c.get("construction", false)
-			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
+			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
 			var centre: Vector2 = session.points[c["c"]]
 			var radius := centre.distance_to(session.points[c["p"]])
 			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, lit)
@@ -573,9 +580,11 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_stroke(verts, colors, arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32), false, false, REF_USED_COLOUR, false)
 				continue
 			var key: String = "arc:" + id
-			var lit: bool = selected.has(key) or key == hovered
+			var sel: bool = selected.has(key)
+			var hov: bool = key == hovered and not sel
+			var lit: bool = sel
 			var construction: bool = a.get("construction", false)
-			var colour: Color = warn if lit else (CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR)
+			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
 			_stroke(verts, colors, sweep, false, construction, colour, lit)
 			var arm := 0.005 / canvas_scale # an arc's centre is marked with a small cross
@@ -592,15 +601,19 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 					_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
 					continue
 				var okey: String = "%s:%s" % [kind, id]
-				var olit: bool = selected.has(okey) or okey == hovered
+				var osel: bool = selected.has(okey)
+				var ohov: bool = okey == hovered and not osel
+				var olit: bool = osel
 				var oconstruction: bool = source[id].get("construction", false)
-				var ocolour: Color = warn if olit else (CONSTRUCTION_COLOUR if oconstruction else OBJECT_COLOUR)
+				var ocolour: Color = _look(osel, ohov, CONSTRUCTION_COLOUR if oconstruction else OBJECT_COLOUR, warn, accent)
 				_stroke(verts, colors, outline, kind == "ellipse", oconstruction, ocolour, olit)
 		for id in session.texts:
 			var tkey: String = "text:" + id
-			var tlit: bool = selected.has(tkey) or tkey == hovered
+			var tsel: bool = selected.has(tkey)
+			var thov: bool = tkey == hovered and not tsel
+			var tlit: bool = tsel
 			var tconstruction: bool = session.texts[id].get("construction", false)
-			var tcolour: Color = warn if tlit else (CONSTRUCTION_COLOUR if tconstruction else OBJECT_COLOUR)
+			var tcolour: Color = _look(tsel, thov, CONSTRUCTION_COLOUR if tconstruction else OBJECT_COLOUR, warn, accent)
 			for poly in session.text_outlines.get(id, []):
 				_stroke(verts, colors, poly, true, tconstruction, tcolour, tlit)
 		for id in session.points:
@@ -614,12 +627,12 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 					continue
 			if session.is_origin(id):
 				# The sketch origin: a bigger, brighter marker than an ordinary point (it is where every dimension can start from).
-				var origin_colour: Color = warn if (selected.has(key) or key == hovered) else ORIGIN_COLOUR
+				var origin_colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), ORIGIN_COLOUR, warn, accent)
 				_marker(verts, colors, session.points[id], POINT_SIZE * 3.2, UNDERLAY, 1.3)
 				_marker(verts, colors, session.points[id], POINT_SIZE * 2.4, origin_colour, 1.6)
 				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
 				continue
-			var colour: Color = warn if (selected.has(key) or key == hovered) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3))
+			var colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3), warn, accent)
 			var ref_state: String = session.reference_status(id)
 			if ref_state == "lost" or ref_state == "potentially_moved":
 				var flag: Color = LOST_COLOUR if ref_state == "lost" else MOVED_COLOUR
@@ -632,6 +645,14 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 	if _refs != null and not is_equal_approx(_refs_scale, canvas_scale):
 		_rebuild_references()
 	_rebuild_dimensions(session)
+
+
+func _look(selected: bool, hovered: bool, base: Color, warn: Color, accent: Color) -> Color:
+	## T5: selected is the warning colour, solid; hovered ("about to pick") is the thing's own colour pulled towards the accent, and drawn thinner
+	## (the callers pass only `selected` as the heavy flag), so the two never look alike. Both: selected.
+	if selected:
+		return warn
+	return base.lerp(accent, 0.65) if hovered else base
 
 
 func _set_surface(node: MeshInstance3D, verts: PackedVector3Array, colors: PackedColorArray) -> void:
@@ -855,21 +876,39 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 		_labels.remove_child(child)
 		child.queue_free()
 	_ghost_text_uv.clear()
+	_annotation_hits.clear()
+	var selected_labels := {}
+	if session != null:
+		for a in session.annotations:
+			selected_labels["%s:%s" % [a["kind"], a["id"]]] = true
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	for child in _constraint_labels.get_children():
 		_constraint_labels.remove_child(child)
 		child.queue_free()
 	if session != null and show_constraints:
-		_draw_constraint_glyphs(session)
+		_draw_constraint_glyphs(session, selected_labels)
 	if session != null and show_dimensions:
 		for item in session.dimension_items():
 			var layout := _layout_for(item["spec"], str(item["text"]), session)
 			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
 				continue
 			var item_colour: Color = DRIVEN_COLOUR if bool(item.get("driven", false)) else DIM_COLOUR
+			var akey := "dimension:%s" % str(item["id"])
+			var asel: bool = selected_labels.has(akey)
+			var ahov: bool = akey == _annotation_hover and not asel
+			if asel:
+				item_colour = _tokens.warn
+			elif ahov:
+				item_colour = DIM_COLOUR.lerp(_tokens.accent, 0.65)
 			_draw_dimension(verts, colors, layout, item_colour)
-			_label_on_sheet(str(item["text"]), layout, item_colour)
+			var dim_label := _label_on_sheet(str(item["text"]), layout, item_colour)
+			if ahov or asel:
+				dim_label.outline_modulate = _tokens.accent if ahov else _tokens.warn # an outline in the accent: hovered; warn: selected
+				dim_label.outline_size = 18
+			var text_h: float = float(LABEL_FONT) * LABEL_PIXEL / canvas_scale # (_dim_params' own text height, without its obstacle scan)
+			_annotation_hits.append({"kind": "dimension", "id": str(item["id"]), "uv": layout["text_uv"], "angle": float(layout["text_angle"]),
+				"half": Vector2(text_h * 0.6 * float(maxi(str(item["text"]).length(), 1)) * 0.5, text_h * 0.5)})
 	for g in ghosts:
 		var spec: Dictionary = g.get("spec", {})
 		if spec.is_empty():
@@ -885,7 +924,7 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 	_set_surface(_dims, verts, colors)
 
 
-func _draw_constraint_glyphs(session) -> void:
+func _draw_constraint_glyphs(session, selected_labels: Dictionary = {}) -> void:
 	## A short letter beside what each constraint holds (H, V, //, |_, =, T, F...), flat in the sketch plane, stacked when an entity has several.
 	var stacked := {}
 	var k := 1.0 / canvas_scale
@@ -898,8 +937,11 @@ func _draw_constraint_glyphs(session) -> void:
 		label.text = str(item["text"])
 		label.font_size = LABEL_FONT
 		label.pixel_size = LABEL_PIXEL * 0.7 / canvas_scale
-		label.modulate = CONSTRAINT_GLYPH_COLOUR
-		label.outline_size = 10
+		var gkey := "constraint:%s" % str(item["id"])
+		var gsel: bool = selected_labels.has(gkey)
+		var ghov: bool = gkey == _annotation_hover and not gsel
+		label.modulate = _tokens.warn if gsel else (CONSTRAINT_GLYPH_COLOUR.lerp(_tokens.accent, 0.65) if ghov else CONSTRAINT_GLYPH_COLOUR)
+		label.outline_size = 18 if (gsel or ghov) else 10
 		label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
 		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		label.double_sided = true
@@ -909,14 +951,17 @@ func _draw_constraint_glyphs(session) -> void:
 		label.transform = Transform3D(Basis.IDENTITY, canvas_point(uv, 3.0))
 		label.set_meta("uv", uv)
 		label.visible = contains(uv)
+		if gsel or ghov:
+			label.outline_modulate = _tokens.warn if gsel else _tokens.accent
 		_constraint_labels.add_child(label)
+		_annotation_hits.append({"kind": "constraint", "id": str(item["id"]), "uv": uv, "angle": 0.0, "half": Vector2(GLYPH_HIT_MM, GLYPH_HIT_MM) / canvas_scale})
 
 
 func constraint_glyph_texts() -> Array:
 	return _constraint_labels.get_children().map(func(l): return (l as Label3D).text)
 
 
-func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> void:
+func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> Label3D:
 	## The value, lying IN the sketch plane along its dimension line (upright: left to right or bottom to top), not a sign turned to face you.
 	var label := Label3D.new()
 	label.text = text
@@ -936,6 +981,33 @@ func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> void:
 	label.set_meta("uv", layout["text_uv"])
 	label.visible = contains(layout["text_uv"]) # a label can't be clipped by the line shader: it shows while its middle is in the window
 	_labels.add_child(label)
+	return label
+
+
+func annotation_near(uv: Vector2, reach_mm: float) -> Dictionary:
+	## T5: the dimension label or constraint glyph the laser is on at `uv` (sketch mm), within `reach_mm` of its box: {kind, id}, or {}. A label wins over
+	## a glyph, the nearer centre over a farther one.
+	var best := {}
+	var best_d := INF
+	for hit in _annotation_hits:
+		var delta: Vector2 = uv - (hit["uv"] as Vector2)
+		var angle: float = float(hit["angle"])
+		var local := Vector2(delta.x * cos(angle) + delta.y * sin(angle), -delta.x * sin(angle) + delta.y * cos(angle))
+		var half: Vector2 = hit["half"]
+		if absf(local.x) <= half.x + reach_mm and absf(local.y) <= half.y + reach_mm:
+			var d := delta.length() - (1000.0 if hit["kind"] == "dimension" else 0.0)
+			if d < best_d:
+				best_d = d
+				best = {"kind": hit["kind"], "id": hit["id"]}
+	return best
+
+
+func set_annotation_hover(kind_id: String) -> void:
+	## "kind:id" of the label under the laser ("" = none): drawn with an accent outline, not the selected look. Redraws only when it changes.
+	if kind_id == _annotation_hover:
+		return
+	_annotation_hover = kind_id
+	_rebuild_dimensions(_last_session, _last_session.ghosts if _last_session != null else [])
 
 
 func show_ghosts(ghosts: Array) -> void:

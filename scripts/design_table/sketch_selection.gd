@@ -97,6 +97,22 @@ static func options(selection: Array, session = null, ghosts: Array = []) -> Arr
 	return out
 
 
+static func annotation_options(annotations: Array, selection: Array, session = null) -> Array:
+	## T5: the menu when dimension labels or constraint glyphs are selected (alone, or with geometry): one dimension alone can have its value edited;
+	## anything else is Delete only (the constraints go, then any selected geometry with what depends on it). Always Clear. (The flat app's Driven /
+	## Driving switch is not offered: the backend notes have no route for it.)
+	var out: Array = []
+	if annotations.is_empty():
+		return out
+	if annotations.size() == 1 and selection.is_empty() and str(annotations[0]["kind"]) == "dimension":
+		var value: Dictionary = session.dimension_value(str(annotations[0]["id"])) if session != null else {"ok": true}
+		if bool(value.get("ok", false)):
+			out.append({"id": "edit_value", "text": "Edit value"})
+	out.append({"id": "delete", "text": TEXT["delete"]})
+	out.append({"id": "clear", "text": TEXT["clear"]})
+	return out
+
+
 static func all_construction(selection: Array, session) -> bool:
 	## True if every line / circle / arc in the selection is already a construction entity (so the menu offers Solid).
 	var any := false

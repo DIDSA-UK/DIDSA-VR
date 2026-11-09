@@ -44,6 +44,8 @@ const BuildTree := preload("res://scripts/design_table/build_tree.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
 const FaceHighlight := preload("res://scripts/face_highlight.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
+const SelectionActions := preload("res://scripts/design_table/selection_actions.gd")
+const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrumbs.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
@@ -61,6 +63,7 @@ const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is t
 const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
 const GHOST_RADIUS := 0.030
 const FONTS := ["Open Sans", "Roboto", "Lato", "Fira Sans", "Barlow", "PT Sans", "IBM Plex Serif", "IBM Plex Mono", "Space Mono", "Rajdhani"] ## the backend's bundled fonts (app/sketch/text_fonts.py FONT_ALLOWLIST)
+const DOUBLE_PULL_MS := 500
 const MENU_SLOTS := 6 ## buttons in the options row
 
 var table ## design_table.gd
@@ -118,6 +121,12 @@ var body_limit := 0 ## how many bodies one pick may hold (0 = any number); a pic
 var revolve_axis_sketch := "" ## the sketch (its own id) the picked axis line is in, "" = the profile's own sketch
 var revolve_axis := "" ## the id of the sketch line Revolve spins the profile about ("" = not picked yet)
 var fixing: Dictionary = {} ## a flagged Build row being mended (begin_fix): {feature_id, type, kind ("edge" | "face"), paths, state_before}: the laser picks one replacement per path on the part as the feature saw it, then Apply fix
+var selection_first := true ## T6: a pull on the part (no tool chosen) SELECTS what it lights and the selection drawer offers what can be done with it; false: the older pull-on-a-face-starts-a-sketch
+var part_selection: Array = [] ## T6: what is selected on the part with no tool chosen: face / edge / vertex / body entities ({kind, body_id, index, key, planar})
+var _selected_build: Dictionary = {} ## T6: a Build tree row selected as a "sketch" or "feature" selection (the drawer's actions for it): {kind, feature_id, ...} or {}
+var hover_part_entity := {} ## T5: the face, edge or vertex of the part the laser is on with no tool chosen (T6 selects it); {} when none
+var _hover_annotation := {} ## T5: the dimension label or constraint glyph under the laser: {kind, id} or {}
+var _last_pull := {"key": "", "ms": 0} ## the last pull on a label: a second one on the same dimension inside DOUBLE_PULL_MS opens the number pad
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
 
 var _hover_uv: Variant = null
@@ -321,11 +330,13 @@ func _say_pick_plane() -> void:
 
 func _process(_delta: float) -> void:
 	hovering = false
-	if state == "idle" or not table.is_open() or table.table_copy == null:
+	if not table.is_open() or table.table_copy == null:
 		return
 	var origin: Vector3 = table._right.global_position
 	var dir: Vector3 = -table._right.global_transform.basis.z.normalized()
 	match state:
+		"idle":
+			_hover_part(origin, dir) # T5: no tool chosen, no sketch: what the laser would pick on the part lights
 		"pick_plane":
 			_hover_pick_plane(origin, dir)
 		"sketch":
@@ -390,16 +401,39 @@ func _hover_pick_plane(origin: Vector3, dir: Vector3) -> void:
 		_hover_plane = ""
 	if markers != null:
 		markers.set_hover(_hover_plane)
-	highlight.set_hover_entity(table._right, table.table_copy, _hover_face)
+	# T5: what lights is what the laser would pick on the part (a corner or an edge when it is close to one, else the face); a sketch plane is still picked by
+	# its face (_hover_face), so the edge or corner shown here is for the eye until T6's selection takes it
+	var lit: Dictionary = LaserPick.entity_for(table.table_copy, face_hit, origin) if (not _hover_face.is_empty() and hovering) else {}
+	hover_part_entity = lit
+	highlight.set_hover_entity(table._right, table.table_copy, lit if not lit.is_empty() else _hover_face)
+
+
+func _hover_part(origin: Vector3, dir: Vector3) -> void:
+	## T5: the no-tool hover on the part (state idle: no sketch open, no tool choosing). The face, edge or vertex under the laser lights, with the reach rules
+	## the feature pick states use (topology_pick.gd: a corner or an edge wins when the laser is close to one). The ray test only runs against the part's own
+	## collider, so nothing costs anything while the laser is elsewhere.
+	var hit := _copy_ray(origin, dir)
+	_hover_face = {}
+	hover_part_entity = {}
+	if hit.is_empty():
+		highlight.set_hover_entity(table._right, table.table_copy, {})
+		return
+	# (no claim of the laser here: this state is "no backend", where nothing on the part can be edited, so the table's own hand handling
+	# (table_manip.gd's engagement) must not be told the laser belongs to the editor; the plane-picking state, which can edit, does claim)
+	hover_part_entity = LaserPick.entity_for(table.table_copy, hit, origin)
+	_hover_face = hover_part_entity
+	highlight.set_hover_entity(table._right, table.table_copy, hover_part_entity)
 
 
 func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	_hover_uv = null
 	_hover_entity = {}
+	_hover_annotation = {}
 	if session == null or view == null:
 		return
 	var uv: Variant = _sheet_hit(origin, dir)
 	if uv == null:
+		view.set_annotation_hover("")
 		view.set_cursor(null)
 		view.set_preview("", [], null)
 		view.set_reference_hover({})
@@ -410,11 +444,14 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	var hit_world: Vector3 = copy_xf * SketchMath.from_sheet(uv, plane)
 	hovering = _claim(origin.distance_to(hit_world))
 	if not hovering:
+		view.set_annotation_hover("")
 		view.set_cursor(null)
 		return
 	_hover_uv = uv
 	var radius_mm: float = SNAP_RADIUS / view.canvas_scale # the snap and pick reaches are a size in the world: they shrink in sketch mm as you zoom in
 	var tool: String = table.active_tool
+	if tool != SELECT_TOOL:
+		view.set_annotation_hover("") # only the no-tool / Select state picks labels
 	if SKETCH_TOOLS.has(tool):
 		var line_start: Variant = null
 		var now_ms := Time.get_ticks_msec()
@@ -465,6 +502,12 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		if EDIT_TOOLS.has(tool):
 			kinds = ["line", "circle", "arc"] if tool == "trim" else ["line", "arc"]
 		_hover_entity = session.nearest_entity(uv, pick_mm, kinds) if repick_point == "" else {}
+		if tool == SELECT_TOOL and repick_point == "":
+			# T5: a dimension label or constraint glyph under the laser wins over the geometry beside it (a label is small and sits near its line)
+			_hover_annotation = view.annotation_near(uv, pick_mm * 0.35)
+			if not _hover_annotation.is_empty():
+				_hover_entity = {}
+		view.set_annotation_hover("%s:%s" % [_hover_annotation["kind"], _hover_annotation["id"]] if not _hover_annotation.is_empty() else "")
 		if repick_point == "" and "point" in kinds and str(_hover_entity.get("kind", "")) != "point" and part_refs != null and session.references_ok and tool != "revolve":
 			var corner: Dictionary = part_refs.pick(uv, pick_mm, ["point"]) # a point beats a line it is on, and the part's own corner or hole centre is a point (the sketch's helper for it is hidden)
 			if not corner.is_empty():
@@ -628,12 +671,24 @@ func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 # --- The trigger ----------------------------------------------------------------------------
 
 func _on_right_pressed(action: String) -> void:
+	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
+		clear_part_selection() # B closes the drawer, like its X
+		return
+	if action == table.click_action and table.is_open() and not hovering and selection_first and state in ["pick_plane", "idle"] and (not part_selection.is_empty() or not _selected_build.is_empty()) \
+			and not table._right.get_meta("ui_hover", false):
+		clear_part_selection() # a pull on empty space (no part entity, no UI) lets go of the selection
+		return
 	if action != table.click_action or not hovering or not table.is_open():
 		return
 	UiFeedback.haptic(table._right, "press")
 	match state:
 		"pick_plane":
-			await _pick_plane()
+			if selection_first and _hover_plane == "" and not hover_part_entity.is_empty():
+				select_part_entity(hover_part_entity) # T6: the pull selects; New sketch on face is a drawer action
+			elif selection_first and _hover_plane == "" and hover_part_entity.is_empty() and not _hover_face.is_empty():
+				select_part_entity(_hover_face)
+			else:
+				await _pick_plane()
 		"sketch":
 			await _sketch_trigger()
 		"pick_edges":
@@ -648,6 +703,277 @@ func _on_right_pressed(action: String) -> void:
 			_toggle_curve()
 		"pick_sketch":
 			_pick_sketch()
+
+
+# --- T6: selection with no tool chosen, and the selection drawer -------------------------------------------------------
+
+func select_part_entity(entity: Dictionary) -> void:
+	## A pull on a lit face / edge / corner: it joins the selection, or (already in it) leaves. The drawer shows what can be done with the selection.
+	if entity.is_empty() or str(entity.get("kind", "")) not in ["face", "edge", "vertex", "body"]:
+		return
+	_selected_build = {}
+	for i in part_selection.size():
+		if str(part_selection[i].get("key", "")) == str(entity.get("key", "")):
+			part_selection.remove_at(i)
+			_sync_part_selection()
+			return
+	var e: Dictionary = entity.duplicate()
+	if str(e["kind"]) == "face":
+		e["planar"] = TopologyPick.is_planar_face(table.table_copy, str(e["body_id"]), int(e["index"]))
+	part_selection.append(e)
+	_sync_part_selection()
+	_say_selection()
+
+
+func set_part_selection(list: Array) -> void:
+	## A rung of the breadcrumb was taken: the selection becomes that level (a body, a feature, a sketch), and the drawer's actions change.
+	part_selection = list.filter(func(e) -> bool: return str(e.get("kind", "")) in ["face", "edge", "vertex", "body"])
+	_selected_build = {}
+	for e in list:
+		if str(e.get("kind", "")) in ["feature", "sketch"]:
+			_selected_build = e
+	if _selected_build.has("feature_id") and table.build != null and table.build.index_of(str(_selected_build["feature_id"])) >= 0:
+		table.build.select(str(_selected_build["feature_id"]))
+		_selected_build["type"] = str(table.build.row(str(_selected_build["feature_id"])).get("type", ""))
+		if str(_selected_build["type"]) == "sketch":
+			_selected_build["kind"] = "sketch"
+			_selected_build["closed"] = bool(rest_sketches.sketches.get(str(_selected_build["feature_id"]), {}).get("closed", false)) if rest_sketches != null and is_instance_valid(rest_sketches) else true
+		_selected_build["name"] = table.build.name_of_feature(str(_selected_build["feature_id"]))
+		_selected_build["suppressed"] = false
+	_sync_part_selection()
+
+
+func select_build_row(feature_id: String) -> void:
+	## A Build tree row selected on the tree window: the drawer offers what a sketch or a feature can do (selection_actions.gd).
+	if not selection_first or table.build == null or table.build.index_of(feature_id) < 0 or session != null:
+		return
+	part_selection.clear()
+	set_part_selection([{"kind": "feature", "feature_id": feature_id}])
+
+
+func select_body_row(body_id: String) -> void:
+	if not selection_first or session != null or state not in ["pick_plane", "idle"]:
+		return
+	set_part_selection([{"kind": "body", "body_id": body_id, "key": TopologyPick.body_key(body_id)}])
+
+
+func clear_part_selection() -> void:
+	part_selection.clear()
+	_selected_build = {}
+	if highlight != null and table.table_copy != null:
+		highlight.set_set(table.table_copy, [])
+	_sync_part_selection()
+
+
+func current_selection() -> Array:
+	## What the drawer is about: the part entities, or the selected Build row, or (a sketch open) the sketch's own picks.
+	if session != null:
+		var out: Array = []
+		for e in session.selection:
+			out.append(e)
+		for a in session.annotations:
+			out.append(a)
+		return out
+	if not _selected_build.is_empty():
+		return [_selected_build]
+	return part_selection
+
+
+func _drawer_context() -> Dictionary:
+	var copy: MeshInstance3D = table.table_copy
+	var ids: Array = copy.get_meta("body_ids") if copy != null and copy.has_meta("body_ids") else []
+	var feature_names := {}
+	if table.build != null:
+		for body in ids:
+			var fid := SelectionCrumbs.base_feature_id(str(body))
+			if not feature_names.has(fid) and table.build.index_of(fid) >= 0:
+				feature_names[fid] = table.build.name_of_feature(fid)
+	var sketch_name := "Sketch"
+	var sketch_feature := ""
+	return {"body_names": BuildTree.body_names(ids), "feature_names": feature_names, "part_name": table.build.part_name() if table.build != null else "Part",
+		"sketch_name": sketch_name, "sketch_feature_id": sketch_feature, "surface_bodies": [], "has_face_extrude": false}
+
+
+func _sync_part_selection() -> void:
+	## The highlight and the drawer follow the selection: lit on the part, the drawer out while something is selected and no tool is running.
+	if table == null or table.drawer == null:
+		return
+	if highlight != null and table.table_copy != null and session == null and _selected_build.is_empty():
+		highlight.set_set(table.table_copy, part_selection) # (a selected Build row keeps the faces build.select() lit)
+	var selection := current_selection()
+	var tool_running: bool = str(table.active_tool) != "" and session == null
+	if selection.is_empty() or tool_running or not table.is_open() or not selection_first or state in ["opening", "pick_curves", "pick_sketch"]:
+		table.drawer.hide_drawer()
+		return
+	var ctx := _drawer_context()
+	var rungs: Array = SelectionCrumbs.chain(selection, ctx)
+	var actions: Array = SelectionActions.actions_for(selection, ctx) if session == null else _sketch_actions()
+	table.drawer.show_for(rungs, actions)
+	if session == null and not part_selection.is_empty():
+		var key_entity: Dictionary = part_selection[part_selection.size() - 1]
+		var point = _entity_point(key_entity)
+		if point != null:
+			table.drawer.show_leader(table.to_local(point))
+
+
+func _sketch_actions() -> Array:
+	## The sketch selection's menu (T5) as drawer actions: the same ids the options row takes.
+	var out: Array = []
+	for o in session.menu():
+		out.append({"id": str(o["id"]), "text": str(o["text"]), "group": "refine" if str(o["id"]).begins_with("dim:") else "modify", "enabled": true, "reason": ""})
+	return out
+
+
+func _entity_point(entity: Dictionary) -> Variant:
+	## Roughly where an entity is, in the world, for the leader line: the middle of its face / the part's centre for others (never fatal if unknown).
+	if table.table_copy == null:
+		return null
+	return table.table_copy.global_transform * table.table_copy.get_aabb().get_center()
+
+
+func _say_selection() -> void:
+	var rungs: Array = SelectionCrumbs.chain(part_selection, _drawer_context())
+	if not rungs.is_empty():
+		table.set_status("%s selected: choose what to do in the drawer at the front of the table. A pull on empty space lets go." % str(rungs[0]["text"]))
+
+
+func on_drawer_action(id: String) -> void:
+	if session != null:
+		await on_option(id)
+		_sync_part_selection()
+		return
+	await begin_tool(id, current_selection())
+
+
+func on_drawer_rung(rung: Dictionary) -> void:
+	var picked: Array = rung.get("select", [])
+	if str(rung.get("level", "")) == "part":
+		part_selection.clear()
+		_selected_build = {}
+		if highlight != null and table.table_copy != null:
+			highlight.set_set(table.table_copy, [])
+		table.drawer.show_for([{"id": "part", "text": "Part \"%s\"" % (table.build.part_name() if table.build != null else "Part"), "level": "part", "select": []}], SelectionActions.part_actions())
+		return
+	set_part_selection(picked if not picked.is_empty() else part_selection)
+
+
+func begin_tool(tool_id: String, seed: Array) -> bool:
+	## Choosing an action in the drawer STARTS the existing tool with the selection already picked, so the user can still add or remove picks, then Apply. The ones that
+	## are not deck tools (New sketch on face, Edit sketch, the feature verbs, the Part rung) act directly. Returns false for an id nothing handles.
+	var edges_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "edge")
+	var faces_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "face")
+	var vertices_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "vertex")
+	var bodies_seed: Array = seed.filter(func(e) -> bool: return str(e.get("kind", "")) == "body")
+	match tool_id:
+		"sketch_on_face":
+			if faces_seed.is_empty():
+				return false
+			var f: Dictionary = faces_seed[0]
+			clear_part_selection()
+			await begin_sketch({"face": {"body_id": str(f["body_id"]), "index": int(f["index"])}})
+			return true
+		"edit_sketch", "edit_feature":
+			var id := str(seed[0].get("feature_id", "")) if not seed.is_empty() else ""
+			if id == "":
+				return false
+			table.build.select(id)
+			clear_part_selection()
+			await table.build.edit_selected()
+			return true
+		"rollback":
+			table.build.select(str(seed[0].get("feature_id", "")))
+			await table.build.toggle_rollback_selected()
+			return true
+		"delete_feature":
+			var del_id := str(seed[0].get("feature_id", ""))
+			if table.build.selected_id != del_id:
+				table.build.select(del_id)
+			await table.build.delete_selected() # asks twice, like the Build row's own Delete: the status line says Sure?
+			if table.build.index_of(del_id) < 0:
+				clear_part_selection()
+			else:
+				_sync_part_selection()
+			return true
+		"suppress":
+			table.set_status("Suppress is not built in VR yet (the flat app has it). Hide the feature from the Build tree's eye instead.")
+			return true
+		"return_arena":
+			table.return_to_arena()
+			return true
+		"properties":
+			table.props.set_wanted(true)
+			return true
+		"appearance":
+			table.set_status("Appearance on the table is not built yet: use the Appearance tool on the wrist tablet in the arena.")
+			return true
+	if table.registry.tool_def(tool_id) == null:
+		return false
+	var sketch_seed: Dictionary = seed[0] if not seed.is_empty() and str(seed[0].get("kind", "")) == "sketch" else {}
+	table.manager.activate(tool_id) # the tool's own on_activated starts its picking (and clears older picks)
+	if not sketch_seed.is_empty():
+		for i in 40:
+			if state == "pick_sketch":
+				break
+			await table.get_tree().process_frame
+		var sid := str(sketch_seed.get("feature_id", ""))
+		if tool_id == "loft":
+			seed_sketches = [sid]
+		else:
+			seed_sketch = sid
+			_seed_tool = tool_id
+			if rest_sketches != null and is_instance_valid(rest_sketches):
+				highlight.set_set(table.table_copy, rest_sketches.candidates().filter(func(c) -> bool: return str(c["sketch_feature_id"]) == sid))
+		_selected_build = {}
+		part_selection.clear()
+		_update_options()
+		schedule_preview()
+		return true
+	# face edges: Fillet / Chamfer on a face rounds ITS edges
+	if tool_id in ["fillet", "chamfer"] and edges_seed.is_empty() and not faces_seed.is_empty():
+		edges_seed = _edges_of_faces(faces_seed)
+	edges = edges_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	faces = faces_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	vertices = vertices_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	bodies = bodies_seed.map(func(e) -> Dictionary: return _entity_copy(e))
+	part_selection.clear()
+	_selected_build = {}
+	_refresh_lit()
+	var feature_tool = tools.get(tool_id)
+	if feature_tool != null:
+		for kind in ["edge", "face", "vertex", "body"]:
+			if (kind == "edge" and not edges.is_empty()) or (kind == "face" and not faces.is_empty()) or (kind == "vertex" and not vertices.is_empty()) or (kind == "body" and not bodies.is_empty()):
+				feature_tool.on_pick(self, kind)
+	_sync_part_selection()
+	_update_options()
+	schedule_preview()
+	return true
+
+
+func _entity_copy(e: Dictionary) -> Dictionary:
+	var out := e.duplicate()
+	out.erase("planar")
+	return out
+
+
+func _edges_of_faces(face_entities: Array) -> Array:
+	## The edges of the faces, from the part's topology (mesh_identity.gd's face_edges), each once.
+	var out: Array = []
+	var seen := {}
+	var topo: Dictionary = table.table_copy.get_meta("topology", {}) if table.table_copy != null else {}
+	for f in face_entities:
+		var body: Dictionary = topo.get(str(f["body_id"]), {})
+		var face_edges: Variant = body.get("face_edges", {})
+		var list: Array = []
+		if face_edges is Dictionary:
+			list = face_edges.get(int(f["index"]), face_edges.get(str(f["index"]), []))
+		elif face_edges is Array and int(f["index"]) < (face_edges as Array).size():
+			list = face_edges[int(f["index"])]
+		for idx in list:
+			var key: String = TopologyPick.entity_key("edge", str(f["body_id"]), int(idx))
+			if not seen.has(key):
+				seen[key] = true
+				out.append({"kind": "edge", "body_id": str(f["body_id"]), "index": int(idx), "key": key})
+	return out
 
 
 func _pick_plane() -> void:
@@ -1436,6 +1762,7 @@ func _on_session_changed() -> void:
 	_refresh_view()
 	_update_options()
 	sync_undo_redo()
+	_sync_part_selection() # T6: the drawer carries the sketch selection's options
 
 
 func _refresh_view() -> void:
@@ -1461,13 +1788,54 @@ func refresh_sketch_hint() -> void:
 
 func _sketch_hint() -> String:
 	var def = table.registry.tool_def(table.active_tool) if table.active_tool != "" else null
-	var hint := "Sketch open. Pick a tool to draw or constrain. To change or delete something, choose Select and pick it: its options appear in Properties."
+	var hint := "Pull the trigger on anything in the sketch to change or delete it, or pick a tool to draw."
 	if def != null and def.hint != "":
 		hint = def.hint
 	var warning: String = session.reference_warning() if session != null else ""
 	if not table.infer_enabled:
 		hint = "Infer off: nothing is added automatically.  " + hint # a toggle left off explains itself
 	return hint if warning == "" else "%s  %s" % [warning, hint]
+
+
+func _pull_annotation(hit: Dictionary) -> void:
+	## T5: a pull on a dimension label or constraint glyph selects it (a second pull on the selected one lets it go). A quick second pull on a
+	## DIMENSION opens the number pad at once: the common thing to do with one.
+	var key := "%s:%s" % [hit["kind"], hit["id"]]
+	var now := Time.get_ticks_msec()
+	if str(hit["kind"]) == "dimension" and key == str(_last_pull["key"]) and now - int(_last_pull["ms"]) <= DOUBLE_PULL_MS:
+		_last_pull = {"key": "", "ms": 0}
+		if not session.is_annotation_selected("dimension", str(hit["id"])):
+			session.toggle_annotation("dimension", str(hit["id"]))
+		_edit_dimension_value(str(hit["id"]))
+		return
+	_last_pull = {"key": key, "ms": now}
+	session.toggle_annotation(str(hit["kind"]), str(hit["id"]))
+	table.set_status("%s selected: Edit value or Delete in the options row." % ("Dimension" if str(hit["kind"]) == "dimension" else "Constraint") if session.is_annotation_selected(str(hit["kind"]), str(hit["id"])) else "Let go.")
+
+
+func _edit_dimension_value(id: String) -> void:
+	var current: Dictionary = session.dimension_value(id)
+	if not bool(current["ok"]):
+		return
+	table._main.open_keyboard_for("%.2f" % float(current["value"]), func(text: String) -> void: await edit_dimension_typed(id, text),
+		{"title": "Dimension (%s)" % str(current["unit"])})
+
+
+func edit_dimension_typed(id: String, text: String) -> void:
+	## The number pad came back for an existing dimension: a plain number above zero, else the status line says why.
+	var cleaned := text.strip_edges()
+	if not cleaned.is_valid_float():
+		table.set_status("That isn't a number.")
+		UiFeedback.haptic(table._right, "error")
+		return
+	var result: Dictionary = await session.edit_dimension(id, cleaned.to_float())
+	if bool(result["ok"]):
+		UiFeedback.haptic(table._right, "confirm")
+		table.set_status("Dimension changed.")
+		sync_undo_redo()
+	elif str(result["message"]) != "":
+		table.set_status(str(result["message"]))
+		UiFeedback.haptic(table._right, "error")
 
 
 func _sketch_trigger() -> void:
@@ -1492,7 +1860,9 @@ func _sketch_trigger() -> void:
 		await _do_repick()
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
-		if ghost != "":
+		if tool == SELECT_TOOL and ghost == "" and not _hover_annotation.is_empty():
+			await _pull_annotation(_hover_annotation)
+		elif ghost != "":
 			if bool(session.ghost(ghost).get("driven", false)):
 				await _keep_driven(ghost)
 			else:
@@ -1671,12 +2041,20 @@ func on_tool_changed(tool_id: String) -> void:
 		"":
 			if state in PICK_STATES or state == "extrude":
 				set_state("sketch" if session != null else "pick_plane")
+			if session != null and state == "sketch":
+				_reselect_if_idle.call_deferred() # T5: with a sketch open, putting a tool down leaves you in the no-tool state: pull on anything to select it
 		_:
 			if state in PICK_STATES or state == "extrude":
 				set_state("sketch" if session != null else "pick_plane")
 			if session == null and (SKETCH_TOOLS.has(tool_id) or CONSTRAIN_TOOLS.has(tool_id) or EDIT_TOOLS.has(tool_id) or tool_id in ["dimension", SELECT_TOOL]):
 				table.set_status("Pick a flat face or a reference plane to sketch on first.")
 	_update_options()
+
+
+func _reselect_if_idle() -> void:
+	## T5: after a frame, if no tool took the place of the one just put down (choosing another tool deactivates the old one first), the Select tool is on again.
+	if session != null and state == "sketch" and table.active_tool == "" and table.is_open():
+		table.manager.activate(SELECT_TOOL)
 
 
 func _update_options() -> void:
@@ -1779,6 +2157,9 @@ func on_option(option_id: String) -> void:
 		return
 	if option_id.begins_with("dim:"):
 		_type_dimension(option_id.substr(4))
+		return
+	if option_id == "edit_value" and session != null and session.annotations.size() == 1:
+		_edit_dimension_value(str(session.annotations[0]["id"]))
 		return
 	if session != null and session.tool == SELECT_TOOL and option_id in SelectMenuIds:
 		_menu_page = 0
@@ -2395,6 +2776,10 @@ func selection_summary() -> Array:
 		for kind in counts:
 			named.append("%d %s%s" % [counts[kind], kind, "" if counts[kind] == 1 else "s"])
 		lines.append("Sketch: %s (options below)" % ", ".join(named))
+	if session != null and not session.annotations.is_empty() and table.active_tool == SELECT_TOOL:
+		var dims: int = session.annotations.filter(func(a) -> bool: return str(a["kind"]) == "dimension").size()
+		var cons: int = session.annotations.size() - dims
+		lines.append("Sketch labels: %s (options below)" % ", ".join(PackedStringArray(([("%d dimension%s" % [dims, "" if dims == 1 else "s"])] if dims > 0 else []) + ([("%d constraint%s" % [cons, "" if cons == 1 else "s"])] if cons > 0 else []))))
 	if session != null and table.active_tool in ["extrude", "revolve", "sweep", "loft"]:
 		lines.append("Open sketch: %s" % ("closed shape ready" if session.profile_ok() else "no closed shape yet"))
 	if not seed_sketches.is_empty():

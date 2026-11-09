@@ -26,6 +26,7 @@ const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const DropCue := preload("res://scripts/room/drop_cue.gd")
 const RoomGhost := preload("res://scripts/room/room_ghost.gd")
 const RoomConsole := preload("res://scripts/room/room_console.gd")
+const StartButtons := preload("res://scripts/ui/start_buttons.gd")
 const WorldPreview := preload("res://scripts/room/world_preview.gd")
 const RoomThumbnail := preload("res://scripts/room/room_thumbnail.gd")
 const NewDocument := preload("res://scripts/design_table/new_document.gd")
@@ -78,6 +79,11 @@ func new_room() -> bool:
 	## as the design table's New part), then summoned like any room (aim at the floor, trigger). Carry parts into it, or Files > Add while standing in
 	## it. True once the placement has started.
 	var root: String = _main.current_root_part_id() if _main != null and _main.has_method("current_root_part_id") else ""
+	if root == "" and _main != null and _main.has_method("new_assembly") and _backend_url != "" and _api_key != "":
+		status.emit("Starting an assembly for the new room...") # T2: no assembly loaded at all: start an empty one instead of refusing
+		if not await _main.new_assembly():
+			return false # new_assembly said why (no backend, or the unsaved-changes prompt is waiting)
+		root = _main.current_root_part_id()
 	if root == "":
 		status.emit("Open or start an assembly first (Files): a new room is a sub-assembly inside it.")
 		return false
@@ -206,7 +212,7 @@ func add_to_room(room: Node, node: Node3D, dropped: Transform3D) -> bool:
 	_mark_room_changed(room)
 	_busy_edit = false
 	_mark_dirty()
-	status.emit("Added to the room. (A copy: the original is where it was; delete it if you meant to move it.)")
+	status.emit(("%s. (A copy: the original is where it was.)" % RoomEdit.FIRST_PART_NOTE) if result.get("first", false) else "Added to the room. (A copy: the original is where it was; delete it if you meant to move it.)")
 	_push_undo("add to room", room.part_id, str(result["occurrence_id"]), snapshot, true)
 	return true
 
@@ -262,7 +268,7 @@ func add_file_to_room(room: Node, path: String) -> bool:
 		return false
 	_busy_edit = true
 	status.emit("Adding %s to the room..." % path.get_file())
-	var pose := {"translation": [0.0, 0.0, 0.0], "rotation_axis": [0.0, 0.0, 1.0], "rotation_angle_degrees": 0.0}
+	var pose := RoomEdit.ORIGIN_POSE.duplicate(true)
 	var result: Dictionary = await e.add_file(room.part_id, text, pose, path.get_file().get_basename())
 	if not result["ok"]:
 		_busy_edit = false
@@ -273,7 +279,8 @@ func add_file_to_room(room: Node, path: String) -> bool:
 	_mark_room_changed(room)
 	_busy_edit = false
 	_mark_dirty()
-	status.emit(("Added %s to the room.%s" % [path.get_file(), NativeCompose.unresolved_note(composed)]) if str(result["error"]) == "" else str(result["error"]))
+	var added_text := ("%s: %s." % [RoomEdit.FIRST_PART_NOTE, path.get_file()]) if result.get("first", false) else "Added %s to the room." % path.get_file()
+	status.emit(("%s%s" % [added_text, NativeCompose.unresolved_note(composed)]) if str(result["error"]) == "" else str(result["error"]))
 	_push_undo("add %s" % path.get_file(), room.part_id, str(result["occurrence_id"]), snapshot, true)
 	return true
 
@@ -462,6 +469,8 @@ func refresh_room(room: Node) -> bool:
 			_view_modes.apply_to(p)
 	await index_room(room)
 	_rebuild_previews()
+	if is_instance_valid(room): # (it can be closed while the awaits above ran)
+		update_start_buttons(room)
 	return true
 
 
@@ -784,6 +793,8 @@ func _ready_room(room: Node, part_id: String, label: String) -> void:
 	if is_instance_valid(room) and rooms.has(room):
 		activate(room)
 		index_room(room)
+		if is_instance_valid(room):
+			update_start_buttons(room)
 
 
 func activate(room: Node) -> void:
@@ -823,6 +834,91 @@ func _make_console(room: Node) -> void:
 	console.pedestal_enabled = pedestal
 	console.setup_console(room, self, _main, left, right, camera)
 	room.console = console
+
+
+# --- Empty room: the two big start buttons (T2) -------------------------------------------------------------------------------------
+
+func _make_start_buttons(room: Node) -> void:
+	## "New assembly" and "Open assembly..." floating in the room's front (the side the console is on), shown only while the room holds nothing.
+	if room.start_buttons != null or _main == null:
+		return
+	var left = _main.get_node_or_null("XROrigin3D/LeftController")
+	var right = _main.get_node_or_null("XROrigin3D/RightController")
+	var camera = _main.get_node_or_null("XROrigin3D/XRCamera3D")
+	if left == null or right == null or camera == null:
+		return
+	var buttons := StartButtons.new()
+	buttons.name = "StartButtons"
+	room.add_child(buttons)
+	buttons.setup_start(_main, left, right, camera, {"title": "Empty assembly", "new": "New assembly", "open": "Open assembly...",
+		"help": "Start a new assembly here, or open one from a file. The first part goes in fixed at the origin; add more from the console."},
+		func() -> void: new_part_in_room(room),
+		func(path: String) -> void: add_file_to_room(room, path),
+		func() -> Transform3D: return start_buttons_pose(room))
+	room.start_buttons = buttons
+
+
+func start_buttons_pose(room: Node) -> Transform3D:
+	## Floating inside the room's front face, at chest height, turned to the user's side (the console's side).
+	var back: Vector3 = room.global_transform.basis.z.normalized()
+	var spot: Vector3 = room.global_position + back * (room.volume.half.z * 0.5)
+	spot.y = maxf(1.1, room.global_position.y)
+	return Transform3D(Basis.looking_at(-back, Vector3.UP), spot)
+
+
+func update_start_buttons(room: Node) -> void:
+	## Shows the buttons while the room's Part has no occurrences (an empty Part has no mesh, so this asks the backend, not the room's nodes).
+	if not is_instance_valid(room) or not rooms.has(room):
+		return
+	var e := edit_api()
+	if e == null or _backend_url == "":
+		return
+	var empty: bool = await e.is_empty_room(room.part_id)
+	if not is_instance_valid(room) or not rooms.has(room):
+		return
+	_make_start_buttons(room)
+	if room.start_buttons != null:
+		room.start_buttons.empty = empty and room.interactive and not room.minimised
+
+
+func new_part_in_room(room: Node) -> bool:
+	## "New assembly" in a room (T2): a new empty sub-assembly Part, in the room's Part, fixed at the origin if it is the room's first. Rooms say
+	## assembly where the table says part; the files and the backend calls are the same.
+	if _busy_edit:
+		status.emit("Still working on the last change, try again in a moment.")
+		return false
+	var e := edit_api()
+	if e == null:
+		status.emit("Adding to a room needs the backend.")
+		return false
+	_busy_edit = true
+	var existing: Array = await e.occurrences_of(room.part_id, true)
+	var name := "Sub-assembly %d" % (existing.size() + 1)
+	status.emit("Making %s..." % name)
+	var result: Dictionary = await e.add_new_part(room.part_id, name)
+	if not result["ok"]:
+		_busy_edit = false
+		status.emit(str(result["error"]))
+		return false
+	var snapshot := await _snapshot_of(room.part_id, str(result["occurrence_id"]))
+	await refresh_room(room)
+	_mark_room_changed(room)
+	_busy_edit = false
+	_mark_dirty()
+	if _main != null and _main.has_method("refresh_assembly_tree"):
+		_main.refresh_assembly_tree()
+	status.emit(("%s: %s (empty: open it as a room, or add parts beside it)." % [RoomEdit.FIRST_PART_NOTE, name]) if result["first"] else "Added %s (empty)." % name)
+	_push_undo("new %s" % name, room.part_id, str(result["occurrence_id"]), snapshot, true)
+	return true
+
+
+func open_file_picker(room: Node) -> void:
+	## The console's "Open assembly..." row: the same file list as the start buttons', on a room that already has parts.
+	if not is_instance_valid(room):
+		return
+	_make_start_buttons(room)
+	if room.start_buttons != null:
+		room.start_buttons.show_chooser()
 
 
 func set_pedestal(on: bool) -> void:

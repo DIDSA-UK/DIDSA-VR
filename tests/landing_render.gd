@@ -48,6 +48,7 @@ func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	main.landing_enabled = true
+	main._settings.folder_asked = true # the first-run "where to save" page (T1) is tests/project_folder.gd's; here the launcher opens on Home
 	root.add_child(main)
 	await process_frame
 	var origin: XROrigin3D = main.get_node("XROrigin3D")
