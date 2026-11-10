@@ -260,10 +260,15 @@ func scroll_by_stick(stick_y: float, delta: float) -> void:
 	## the window (push down = scroll down) — the same control the wrist tablet has.
 	## The per-frame call is LaserSurface's; this stays public so tests can drive it
 	## without a real XR runtime.
-	surface.scroll_target = scroll_target
+	surface.scroll_target = _live_scroll_target()
 	surface.scroll_speed_px = scroll_speed_px
 	surface.scroll_deadzone = scroll_deadzone
 	surface.scroll_by_stick(stick_y, delta)
+
+
+func _live_scroll_target() -> ScrollContainer:
+	## scroll_target, or null once a subclass freed it without clearing it (assigning a freed object errors and ends _process before the laser is read).
+	return scroll_target if is_instance_valid(scroll_target) else null
 
 
 func _update_pointer() -> void:
@@ -272,7 +277,7 @@ func _update_pointer() -> void:
 	surface.panel_size = panel_size
 	surface.max_point_distance = max_point_distance
 	surface.click_action = click_action
-	surface.scroll_target = scroll_target
+	surface.scroll_target = _live_scroll_target()
 	surface.scroll_speed_px = scroll_speed_px
 	surface.scroll_deadzone = scroll_deadzone
 	surface.process(_last_delta, true)

@@ -3,6 +3,14 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## Branch `ccr-41dea9ce-xw2oi0` (10 Nov, not merged; owner's bug report)
+
+Headless-tested (`tests/empty_start.gd`, +7 lines that fail without the fix); not checked on the headset.
+
+- **The start buttons went dead after the file list.** "Open part..." / "Open assembly..." set the panel's `scroll_target` to the list's scroll box; going back to the buttons (Cancel, a pick) freed it but kept the pointer, and `diegetic_panel.gd` then stopped with an error every frame before reading the laser, so *New part* / *Open part...* (and the room's pair) could not be pressed again, also after closing and reopening the table. `start_buttons.gd` clears it; `diegetic_panel.gd` ignores a freed `scroll_target`.
+- **Closing the table with the file list up left it open, out of sight.** It kept taking the laser where it had been, and reopening showed the old list. `start_buttons.gd` `put_away()` closes it whatever it shows; the table's close, a room's minimise and a room that is no longer touchable use it.
+- `tests/empty_start.gd` frees its stand-in main (and the rooms in it) with the room manager: their consoles went on calling the freed manager, and the run crashed in about half the runs, before and after this change.
+
 ## Branch `ccr-8db48425-oxdljy` (3 Nov, not merged; DIDSA-CAD plan `docs/pattern-followers-smoothness-plan.md`, items S1, S3, S4 for VR)
 
 Builds on the pattern-copy work below (V1-V3, merged). S1 needs nothing new from the backend (an older one sends no model for a follower); S3's commit settle and S4 need no new route. Headless- and live-backend-tested; drag feel is not judged by any test and nothing here was tried on a headset.
