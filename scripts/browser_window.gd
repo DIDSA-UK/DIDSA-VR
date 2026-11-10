@@ -62,9 +62,33 @@ func set_keyboard(keyboard: Node) -> void:
 
 
 func configure_relay(relay_url: String, relay_api_key: String, start_url: String = "about:blank") -> void:
-	_relay_url = relay_url
+	_relay_url = relay_ws_url(relay_url)
 	_relay_api_key = relay_api_key
 	_start_url = start_url
+
+
+static func relay_ws_url(raw: String) -> String:
+	## The relay's base address as Godot's WebSocketPeer needs it: ws:// or wss:// (it refuses http(s):// outright, error 31), no trailing
+	## slash and no /ws (added when connecting). A hand-written secrets.cfg / servers.cfg, or a pairing code from before 10 Nov 2026, may say
+	## http(s)://: taken as the matching ws(s)://.
+	var url := raw.strip_edges()
+	while url.ends_with("/"):
+		url = url.substr(0, url.length() - 1)
+	var lower := url.to_lower()
+	if lower.begins_with("https://"):
+		url = "wss://" + url.substr(8)
+	elif lower.begins_with("http://"):
+		url = "ws://" + url.substr(7)
+	if url.to_lower().ends_with("/ws"):
+		url = url.substr(0, url.length() - 3)
+	return url
+
+
+static func relay_failure_text(relay_url: String, was_connected: bool, close_code: int) -> String:
+	## What the status line says when the relay connection ends. A connection that never opened is the common case when setting up: say what to check.
+	if was_connected:
+		return "Disconnected from the relay (code %d). Close and reopen the window to reconnect." % close_code
+	return "Could not connect to the browser relay at %s. Check: the relay is running (its /health answers), the address and port (8100 by default), the relay key (BROWSER_RELAY_API_KEY, not the CAD key), and that this headset is on the same network." % relay_url
 
 
 func _build_content() -> Control:
@@ -128,6 +152,7 @@ func _build_content() -> Control:
 	_status_label.add_theme_font_size_override("font_size", 16)
 	_status_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	_status_label.text = "Not connected"
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART # the "could not connect" line says what to check, which takes two lines
 	box.add_child(_status_label)
 
 	return box
@@ -135,7 +160,7 @@ func _build_content() -> Control:
 
 func _on_opened() -> void:
 	if _relay_url.is_empty() or _relay_api_key.is_empty():
-		_status_label.text = "No browser relay configured (see secrets.cfg.example)"
+		_status_label.text = "No browser relay set for this server. Landing > Servers > Relay on the server's row (docs/servers.md)."
 		return
 	_connect_to_relay()
 
@@ -185,8 +210,7 @@ func _poll_relay() -> void:
 			_handle_incoming(packet.get_string_from_utf8())
 	elif state == WebSocketPeer.STATE_CLOSED:
 		if _connected or _status_label.text == "Connecting...":
-			var code := _ws.get_close_code()
-			_status_label.text = "Disconnected (code %d)" % code
+			_status_label.text = relay_failure_text(_relay_url, _connected, _ws.get_close_code())
 		_connected = false
 		_ws = null
 

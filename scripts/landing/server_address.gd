@@ -49,6 +49,33 @@ static func check(raw_url: String) -> Dictionary:
 	return _result(Level.OK, "A public https:// address.", url, host)
 
 
+static func check_relay(raw_url: String) -> Dictionary:
+	## The Browser window's relay (DIDSA-CAD browser-relay/): a WebSocket address, ws:// or wss://, under the same rules as a server's address
+	## (plain ws:// only on your own network). An http(s):// address is taken as the matching ws(s):// one, since that is easy to type by mistake.
+	## Same shape as check(); `url` comes back as ws:// or wss://. (Before 10 Nov 2026 a pairing code's relay went through check(), which refused
+	## every ws:// address: a relay could never be paired.)
+	var url := normalise(raw_url)
+	var lower := url.to_lower()
+	var as_http := url
+	if lower.begins_with("wss://"):
+		as_http = "https://" + url.substr(6)
+	elif lower.begins_with("ws://"):
+		as_http = "http://" + url.substr(5)
+	elif not (lower.begins_with("https://") or lower.begins_with("http://")):
+		return _result(Level.REFUSED, "That is not a valid ws:// or wss:// address.", url, "")
+	var out := check(as_http)
+	var ws_url: String = str(out["url"])
+	if ws_url.to_lower().begins_with("https://"):
+		ws_url = "wss://" + ws_url.substr(8)
+	elif ws_url.to_lower().begins_with("http://"):
+		ws_url = "ws://" + ws_url.substr(7)
+	if ws_url.to_lower().ends_with("/ws"):
+		ws_url = ws_url.substr(0, ws_url.length() - 3) # the Browser window adds /ws itself
+	out["url"] = ws_url
+	out["message"] = str(out["message"]).replace("Plain http://", "Plain ws://").replace("Plain http", "Plain ws").replace("http(s)", "ws(s)").replace("https://", "wss://")
+	return out
+
+
 static func split(url: String) -> Dictionary:
 	## {scheme, host, port, path} for an http(s) URL with a host, else {}. IPv6 hosts are not unwrapped beyond their brackets.
 	var lower := url.to_lower()

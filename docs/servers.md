@@ -28,7 +28,8 @@ api_key="..."
 ```
 
 `name`, `url` and `api_key` are what matter (`url` and `api_key` are required; an entry without both is ignored). `current` is the id of the
-server used at start. `document_session`, `relay_url` and `relay_api_key` are optional (a fixed document session id; the Browser window's relay).
+server used at start. `document_session`, `relay_url` and `relay_api_key` are optional (a fixed document session id; the Browser window's relay, a
+`ws://` or `wss://` address: see [Setting up the Browser](#setting-up-the-browser-the-browser-relay)).
 At most 12 servers.
 
 `res://secrets.cfg` (developer machines; never in an APK) is read first and wins at start: it is listed as **From secrets.cfg**, read-only, and is
@@ -44,6 +45,8 @@ Landing > **Servers** (or tap the connection pill at the top of the launcher):
   glb stays. **Use no server** goes offline (the demo models still work).
 - **Test** asks `GET <address>/health` with the key and says what the answer means (works, key refused, no answer, certificate, error number).
 - **Forget** removes it from the list and the file. The one in use goes offline first.
+- **Relay** opens that server's **Browser relay** form under its row: the relay's address (`ws://` or `wss://`) and its own key, then **Save relay**
+  (the row then reads **Relay on**; **Remove relay** clears it). See [Setting up the Browser](#setting-up-the-browser-the-browser-relay).
 - **Add a server by typing:** Name, Address, Key on the full keyboard, then **Test these** and **Save and use**. The address is checked first (below).
   The key is shown as dots.
 - **Scan a QR code:** see [Scanning](#scanning-a-qr-code).
@@ -62,6 +65,43 @@ The same rules as DIDSA-CAD's pairing checks (`client/lib/vr_pairing/headset_pai
   `HTTPRequest` uses its own sockets, so it very likely works, but nobody has run it on a headset. If it is blocked, the Test button says so and
   [`landing-scope.md`](landing-scope.md#plain-http-on-the-quest) (step L0) has the fix.
 
+## Setting up the Browser (the browser relay)
+
+The Browser window (wrist tablet > Windows > Browser) does not talk to the CAD backend. It shows a real Chromium tab running in a second service,
+**browser-relay** (DIDSA-CAD `browser-relay/`, its README has the design), which streams the page to the headset over a WebSocket. Without a relay the
+window says *No browser relay set for this server*.
+
+**1. Run the relay** on the same computer or Pi as the backend (Docker; from the DIDSA-CAD repo root):
+
+```
+cp docker-compose.example.yml docker-compose.yml      # once
+export CAD_API_KEY=...                                 # the backend's key, as before
+export BROWSER_RELAY_API_KEY=<a different long random string>
+docker compose up -d --build browser-relay
+curl http://<server-ip>:8100/health                    # {"status":"ok"}: it is up (this check needs no key)
+```
+
+Without Docker: `cd browser-relay && pip install -r requirements.txt`, then `BROWSER_RELAY_API_KEY=... BROWSER_RELAY_CHROME_BINARY=<chromium>
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8100` (note `--host 0.0.0.0`, or the headset cannot reach it). Debian's `chromium` works;
+Ubuntu's `chromium-browser` is a snap wrapper that does not run in a container.
+
+**2. Give the headset its address and key**, either way:
+
+- **Pairing code:** in the flat app, File > **Connect a VR headset...** > **Browser relay (optional)**: the address (`ws://<server-ip>:8100`, or
+  `wss://` behind an https tunnel) and the relay key, **Save relay and check again**, then scan the code. The headset's card lists *Browser relay*.
+- **On the headset:** Landing > **Servers** > **Relay** on the server's row, type both, **Save relay**.
+
+The address is the base only: the app adds `/ws`. An `http(s)://` address is taken as `ws(s)://`. The same rules as a server's address apply:
+plain `ws://` only on your own network.
+
+**3. Open the Browser.** *Connected* then a page means it works. *Could not connect to the browser relay at ...* means one of: the relay is not
+running (step 1's `curl`), the address or port is wrong, the key is the CAD key instead of `BROWSER_RELAY_API_KEY` (the relay closes the connection
+before it opens, so a wrong key looks the same as no answer), or the headset is on another network. The relay allows 2 tabs at once
+(`BROWSER_RELAY_MAX_SESSIONS`); closing the window frees its tab.
+
+**Not verified:** the relay on the Raspberry Pi (arm64 Chromium), plain `ws://` from a Quest (as for `http://`, Godot uses its own sockets, so it
+is expected to work), and a `wss://` relay behind a tunnel.
+
 ## Pre-loading a headset (no typing)
 
 For a demo you set up yourself: write `servers.cfg` as above on your computer, then copy it into the app's data folder:
@@ -76,7 +116,8 @@ on the headset and correct this paragraph. The app reads the file at start, so r
 
 ## Scanning a QR code
 
-DIDSA-CAD shows the code (File > **Connect a VR headset...**, or the connection screen's **Connect a VR headset**): `didsa-vr:1?n=<name>&u=<url>&k=<key>`,
+DIDSA-CAD shows the code (File > **Connect a VR headset...**, or the connection screen's **Connect a VR headset**): `didsa-vr:1?n=<name>&u=<url>&k=<key>`
+(plus `&r=<relay>&rk=<relay key>` when a Browser relay is set there),
 format and checks in DIDSA-CAD's `docs/vr-headset-pairing.md`. The headset reads it with **OpenXR marker tracking, which is in Godot's core**: the
 runtime finds and decodes the code and Godot hands over an `OpenXRMarkerTracker` whose marker data is the text. No camera access, no decoder, no addon.
 

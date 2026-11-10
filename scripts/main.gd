@@ -79,6 +79,7 @@ const Landing := preload("res://scripts/landing/landing.gd") ## the first screen
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
 const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
+const ServerAddress := preload("res://scripts/landing/server_address.gd") ## the Servers page's address rules (a Browser relay's too)
 const GraphicsOverrides := preload("res://scripts/graphics_overrides.gd") ## user://graphics.cfg: switches for finding a headset rendering fault without a rebuild
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
@@ -180,6 +181,8 @@ func _ready() -> void:
 	_load_servers()
 	_apply_backend()
 	_start_xr()
+	if _on_android():
+		get_tree().create_timer(ALL_FILES_ASK_DELAY).timeout.connect(ask_all_files_access_at_start) # every launch until allowed: files other apps put in the project folder need it
 	_world_environment.setup($DirectionalLight3D, xr_interface, get_viewport(), $Ground/MeshInstance3D.mesh.material as ShaderMaterial)
 	# Never start in Passthrough: if it misbehaves on a headset (Quest 3, 21 Oct: a flicker in both eyes from the first frame) you would start blind,
 	# with no way to see the menu that turns it off. Turn it on again from View > Environment or the landing's Scan / Graphics check pages.
@@ -1021,24 +1024,48 @@ func keep_in_app_storage() -> void:
 
 
 const ALL_FILES_PERMISSION := "android.permission.MANAGE_EXTERNAL_STORAGE"
+const ALL_FILES_ASK_DELAY := 2.0 ## seconds after start before the launch-time ask: let the XR session come up before Android's Settings page covers it
+
+var pretend_android := false ## tests: behave as the Android build for the All files access checks
+var permission_requester := func(permission: String) -> bool: return OS.request_permission(permission) ## tests replace it to see what is asked for
+var granted_permissions := func() -> PackedStringArray: return OS.get_granted_permissions() ## tests replace it
+
+
+func _on_android() -> bool:
+	return pretend_android or OS.has_feature("android")
+
+
+func all_files_access_granted() -> bool:
+	return _on_android() and ALL_FILES_PERMISSION in granted_permissions.call()
+
 
 func all_files_access_text() -> String:
-	## Settings > Project folder: the state of *All files access* in words. Only the Android build has it; whether OS.get_granted_permissions()
-	## reports this particular permission on Horizon OS is not verified (docs/android-build.md), so "not granted" can also mean "not reported".
-	if not OS.has_feature("android"):
+	## Settings > Project folder: the state of *All files access* in words. Only the Android build has it.
+	if not _on_android():
 		return "All files access: not needed on this platform."
-	if ALL_FILES_PERMISSION in OS.get_granted_permissions():
+	if all_files_access_granted():
 		return "All files access: allowed. Any folder can be read."
 	return "All files access: not allowed (or not reported). Files other apps put in the folder may not open."
 
 
 func request_all_files_access() -> void:
-	## Sends the user to the system's All files access page for this app (Android only).
-	if not OS.has_feature("android"):
+	## Sends the user to the system's All files access page for this app (Android only). Android has no pop-up for this permission: it is a
+	## switch on a Settings page, which Godot opens only when given the FULL name. The short "MANAGE_EXTERNAL_STORAGE" (used until 10 Nov 2026)
+	## is not a permission Android knows, so Godot's PermissionsUtil skipped it silently and the button did nothing (owner, Quest 3, 10 Nov).
+	## The permission must also be in the APK's manifest (export preset: permissions/manage_external_storage), or the page has no switch.
+	if not _on_android():
 		_set_status("All files access is an Android setting; not needed here.")
 		return
-	OS.request_permission("MANAGE_EXTERNAL_STORAGE")
-	_set_status("Allow All files access on the system page that opened, then come back.")
+	permission_requester.call(ALL_FILES_PERMISSION)
+	_set_status("Turn on All files access for DIDSA on the system page that opened, then come back.")
+
+
+func ask_all_files_access_at_start() -> bool:
+	## On every launch of the Android build until it is allowed (owner, 10 Nov 2026), like the passthrough camera prompt. True if it asked.
+	if not _on_android() or all_files_access_granted():
+		return false
+	request_all_files_access()
+	return true
 
 
 func save_dir() -> String:
@@ -1199,6 +1226,26 @@ func add_server(fields: Dictionary, use_now: bool = true) -> Dictionary:
 		else:
 			switch_server(str(entry["id"]))
 	return entry
+
+
+func set_server_relay(id: String, url: String, key: String) -> Dictionary:
+	## The Servers page's Browser relay for a saved server: {ok, message}. The address goes through ServerAddress.check_relay(); "" clears it.
+	## Applied at once if that server is in use.
+	var clean := ""
+	if url.strip_edges() != "":
+		var check := ServerAddress.check_relay(url)
+		if check["level"] == ServerAddress.Level.REFUSED:
+			return {"ok": false, "message": str(check["message"])}
+		clean = str(check["url"])
+		if key.strip_edges() == "":
+			return {"ok": false, "message": "The relay needs its key (BROWSER_RELAY_API_KEY on the relay's machine)."}
+	var entry := server_store.set_relay(id, clean, key if clean != "" else "")
+	if entry.is_empty():
+		return {"ok": false, "message": "That server is not in the list any more."}
+	if active_server_id == id:
+		_set_backend_from(entry)
+		_apply_backend()
+	return {"ok": true, "message": "Browser relay saved: %s" % clean if clean != "" else "Browser relay cleared."}
 
 
 var test_server_override: Callable = Callable() ## tests only: (url, key) -> {ok, message, code} in place of the real request (a pairing code cannot name localhost, where a stub server would be)

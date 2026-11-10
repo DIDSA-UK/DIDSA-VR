@@ -97,6 +97,17 @@ func add(fields: Dictionary, make_current: bool = false) -> Dictionary:
 	return entry
 
 
+func set_relay(id: String, relay_url: String, relay_api_key: String) -> Dictionary:
+	## Sets (or, with "", clears) a saved server's Browser relay. Returns the updated entry, or {} if there is no such server. Saves.
+	var entry := find(id)
+	if entry.is_empty():
+		return {}
+	entry["relay_url"] = relay_url.strip_edges()
+	entry["relay_api_key"] = relay_api_key.strip_edges()
+	save_to_disk()
+	return entry
+
+
 func remove(id: String) -> bool:
 	## Forget a server. If it was current, nothing is (the app falls back to offline).
 	for i in servers.size():

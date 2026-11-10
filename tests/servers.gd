@@ -124,6 +124,21 @@ func _initialize() -> void:
 	check("forgetting the server in use goes offline first", main.forget_server(a["id"]) and not main.has_backend() and main.server_entries().is_empty())
 	check("an empty key or a refused address is not saved by the page's rules", main.add_server({"url": "https://x.example.net", "api_key": ""}).is_empty())
 
+	# --- a saved server's Browser relay (bug report 10 Nov 2026: no way to set one on the headset) -----------------------------------------
+	var c: Dictionary = main.add_server({"name": "Pi", "url": "http://192.168.1.20:8000", "api_key": "kc"})
+	check("ServerAddress.check_relay: ws:// on your own network warns, its /ws dropped", ServerAddress.check_relay("ws://192.168.1.20:8100/ws")["level"] == ServerAddress.Level.WARN and ServerAddress.check_relay("ws://192.168.1.20:8100/ws")["url"] == "ws://192.168.1.20:8100")
+	check("...plain ws:// to the internet is refused and says ws", ServerAddress.check_relay("ws://example.com")["level"] == ServerAddress.Level.REFUSED and "ws://" in str(ServerAddress.check_relay("ws://example.com")["message"]))
+	check("...an http address is taken as ws", ServerAddress.check_relay("http://192.168.1.20:8100")["url"] == "ws://192.168.1.20:8100" and ServerAddress.check_relay("https://relay.example.net")["url"] == "wss://relay.example.net")
+	check("set_server_relay refuses a relay with no key", not main.set_server_relay(c["id"], "ws://192.168.1.20:8100", "")["ok"])
+	check("...and a refused address", not main.set_server_relay(c["id"], "ws://example.com", "rk")["ok"] and main.relay_url == "")
+	var set_answer: Dictionary = main.set_server_relay(c["id"], "ws://192.168.1.20:8100/", "relaykey")
+	check("set_server_relay saves it and, the server being in use, the Browser window gets it at once", set_answer["ok"] and main.relay_url == "ws://192.168.1.20:8100" and main.relay_api_key == "relaykey" and main._browser_window._relay_url == "ws://192.168.1.20:8100")
+	var reread := ServerStore.new()
+	reread.load_from_disk()
+	check("...it is in servers.cfg for the next start", reread.find(c["id"]).get("relay_url", "") == "ws://192.168.1.20:8100" and reread.find(c["id"]).get("relay_api_key", "") == "relaykey")
+	check("clearing it", main.set_server_relay(c["id"], "", "")["ok"] and main.relay_url == "" and main._browser_window._relay_url == "")
+	main.forget_server(c["id"])
+
 	# --- what the old server loaded is unloaded ---------------------------------------------------------------------------------------------
 	main.add_server({"name": "One", "url": "https://one.example.net", "api_key": "k1"})
 	var two: Dictionary = main.add_server({"name": "Two", "url": "https://two.example.net", "api_key": "k2"}, false)
@@ -196,6 +211,18 @@ func _initialize() -> void:
 	await frames(3)
 	check("Save and use switches, lists the server as in use and clears the form", main.backend_url == "http://192.168.1.5:8000" and launcher._body.find_child("Server_" + main.active_server_id, true, false) != null and launcher._form["api_key"] == "")
 	check("the landing follows: the connection pill and the tiles that need a server", "192.168.1.5:8000" in launcher._pill.text)
+	# The Relay button on the row opens the relay form under it; the key is never shown; Save stores it on that server.
+	var row_id: String = main.active_server_id
+	launcher._body.find_child("Relay_" + row_id, true, false).pressed.emit()
+	await frames(2)
+	check("Relay on a server's row shows its relay form", launcher._body.find_child("RelayForm", true, false) != null and launcher._body.find_child("RelayForm_relay_url", true, false) != null)
+	launcher._relay_form = {"relay_url": "ws://192.168.1.5:8100", "relay_api_key": "relaysecret"}
+	launcher.show_page("servers")
+	await frames(2)
+	check("...the relay key is never shown", not ("relaysecret" in _all_text(launcher._body)))
+	launcher._body.find_child("RelaySave", true, false).pressed.emit()
+	await frames(2)
+	check("Save relay stores it on that server and the form closes; the row says the relay is on", main.relay_url == "ws://192.168.1.5:8100" and launcher._body.find_child("RelayForm", true, false) == null and launcher._body.find_child("Relay_" + row_id, true, false).text == "Relay on")
 	launcher.show_page("home")
 	await frames(2)
 	check("with a server the New assembly and Demo assemblies tiles are on", not launcher._home_root.find_child("Tile_new", true, false).disabled and not launcher._home_root.find_child("Tile_assemblies", true, false).disabled)

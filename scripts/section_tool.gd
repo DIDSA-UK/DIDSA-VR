@@ -162,7 +162,7 @@ func try_grab(hand: Node3D, extra_reach: float = 0.0) -> bool:
 	# this before falling through to its own held_node check.
 	hand.set_meta("section_gizmo_held", true)
 	_grab_offset = hand.global_transform.affine_inverse() * _gizmo.global_transform
-	_grab_filter.reset(hand.global_position)
+	_grab_filter.reset(_hand_frame(hand).affine_inverse() * hand.global_position)
 	_gesture_start_transform = _gizmo.global_transform
 	return true
 
@@ -176,10 +176,18 @@ func release(hand: Node3D) -> bool:
 	return true
 
 
+static func _hand_frame(hand: Node3D) -> Transform3D:
+	## The hand's parent (the XR origin) in global space; identity without one.
+	var origin := hand.get_parent() as Node3D
+	return origin.global_transform if origin != null and origin.is_inside_tree() else Transform3D.IDENTITY
+
+
 func update_held(hand: Node3D, delta: float, steadiness_on: bool = true) -> void:
 	if _held_by != hand or _gizmo == null:
 		return
-	var filtered_pos: Vector3 = _grab_filter.filter(hand.global_position, delta) if steadiness_on else hand.global_position
+	# Filtered in the XR origin's frame (as controller.gd does for a held part), so a stick walk carries the gizmo 1:1 instead of trailing.
+	var frame := _hand_frame(hand)
+	var filtered_pos: Vector3 = frame * _grab_filter.filter(frame.affine_inverse() * hand.global_position, delta) if steadiness_on else hand.global_position
 	_gizmo.global_transform = Transform3D(hand.global_transform.basis, filtered_pos) * _grab_offset
 	_update_global_plane()
 

@@ -90,4 +90,9 @@ func _initialize() -> void:
 	print("SMOKE Tab is vk 9: ", BrowserWindow.key_events_for("Tab")[0]["windowsVirtualKeyCode"] == 9)
 	print("SMOKE an unknown key sends nothing: ", BrowserWindow.key_events_for("F13").is_empty())
 
+	# The relay address as WebSocketPeer needs it (it refuses http(s):// with error 31, Godot 4.7.2): bug report 10 Nov 2026.
+	print("SMOKE relay address: ws:// kept, trailing slash and /ws dropped: ", BrowserWindow.relay_ws_url(" ws://192.168.1.9:8100/ws/ ") == "ws://192.168.1.9:8100")
+	print("SMOKE relay address: http(s):// becomes ws(s)://: ", BrowserWindow.relay_ws_url("http://192.168.1.9:8100") == "ws://192.168.1.9:8100" and BrowserWindow.relay_ws_url("HTTPS://relay.example.net/") == "wss://relay.example.net")
+	print("SMOKE a relay that never opened says what to check (key, port, network): ", "BROWSER_RELAY_API_KEY" in BrowserWindow.relay_failure_text("ws://a:8100", false, -1) and "8100" in BrowserWindow.relay_failure_text("ws://a:8100", false, -1))
+
 	quit()

@@ -22,6 +22,13 @@ extends RefCounted
 ## brighter while carried; grip starts a carry (start_laser_grab); the panel then follows the hand's
 ## position (it swings with the laser, smoothed) but always turns to face you, upright (a leaning
 ## keyboard keeps its lean); A/X pulls it towards you and B/Y pushes it away (nudge()).
+##
+## Two options for a host that is not an upright window (the design table, owner 10 Nov 2026: "make the handle grabbable with the laser as per
+## the other handles", so it can be moved while seated):
+##   laser_pill_only  the laser picks this panel only on the pill itself (plus laser_pill_slack), not anywhere over the panel: the table's glass
+##                    is its own laser surface (parts, buttons), which a laser grab must not take over.
+##   keep_level       a distance carry keeps the host's slope and only turns it about the vertical, so it stays turned towards you the way it was
+##                    when you took hold (a tilted table stays tilted) instead of standing upright facing you.
 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const HALO_SHADER := preload("res://shaders/ui_halo.gdshader")
@@ -43,6 +50,9 @@ var min_pull_distance := 0.25 ## A/X won't pull a carried panel closer to the ha
 var max_distance := 12.0
 var distance_mode := false ## the current carry is a distance grab (faces you, smoothed) rather than a rigid near grab
 var glow_level := 0.0 ## 0 none, 0.5 a laser is on it, 1 being carried
+var laser_pill_only := false ## the laser picks this panel only on the pill (see the class docstring)
+var laser_pill_slack := 0.03 ## metres around the pill a laser still counts as on it (it is 16 mm thick: hard to hit from across a room)
+var keep_level := false ## a distance carry keeps the host's slope and turns it only about the vertical (see the class docstring)
 
 var _host: Node3D
 var _is_open: Callable
@@ -54,6 +64,7 @@ var _hover_hands := {}
 var _dist_offset := Vector3.ZERO ## distance carry: the panel's position in the holding hand's local frame
 var _tilt := Basis.IDENTITY ## distance carry: the panel's own pitch (a leaning keyboard), kept while it faces you
 var _panel_size := Vector2(0.3, 0.2)
+var _level_rel := Basis.IDENTITY ## keep_level carry: the host's basis relative to the facing direction at the moment it was taken hold of
 
 
 func setup(host: Node3D, left: XRController3D, right: XRController3D, is_open: Callable, tokens: Resource = null) -> void:
@@ -133,6 +144,8 @@ func laser_hit_distance(origin: Vector3, dir: Vector3) -> float:
 	## margin all round), or -1 if the ray misses, it's too far, or the panel isn't open.
 	if node == null or not _is_open.call() or not _host.visible:
 		return -1.0
+	if laser_pill_only:
+		return _pill_hit_distance(origin, dir)
 	var hit = Plane(_host.global_transform.basis.z.normalized(), _host.global_position).intersects_ray(origin, dir)
 	if hit == null:
 		return -1.0
@@ -144,6 +157,26 @@ func laser_hit_distance(origin: Vector3, dir: Vector3) -> float:
 	if absf(local.x) > _panel_size.x * 0.5 + pad or absf(local.y) > _panel_size.y * 0.5 + pad:
 		return -1.0
 	return d
+
+
+func _pill_hit_distance(origin: Vector3, dir: Vector3) -> float:
+	## Metres along the ray to the point nearest the pill's axis, if the ray passes within the pill's radius + laser_pill_slack of it; else -1.
+	var capsule := node.mesh as CapsuleMesh
+	var axis: Vector3 = node.global_transform.basis.y.normalized() # a capsule's long axis is its local Y
+	var half := capsule.height * 0.5 - capsule.radius
+	var a: Vector3 = node.global_position - axis * half
+	var b: Vector3 = node.global_position + axis * half
+	var points := Geometry3D.get_closest_points_between_segments(origin, origin + dir.normalized() * laser_reach, a, b)
+	if points[0].distance_to(points[1]) > capsule.radius + laser_pill_slack:
+		return -1.0
+	return origin.distance_to(points[0])
+
+
+func _facing_yaw(pos: Vector3) -> Basis:
+	## Yaw only: -Z pointing from the camera to `pos`, flattened onto the floor.
+	var away := pos - (camera.global_position if camera != null else pos + Vector3.BACK)
+	away.y = 0.0
+	return Basis.looking_at(away.normalized(), Vector3.UP) if away.length() > 0.001 else Basis.IDENTITY
 
 
 func set_hover(hand: Object, on: bool) -> void:
@@ -177,6 +210,7 @@ func start_laser_grab(hand: XRController3D) -> bool:
 	hand.set_meta("window_held", true)
 	_dist_offset = hand.global_transform.affine_inverse() * _host.global_position
 	_tilt = Basis(Vector3.RIGHT, _host.global_transform.basis.get_euler(EULER_ORDER_YXZ).x) # its own lean (the full keyboard's), nothing else
+	_level_rel = _facing_yaw(_host.global_position).inverse() * _host.global_transform.basis.orthonormalized()
 	_material.albedo_color = held_colour
 	_material.emission = held_colour
 	_refresh_glow()
@@ -231,7 +265,7 @@ func follow(delta: float = 0.0) -> bool:
 	var blend_p := 1.0 if delta <= 0.0 else 1.0 - exp(-24.0 * delta)
 	var blend_r := 1.0 if delta <= 0.0 else 1.0 - exp(-14.0 * delta)
 	var pos := t.origin.lerp(target, blend_p)
-	var wanted_basis := _facing_basis(pos) * _tilt
+	var wanted_basis := _facing_yaw(pos) * _level_rel if keep_level else _facing_basis(pos) * _tilt
 	_host.global_transform = Transform3D(t.basis.orthonormalized().slerp(wanted_basis, blend_r), pos)
 	return true
 
