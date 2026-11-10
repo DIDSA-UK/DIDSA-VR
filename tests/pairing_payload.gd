@@ -32,7 +32,11 @@ func _initialize() -> void:
 	check("no name: the host is used", no_name["ok"] and no_name["name"] == "cad.example.net")
 	check("a long name is cut to 64 characters", Payload.parse("didsa-vr:1?n=%s&u=https%%3A%%2F%%2Fa.example.net&k=k" % "x".repeat(200))["name"].length() == 64)
 	var extras := Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&s=vr-session-1&r=https%3A%2F%2Frelay.example.net&rk=relaykey&zz=ignored")
-	check("the reserved keys (document session, relay) are read and an unknown key is ignored", extras["ok"] and extras["document_session"] == "vr-session-1" and extras["relay_url"] == "https://relay.example.net" and extras["relay_api_key"] == "relaykey")
+	check("the optional keys (document session, relay) are read and an unknown key is ignored; an https relay is taken as wss", extras["ok"] and extras["document_session"] == "vr-session-1" and extras["relay_url"] == "wss://relay.example.net" and extras["relay_api_key"] == "relaykey")
+	var ws_relay := Payload.parse("didsa-vr:1?u=http%3A%2F%2F192.168.1.9%3A8000&k=k&r=ws%3A%2F%2F192.168.1.9%3A8100&rk=rk")
+	check("a ws:// relay on your own network is accepted (it was refused as 'not http(s)' before 10 Nov 2026)", ws_relay["ok"] and ws_relay["relay_url"] == "ws://192.168.1.9:8100")
+	var wss_relay := Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&r=wss%3A%2F%2Frelay.example.net%2Fws&rk=rk")
+	check("a wss:// relay is accepted, its /ws dropped (the Browser adds it)", wss_relay["ok"] and wss_relay["relay_url"] == "wss://relay.example.net")
 	check("surrounding spaces and a newline from a scanner are tolerated", Payload.parse("  didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k\n")["ok"])
 
 	# --- the round trip ------------------------------------------------------------------------------------------------------
@@ -81,6 +85,8 @@ func _initialize() -> void:
 	check("a value that is too long", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=" + "k".repeat(600), "too long"))
 	check("a whole code that is too long", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&zz=" + "z".repeat(3000), "too long"))
 	check("a relay address that is not allowed refuses the whole code", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&r=http%3A%2F%2Fexample.com", "relay"))
+	check("...plain ws:// to the internet too", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&r=ws%3A%2F%2Fexample.com", "relay"))
+	check("...and something that is not a web address", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&r=ftp%3A%2F%2F192.168.1.9", "relay"))
 
 	# --- recognising ours ------------------------------------------------------------------------------------------------------------
 	check("looks_like_pairing: ours (any case) yes, others no", Payload.looks_like_pairing("didsa-vr:1?x") and Payload.looks_like_pairing(" DIDSA-VR:9") and not Payload.looks_like_pairing("https://a.example.net") and not Payload.looks_like_pairing(""))

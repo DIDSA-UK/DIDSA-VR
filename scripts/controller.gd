@@ -729,7 +729,7 @@ func _begin_hold(target: Node3D, start_transform: Transform3D) -> void:
 	# _update_held_part() drives its transform explicitly every frame (so
 	# steadiness — see below — can filter the hand's position first).
 	_grab_offset = global_transform.affine_inverse() * target.global_transform
-	_grab_filter.reset(global_position)
+	_grab_filter.reset(_tracking_frame().affine_inverse() * global_position)
 	held_node = target
 
 
@@ -910,11 +910,20 @@ func _try_release() -> void:
 		table.part_put_down(part) # a part whose mates went stale in an edit gets the Enforce mates button here
 
 
+func _tracking_frame() -> Transform3D:
+	## The XR origin's global transform (this hand's parent): what locomotion.gd moves. Identity without a 3D parent.
+	var origin := get_parent() as Node3D
+	return origin.global_transform if origin != null and origin.is_inside_tree() else Transform3D.IDENTITY
+
+
 func _update_held_part(delta: float) -> void:
 	## Filters this hand's position (not its rotation — see the class-level
 	## comment) before applying the grab offset, so a held hand's few-mm
 	## tremor doesn't reach the part while a deliberate move still does.
-	var filtered_pos := global_position if steadiness == 0 else _grab_filter.filter(global_position, delta)
+	# Filtered in the XR origin's frame, not the world's: a stick walk or snap turn moves the origin, and with it this hand and the part,
+	# exactly 1:1, as if carried. Filtered in world space, a walk read as a fast hand move and the part trailed behind and then caught up.
+	var frame := _tracking_frame()
+	var filtered_pos := global_position if steadiness == 0 else frame * _grab_filter.filter(frame.affine_inverse() * global_position, delta)
 	var desired := Transform3D(global_transform.basis, filtered_pos) * _grab_offset
 	if _held_group == null and mates_tool and mates_tool.is_constrained(held_node):
 		# Enforced mates: the part slides along what they allow (a live solve on

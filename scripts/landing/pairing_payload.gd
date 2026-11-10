@@ -2,7 +2,7 @@ extends RefCounted
 ## What a pairing QR code says, and what the headset will take from it. The format is DIDSA-CAD's (docs/vr-headset-pairing.md, "The code's contents"):
 ##
 ##     didsa-vr:1?n=<name>&u=<base url>&k=<api key>          (each value percent-encoded; Dart's Uri.encodeQueryComponent, so a space is `+`)
-##     optional, reserved: s=<document session>  r=<relay url>  rk=<relay key>
+##     optional: s=<document session>  r=<browser relay, ws:// or wss://>  rk=<relay key>
 ##
 ## The headset refuses anything that does not start `didsa-vr:1?`, a version it does not know, a code with no address or key, an address
 ## server_address.gd refuses (so plain http:// only to a local network), and anything carrying control characters or an absurd length. Unknown extra
@@ -69,8 +69,11 @@ static func parse(raw: String) -> Dictionary:
 	if address["level"] == ServerAddress.Level.REFUSED:
 		return _fail(str(address["message"]))
 	var relay_url := ServerAddress.normalise(str(values.get("r", "")))
-	if relay_url != "" and ServerAddress.check(relay_url)["level"] == ServerAddress.Level.REFUSED:
-		return _fail("The browser relay address in that code is not allowed: %s" % ServerAddress.check(relay_url)["message"])
+	if relay_url != "":
+		var relay := ServerAddress.check_relay(relay_url)
+		if relay["level"] == ServerAddress.Level.REFUSED:
+			return _fail("The browser relay address in that code is not allowed: %s" % relay["message"])
+		relay_url = str(relay["url"])
 	var name := str(values.get("n", "")).strip_edges().substr(0, MAX_NAME)
 	if name == "":
 		name = ServerAddress.default_name(url)

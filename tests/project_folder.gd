@@ -107,6 +107,26 @@ func _initialize() -> void:
 	check("keep_in_app_storage: no folder, saves to user://models, still not asked again", main.project_folder() == "" and main.save_dir() == "user://models" and not main.folder_needs_asking())
 	check("the Files header then says app storage", main.folder_label() == "Project folder: app storage")
 	check("All files access says it is not needed off Android", "not needed" in main.all_files_access_text())
+	check("...and is not asked for at start off Android", not main.ask_all_files_access_at_start())
+	# As the Android build: the request must use the FULL permission name. Godot's Android PermissionsUtil only opens the All files access
+	# page for "android.permission.MANAGE_EXTERNAL_STORAGE"; the short name it was given before 10 Nov was skipped silently (no page, owner's bug).
+	var asked: Array = []
+	var granted := PackedStringArray()
+	main.pretend_android = true
+	main.permission_requester = func(p: String) -> bool:
+		asked.append(p)
+		return false
+	main.granted_permissions = func() -> PackedStringArray: return granted
+	check("Android, not allowed: the launch asks for All files access by its full name", main.ask_all_files_access_at_start() and asked == ["android.permission.MANAGE_EXTERNAL_STORAGE"])
+	check("...the state line says not allowed", "not allowed" in main.all_files_access_text())
+	asked.clear()
+	main.request_all_files_access()
+	check("the Settings button asks for the same full name", asked == ["android.permission.MANAGE_EXTERNAL_STORAGE"])
+	asked.clear()
+	granted.append("android.permission.MANAGE_EXTERNAL_STORAGE")
+	check("once allowed, the launch does not ask again", not main.ask_all_files_access_at_start() and asked.is_empty())
+	check("...and the state line says allowed", "allowed. Any folder" in main.all_files_access_text())
+	main.pretend_android = false
 
 	# --- the folder chooser ---
 	var chooser = FolderChooser.new()

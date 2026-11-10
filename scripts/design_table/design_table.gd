@@ -547,7 +547,11 @@ func _build_handle() -> void:
 	handle.setup(_handle_frame, _left, _right, func() -> bool: return _open, tokens)
 	handle.grab_action = grab_action
 	handle.camera = _camera
-	handle.laser_reach = 0.0 # near grab only: a distance carry would stand the console upright and face it at you
+	# The laser carries it too, like every other handle (owner, 10 Nov 2026: needed when working seated). Only a laser on the pill itself, not on
+	# the glass (the glass is the table's own laser surface), and the carry keeps the slab's slope, turning it only about the vertical to stay
+	# turned towards you: a window's distance carry would stand the console upright.
+	handle.laser_pill_only = true
+	handle.keep_level = true
 	handle.build(slab_size)
 	handle.set_hollow(true) # the slab is glass: the halo glows round it, not over it
 

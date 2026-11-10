@@ -86,7 +86,7 @@ func _initialize() -> void:
 	check("nothing is saved or switched yet", main.server_store.servers.is_empty() and not main.has_backend() and asked.is_empty())
 	check("neither the key nor the relay key is on screen", not ("TOPSECRETKEY" in _all_text(launcher._body)) and not ("RELAYSECRET" in _all_text(launcher._body)))
 	var checks := _all_text(card("CardChecks"))
-	check("the card lists what the code gave, with a tick each: read, server, address, the key received (its length, not its value), the session", "QR code read" in checks and "Server: Workshop PC" in checks and "Address: cad.example.net" in checks and "API key received (12 characters, kept hidden)" in checks and "Document session included" in checks and card("CardChecks").find_children("*", "TextureRect", true, false).size() == 5)
+	check("the card lists what the code gave, with a tick each: read, server, address, the key received (its length, not its value), the session, the browser relay", "QR code read" in checks and "Server: Workshop PC" in checks and "Address: cad.example.net" in checks and "API key received (12 characters, kept hidden)" in checks and "Document session included" in checks and "Browser relay: wss://relay.example.net" in checks and card("CardChecks").find_children("*", "TextureRect", true, false).size() == 6)
 	check("the status line says the code was read with its key", "QR code read: Workshop PC, with its API key" in main.status_text)
 	main.say("something else")
 	scanner._last_seen_ms -= 5000
@@ -100,7 +100,7 @@ func _initialize() -> void:
 	check("Connect asked the server with the code's address and key", asked == [["https://cad.example.net", "TOPSECRETKEY"]])
 	var entry: Dictionary = main.server_store.current()
 	check("it saved the server and switched to it", entry.get("url", "") == "https://cad.example.net" and main.has_backend() and main.backend_url == "https://cad.example.net" and main.active_server_id == entry.get("id", "x"))
-	check("the document session and the relay came with it", entry["document_session"] == "vr-shared" and entry["relay_url"] == "https://relay.example.net" and entry["relay_api_key"] == "RELAYSECRET" and main.relay_url == "https://relay.example.net")
+	check("the document session and the relay came with it", entry["document_session"] == "vr-shared" and entry["relay_url"] == "wss://relay.example.net" and entry["relay_api_key"] == "RELAYSECRET" and main.relay_url == "wss://relay.example.net")
 	check("every tool follows (no restart)", main._mates_tool.api_key == "TOPSECRETKEY" and main._measure_tool.backend_url == "https://cad.example.net" and main.room_manager._backend_url == "https://cad.example.net")
 	check("the Servers page says the server answered and accepted the key", "accepted the API key" in (launcher._body.find_child("TestResult", true, false) as Label).text)
 	check("the Servers page is shown with it in use, the scanner stopped, and the status says connected", launcher.page == "servers" and not scanner.running and "Connected to Workshop PC" in main.status_text and launcher._body.find_child("Server_" + entry["id"], true, false) != null)

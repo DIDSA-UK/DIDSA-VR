@@ -26,6 +26,13 @@ extends Node
 ##    anchored to the model's orientation before the first one.)
 ## Going between one and two hands re-baselines, so the model never jumps.
 ##
+## All of this is measured in the XR origin's frame (the play area), not the
+## world: walking or snap-turning with the sticks moves the origin, so a model
+## held while you move comes with you 1:1, like something carried, and only
+## your arms' own movement is filtered and gain-amplified. (Measured in the
+## world, a stick walk counted as hand movement and was multiplied by the
+## drag gain, up to 15x: the model raced off ahead of you. Owner, 10 Nov.)
+##
 ## Steadiness: your hand positions go through an adaptive filter (one_euro.gd)
 ## before they move the model, so a hand held "still" doesn't make it shake,
 ## while deliberate moves stay direct. Levels below; the tablet sets it.
@@ -76,6 +83,7 @@ var _start_hand := Vector3.ZERO
 var _prev_mid := Vector3.ZERO
 var _prev_vec := Vector3.ZERO
 var _two_hand_gain := 1.0 ## same size-based gain as one-hand drag, measured once per gesture
+var _prev_frame := Transform3D.IDENTITY ## the origin's global transform at the last two-hand frame (see _update_two_hand)
 var _prev_pivot := Vector3.ZERO ## virtual pivot the transform is built around each frame — tracks _prev_mid with gain applied, so it can drift from where your hands actually are on a big model
 var _gesture_active := false
 var _gesture_start_transform: Transform3D
@@ -214,8 +222,9 @@ func _process(delta: float) -> void:
 
 	var left_free := enabled and _claims(_left, _hand_free(_left))
 	var right_free := enabled and _claims(_right, _hand_free(_right))
-	var left_pos := _steady(_left_filter, _left.global_position, left_free, delta)
-	var right_pos := _steady(_right_filter, _right.global_position, right_free, delta)
+	var to_local := _frame().affine_inverse()
+	var left_pos := _steady(_left_filter, to_local * _left.global_position, left_free, delta)
+	var right_pos := _steady(_right_filter, to_local * _right.global_position, right_free, delta)
 
 	if left_free and right_free and (right_pos - left_pos).length() >= 0.05:
 		_update_two_hand(left_pos, right_pos)
@@ -262,21 +271,30 @@ func _steady(filter: RefCounted, raw: Vector3, gripping: bool, delta: float) -> 
 	return filter.filter(raw, delta)
 
 
+func _frame() -> Transform3D:
+	## The XR origin's global transform: the frame hand positions are measured in (see the class docstring). Identity when the hands
+	## have no 3D parent (a bare test setup).
+	var origin := _left.get_parent() as Node3D if _left != null else null
+	return origin.global_transform if origin != null and origin.is_inside_tree() else Transform3D.IDENTITY
+
+
 func _update_one_hand(hand: XRController3D, hand_pos: Vector3) -> void:
+	## `hand_pos` is in the origin's frame (_frame()); so is _start_root, so walking carries the model along unamplified.
 	if _mode != Mode.ONE_HAND or _one_hand != hand:
 		_mode = Mode.ONE_HAND
 		_one_hand = hand
-		_start_root = _root.global_transform
+		_start_root = _frame().affine_inverse() * _root.global_transform
 		_start_hand = hand_pos
 		_one_hand_gain = one_hand_drag_gain()
 		_begin_gesture()
 		return
 	var t := _start_root
 	t.origin += (hand_pos - _start_hand) * _one_hand_gain
-	_root.global_transform = t
+	_root.global_transform = _frame() * t
 
 
 func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
+	## Both positions in the origin's frame (_frame()).
 	var vec := right_pos - left_pos
 	var mid := (left_pos + right_pos) * 0.5
 	if _mode != Mode.TWO_HAND:
@@ -284,6 +302,7 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 		_prev_mid = mid
 		_prev_vec = vec
 		_prev_pivot = mid # virtual pivot starts exactly at your hands' real midpoint
+		_prev_frame = _frame()
 		_two_hand_gain = one_hand_drag_gain() # measured once, like one-hand's own gain, so it can't feed back on itself
 		_begin_gesture()
 		return
@@ -304,8 +323,12 @@ func _update_two_hand(left_pos: Vector3, right_pos: Vector3) -> void:
 	var pivot := _prev_pivot + (mid - _prev_mid) * _two_hand_gain
 
 	# Turn/scale the model about where the (gain-amplified) pivot WAS, then hang it off where it is now.
-	var t := _root.global_transform
-	_root.global_transform = Transform3D(
+	# Positions here are all in the origin's frame. The model's pose is taken in the frame as it was LAST time, and put back in the
+	# frame as it is now, so a stick walk or snap turn since then carries the model along 1:1.
+	var frame := _frame()
+	var t := _prev_frame.affine_inverse() * _root.global_transform
+	_prev_frame = frame
+	_root.global_transform = frame * Transform3D(
 		(rot * t.basis) * scale_factor,
 		pivot + (rot * (t.origin - _prev_pivot)) * scale_factor
 	)

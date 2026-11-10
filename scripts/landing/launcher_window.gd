@@ -38,6 +38,9 @@ var _scan_restore_scene := ""
 var launcher_panel_size := Vector2(0.88, 0.66) ## metres (the landing deck sets its own in _init)
 var launcher_viewport_size := Vector2i(880, 660)
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
+var _relay_for := "" ## the saved server whose Browser relay is being typed ("" = none): its form shows under the list
+var _relay_form := {"relay_url": "", "relay_api_key": ""}
+var _relay_note := "" ## what the last relay Save said
 var _page_before_discard := "" ## the page the "Unsaved changes" choice replaced, to go back to once it is decided
 
 
@@ -276,6 +279,8 @@ func _build_servers() -> void:
 	_body.add_child(_server_result)
 	for entry in main.server_entries():
 		_body.add_child(_server_row(entry))
+		if str(entry["id"]) == _relay_for and not entry.get("readonly", false):
+			_build_relay_form(entry)
 	if main.active_server_id != "":
 		_body.add_child(_action("Use no server (offline, demo models only)", func() -> void:
 			main.switch_server("")
@@ -320,10 +325,65 @@ func _server_row(entry: Dictionary) -> Control:
 	box.add_child(use)
 	box.add_child(_action("Test", func() -> void: _run_test(str(entry["url"]), str(entry["api_key"])), 100))
 	if not entry.get("readonly", false):
+		var relay := _action("Relay on" if str(entry.get("relay_url", "")) != "" else "Relay", func() -> void:
+			_relay_for = "" if _relay_for == str(entry["id"]) else str(entry["id"])
+			_relay_form = {"relay_url": str(entry.get("relay_url", "")), "relay_api_key": str(entry.get("relay_api_key", ""))}
+			if _relay_form["relay_url"] == "":
+				_relay_form["relay_url"] = "ws://"
+			_relay_note = ""
+			show_page("servers"), 110)
+		relay.name = "Relay_" + str(entry["id"])
+		box.add_child(relay)
 		box.add_child(_action("Forget", func() -> void:
 			if main.forget_server(str(entry["id"])):
 				show_page("servers"), 110))
 	return box
+
+
+func _build_relay_form(entry: Dictionary) -> void:
+	## The Browser window's relay for this server (DIDSA-CAD browser-relay/, docs/servers.md): its ws:// or wss:// address and its own key.
+	var box := VBoxContainer.new()
+	box.name = "RelayForm"
+	_body.add_child(box)
+	box.add_child(_hint("Browser relay for %s: the Browser window's own service (port 8100 by default), with its own key, not the CAD key." % entry["name"]))
+	for field in [["relay_url", "Relay address"], ["relay_api_key", "Relay key"]]:
+		var value := str(_relay_form[field[0]])
+		var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field[0] == "relay_api_key" else value
+		var f: String = field[0]
+		var title: String = field[1]
+		var button := _action("%s: %s" % [title, shown if shown not in ["", "ws://"] else "tap to type"], func() -> void:
+			main.open_keyboard_for(str(_relay_form[f]), func(text: String) -> void:
+				_relay_form[f] = text.strip_edges()
+				show_page("servers"), {"mode": "full", "title": title}), 0)
+		button.name = "RelayForm_" + f
+		box.add_child(button)
+	var typed := str(_relay_form["relay_url"])
+	if typed not in ["", "ws://"]:
+		box.add_child(_hint(str(ServerAddress.check_relay(typed)["message"])))
+	if _relay_note != "":
+		var note := _hint(_relay_note)
+		note.name = "RelayNote"
+		box.add_child(note)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	var save := _action("Save relay", func() -> void:
+		var url := str(_relay_form["relay_url"])
+		var answer: Dictionary = main.set_server_relay(str(entry["id"]), "" if url == "ws://" else url, str(_relay_form["relay_api_key"]))
+		_relay_note = str(answer["message"])
+		if answer["ok"]:
+			_relay_for = ""
+			main.say(_relay_note)
+		show_page("servers"), 0)
+	save.name = "RelaySave"
+	row.add_child(save)
+	if str(entry.get("relay_url", "")) != "":
+		var clear := _action("Remove relay", func() -> void:
+			main.set_server_relay(str(entry["id"]), "", "")
+			_relay_for = ""
+			show_page("servers"), 0)
+		clear.name = "RelayClear"
+		row.add_child(clear)
 
 
 func _scan_button() -> Button:
@@ -494,6 +554,8 @@ func _refresh_card() -> void:
 	checks.add_child(_check_row(true, "API key received (%d characters, kept hidden)" % str(_pending["api_key"]).length()))
 	if str(_pending.get("document_session", "")) != "":
 		checks.add_child(_check_row(true, "Document session included"))
+	if str(_pending.get("relay_url", "")) != "":
+		checks.add_child(_check_row(str(_pending.get("relay_api_key", "")) != "", "Browser relay: %s" % _pending["relay_url"] + ("" if str(_pending.get("relay_api_key", "")) != "" else " (no key: the Browser will not connect)")))
 	_scan_card.add_child(checks)
 	var detail := _hint(str(_pending["url"]) + ("\n" + str(_pending["warning"]) if _pending["warning"] != "" else ""))
 	detail.name = "CardDetail"
