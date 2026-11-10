@@ -253,7 +253,7 @@ func minimise() -> bool:
 	if console != null:
 		console.close()
 	if start_buttons != null:
-		start_buttons.empty = false # put away with the rest; update_start_buttons() brings it back if the room is still empty
+		start_buttons.put_away() # put away with the rest, file list included; update_start_buttons() brings it back if the room is still empty
 	minimised = true
 	RoomRegistry.push()
 	return true

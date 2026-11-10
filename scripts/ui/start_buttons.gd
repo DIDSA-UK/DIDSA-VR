@@ -57,6 +57,7 @@ func _build_content() -> Control:
 
 
 func _clear() -> void:
+	scroll_target = null # the list's scroll box is freed below: a stale pointer here stops diegetic_panel.gd's _process every frame (the buttons go dead)
 	for child in _holder.get_children():
 		_holder.remove_child(child)
 		child.queue_free()
@@ -138,6 +139,13 @@ func _sync_force_open() -> void:
 	## Opened on its own (the room console's "Open assembly..." row on a room that has parts): shows the list even though the space is not empty.
 	if _viewport != null:
 		open()
+
+
+func put_away() -> void:
+	## The owner is hiding its space (the table closing, the room minimised or no longer touchable): close even if the file list is up, and leave the
+	## buttons behind, so the next open shows them. `empty = false` alone keeps a list that is up open, which is right only for the room console's row.
+	_choosing = false
+	empty = false # _sync() closes it now that it is not choosing; the next open rebuilds the buttons
 
 
 func is_choosing() -> bool:

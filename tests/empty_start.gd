@@ -151,9 +151,17 @@ func _room_side() -> void:
 	fake.occurrences["S"] = []
 	await manager.update_start_buttons(room)
 	check("an empty room shows them again", sb.is_open())
+	(sb.find_child("StartOpen", true, false) as Button).pressed.emit()
+	await frames(2)
+	(sb.find_child("Cancel", true, false) as Button).pressed.emit()
+	await frames(3)
+	check("Cancel on the list: the buttons are back and the laser still reaches New assembly (bug report 10 Nov: a freed scroll box stopped the laser)", sb.find_child("StartNew", true, false) != null and await _laser_reaches(sb, "StartNew"))
+	(sb.find_child("StartOpen", true, false) as Button).pressed.emit()
+	await frames(2)
 	room.minimise()
-	check("a minimised room puts them away", not sb.is_open())
-	manager.free()
+	check("a minimised room puts them away, even with the file list up", not sb.is_open() and not sb.is_choosing())
+	main.queue_free() # the rooms are the stand-in main's children: free them with the manager, or their consoles go on calling a freed manager
+	await frames(2)
 
 
 func _table_side() -> void:
@@ -197,7 +205,50 @@ func _table_side() -> void:
 	sb.find_child("StartOpen", true, false).pressed.emit()
 	await frames(2)
 	check("Open part... shows the file list, native files only", sb.is_choosing() and sb.find_child("Chooser", true, false) != null)
+	(sb.find_child("Cancel", true, false) as Button).pressed.emit()
+	await frames(3)
+	check("Cancel on the list: the laser still reaches New part (bug report 10 Nov)", await _laser_reaches(sb, "StartNew"))
+	check("...and the panel no longer points at the freed list's scroll box", sb.scroll_target == null)
+	table.close()
+	await frames(2)
+	table.open()
+	await frames(3)
+	check("...and after closing and reopening the table too", sb.is_open() and await _laser_reaches(sb, "StartNew"))
+	sb.find_child("StartOpen", true, false).pressed.emit()
+	await frames(2)
+	var spot: Vector3 = _button_point(sb, "Cancel")
+	table.close()
+	await frames(2)
+	check("closing the table with the file list up closes it too (no hidden panel left open)", not sb.is_open() and not sb.is_choosing())
+	_aim(sb, spot)
+	await frames(3)
+	check("...so nothing invisible takes the laser where it was", not sb.surface.hovering and not sb._right.get_meta("ui_hover", false))
+	table.open()
+	await frames(3)
+	check("reopening shows the two buttons again, not the old list, and the laser reaches them", sb.is_open() and not sb.is_choosing() and sb.find_child("StartNew", true, false) != null and sb.find_child("Chooser", true, false) == null and await _laser_reaches(sb, "StartNew"))
 	main.queue_free()
+
+
+func _button_point(panel, button_name: String) -> Vector3:
+	## The world point at the middle of a button on a diegetic panel.
+	var button: Control = panel.find_child(button_name, true, false)
+	var centre: Vector2 = button.get_global_rect().get_center()
+	var vp := Vector2(panel._viewport.size)
+	return panel.global_transform * Vector3((centre.x / vp.x - 0.5) * panel.panel_size.x, (0.5 - centre.y / vp.y) * panel.panel_size.y, 0.0)
+
+
+func _aim(panel, target: Vector3) -> void:
+	## The right laser from 0.8 m in front of the panel (a little to the side, as a hand is), at the point.
+	var from: Vector3 = target + panel.global_transform.basis.z.normalized() * 0.8 + Vector3(0.1, -0.05, 0.0)
+	panel._right.global_transform = Transform3D(Basis.looking_at(target - from, Vector3.UP), from)
+
+
+func _laser_reaches(panel, button_name: String) -> bool:
+	## Aims the right laser at the button and waits a few frames: does the panel take the laser, with the pointer on that button?
+	_aim(panel, _button_point(panel, button_name))
+	await frames(3)
+	var button: Control = panel.find_child(button_name, true, false)
+	return panel.surface.hovering and button != null and button.get_global_rect().has_point(panel.surface.pointer_px) # a click lands at pointer_px
 
 
 func _button_with(node: Node, text: String) -> Button:

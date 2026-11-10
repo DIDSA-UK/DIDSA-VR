@@ -296,7 +296,7 @@ func close() -> void:
 	if drawer != null:
 		drawer.hide_drawer()
 	if start_buttons != null:
-		start_buttons.empty = false
+		start_buttons.put_away() # also when its file list is up: it must not stay open (and take the laser) behind the hidden table
 	manager.deactivate()
 	resizer.cancel()
 	if tree.is_open():

@@ -158,7 +158,8 @@ D) is **not** built: it needs a native plugin, which `CLAUDE.md` does not allow.
 
 1. What the launcher's Servers page prints for `OS.get_user_data_dir()`: is it under `Android/data/<app>/files` (the Files app shows it) or `/data/data/<app>/files` (nothing can)? ____
 2. Does a file saved to `Documents/DIDSA` show in the Quest Files app and over USB? ____
-3. Can a file copied into `Documents/DIDSA` over USB be opened **without** All files access? (Expected: no.) With it? ____
+3. Can a file copied into `Documents/DIDSA` over USB be opened **without** All files access? (Expected: no.) With it? **Owner, 10 Nov (Quest 3): no.** `.didsa` files copied over USB do not show: the folder chooser opens the folder and counts 0 model files. The APK was exported with external storage read and write on, but the permission was never accepted on the headset. Read/write external storage does not cover other apps' non-media files on Android 11 and later; only All files access does. With it: ____
+   If Horizon OS shows no All files access page, it can be granted over USB: `adb shell appops set uk.didsa.vr MANAGE_EXTERNAL_STORAGE allow` (the package name from the preset), then restart the app. Not tried.
 4. Does *Allow opening files from other apps* open the system's All files access page for the app? Does Settings then say "allowed"? (Godot's `OS.request_permission("MANAGE_EXTERNAL_STORAGE")` and whether `OS.get_granted_permissions()` reports it are not verified: if the state line never says allowed, that is the reason, not the permission.) ____
 
 ## What was checked, and what was not

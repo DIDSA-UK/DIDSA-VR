@@ -878,7 +878,10 @@ func update_start_buttons(room: Node) -> void:
 		return
 	_make_start_buttons(room)
 	if room.start_buttons != null:
-		room.start_buttons.empty = empty and room.interactive and not room.minimised
+		if not room.interactive or room.minimised:
+			room.start_buttons.put_away() # a list opened from the console goes too: nothing to pick it with
+		else:
+			room.start_buttons.empty = empty
 
 
 func new_part_in_room(room: Node) -> bool:
