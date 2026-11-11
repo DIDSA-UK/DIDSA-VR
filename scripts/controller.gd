@@ -60,6 +60,7 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which sp
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
+signal selection_changed(node: Node3D, level: Dictionary) ## the laser / tree selection changed: the selected part (null = cleared) and, for a sub-assembly, its level (V-7: the Assembly Tree follows it)
 signal group_message(text: String) ## something to tell the user about choosing / moving a sub-assembly (main.gd shows it)
 signal tool_message(text: String) ## what a shot tool did or why it did nothing (main.gd shows it on the status line and the wrist prompt)
 signal wheel_chord_started() ## trigger + grip pressed together on a hand with wheel_enabled: tool_wheel.gd opens the wheel
@@ -593,8 +594,8 @@ func refusal_for(level: Dictionary, anchor: Node3D) -> Dictionary:
 			var own := k == depth
 			var names: Array = anchor.get_meta("group_names", []) if is_instance_valid(anchor) else []
 			var holder := label if own else (str(names[k - 1]) if names.size() >= k else "an assembly above it")
-			var text := "%s is fixed (grounded): Float it first to move it." % label if own else "%s sits inside %s, which is fixed (grounded): Float that first to move it." % [label, holder]
-			return {"kind": "fixed", "text": text, "short": "Part is fixed: %s. Float it first." % (label if own else holder)}
+			var text := "%s is fixed (grounded): Float it in the Assembly Tree to move it." % label if own else "%s sits inside %s, which is fixed (grounded): Float that in the Assembly Tree to move it." % [label, holder]
+			return {"kind": "fixed", "text": text, "short": "Part is fixed: %s. Float it in the Assembly Tree." % (label if own else holder)}
 	if depth == 1 and str(mates_tool.group_state(root, str(prefix[0]) if not prefix.is_empty() else "")) == "mated":
 		var t := "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % label
 		return {"kind": "mated", "text": t, "short": t}
@@ -648,8 +649,11 @@ func _finish_group_move(gs) -> void:
 		save)
 	if save:
 		mates_tool.persist_group_pose(owner, occ, new_pose)
-	elif gs.depth > 1 and not sandbox:
-		group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
+	elif (gs.depth > 1 or gs.prefix.is_empty()) and not sandbox:
+		if gs.prefix.is_empty():
+			group_message.emit("The whole assembly moved on screen only: the parts' own places are not changed (V-7: selected from the tree's root row).")
+		else:
+			group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
 
 
 func _arm_crumb() -> void:
@@ -729,6 +733,7 @@ func select_group_level(node: Node3D, level: Dictionary, point: Vector3) -> void
 			m.set_meta("selected", true)
 			m.material_overlay = _select_material
 	group_message.emit("Selected %s (%d parts)" % [_sel_group.label, _sel_group.members.size()])
+	selection_changed.emit(node, level)
 
 
 func _try_grab_table() -> bool:
@@ -1323,9 +1328,27 @@ func _set_selection(node: Node3D, pivot_point: Vector3) -> void:
 	node.material_overlay = _select_material
 	_pivot_local = node.global_transform.affine_inverse() * pivot_point
 	_selected_start_transform = node.global_transform
+	selection_changed.emit(node, {})
+
+
+func selected_group_prefix() -> Variant:
+	## The occurrence-id prefix of the selected sub-assembly (an empty array for the whole assembly), or null when no group is selected.
+	return (_sel_level["prefix"] as Array) if _sel_group != null and _sel_level.has("prefix") else null
+
+
+func pulse_selection() -> void:
+	## V-7: a selection made from the tree flashes once (bright, then the normal overlay), so the eye finds a part that may be behind you or far away.
+	if _select_material == null or not is_inside_tree():
+		return
+	var normal := Color(1.0, 0.85, 0.1, 0.35)
+	_select_material.albedo_color = Color(1.0, 1.0, 0.6, 0.9)
+	var tween := create_tween()
+	tween.tween_property(_select_material, "albedo_color", normal, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func _clear_selection() -> void:
+	if selected_node != null:
+		selection_changed.emit(null, {})
 	if selected_node and _sel_group != null:
 		var gs = _sel_group
 		_sel_group = null

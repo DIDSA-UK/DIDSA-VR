@@ -82,6 +82,7 @@ var _settings := preload("res://scripts/app_settings.gd").new() ## project folde
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
+const GroupIndex := preload("res://scripts/group_index.gd") ## the Assembly Tree selects by path (select_tree_row)
 const Landing := preload("res://scripts/landing/landing.gd") ## the first screen: a state of this world, see landing.gd
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
@@ -804,6 +805,94 @@ func select_part_by_occurrence_id(occurrence_id: String) -> bool:
 			$XROrigin3D/RightController.select_external(node, node.global_position)
 			return true
 	return false
+
+
+# --- The Assembly Tree's side of the world (assembly_tree_window.gd, V-7): rows are addressed by PATH, the occurrence ids from the root down, because the id of a
+# child alone is the same under every placement of its sub-assembly (B1). An empty path is the root row: the whole assembly.
+
+func tree_row_nodes(path: Array) -> Array:
+	## The world's parts a tree row stands for: its own node if it has geometry, every part under it if it is a sub-assembly, every part of the world for the root.
+	var nodes: Array = RoomRegistry.world_parts(get_tree()).filter(func(n: Node) -> bool: return is_instance_valid(n))
+	var root := current_root_part_id()
+	if path.is_empty():
+		return nodes
+	var members := GroupIndex.members_of(nodes, root, path, 0)
+	if not members.is_empty():
+		return members
+	if path.size() == 1: # (a world that was not indexed into paths yet: the occurrence id alone is unique among the root's own top-level parts)
+		return nodes.filter(func(n: Node) -> bool: return not n.has_meta("group_path") and str(n.get_meta("occurrence_id", "")) == str(path[0]) and str(n.get_meta("owner_part_id", "")) == root)
+	return []
+
+
+func select_tree_row(path: Array, label: String = "") -> Dictionary:
+	## Selects what a tree row stands for, the same way the laser does: one part -> that part; a sub-assembly (or the root, the whole assembly) -> all of it as a
+	## group (every part lights up, the stick and A / B move it as one). Pressing the row that is already selected clears the selection. Returns
+	## {ok, kind ("part" / "group" / "cleared" / "none"), count}.
+	var hand := $XROrigin3D/RightController
+	var members := tree_row_nodes(path)
+	if members.is_empty():
+		return {"ok": false, "kind": "none", "count": 0}
+	var selected_prefix = hand.selected_group_prefix()
+	if selected_prefix != null and selected_prefix == path:
+		hand._clear_selection()
+		return {"ok": true, "kind": "cleared", "count": members.size()}
+	var exact: Array = members.filter(func(n: Node) -> bool: return GroupIndex.path_of(n) == path)
+	if members.size() == 1 or (exact.size() == 1 and not path.is_empty()):
+		var node: Node3D = exact[0] if not exact.is_empty() else members[0]
+		if hand.selected_node == node and selected_prefix == null:
+			hand._clear_selection()
+			return {"ok": true, "kind": "cleared", "count": 1}
+		hand._clear_selection()
+		hand.select_external(node, node.global_position)
+		hand.pulse_selection()
+		return {"ok": true, "kind": "part", "count": 1}
+	var anchor: Node3D = members[0]
+	var level := {"depth": maxi(path.size(), 1), "prefix": path.duplicate(), "members": members, "label": label if label != "" else "Assembly"}
+	hand._clear_selection()
+	hand.select_group_level(anchor, level, anchor.global_position)
+	hand.pulse_selection()
+	return {"ok": true, "kind": "group", "count": members.size()}
+
+
+func clear_tree_selection() -> void:
+	$XROrigin3D/RightController._clear_selection()
+
+
+func tree_row_hidden(path: Array) -> bool:
+	var nodes := tree_row_nodes(path)
+	return not nodes.is_empty() and nodes.all(func(n: Node3D) -> bool: return not n.visible)
+
+
+func set_tree_row_visible(path: Array, vis: bool, label: String) -> void:
+	## View-only (owner, 11 Nov): shows or hides what a row stands for, undoably. Never the backend's `hidden` flag, never saved.
+	var nodes := tree_row_nodes(path)
+	if nodes.is_empty():
+		return
+	var before := {}
+	var changed := false
+	for n in nodes:
+		before[n] = n.visible
+		if n.visible != vis:
+			changed = true
+	if not changed:
+		return
+	for n in nodes:
+		n.visible = vis
+	_push_visibility_command("%s %s" % ["show" if vis else "hide", label], before)
+
+
+func isolate_tree_row(path: Array, label: String) -> void:
+	## Only what the row stands for stays visible (the world's parts; undoable).
+	var keep := tree_row_nodes(path)
+	if keep.is_empty():
+		return
+	var parts := _arena_parts()
+	var before := {}
+	for p in parts:
+		before[p] = p.visible
+	for p in parts:
+		p.visible = keep.has(p)
+	_push_visibility_command("isolate %s" % label, before)
 
 
 func _set_all_visibility(vis: bool, label: String) -> void:

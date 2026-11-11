@@ -1998,22 +1998,59 @@ func notify_locked(part: Node3D) -> void:
 
 
 func toggle_fixed(part: Node3D) -> void:
-	## Tablet's Fix/Float: flips the selected part's grounded flag on the
-	## backend (the same field the flat app's Fix/Float toggle writes).
+	## Tablet's Fix/Float: flips the selected part's grounded flag on the backend (the same field the flat app's Fix/Float toggle writes). The Assembly Tree's
+	## Fix / Float bar calls the same function below (V-5, V-7).
 	if part == null or not is_managed(part):
 		_report("Select a placed part first (laser-select it).")
 		return
-	var occ := _occ_id(part)
-	var owner := owner_of(part)
-	var occs: Dictionary = occurrence_state(owner).get("occurrences", {})
-	var now_fixed := not bool(occs.get(occ, {}).get("fixed", false))
-	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner, occ], {"fixed": now_fixed})
+	await toggle_fixed_occurrence(owner_of(part), _occ_id(part), label_or(part, "the part"))
+
+
+func is_occurrence_fixed(owner_part_id: String, occurrence_id: String) -> bool:
+	return group_fixed(owner_part_id, occurrence_id)
+
+
+func toggle_fixed_occurrence(owner_part_id: String, occurrence_id: String, label: String) -> bool:
+	## Flips the `fixed` flag of the occurrence `occurrence_id` placed by the Part `owner_part_id` (the world's root, a room's Part or a deeper sub-assembly),
+	## one undo step. True if it was changed.
+	var now_fixed := not group_fixed(owner_part_id, occurrence_id)
+	return await set_occurrence_fixed(owner_part_id, occurrence_id, now_fixed, label, true)
+
+
+func set_occurrence_fixed(owner_part_id: String, occurrence_id: String, fixed: bool, label: String, record: bool) -> bool:
+	if owner_part_id == "" or occurrence_id == "":
+		_report("Nothing to %s here." % ("fix" if fixed else "float"))
+		return false
+	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, occurrence_id], {"fixed": fixed})
 	if not result["ok"]:
-		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", label_or(part, "the part"), _friendly_error(result)])
-		return
-	occs[occ] = {"fixed": now_fixed}
+		_report("Couldn't %s %s: %s" % ["ground" if fixed else "float", label, _friendly_error(result)])
+		return false
+	var was := not fixed
+	_remember_fixed(owner_part_id, occurrence_id, fixed)
 	document_changed.emit()
-	_report("%s is now %s." % [label_or(part, "The part"), "grounded (fixed)" if now_fixed else "floating (free to move)"])
+	_report("%s is now %s." % [label, "grounded (fixed)" if fixed else "floating (free to move)"])
+	if record and command_stack != null:
+		command_stack.push("%s %s" % ["fix" if fixed else "float", label],
+			func() -> void: set_occurrence_fixed(owner_part_id, occurrence_id, was, label, false),
+			func() -> void: set_occurrence_fixed(owner_part_id, occurrence_id, fixed, label, false),
+			true)
+	return true
+
+
+func _remember_fixed(owner_part_id: String, occurrence_id: String, fixed: bool) -> void:
+	## Writes the new flag into every state dictionary that holds this occurrence: the active root's, a room's, and the nested one (a room's Part is also a
+	## sub-assembly of the world's root, so it can be in two).
+	var dicts: Array = []
+	if owner_part_id == _current_owner_part_id:
+		dicts.append(occurrences)
+	elif _other_states.has(owner_part_id):
+		dicts.append(_other_states[owner_part_id].get("occurrences", {}))
+	if _nested_states.has(owner_part_id):
+		dicts.append(_nested_states[owner_part_id].get("occurrences", {}))
+	for d in dicts:
+		var entry: Dictionary = (d as Dictionary).get(occurrence_id, {})
+		entry["fixed"] = fixed
+		(d as Dictionary)[occurrence_id] = entry
 
 
 func _choose_driven(first_occ: String, second_occ: String) -> String:
