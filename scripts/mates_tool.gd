@@ -182,6 +182,7 @@ var branch_controls: Array = [] ## the preview's `controls`: the branch fields (
 var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the ghost shows
 var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
 var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
+var _preview_note := "" ## V-4: why the latest preview drew no ghost (shown instead of "Ready", and logged as "DIDSA VR: preview: ..."); "" = nothing to say
 var _branch_notice := "" ## the sentence telling the user so (branch_notice())
 var _flip_base := -1 ## a coupler: the sense (0 / 1) the backend chose by default, which "Reverse" / "Left-hand" is measured from (-1 = not known yet)
 var preview_coupler_value := -1.0 ## a coupler: the ratio / travel / lead the latest preview says the mate would be made with (-1 = none)
@@ -399,6 +400,7 @@ func clear_picks() -> void:
 	_width_seq += 1
 	_branch_changes = []
 	_branch_notice = ""
+	_preview_note = ""
 	branch_controls = []
 	branch_resolved = {}
 	branch_alternatives = []
@@ -507,6 +509,8 @@ func status_text() -> String:
 				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
+			if _preview_note != "":
+				return _preview_note
 			return "Ready — choose a mate type and Create."
 	return ""
 
@@ -1028,6 +1032,7 @@ func _run_preview(seq: int) -> void:
 	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
 	_branch_changes = []
 	_branch_notice = ""
+	_preview_note = ""
 	branch_controls = []
 	branch_resolved = {}
 	branch_alternatives = []
@@ -1046,12 +1051,42 @@ func _run_preview(seq: int) -> void:
 	_clear_ghost()
 	if is_coupler() or is_limit():
 		members = [] # a coupler / limit places nothing: no ghost (the preview only brings the default value and sense)
+	var missing: Array = []
 	for member in members:
 		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
 		if part != null:
 			_show_ghost(part, json_to_pose(member["transform"]))
+		else:
+			missing.append(str(member["occurrence_id"]))
+	_note_preview(owner_part_id, driven_id, result, json, members, missing)
 	# "No ghost to show yet" (nothing added above): a value still to be typed, geometry this type can't use, or a grounded part.
 	picks_changed.emit()
+
+
+func _note_preview(owner_part_id: String, driven_id: String, result: Dictionary, json, members: Array, missing: Array) -> void:
+	## V-4: says WHY there is no ghost (the backend turns every validation error into `converged: false`, so the ghost used to vanish with no reason). Sets
+	## `_preview_note` (the status line shows it in place of "Ready") and logs one line for `adb logcat` (filter "DIDSA VR: preview").
+	var why := ""
+	if is_coupler() or is_limit():
+		pass # these place nothing: no ghost is expected
+	elif not result["ok"]:
+		why = "the backend refused the preview: %s" % _friendly_error(result)
+	elif not (json is Dictionary):
+		why = "the backend's answer was not understood"
+	elif bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_id, {}).get("fixed", false)):
+		why = "the part to move is fixed (grounded): Float it in the Assembly Tree first"
+	elif not bool(json.get("converged", false)):
+		if _branch_notice != "":
+			why = "" # (the branch sentence says it)
+		else:
+			why = "the solver found no placement for this mate (%s)" % str(json.get("reason", "no reason given: it may be over-constrained, conflict with an earlier mate or be refused by the backend"))
+	elif members.is_empty():
+		why = "the solver converged but moved nothing"
+	elif not missing.is_empty() and not preview_visible():
+		why = "the part to show is not on screen (%s: a hidden copy while a room is open?)" % ", ".join(PackedStringArray(missing))
+	_preview_note = "No preview: %s." % why if why != "" else ""
+	print("DIDSA VR: preview: type=%s driven=%s ok=%s converged=%s members=%d missing=%d ghost=%s note=%s" % [
+		mate_type, driven_id, str(result.get("ok", false)), str(json.get("converged")) if json is Dictionary else "-", members.size(), missing.size(), str(preview_visible()), _preview_note])
 
 
 func _show_ghost(part: Node3D, pose: Transform3D) -> void:

@@ -1010,7 +1010,7 @@ func _arm_paint() -> void:
 		trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
 		tool_message.emit("Took the look of %s: %s." % [part.name, appearance_tool.Rule.key_of(got).replace(";", ", ")])
 		return
-	if bool(appearance_tool.is_busy()):
+	if bool(appearance_tool.is_saving()): # (a read still running is awaited by the paint itself, V-3)
 		tool_message.emit("Paint: still saving the last paint, shoot again in a moment.")
 		return
 	_paint_press = {"ms": Time.get_ticks_msec(), "node": part, "face_index": int(hit.get("face_index", -1)), "point": hit.get("point", part.global_position)}
@@ -1106,7 +1106,9 @@ func _finish_paint() -> void:
 
 
 func _paint_row(node: Node3D, row: Dictionary) -> void:
-	var result: Dictionary = await appearance_tool.apply(row, appearance_tool.root_of(node, _world_root()), _scope_nodes(), _world_root())
+	var root: String = appearance_tool.root_of(node, _world_root())
+	await appearance_tool.ensure_loaded(root) # (V-3: the breadcrumb path used to paint without waiting for the Part's lists)
+	var result: Dictionary = await appearance_tool.apply(row, root, _scope_nodes(), _world_root())
 	if not result.get("ok", false):
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
 		tool_message.emit("Couldn't paint %s: %s" % [str(row.get("label", "")), str(result.get("error", "unknown error"))])

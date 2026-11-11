@@ -24,6 +24,7 @@ signal message(text: String) ## a one-line outcome for the wrist / status line
 const Rule := preload("res://scripts/appearance/appearance_rule.gd")
 const Look := preload("res://scripts/appearance/appearance_look.gd")
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
+const ClipLook := preload("res://scripts/clip_look.gd")
 
 const API_PREFIX := "/document"
 const RECENT_MAX := 8
@@ -56,6 +57,9 @@ var _loaded: Dictionary = {} ## Part id -> true once its lists are in the model
 var _temporary: Dictionary = {} ## scope root Part id -> [override records]: the sandbox's paint (never sent)
 var _preview: Dictionary = {} ## the row being previewed: {root, record, appearance (or CLEAR)}; empty = none
 var _busy := false
+var _inflight: Dictionary = {} ## Part id -> true while its lists are being read (V-3: a second ensure_loaded waits for it instead of starting another read)
+var _versions: Dictionary = {} ## Part id -> bumped by every PUT that lands (V-3: a load that began before a PUT keeps the newer override list)
+signal _load_finished
 
 
 func _ready() -> void:
@@ -69,6 +73,11 @@ func configure(p_api, p_settings: RefCounted = null) -> void:
 
 
 func is_busy() -> bool:
+	return _busy or not _inflight.is_empty()
+
+
+func is_saving() -> bool:
+	## A paint's PUT is on its way (a load running is not this: a paint awaits the load, controller.gd).
 	return _busy
 
 
@@ -93,6 +102,7 @@ func forget() -> void:
 	_patterns.clear()
 	_names.clear()
 	_loaded.clear()
+	_versions.clear()
 	_temporary.clear()
 	_preview.clear()
 
@@ -109,7 +119,11 @@ func ensure_loaded(root_part_id: String) -> void:
 			continue
 		seen[pid] = true
 		if not _loaded.has(pid):
-			await _load_part(pid)
+			if _inflight.has(pid):
+				while _inflight.has(pid):
+					await _load_finished # (V-3: the read already running for this Part is awaited, not repeated)
+			else:
+				await _load_part(pid)
 		var entry: Dictionary = (_model["parts"] as Dictionary).get(pid, {})
 		for occ in (entry.get("occurrences", {}) as Dictionary).values():
 			var child := str((occ as Dictionary).get("part_id", ""))
@@ -118,6 +132,8 @@ func ensure_loaded(root_part_id: String) -> void:
 
 
 func _load_part(pid: String) -> void:
+	_inflight[pid] = true
+	var version_at_start := int(_versions.get(pid, 0))
 	var entry := {"occurrences": {}}
 	var part: Dictionary = await _fetch("/parts/%s" % pid)
 	_names[pid] = str(part.get("name", pid))
@@ -139,8 +155,22 @@ func _load_part(pid: String) -> void:
 		entry["occurrences"][str(row["id"])] = {"part_id": str(row["resolved_part_id"]), "color": row.get("color"), "hidden": bool(row.get("hidden", false))} # (hidden: for scenes_tool.gd)
 	_set_overrides(entry, (await _fetch("/parts/%s/appearance-overrides" % pid)).get("overrides", []))
 	_patterns[pid] = await _get_list("/parts/%s/component-patterns" % pid)
+	if int(_versions.get(pid, 0)) != version_at_start:
+		# V-3: a paint's PUT landed while this read was on its way. What the PUT returned is newer than what was read: keep its override
+		# list (and the occurrence colours it mirrored) and take everything else from this read.
+		var newer: Dictionary = (_model["parts"] as Dictionary).get(pid, {})
+		if newer.has("appearance_overrides"):
+			entry["appearance_overrides"] = newer["appearance_overrides"]
+		else:
+			entry.erase("appearance_overrides")
+		for occ_id in (newer.get("occurrences", {}) as Dictionary):
+			if (entry["occurrences"] as Dictionary).has(occ_id):
+				entry["occurrences"][occ_id]["color"] = newer["occurrences"][occ_id].get("color")
+		print("DIDSA VR: paint: a read of Part %s finished after a paint; kept the newer override list" % pid)
 	_model["parts"][pid] = entry
 	_loaded[pid] = true
+	_inflight.erase(pid)
+	_load_finished.emit()
 
 
 static func _set_overrides(entry: Dictionary, listed: Array) -> void:
@@ -385,7 +415,14 @@ func apply(row: Dictionary, root: String, nodes: Array, world_root: String) -> D
 		after = (before if before != null else {}).duplicate()
 		for k in brush:
 			after[k] = brush[k]
+	var loading := not _inflight.is_empty()
 	var result: Dictionary = await _store(root, record, after, nodes, world_root)
+	if loading and result["ok"]:
+		# V-3: the nodes were not in the model yet when the paint landed (the read was still running), so repaint() left them as the glb had them. Once
+		# the read is in (it keeps this paint's override list), show the paint.
+		await ensure_loaded(root)
+		repaint(nodes, world_root)
+	_log_paint(row, root, result, loading, nodes)
 	if not result["ok"]:
 		return result
 	_remember_colour(str(brush.get("colour", "")))
@@ -397,6 +434,29 @@ func apply(row: Dictionary, root: String, nodes: Array, world_root: String) -> D
 			not temporary)
 	message.emit(("%s %s (temporary: mates relaxed)." if temporary else "%s %s.") % ["Cleared" if after == null else "Painted", str(row.get("label", ""))])
 	return result
+
+
+func _log_paint(row: Dictionary, root: String, result: Dictionary, loading_at_start: bool, nodes: Array) -> void:
+	## V-3: one line per paint for `adb logcat` (filter "DIDSA VR: paint"), so one reproduction names the cause of "the paint shows nothing until the
+	## next one": the row, the scope, temporary or not, whether the PUT worked, how many overrides came back, how many meshes were rebuilt, the colour the
+	## first painted node wears afterwards, whether a clip (room / section) shader was on it, and whether a read was running.
+	var members: Array = row.get("members", [])
+	var node = members[0] if not members.is_empty() else null
+	var colour := "-"
+	var clip := false
+	if node is MeshInstance3D and is_instance_valid(node):
+		var m: Material = node.material_override
+		if m == null and node.mesh != null and node.mesh.get_surface_count() > 0:
+			m = node.get_surface_override_material(0) if node.get_surface_override_material(0) != null else node.mesh.surface_get_material(0)
+		clip = ClipLook.is_clip(m)
+		if m is BaseMaterial3D:
+			colour = (m as BaseMaterial3D).albedo_color.to_html()
+		elif m is ShaderMaterial:
+			var c = (m as ShaderMaterial).get_shader_parameter("albedo_color")
+			colour = (c as Color).to_html() if c is Color else "-"
+	print("DIDSA VR: paint: row=%s root=%s temporary=%s ok=%s overrides=%s rebuilt=%s colour_after=%s clip=%s load_running_at_start=%s load_running_now=%s nodes=%d error=%s" % [
+		str(row.get("id", "")), root, str(result.get("temporary", false)), str(result.get("ok", false)), str(result.get("overrides", "-")),
+		str(result.get("rebuilt", "-")), colour, str(clip), str(loading_at_start), str(not _inflight.is_empty()), nodes.size(), str(result.get("error", ""))])
 
 
 func _own_appearance(root: String, record: Dictionary) -> Variant:
@@ -430,13 +490,15 @@ func _store(root: String, record: Dictionary, appearance: Variant, nodes: Array,
 	_busy = false
 	if not r.get("ok", false):
 		return {"ok": false, "error": str(r.get("error", "the backend refused the paint")), "temporary": false}
+	_versions[root] = int(_versions.get(root, 0)) + 1
 	var entry: Dictionary = (_model["parts"] as Dictionary).get(root, {"occurrences": {}})
-	_set_overrides(entry, (r["json"] as Dictionary).get("overrides", []) if r.get("json") is Dictionary else [])
+	var listed: Array = (r["json"] as Dictionary).get("overrides", []) if r.get("json") is Dictionary else []
+	_set_overrides(entry, listed)
 	_mirror_legacy(entry, record, appearance)
 	_model["parts"][root] = entry
-	repaint(nodes, world_root)
+	var rebuilt := repaint(nodes, world_root)
 	document_changed.emit()
-	return {"ok": true, "error": "", "temporary": false}
+	return {"ok": true, "error": "", "temporary": false, "overrides": listed.size(), "rebuilt": rebuilt}
 
 
 static func _mirror_legacy(entry: Dictionary, record: Dictionary, appearance: Variant) -> void:
