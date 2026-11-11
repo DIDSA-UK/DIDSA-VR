@@ -19,13 +19,22 @@ The file-format and desktop-mode items from the same notes are in `DIDSA-UK/DIDS
 | V-4 | Mate preview ghost sometimes missing though Create moves the parts | Bug | **Medium: several silent no-ghost paths; instrument first** |
 | V-5 | Fix / Float: controlled from the Assembly Tree, not the wheel; the wheel gets only "Relax fix" | Decision | n/a |
 | V-6 | "Relax fix mates": grab a grounded assembly and carry it, mates intact; temporary | Feature | n/a (owner's rules below) |
+| V-7 | Assembly Tree, phase T1 of `feature-tree-review-2026-11-11.md`: state icons, selection both ways, a bottom action bar (Fix / Float, view-only Hide, Isolate, Rename, Room, Delete), stays current | Feature + bugs (confirmed) | High (read) |
 | V-8 | Sketch dimension: the keyboard opens behind the sketch sheet | Bug + placement design | High (read: the geometry) |
 | V-9 | Saving: VR writes one whole-session snapshot to a new file; align with the flat app's one-file-per-Part Save | Design gap (data divergence) | High (read) |
-| V-7 | Assembly Tree, phase T1 of `feature-tree-review-2026-11-11.md`: state icons, selection both ways, a bottom action bar (Fix / Float, view-only Hide, Isolate, Rename, Room, Delete), stays current | Feature + bugs (confirmed) | High (read) |
 
-Suggested order: **V-1 → V-7 → V-5 → V-6**, and **V-9** before assembly import (DIDSA-CAD F-6) reaches VR, with **V-2 and V-8** (small, causes known) any time, and **V-3, V-4** started by their instrumentation steps in
-parallel (each is a small first PR: logs plus a test), then fixed once the cause is known.
-V-7 brings Fix / Float (V-5); V-6 adds the Relax fix wedge to `scripts/ui/wheel_flows.gd` `_mates_entries`.
+**Work packages for the implementation session** (one PR each, in this order; each item's section has the detail and the tests):
+
+| # | Package | Why this order | Needs the owner afterwards |
+|---|---|---|---|
+| 1 | **V-2** (latch leak) and **V-8** (keyboard dock) | Small, causes known | Re-test both on the headset |
+| 2 | **V-3 and V-4, instrumentation PRs**: the logging, the V-3 load race fix, V-4's "why no ghost" note | Cheap; the logs name the remaining causes | Reproduce once and send `adb logcat` lines |
+| 3 | **V-1** (refusals reach the hand, any depth, "(fixed)" while cycling) | Small; V-7 and V-6 build on its refusal function | |
+| 4 | **V-7** = tree phase T1 (`feature-tree-review-2026-11-11.md`), including Fix / Float (V-5) | The tree is where Fix / Float lives now | Headset check of the bar and the cue |
+| 5 | **V-6** (Relax fix) with the mates-ring change (V-5: eight wedges incl. Tree) | Needs V-1's refusals and V-7's Fix / Float | Feel of the carry |
+| 6 | **V-9** (Save one file per Part) | Larger; must land before assembly import (DIDSA-CAD F-6) reaches VR | Edit in VR, open in the flat app |
+| 7 | **V-3 / V-4 fixes** once the logs are in | Depends on 2 | |
+| 8 | Tree phases **T2, T3** | After T1 has been used | |
 
 Vocabulary the notes use: **"fix mate"** = an occurrence's `fixed` (grounded) flag; the backend has no "fix" mate type
 (`MateType` is coincident, concentric, parallel, distance, angle, gear, rack_pinion, screw, limit_*).
