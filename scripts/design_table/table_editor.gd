@@ -1827,7 +1827,7 @@ func _edit_dimension_value(id: String) -> void:
 	var current: Dictionary = session.dimension_value(id)
 	if not bool(current["ok"]):
 		return
-	table._main.open_keyboard_for("%.2f" % float(current["value"]), func(text: String) -> void: await edit_dimension_typed(id, text),
+	table.open_keyboard("%.2f" % float(current["value"]), func(text: String) -> void: await edit_dimension_typed(id, text),
 		{"title": "Dimension (%s)" % str(current["unit"])})
 
 
@@ -1999,7 +1999,7 @@ func _type_dimension(ghost_key: String) -> void:
 	var g: Dictionary = session.ghost(ghost_key)
 	if g.is_empty():
 		return
-	table._main.open_keyboard_for("%.2f" % float(g["value"]), func(text: String) -> void: await dimension_typed(ghost_key, text),
+	table.open_keyboard("%.2f" % float(g["value"]), func(text: String) -> void: await dimension_typed(ghost_key, text),
 		{"title": "%s (%s)" % [g["label"], g["unit"]]})
 
 
@@ -2207,7 +2207,7 @@ func on_option(option_id: String) -> void:
 				await session.finish_spline()
 		"text_edit":
 			if session != null:
-				table._main.open_keyboard_for(session.text_content, func(text: String) -> void:
+				table.open_keyboard(session.text_content, func(text: String) -> void:
 					session.text_content = text.strip_edges()
 					_update_options(), {"title": "Text to place"})
 		"text_font":
@@ -2229,7 +2229,7 @@ func on_option(option_id: String) -> void:
 
 
 func type_option(key: String, title: String) -> void:
-	table._main.open_keyboard_for("%.2f" % float(options[key]), func(text: String) -> void: option_typed(key, text), {"title": title})
+	table.open_keyboard("%.2f" % float(options[key]), func(text: String) -> void: option_typed(key, text), {"title": title})
 
 
 func option_typed(key: String, text: String) -> void:

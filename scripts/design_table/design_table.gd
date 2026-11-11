@@ -506,6 +506,40 @@ func remember_layout() -> void:
 	_main.app_settings().set_table_slab_size(slab_size)
 
 
+func keyboard_dock() -> Transform3D:
+	## V-8, console frame: the pose of the TOP edge's middle of a keyboard docked for typing at the table. It is on your side of the sketch sheet's hinge
+	## (in front of the slab's front edge, a hand's width beyond the tool deck's lower edge and a little below it), and the keyboard leans back about
+	## its top edge like a laptop's (30 degrees up from vertical-facing-you once the console's own lean-back is counted), hanging below that point.
+	## Same place for every value typed here, so it never covers the sketch and is never behind it.
+	var lean := deg_to_rad(90.0 - deck_lean_degrees)
+	var deck_bottom_z := slab_size.y * 0.5 + deck_gap + sin(lean) * tools_size.y
+	var deck_bottom_y := -0.01 - cos(lean) * tools_size.y
+	var tilt := deg_to_rad(lean_degrees + 30.0)
+	return Transform3D(Basis(Vector3.RIGHT, -tilt), Vector3(0.0, deck_bottom_y - 0.02, deck_bottom_z + 0.05))
+
+
+func keyboard_obstacles() -> Array:
+	## V-8: the quads (world frame) a keyboard opened for the table must not sit behind: the sketch sheet while a sketch is open.
+	var quads: Array = []
+	if editing_sketch() and window_anchor_normal != Vector3.ZERO:
+		var z := window_anchor_normal.normalized()
+		var x := Vector3.RIGHT
+		var y := z.cross(x).normalized()
+		x = y.cross(z).normalized()
+		quads.append({"xf": global_transform * Transform3D(Basis(x, y, z), window_anchor), "size": sheet_window_m})
+	return quads
+
+
+func open_keyboard(initial_text: String, on_confirm: Callable, options: Dictionary = {}) -> void:
+	## Every number / text typed at the table goes through here (a dimension, a feature value, an option, a rename): the keyboard opens docked at
+	## keyboard_dock() in this console's frame and follows the console (V-8).
+	var docked := options.duplicate()
+	docked["anchor"] = self
+	docked["dock"] = keyboard_dock()
+	docked["obstacles"] = Callable(self, "keyboard_obstacles")
+	_main.open_keyboard_for(initial_text, on_confirm, docked)
+
+
 func _layout_deck() -> void:
 	## The deck's top edge starts deck_gap in front of the slab's front edge, just under it (moves with the slab when it is resized).
 	var lean := deg_to_rad(90.0 - deck_lean_degrees)
@@ -947,7 +981,7 @@ func rename_part() -> void:
 	if seated == null or editor.part_id == "":
 		return
 	var node := seated
-	_main.open_keyboard_for(str(node.name), func(text: String) -> void: await rename_part_to(text), {"mode": "full", "title": "Part name", "confirm_label": "Rename"})
+	open_keyboard(str(node.name), func(text: String) -> void: await rename_part_to(text), {"mode": "full", "title": "Part name", "confirm_label": "Rename"})
 
 
 func rename_part_to(new_name: String) -> bool:

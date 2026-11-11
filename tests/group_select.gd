@@ -12,6 +12,7 @@ const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const FakeApi := preload("res://tests/fake_room_api.gd")
 const CommandStack := preload("res://scripts/command_stack.gd")
+const TwoHandModel := preload("res://scripts/two_hand_model.gd")
 
 const STUB := "extends Node
 var relaxed := false
@@ -184,6 +185,15 @@ func _initialize() -> void:
 	hand.global_position = p0 + Vector3(0.01, 0, 0)
 	await tick()
 	print("SMOKE moving the hand inside the dead zone commits nothing: ", not hand._latch.is_empty() and hand.held_node == null and kb[0].global_position.is_equal_approx(p0))
+	# V-2: while the grip is latched the hand is busy: the world gesture must not drag the model (it did, inside the dead zone)
+	var gesture := TwoHandModel.new()
+	print("SMOKE V-2 a latched grip marks the hand busy, so the whole-model gesture treats it as not free: ", hand.get_meta("grip_latched", false) == true and not gesture._hand_free_ignoring_button(hand))
+	hand.selected_node = kb[1] # (a laser-selected part: the stick / A / B turn and push it, but not while a grip is latched)
+	var sel_before: Transform3D = kb[1].global_transform
+	hand._physics_process(0.5)
+	print("SMOKE V-2 ...and the laser-selected part is not turned or pushed meanwhile, the model root is unmoved: ", kb[1].global_transform.is_equal_approx(sel_before) and kb[0].global_position.is_equal_approx(p0))
+	hand.selected_node = null
+	gesture.free()
 	hand._on_button_pressed("trigger_click")
 	print("SMOKE a trigger click widens what will be taken by one level, and says so: ", hand._latch["level"] == 1 and messages.size() > 0 and messages.back() == "Bolt < [Drive]")
 	hand._on_button_pressed("trigger_click")
@@ -192,6 +202,7 @@ func _initialize() -> void:
 	var steps := stack.history_labels().size()
 	hand.global_position = p0 + Vector3(0.1, 0, 0)
 	await tick()
+	print("SMOKE V-2 leaving the dead zone clears the busy mark (the hold's own markers take over): ", hand.get_meta("grip_latched", false) == false)
 	print("SMOKE leaving the dead zone takes the chosen level: the whole drive is held, anchored on the bolt gripped: ", hand._latch.is_empty() and hand._held_group != null and hand.held_node == kb[0] and hand._held_group.members.size() == 2)
 	print("SMOKE ...the sphere and brackets are gone: ", root.find_child("GroupDeadZone", true, false) == null and root.find_child("GroupBrackets", true, false) == null)
 	hand.global_position = p0 + Vector3(0.4, 0.1, 0)

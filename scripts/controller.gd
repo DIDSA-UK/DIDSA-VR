@@ -218,8 +218,8 @@ func _physics_process(delta: float) -> void:
 		drive_tool.feed(get_vector2("primary"), is_button_pressed("ax_button"), is_button_pressed("by_button"))
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
-	if selected_node == null or _table_owns_input() or wheel_is_open():
-		return # (the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
+	if selected_node == null or _table_owns_input() or wheel_is_open() or not _latch.is_empty():
+		return # (a latched grip: the stick and A / B must not turn or push the laser-selected part either, V-2; the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
 
 	var stick: Vector2 = get_vector2("primary")
 	# The laser on the wrist tablet / a floating window means the stick scrolls
@@ -460,6 +460,7 @@ func _begin_latch(target: Node3D) -> void:
 		_begin_part_hold(target) # nothing wider to choose
 		return
 	_latch = {"target": target, "levels": levels, "level": 0, "at": global_position, "nodes": [], "cues": []}
+	set_meta("grip_latched", true) # (V-2: the world gesture in two_hand_model.gd must not drag the model while the dead zone is waited out)
 	var sphere := GroupCues.sphere(group_deadzone)
 	_scene_root().add_child(sphere)
 	sphere.global_position = global_position
@@ -496,6 +497,7 @@ func _end_latch() -> void:
 	GroupCues.clear(_latch.get("nodes", []))
 	GroupCues.clear(_latch.get("cues", []))
 	_latch = {}
+	set_meta("grip_latched", false)
 
 
 func _update_latch() -> void:

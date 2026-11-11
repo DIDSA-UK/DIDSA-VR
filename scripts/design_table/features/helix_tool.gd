@@ -147,7 +147,7 @@ func _ask(ed, key: String) -> void:
 	var titles := {"h_diameter": "Diameter at the start (mm, through the wire centre)", "h_taper_value": "End diameter (mm)" if _o(ed)["h_taper"] == "end_diameter" else "Taper angle (degrees, + widens)"}
 	var title: String = titles.get(key, "Pitch: height per turn (mm, negative goes the other way)" if key.begins_with("h_pitch_") or key.begins_with("h_ppitch_")
 		else ("Distance from the start (mm)" if key.begins_with("h_at_") else "Turns"))
-	ed.table._main.open_keyboard_for("%.2f" % _value_of(ed, key), func(text: String) -> void: type_value(ed, key, text), {"title": title})
+	ed.table.open_keyboard("%.2f" % _value_of(ed, key), func(text: String) -> void: type_value(ed, key, text), {"title": title})
 
 
 func _value_of(ed, key: String) -> float:

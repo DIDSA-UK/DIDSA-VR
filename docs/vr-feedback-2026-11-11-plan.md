@@ -41,6 +41,16 @@ Vocabulary the notes use: **"fix mate"** = an occurrence's `fixed` (grounded) fl
 **"Hand disc"** = the badge disc above the right hand (`ui/tool_badge.gd`) and the wrist hint panel next to it (`ui/wrist_hint.gd`,
 fed by `ui/wheel_flows.gd` `say()` / `prompt_text()`).
 
+## Progress notes (implementation session, 11 Nov 2026)
+
+Each package is one PR (stacked: each PR's base is the branch of the one before it). What was built, what differs from the plan, what is unverified.
+
+**Package 1: V-2 + V-8 (built; headless only).**
+- **V-2.** The plan's cause was right: `controller._begin_latch` / `_end_latch` now set `grip_latched` on the hand and `two_hand_model._hand_free_ignoring_button` reads it, so the one-hand world gesture no longer drags the model inside the dead zone. The stick / A / B manipulation of the laser-selected part is also skipped while `_latch` is non-empty. Tests: `tests/group_select.gd` (the hand is not free while latched; the model and the selected part are unmoved; the mark clears on commit). A headless test cannot press a grip, so "the model drifted during the latch" is asserted through the arbitration meta and the `_physics_process` path, not through a real grip press; the owner's re-test below is the real check.
+- **V-8.** `popup_keyboard.gd` takes `anchor` + `dock` (the pose of the keyboard's **top edge** in the anchor's frame, so the keypad and the full keyboard hang from the same point) and `obstacles` (a callable giving world quads). `design_table.gd` `open_keyboard()` / `keyboard_dock()` / `keyboard_obstacles()`; every `table._main.open_keyboard_for` in `scripts/design_table/` now goes through `table.open_keyboard`. The dock sits below the tool deck's lower edge (not the slab's front edge as the plan's prose says: the deck occupies the strip directly in front of the slab, so a keyboard "at the front edge" would sit on the deck), leaning back like a laptop (30 degrees up once the console's 22 degree lean is counted). A pose the user carries it to is kept in the console's frame. The clear-view check (eyes to the keyboard's middle, against panel quads in the `diegetic_panels` group and the sketch sheet's quad) runs for every placement except a pose the user dropped it at. Tests: `tests/keyboard_dock.gd`.
+- **Not built:** the optional "typed value shown on the dimension while typing"; a below-the-window placement for floating windows (the browser, the calculator, the tablet's fields): only the clear-view check applies to them. The sketch sheet and deck constants are guesses until looked at on the headset.
+- **Owner re-test (headset):** V-2: grip a part in a sub-assembly, wiggle inside the sphere, cycle with the trigger, leave: nothing should move until you leave the sphere. V-8: with a sketch open, double-pull a dimension: is the pad in easy reach, readable, clear of the sketch and the deck? Carry it somewhere else, close and reopen: it should come back to the same spot relative to the table; move the table and reopen: it should have moved with it.
+
 ---
 
 ## V-3: paint shows nothing until the next paint (medium confidence: instrument first)

@@ -82,6 +82,11 @@ var _seen_revision := -1
 var surface ## LaserSurface: hover, claim, frozen press
 var handle ## PanelHandle: the grab pill at the lower edge
 var _moved_poses := {} ## layout ("numeric" / "full") -> the Transform3D the user last dropped the keyboard at
+var _moved_local := {} ## V-8: layout -> the pose last dropped at while DOCKED, in the anchor's frame (so it stays put relative to the console, whatever happens to the console)
+var _moved_anchor: Node3D = null ## the anchor `_moved_local` belongs to
+var _dock_anchor: Node3D = null ## V-8: this opening's anchor (options "anchor" + "dock"), or null
+var _obstacles := Callable() ## V-8: options "obstacles": () -> Array of {"xf": Transform3D (world, +Z = the quad's face), "size": Vector2} the keyboard must not sit behind
+const MIN_EYE_DISTANCE := 0.3 ## metres: the clear-view check never brings the keyboard closer to the eyes than this
 var _hovering: bool:
 	get: return surface != null and surface.hovering
 var _pressed: bool:
@@ -125,6 +130,8 @@ func open_for(initial_text: String, on_confirm: Callable, options: Dictionary = 
 	## just doing nothing). `options`: see this file's docstring (mode/title/
 	## confirm_label/live/on_input). Existing numeric callers pass none.
 	_options = options
+	_dock_anchor = options.get("anchor") as Node3D if options.get("anchor") is Node3D and options.has("dock") else null
+	_obstacles = options.get("obstacles", Callable())
 	_mode = str(options.get("mode", "numeric"))
 	_live = options.get("on_input", Callable()) if bool(options.get("live", false)) else Callable()
 	_layer = "abc"
@@ -165,17 +172,91 @@ func handle_in_reach(hand: Node3D) -> bool:
 
 
 func _on_handle_dropped(_hand: XRController3D) -> void:
+	if _dock_anchor != null and is_instance_valid(_dock_anchor):
+		_moved_local[_mode] = _dock_anchor.global_transform.affine_inverse() * global_transform # V-8: kept in the console's frame, not the world's
+		_moved_anchor = _dock_anchor
+		return
 	_moved_poses[_mode] = global_transform
+
+
+func dock_transform() -> Transform3D:
+	## V-8: where a docked keyboard of the current layout goes, in the world: the options' dock is the pose of its TOP edge's middle in the
+	## anchor's frame (+Z = the face towards you), so the keyboard hangs below that point whatever its size.
+	var top: Transform3D = _dock_anchor.global_transform * (_options["dock"] as Transform3D)
+	return top * Transform3D(Basis.IDENTITY, Vector3(0.0, -panel_size.y * 0.5, 0.0))
 
 
 func _place_in_front_of_camera() -> void:
 	if _camera == null:
 		return
+	if _dock_anchor != null and is_instance_valid(_dock_anchor):
+		if _moved_local.has(_mode) and _moved_anchor == _dock_anchor:
+			global_transform = _dock_anchor.global_transform * (_moved_local[_mode] as Transform3D) # where you left it, relative to the console (your choice: not second-guessed)
+			return
+		global_transform = dock_transform()
+		_clear_the_view()
+		return
+	if not _place_free():
+		_clear_the_view()
+
+
+func _clear_the_view() -> void:
+	## V-8 safety net for every placement: look from the eyes to the keyboard's middle; if a panel (a window, the sketch sheet) is in the way, bring the
+	## keyboard towards you until it is clear (never closer than MIN_EYE_DISTANCE). There are no colliders on the panels, so the test is against their quads.
+	if _camera == null:
+		return
+	var eye := _camera.global_position
+	var to_kb := global_position - eye
+	var dist := to_kb.length()
+	if dist < 0.001:
+		return
+	var dir := to_kb / dist
+	var nearest := dist
+	for q in _blocking_quads():
+		var t := _ray_quad(eye, dir, q["xf"] as Transform3D, q["size"] as Vector2)
+		if t > 0.0 and t < nearest:
+			nearest = t
+	if nearest < dist:
+		var wanted := maxf(nearest - 0.05, MIN_EYE_DISTANCE)
+		global_position = eye + dir * minf(wanted, dist)
+
+
+func _blocking_quads() -> Array:
+	var quads: Array = []
+	for node in get_tree().get_nodes_in_group("diegetic_panels"):
+		var panel := node as Node3D
+		if panel == null or panel == self or not panel.is_visible_in_tree():
+			continue
+		var size = panel.get("panel_size")
+		if size is Vector2:
+			quads.append({"xf": panel.global_transform, "size": size})
+	if _obstacles.is_valid():
+		quads.append_array(_obstacles.call())
+	return quads
+
+
+static func _ray_quad(origin: Vector3, dir: Vector3, xf: Transform3D, size: Vector2) -> float:
+	## Distance along the ray to the quad (a rectangle in xf's local XY plane, centred), or -1 when it misses.
+	var normal := xf.basis.z.normalized()
+	var denom := dir.dot(normal)
+	if absf(denom) < 0.0001:
+		return -1.0
+	var t := (xf.origin - origin).dot(normal) / denom
+	if t <= 0.0:
+		return -1.0
+	var local := xf.affine_inverse() * (origin + dir * t)
+	if absf(local.x) <= size.x * 0.5 and absf(local.y) <= size.y * 0.5:
+		return t
+	return -1.0
+
+
+func _place_free() -> bool:
+	## The old placement, in front of your eyes. True when it reused the pose the user dropped it at.
 	if _moved_poses.has(_mode):
 		var kept: Transform3D = _moved_poses[_mode]
 		if kept.origin.distance_to(_camera.global_position) <= moved_pose_reach:
 			global_transform = kept # where you left it
-			return
+			return true
 		_moved_poses.erase(_mode) # you've walked away from it: start fresh in front of you
 	var forward := -_camera.global_transform.basis.z
 	forward.y = 0.0
@@ -203,6 +284,7 @@ func _place_in_front_of_camera() -> void:
 	if tilt != 0.0:
 		basis = basis * Basis(Vector3.RIGHT, -tilt) # rotates the panel's +Z (front) face up towards the sky
 	global_transform = Transform3D(basis, target_position)
+	return false
 
 
 func apply_theme() -> void:
