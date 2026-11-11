@@ -45,7 +45,7 @@ func _initialize() -> void:
 			mismatches.append(str(c["name"]))
 			print("  ", c["name"], ": got ", got, " expected ", c["expected"])
 	print("SMOKE golden vectors: ", (doc["cases"] as Array).size(), " cases, mismatches ", mismatches)
-	_check((doc["cases"] as Array).size() >= 16 and mismatches.is_empty(), "every vector gives the reference's answer")
+	_check((doc["cases"] as Array).size() >= 25 and mismatches.is_empty(), "every vector gives the reference's answer")
 	_check(FileLookup.name_key("parts/Bracket.didsa") == FileLookup.name_key("old/bracket.DIDSAprt") and FileLookup.name_key("Bracket.DIDSACAD") == "bracket", "the name key sets the native extension and the case aside")
 	_check(FileLookup.name_key("a\\b\\Frame A.didsa") == "frame a" and FileLookup.name_key("notes.txt") == "notes.txt", "...takes the last segment of either slash, and leaves other files alone")
 	_check(FileLookup.is_native("x/Frame.DIDSAPRT") and not FileLookup.is_native("x/Frame.step"), "native files are told apart in any case")

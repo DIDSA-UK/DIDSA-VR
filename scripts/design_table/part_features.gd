@@ -51,20 +51,26 @@ static func extrude_request(sketch_feature_id: String, boss: bool, start_distanc
 	return _good("extrude-features", body)
 
 
-static func revolve_request(sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array) -> Dictionary:
-	## Spins the sketch's closed profile `angle` degrees (0-360) about one of the sketch's lines. Same Boss / Cut rule as extrude.
+static func revolve_request(sketch_feature_id: String, sketch_id: String, axis_line_id: String, angle: float, boss: bool, target_body_ids: Array, extra: Dictionary = {}) -> Dictionary:
+	## Spins the sketch's closed profile `angle` degrees (0-360) about one of the sketch's lines. Same Boss / Cut rule as extrude. `extra` may hold
+	## `thickness` (a thin wall, > 0) and `thickness_direction`: a closed profile's wall reads against its material, an open chain's (outward = away
+	## from the axis, inward = toward it) against the axis.
 	if not boss and target_body_ids.is_empty():
 		return _bad("There is nothing to cut yet.")
 	if axis_line_id == "":
 		return _bad("Pick the line to spin it about first.")
 	if angle <= 0.0 or angle > 360.0:
 		return _bad("The angle has to be more than 0 and at most 360 degrees.")
-	return _good("revolve-features", {
+	if extra.has("thickness") and float(extra["thickness"]) <= 0.0:
+		return _bad("The wall thickness has to be bigger than zero.")
+	var body := {
 		"sketch_feature_id": sketch_feature_id,
 		"axis_ref": {"sketch_id": sketch_id, "entity_type": "line", "entity_id": axis_line_id},
 		"angle": angle,
 		"mode": "boss" if boss else "cut",
-		"target_body_ids": target_body_ids})
+		"target_body_ids": target_body_ids}
+	body.merge(extra)
+	return _good("revolve-features", body)
 
 
 static func shell_request(body_id: String, faces: Array, thickness: float, direction: String) -> Dictionary:

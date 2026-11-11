@@ -684,3 +684,23 @@ PATCH /document/parts/{id}/features/{feature_id}/sketch-origin    {"origin": <re
   `scripts/section_tool.gd`), makes no call to this endpoint at all, and is
   built (`docs/status.md`'s Milestone 4 section).
 - `backend/app/session_context.py` — session id resolution.
+
+## Added 2026-11-11 (DIDSA-CAD `docs/flutter-testing-feedback-2026-11-11-plan.md`)
+
+- **Thin Revolve (V3).** `POST /document/parts/{id}/revolve-features` and its PATCH take `thickness` (> 0, else 400) and `thickness_direction`
+  (`outward` | `inward` | `symmetric`, default `outward`); the response carries both (`thickness: null` = a solid revolve). On PATCH an omitted
+  `thickness` keeps the stored one and an explicit `null` goes back to a solid revolve. A closed profile's wall is read against its material
+  (outward = away from it); an **open chain's** against the axis (outward = away from the axis, inward = toward it). 422
+  `{"type": "thin_revolve_failed", "reason": ...}` with `inward_collapsed`, `offset_failed`, `invalid_ring`, `crosses_axis`, `near_axis`,
+  `revolve_failed`. Holes in a closed profile are not thinned. Native file: `thickness` / `thickness_direction` are written only when set.
+- **`profile.open_chain`** (in `GET /sketch/sketches/{id}/profile` and the sketch response's `profile`): true when the sketch has no closed
+  profile but exactly one open chain of lines / arcs (construction entities do not count). Only a thin Revolve can use such a sketch (a solid
+  one still needs a closed profile, 400 otherwise).
+- **File lookup `likely`** (V1): see `scripts/file_lookup.gd` and the vectors; nothing on the wire.
+- **Sketch alignment and the resolved frame (V2).** `PATCH /document/parts/{id}/features/{feature_id}/sketch-alignment` with `{"x_axis_ref": <flat SketchOrEdgeRef> | null}` (a straight Body
+  edge `{"edge_ref": {...}}` or a Sketch Line `{sketch_id, entity_type: "line", entity_id}` of an EARLIER sketch) makes its direction (projected into the plane) the sketch's +X; flip /
+  turns then act relative to it. 422 types: `alignment_edge_not_straight`, `alignment_reference_not_upstream`, `alignment_edge_parallel_to_normal`. Every sketch-feature row now
+  carries `x_axis_ref` and the whole resolved frame: `resolved_frame_origin`, `resolved_x_axis`, `resolved_y_axis`, `resolved_normal` (world / part frame, mm; a flipped sketch's frame is
+  left-handed: x cross y = -normal) and `aligned_x_axis` / `aligned_y_axis` (the anchor axes after the alignment, before flip / turns). A point at (u, v) is at
+  `resolved_frame_origin + u * resolved_x_axis + v * resolved_y_axis`. `resolved_origin` keeps its old meaning (set only for a stored origin that resolves). A lost alignment reports
+  `x_axis_ref.edge_ref` / `x_axis_ref.sketch_entity_ref` in `lost_references` and the frame is the unaligned one.

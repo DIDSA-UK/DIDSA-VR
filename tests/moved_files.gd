@@ -21,6 +21,22 @@ class FakeMain extends Node:
 	var files: Array = []
 	var chosen: Array = []
 	var left: Array = []
+	var dont_ask := false
+	var folder_match_dont_ask := false
+	var used_likely := 0
+	var left_likely := 0
+
+	func use_likely_references() -> void:
+		used_likely += 1
+
+	func leave_likely_references() -> void:
+		left_likely += 1
+
+	func set_folder_match_dont_ask(on: bool) -> void:
+		folder_match_dont_ask = on
+
+	func ask_folder_match_again() -> void:
+		pass
 
 	func reference_review() -> Dictionary:
 		return review
@@ -163,6 +179,58 @@ func _initialize() -> void:
 	_check(index.any(func(e) -> bool: return e["path"] == "Plate.didsa" and e["part_id"] == "not-the-plate"), "...with each file's root Part id")
 	_check(FileIndex.relative_to(DIR.path_join("a/b.didsa"), [DIR]) == "a/b.didsa" and FileIndex.relative_to("user://other/b.didsa", [DIR]) == "", "a file outside the folders has no reference path")
 
+	# Item 1b / 1c (DIDSA-CAD docs/flutter-testing-feedback-2026-11-11-plan.md): a 3-level assembly whose occurrences carry no ids, under a new
+	# project root (every file is under proj/ and every stored path lacks it). Not accepted: level 1 is "likely", never used, and the levels
+	# below are not visited; accepted: every level resolves; one reference found by id teaches the shift to the id-less ones below it.
+	var three := "three"
+	_write(three + "/proj/parts/Sub.didsa", _part("sub", [_occ("o-leaf", "parts/Leaf.didsa")]))
+	_write(three + "/proj/parts/Leaf.didsa", _part("leaf"))
+	var three_root := _write(three + "/Root3.didsa", _part("root3", [_occ("o-sub", "parts/Sub.didsa")]))
+	var asked := NativeCompose.compose(three_root)
+	var sub_review := _review_of(asked, "o-sub")
+	_check(asked["resolved"] == 0 and sub_review.get("result") == "likely" and sub_review["candidates"].map(func(c): return c["path"]) == ["proj/parts/Sub.didsa"],
+		"item 1b: an id-less reference whose file moved with the folder is likely, with its one candidate, and is not used (%s)" % str(sub_review.get("result")))
+	_check(_review_of(asked, "o-leaf").is_empty() and _occ_of(asked, "root3", "o-sub")["resolved_part_id"] == null, "...and the levels below it are not visited")
+	_check(NativeCompose.unresolved_note(asked).contains("1 file looks like it moved with the project folder"), "the status note says so (%s)" % NativeCompose.unresolved_note(asked))
+	var taken := NativeCompose.compose(three_root, [], {}, true)
+	_check(taken["resolved"] == 2 and taken["review"].is_empty(), "accept_likely: every level resolves (%d)" % taken["resolved"])
+	_check(_occ_of(taken, "root3", "o-sub")["external_ref"] == "proj/parts/Sub.didsa" and _occ_of(taken, "sub", "o-leaf")["external_ref"] == "proj/parts/Leaf.didsa" and _occ_of(taken, "sub", "o-leaf")["resolved_part_id"] == "leaf",
+		"...each level's external_ref is corrected")
+	_check(taken["relinked"].all(func(m) -> bool: return m["via"] == "folder"), "...and listed as found by folder")
+	var three_id := _write(three + "/Root3b.didsa", _part("root3b", [_occ("o-sub", "parts/Sub.didsa", "sub")]))
+	var learned := NativeCompose.compose(three_id)
+	_check(learned["relinked"].size() == 1 and learned["relinked"][0]["via"] == "id", "item 1c: the reference with an id is found by it")
+	var leaf_review := _review_of(learned, "o-leaf")
+	_check(leaf_review.get("result") == "likely" and leaf_review["candidates"].map(func(c): return c["path"]) == ["proj/parts/Leaf.didsa"],
+		"...and teaches the shift: the id-less reference below it is likely, its children visited because Sub resolved")
+	var wrong_id := _write(three + "/Root3c.didsa", _part("root3c", [_occ("o-sub", "parts/Sub.didsa", "sub"), _occ("o-other", "parts/Other.didsa", "someone-else")]))
+	_write(three + "/proj/parts/Other.didsa", _part("not-someone-else"))
+	var wrong := NativeCompose.compose(wrong_id)
+	_check(_review_of(wrong, "o-other").get("result") == "suggest" and _occ_of(wrong, "root3c", "o-other")["resolved_part_id"] == null, "a stored id the shifted file does not carry is never used (a suggestion)")
+
+	# main.gd's session answer (in memory only): the real scene, no backend.
+	var main = load("res://scenes/main.tscn").instantiate()
+	main.secrets_file_path = "res://__nonexistent__.cfg"
+	root.add_child(main)
+	await process_frame
+	await process_frame
+	main._note_references(three_root, asked)
+	var pending: Dictionary = main.reference_review()
+	_check(pending["likely"] == 1 and pending["likely_pending"], "main.gd: a likely reference makes the header row pending")
+	main.folder_match_dont_ask = true
+	main.leave_likely_references() # Not now, with Don't ask again this session on
+	_check(main.folder_match_answer == false and not main.reference_review()["likely_pending"], "Not now with the toggle: remembered as 'leave them' and the row goes away")
+	var still_asked: Dictionary = main.compose_native(three_root)
+	_check(still_asked["resolved"] == 0, "...and a later open leaves them as suggestions without asking")
+	main.ask_folder_match_again()
+	_check(main.folder_match_answer == null and not main.folder_match_dont_ask, "Ask again clears the answer")
+	main.folder_match_answer = true # what Use them + the toggle stores
+	var second_open: Dictionary = main.compose_native(three_root)
+	_check(second_open["resolved"] == 2, "a stored 'use them' answer applies to the next open (and room adds, which compose the same way) without asking")
+	main.folder_match_answer = null
+	_check(main.compose_native(three_root)["resolved"] == 0, "nothing is stored on disk: the answer is a plain variable, so a new session asks again")
+	main.queue_free()
+
 	# Files > References, against a stand-in for main.gd.
 	var fake := FakeMain.new()
 	fake.review = {"root": root_path, "relinked": composed["relinked"], "review": composed["review"], "bases": composed["bases"]}
@@ -192,6 +260,22 @@ func _initialize() -> void:
 	_check(locate.slice(1).all(func(r) -> bool: return r["actions"][0]["confirm"]), "...every one of them a different part, so each needs a second press")
 	(locate[0]["actions"][0]["callback"] as Callable).call()
 	_check(pages._references_rows()[0]["id"] != "locate", "Cancel goes back to the review list")
+
+	# The header row for the likely question, and the Use row for a likely candidate (one press).
+	fake.review = {"root": three_root, "relinked": [], "review": asked["review"], "bases": asked["bases"], "likely": 1, "likely_pending": true, "folder_match_answer": null}
+	fake.dont_ask = false
+	var likely_rows: Array = pages._references_rows()
+	var header = likely_rows.filter(func(r) -> bool: return r["id"] == "likely-header")
+	_check(header.size() == 1 and header[0]["actions"].map(func(a): return a["label"]) == ["Use them", "Not now"], "the Files > References header row asks: Use them / Not now")
+	_check(likely_rows.any(func(r) -> bool: return r["id"] == "likely-toggle"), "...with a Don't ask again this session toggle")
+	(header[0]["actions"][0]["callback"] as Callable).call()
+	(header[0]["actions"][1]["callback"] as Callable).call()
+	_check(fake.used_likely == 1 and fake.left_likely == 1, "Use them and Not now reach main")
+	var likely_use = likely_rows.filter(func(r) -> bool: return str(r["id"]).begins_with("use:root3/o-sub:"))
+	_check(likely_use.size() == 1 and not likely_use[0]["actions"][0].get("confirm", false), "a likely candidate is used with one press")
+	fake.review = {"root": three_root, "relinked": [], "review": [], "bases": [], "likely": 0, "likely_pending": false, "folder_match_answer": true}
+	var stored_rows: Array = pages._references_rows()
+	_check(stored_rows.any(func(r) -> bool: return r["id"] == "likely-session" and r["title"].contains("used automatically this session")), "a stored answer is shown with Ask again")
 
 	fake.free()
 	_remove_tree(DIR)

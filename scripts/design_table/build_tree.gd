@@ -102,7 +102,10 @@ static func summary(features: Array, index: int) -> String:
 				text += ", draft %s deg" % number(float(f["draft_angle"]))
 			return text
 		"revolve":
-			return "%s %s deg" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", number(float(f.get("angle", 360.0)))]
+			var rev_text := "%s %s deg" % ["Cut" if str(f.get("mode", "boss")) == "cut" else "Boss", number(float(f.get("angle", 360.0)))]
+			if f.get("thickness") != null:
+				rev_text += ", thin %s mm" % number(absf(float(f["thickness"])))
+			return rev_text
 		"shell":
 			return "%s mm, %d face(s) open" % [number(float(f.get("thickness", 0.0))), (f.get("faces_to_remove", []) as Array).size()]
 		"mirror":

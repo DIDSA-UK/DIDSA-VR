@@ -23,6 +23,7 @@ var configured := true
 var created_parts: Array = [] ## {id, name} for each POST /document/parts
 var feature_warnings: Array = [] ## the non-blocking notes a feature POST / PATCH answers with (the real backend: a loft guide bent to meet a section)
 var track_rows := false ## opt-in: a POST of a feature adds its row to feature_rows (the request body merged in) and a DELETE of it takes the row away, like the real backend
+var profile_open_chain := false ## the sketch's profile answers `open_chain: true` while there is no closed shape (a thin Revolve's open profile)
 var feature_rows := {} ## part id -> the rows GET .../features answers with (and PATCH / cascade DELETE change)
 var origin := false ## whether GET .../sketches/{id} (which creates the sketch's origin point, as the real backend does, lazily) is routed
 var origin_id := ""
@@ -36,6 +37,7 @@ var reference_rows = null ## what GET .../external-references answers with (an A
 var reattached: Array = [] ## [point id, body, vertex / edge index] of each POST .../reattach
 var confirmed: Array = [] ## point ids of each POST .../confirm
 var pinned := {} ## point ids the backend reports as is_locked
+var sketch_flip := false ## GET .../sketches/{id} says the sketch is flipped (the flat app flipped it): an older backend then sends no frame, so the table refuses it
 var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
 var reference_ids := {} ## id -> true: what a convert route asked to be a reference helper made (points and shapes), as the real backend's Sketch.reference_ids
 var edge_vertices_for: Callable = Callable() ## Callable(body id, edge index) -> [vertex index a, vertex index b]: the two corners of a STRAIGHT edge, for POST .../convert-entities/edge on one
@@ -185,7 +187,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		if origin_id == "":
 			origin_id = next_id("pt")
 			points[origin_id] = Vector2.ZERO
-		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
+		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": sketch_flip, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		var made_sketch := {"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")}
 		if body is Dictionary and str(body.get("origin", "")) == "auto":
@@ -381,7 +383,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": pinned.has(id), "is_reference": reference_ids.has(id)})
 		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
-		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop"}, "reference_dimensions": _reference_dimension_rows()})
+		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop", "open_chain": profile_open_chain and not has_loop}, "reference_dimensions": _reference_dimension_rows()})
 	if path.ends_with("/export"):
 		return _ok({"entities": entities, "reference_ids": reference_ids.keys(), "reference_dimensions": _reference_dimension_rows()})
 	if path.ends_with("/reference-dimensions") and verb == "POST":

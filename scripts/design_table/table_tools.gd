@@ -111,7 +111,7 @@ const HINTS := {
 	"perpendicular": "Pick two lines.",
 	"coincident": "Pick two points, or a point and a line or circle.",
 	"extrude": "Draw a closed shape, set Boss or Cut and the depth, then Apply.",
-	"revolve": "Draw a closed shape and a line to spin it about. Press Axis, pull the trigger on that line, set Boss or Cut and the angle, then Apply.",
+	"revolve": "Draw a closed shape (or one open line chain for a thin wall) and a line to spin it about. Press Axis, pull the trigger on that line, set Boss or Cut and the angle, then Apply.",
 	"fillet": "Pick edges on the part, set the radius, then Apply.",
 	"chamfer": "Pick edges on the part, set the distance, then Apply.",
 	"shell": "Pick the faces to open (the part is hollowed behind them), set the wall thickness, then Apply.",

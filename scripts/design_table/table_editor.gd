@@ -90,7 +90,7 @@ var plane_base2: Dictionary = {} ## the second plane of a midplane (the first is
 var redo_stack: Array = [] ## what Undo took back, newest last: {kind: "create", type, route, body} (the create request, sent again by Redo: the feature gets a new id) or {kind: "edit", entry} (a Build-tree edit: its new value is put back). Any new action clears it
 var created_requests := {} ## id of a feature made here -> {type, route, body}: how to make it again
 var feature_stack: Array = [] ## what Undo takes back after the sketch is spent, newest last: the id of a feature made here (taken back by deleting it), or {kind: "edit", id, type, payload} for a value changed in the Build tree (taken back by putting the old value back)
-var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "pl_method": "offset", "ch_angle_on": false, "ch_angle": 45.0, "ch_flip": false, "ch_mixed": false, "mf_dir": "normal", "pat_skip": [], "pat_orient": "rotate_with_pattern", "lo_thin": false, "lo_wall": 2.0, "lo_closed": false, "ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
+var options := {"boss": true, "flip": false, "new_body": false, "depth": 10.0, "pl_method": "offset", "ch_angle_on": false, "ch_angle": 45.0, "ch_flip": false, "ch_mixed": false, "mf_dir": "normal", "pat_skip": [], "pat_orient": "rotate_with_pattern", "lo_thin": false, "lo_wall": 2.0, "lo_closed": false, "ext_sym": false, "ext_thin": false, "ext_wall": 2.0, "ext_dir": "outward", "rev_thin": false, "rev_wall": 2.0, "rev_dir": "outward", "ext_draft": false, "ext_angle": 5.0, "ext_draft_out": true, "radius": 2.0, "distance": 2.0, "angle": 360.0, "thickness": 2.0, "shell_direction": "inward", "mirror_fuse": false, "plane_offset": 10.0, "plane_flip": false, "ruled": false, "text_font": "Open Sans", "text_size": 10.0, "text_rot": 0.0, "mf_offset": 5.0, "mf_flip": false, "mb_dx": 0.0, "mb_dy": 0.0, "mb_dz": 0.0, "mb_copy": false, "sb_factor": 1.5, "offset_dist": 5.0, "offset_flip": false, "bool_op": "subtract", "bool_consume": true,
 	"pat_type": "rectangular", "pat_dir1": "x", "pat_count1": 3.0, "pat_spacing1": 20.0, "pat_rev1": false, "pat_dir2": "none", "pat_count2": 2.0, "pat_spacing2": 20.0, "pat_rev2": false,
 	"pat_count_ang": 4.0, "pat_angle": 360.0, "pat_rev_ang": false, "pat_merge": false, "pat_pick": "bodies"}
 var faces: Array = [] ## picked face entities (Shell)
@@ -1136,8 +1136,8 @@ func _pick_sketch() -> void:
 		seed_sketch = ""
 		highlight.set_set(table.table_copy, [])
 		table.set_status(_sketch_pick_hint())
-	elif not bool(rest_sketches.sketches.get(id, {}).get("closed", false)):
-		table.set_status("%s has no closed shape to use." % name)
+	elif not bool(rest_sketches.sketches.get(id, {}).get("closed", false)) and not (table.active_tool == "revolve" and bool(rest_sketches.sketches.get(id, {}).get("open_chain", false))):
+		table.set_status("%s has no closed shape to use." % ("%s (a thin revolve can use one open line chain)" % name if table.active_tool == "revolve" else name))
 		UiFeedback.haptic(table._right, "error")
 		return
 	else:
@@ -1236,6 +1236,13 @@ func seed_ready() -> bool:
 	if session != null:
 		return session.profile_ok()
 	return seed_sketch != "" and rest_sketches != null and is_instance_valid(rest_sketches) and bool(rest_sketches.sketches.get(seed_sketch, {}).get("closed", false))
+
+
+func seed_open_chain() -> bool:
+	## The seed sketch has no closed shape but one open chain of lines / arcs: only a thin Revolve can use it.
+	if session != null:
+		return session.open_chain_ok()
+	return seed_sketch != "" and rest_sketches != null and is_instance_valid(rest_sketches) and not bool(rest_sketches.sketches.get(seed_sketch, {}).get("closed", false)) and bool(rest_sketches.sketches.get(seed_sketch, {}).get("open_chain", false))
 
 
 func seed_tool_active() -> bool:
@@ -1513,12 +1520,15 @@ func reopen_sketch(feature_id: String) -> bool:
 		if not refs.is_empty() and refs[0] is Dictionary:
 			var ref: Dictionary = (refs[0] as Dictionary).get("face_ref", refs[0])
 			chosen_face = {"body_id": str(ref.get("body_id", "")), "index": int(ref.get("index", 0))}
-	plane = SketchMath.with_origin(plane, row) # a sketch whose origin was moved in the flat app (or "auto" on a face) is drawn from there
-	if plane.is_empty() or bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
+	# The backend's resolved frame (anchor plane -> alignment -> flip / turns -> origin) when the row has one; else the plane with its origin moved
+	# (an older backend), which cannot place a flipped or turned sketch, so that one is refused.
+	var framed := SketchMath.has_frame(row)
+	plane = SketchMath.with_frame(plane, row)
+	if plane.is_empty() or (not framed and (bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0)):
 		chosen_plane = ""
 		chosen_face = {}
 		set_state("pick_plane")
-		table.set_status("That sketch is flipped or turned in the flat app, or its plane can't be found, so it can't be opened here yet.")
+		table.set_status("That sketch's frame can't be worked out here.")
 		return false
 	var new_session := SketchSession.new(Callable(self, "_call"))
 	new_session.owner_part_id = part_id
@@ -2838,7 +2848,10 @@ func start_curve_picks(limit := 0) -> void:
 
 
 func _plane_for_row(row: Dictionary) -> Dictionary:
-	## The plane of a finished sketch (a Build row) as a basis in the part's frame, or {} when it can't be placed (flipped or turned in the flat app).
+	## The frame of a finished sketch (a Build row) in the part's frame: the backend's resolved frame when the row has one (a flipped, turned or
+	## edge-aligned sketch included), else the plane with its origin moved (an older backend, which cannot place a flipped or turned sketch: {}).
+	if SketchMath.has_frame(row):
+		return SketchMath.with_frame({}, row)
 	var described: Dictionary = await _call(HTTPClient.METHOD_GET, "/sketch/sketches/%s" % str(row["sketch_id"]), null)
 	if not described["ok"] or not (described["json"] is Dictionary):
 		return {}
@@ -2846,9 +2859,9 @@ func _plane_for_row(row: Dictionary) -> Dictionary:
 	if bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
 		return {}
 	if info.get("plane") is String:
-		return SketchMath.with_origin(SketchMath.fixed_basis(str(info["plane"])), row)
+		return SketchMath.with_frame(SketchMath.fixed_basis(str(info["plane"])), row)
 	if row.get("plane_feature_id") != null:
-		return SketchMath.with_origin(SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"]))), row)
+		return SketchMath.with_frame(SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"]))), row)
 	return {}
 
 

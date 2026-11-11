@@ -48,6 +48,31 @@ static func basis_from_plane_response(response: Dictionary) -> Dictionary:
 	}
 
 
+static func has_frame(row: Dictionary) -> bool:
+	## Does the backend's sketch-feature row carry the whole resolved frame (DIDSA-CAD flutter-testing plan item 2: `resolved_frame_origin`,
+	## `resolved_x_axis`, `resolved_y_axis`, `resolved_normal`, each [x, y, z] in the part's frame)? An older backend sends none of them.
+	for key in ["resolved_frame_origin", "resolved_x_axis", "resolved_y_axis", "resolved_normal"]:
+		if not (row.get(key) is Array) or (row[key] as Array).size() != 3:
+			return false
+	return true
+
+
+static func with_frame(basis: Dictionary, row: Dictionary) -> Dictionary:
+	## The sketch's frame in the part: the backend's resolved frame when the row carries one (anchor plane -> alignment to an edge or line ->
+	## flip / turns -> origin: the exact vectors `basis_for_sketch` draws and extrudes with, so a point at (u, v) is origin + u*x + v*y), else
+	## `basis` with `with_origin` (an older backend). `basis` may be empty when the row has a frame (the plane need not be found at all).
+	## A FLIPPED frame is left-handed (x cross y = -normal): `n` here is always x cross y, so the table layout (`orient_to_table`) stays a
+	## rotation and the sheet is simply seen from the other side, X right and Y away exactly as the flat app's 2D view shows them; `mirrored`
+	## says so. Unit vectors are re-normalised (the wire rounds them).
+	if not has_frame(row):
+		return with_origin(basis, row)
+	var x := _vec(row["resolved_x_axis"]).normalized()
+	var y := _vec(row["resolved_y_axis"]).normalized()
+	var normal := _vec(row["resolved_normal"]).normalized()
+	var n := x.cross(y).normalized()
+	return {"origin": _vec(row["resolved_frame_origin"]), "x": x, "y": y, "n": n, "mirrored": n.dot(normal) < 0.0}
+
+
 static func with_origin(basis: Dictionary, row: Dictionary) -> Dictionary:
 	## `basis` with its origin moved to the sketch's own origin, when the backend's sketch-feature row carries one: `resolved_origin`
 	## (DIDSA-CAD's sketch origin, [x, y, z] in the part's frame, already projected onto the plane). The axes and the normal stay the plane's.
