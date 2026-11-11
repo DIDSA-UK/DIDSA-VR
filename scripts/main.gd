@@ -1521,7 +1521,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 ## enum accepts (backend/app/document/models.py) — "step"/"stl"/"obj" go
 ## through the backend's importer; glb/gltf load straight into Godot with no
 ## backend round trip at all (see load_glb_file()).
-const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
+const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "iges": "iges", "igs": "iges", "stl": "stl", "obj": "obj"}
 const _NATIVE_FORMATS := ["didsa", "didsaprt", "didsacad"] ## a plain JSON native save/export, any of the extensions it has had (current first; native_compose.gd) — same file, no format difference.
 
 func list_model_files() -> PackedStringArray:

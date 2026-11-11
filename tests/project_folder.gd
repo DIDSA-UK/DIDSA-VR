@@ -173,6 +173,10 @@ func _initialize() -> void:
 	_wipe(TMP)
 	for path in [SETTINGS, RECENT]:
 		DirAccess.remove_absolute(path)
+	# --- IGES (F-3): listed in the project folder and imported through the backend as "iges"
+	var main_script = load("res://scripts/main.gd")
+	var backend_formats: Dictionary = main_script._BACKEND_IMPORT_FORMATS
+	print("SMOKE IGES files (.iges and .igs) are listed in the project folder and imported as the backend's iges format: ", ProjectFolder.MODEL_EXTENSIONS.has("iges") and ProjectFolder.MODEL_EXTENSIONS.has("igs") and backend_formats.get("iges") == "iges" and backend_formats.get("igs") == "iges" and backend_formats.get("stp") == "step")
 	quit()
 
 

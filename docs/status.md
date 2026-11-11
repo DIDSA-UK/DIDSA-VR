@@ -15,7 +15,7 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 | Area | Built | Real backend | Notes / where to read |
 |---|---|---|---|
-| Import and viewing (native `.didsa`, glTF, STEP/STL/OBJ via backend) | Yes | Yes | Quest load time and frame rate not yet measured |
+| Import and viewing (native `.didsa`, glTF, STEP/IGES/STL/OBJ via backend) | Yes | Yes | Quest load time and frame rate not yet measured |
 | Manipulation: grip, laser select, whole-model move/turn/scale, steadiness filter, undo/redo | Yes | n/a | |
 | Locomotion: walk, snap-turn, teleport, travel-speed slider | Yes | n/a | |
 | Wrist tablet (6 x 2 home grid), popup keyboards, themes and shader effects | Yes | n/a | [`wrist-tablet-redesign-plan.md`](wrist-tablet-redesign-plan.md) |

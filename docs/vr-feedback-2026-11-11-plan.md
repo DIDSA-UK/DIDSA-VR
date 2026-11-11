@@ -80,6 +80,8 @@ Each package is one PR (stacked: each PR's base is the branch of the one before 
 - **Tests:** `tests/project_save.gd` (fake backend, temp folder: stamping, exact numbers, children first, a second save writes nothing, one changed Part writes one file, the root untouched, changed-on-disk ask / skip / copy / overwrite, per-file extras, demo, per-Part failure, native_compose round trip) and `tests/e2e_project_save.gd` (live backend: open a root with two files, first Save upgrades the older-format fixtures keeping their own keys, a second writes nothing, a rename plus a new Part writes only the root and the new file, the plate and peg stay byte for byte, the files reopen in the backend with every occurrence resolved). **Not covered:** a real shared folder edited by the flat app meanwhile (the conflict test moves the recorded modified time), the Files page buttons, the Quest's storage (`user://` vs Documents), very large assemblies (one request per Part).
 - **Owner:** edit a part in VR (the design table), Save, open the assembly in the flat app: the edit should be there; save, change one part file in the flat app, edit another in VR, Save: the changed file should be reported, not overwritten.
 
+**Package 7: F-3 IGES, the VR file-list lines (built; headless).** `main.gd` `_BACKEND_IMPORT_FORMATS` and `project_folder.gd` `MODEL_EXTENSIONS` take `iges` and `igs` (imported as the backend's `iges`), so an IGES file in the project folder is offered and imported through the backend's new reader (DIDSA-CAD PR #343). One line in `tests/project_folder.gd`. The import's `solid` flag (surfaces rather than a solid) is **not shown in VR**. Needs the F-3 backend.
+
 ---
 
 ## V-3: paint shows nothing until the next paint (medium confidence: instrument first)
