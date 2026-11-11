@@ -20,9 +20,10 @@ The file-format and desktop-mode items from the same notes are in `DIDSA-UK/DIDS
 | V-5 | Fix / Float: controlled from the Assembly Tree, not the wheel; the wheel gets only "Relax fix" | Decision | n/a |
 | V-6 | "Relax fix mates": grab a grounded assembly and carry it, mates intact; temporary | Feature | n/a (owner's rules below) |
 | V-8 | Sketch dimension: the keyboard opens behind the sketch sheet | Bug + placement design | High (read: the geometry) |
+| V-9 | Saving: VR writes one whole-session snapshot to a new file; align with the flat app's one-file-per-Part Save | Design gap (data divergence) | High (read) |
 | V-7 | Assembly Tree, phase T1 of `feature-tree-review-2026-11-11.md`: state icons, selection both ways, a bottom action bar (Fix / Float, view-only Hide, Isolate, Rename, Room, Delete), stays current | Feature + bugs (confirmed) | High (read) |
 
-Suggested order: **V-1 → V-7 → V-5 → V-6**, with **V-2 and V-8** (small, causes known) any time, and **V-3, V-4** started by their instrumentation steps in
+Suggested order: **V-1 → V-7 → V-5 → V-6**, and **V-9** before assembly import (DIDSA-CAD F-6) reaches VR, with **V-2 and V-8** (small, causes known) any time, and **V-3, V-4** started by their instrumentation steps in
 parallel (each is a small first PR: logs plus a test), then fixed once the cause is known.
 V-7 brings Fix / Float (V-5); V-6 adds the Relax fix wedge to `scripts/ui/wheel_flows.gd` `_mates_entries`.
 
@@ -290,6 +291,63 @@ table can also be behind the sheet. The dimension callers (`table_editor.gd` `_t
 **Tests** (headless): with the table open and a sketch open, `_type_dimension` opens the keyboard at the dock (to 1 cm) and in front of
 the sheet's plane on the camera's side; the eye-to-keyboard check moves it in front of a panel placed in the way; a moved keyboard at the
 table reopens at the same console-frame pose after the console is recalled. **Headset:** reach and readability of the dock.
+
+---
+
+## V-9: save like the flat app: one file per Part, in place
+
+**Owner (11 Nov):** the whole-session snapshot is concerning; should VR align with the flat app? **Yes.**
+
+**What VR does today** (`main.gd` `save_native_snapshot`, `snapshot_path`): one `GET /document/export/native` (no `part_id`: every
+Part in the session) written to a **new** file, `<name>-vr-<date-time>.didsa`, in the project folder (else `user://models`). It
+never overwrites anything and never writes a Part's own file.
+
+**What the flat app does** (`DIDSA-CAD client/lib/assembly/assembly_document_client.dart` `saveAll`, `save_all.dart`,
+`docs/save-project-overhaul-scope.md`): one file per Part (`exportNative(partId:)`), written in place; every occurrence's
+`external_ref` stamped with the referenced Part's relative path (`stampExternalRefs`) and its `ref_part_id`; children written
+before their parents; a per-Part failure list; new Parts auto-named and auto-pathed; dirty tracking, so Save writes what changed;
+Save As for a copy.
+
+**Why the snapshot is a problem**
+1. **VR edits never reach the part files.** Edit a part on the design table or a sub-assembly in a Room, save: only the snapshot has
+   it. Open the assembly in the flat app (or in VR from its real file) and the change is not there.
+2. **Silent forks.** The snapshot embeds a copy of every Part; when it is opened, an embedded Part wins over the file
+   (`native_compose.gd` only reads a file for a Part the payload lacks). A later flat-app edit of `Bracket.didsa` never shows in the
+   snapshot, and the snapshot's older bracket never shows in the flat app.
+3. **Same Part ids in two places.** The snapshot reuses the files' Part ids; adding the real file and the snapshot to one session
+   clashes (the composer leaves a reused id unresolved).
+4. **A new file per save**: no "the" current file, folders fill with dated copies.
+5. It gets worse with every feature that creates Parts in VR (New part on the table, assembly import F-6, the tree's future actions).
+
+**Plan: port Save All to VR** (as `native_compose.gd` ported the flat app's composer on the open side; the backend has no
+filesystem, so this is the client's job in both apps).
+1. **Know each Part's file.** The composer already maps Part id → file (`state["part_ids"]`); return it from `compose()` and keep it
+   in `main.gd` for the session (`part_files`). A Part with no file (created in VR, imported as an assembly, or from a demo) gets one
+   by the flat app's auto-naming rule (§3.1 of the save overhaul doc: the Part's name, unique in the folder, next to the root).
+2. **Save (in place):** for each Part: `GET /document/export/native?part_id=<id>`, stamp `external_ref`s with paths **relative to that
+   file's folder** and `ref_part_id`s (port `stampExternalRefs` / `_stampOnDiskRefIds` / `_placedFirst`), keep the number text exact
+   (`native_compose.to_json` / `append_to_json_object`, the float trap), write the root's `_native_extras` back onto the root file only.
+   Write children first, each to a temp file then rename (never a half-written file).
+3. **Only what changed:** compare each Part's new text with its file on disk (the file as last read or written); unchanged → skip. No
+   separate dirty tracking needed, and it is exact.
+4. **Someone else changed the file meanwhile** (the flat app on the same shared folder): keep each file's modified time from when it was
+   read (the composer's cache already reads mtimes); if it changed, don't overwrite: ask (Overwrite / Save that part as a copy /
+   Skip), per part.
+5. **Demos** (`res://demo/`, read-only): Save becomes "Save to project folder": every Part gets a new file there (and a new Part id
+   only if a clash would arise). Same for a session with no project folder: `user://models`.
+6. **Keep the snapshot as "Save a copy (one file)"** on the Files page: still useful to share or back up a whole session in one file.
+   Name it as such so nobody mistakes it for Save.
+7. **Report per Part** in the status line and the Files page: "Saved 3 files (Bracket, Frame, Assembly); 1 skipped: <why>".
+8. The unsaved-changes prompt (`_pending_discard`, `save_and_continue`) calls the new Save.
+
+**What this needs from the backend:** nothing new (`export/native?part_id=` exists and the flat app uses it).
+
+**Tests** (headless, with the existing fake backend patterns and a temp folder): open a two-file assembly, change one Part, Save
+writes only that file and the root is untouched; a new Part gets an auto-named file and the root's occurrence references it; reopening
+from the root file shows the change (round trip through `native_compose`); a file changed on disk since it was read is not
+overwritten; a demo saves to the project folder; numbers keep their text (`0` stays `0`). e2e against a real backend
+(`tests/e2e_*`, add to `tests/e2e_ci_list.txt`): flat-app-shaped files written by VR reopen in the backend with every reference
+resolved. **Owner check:** edit a part in VR, save, open the assembly in the flat app, the edit is there.
 
 ---
 
