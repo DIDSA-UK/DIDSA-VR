@@ -37,6 +37,7 @@ var reference_rows = null ## what GET .../external-references answers with (an A
 var reattached: Array = [] ## [point id, body, vertex / edge index] of each POST .../reattach
 var confirmed: Array = [] ## point ids of each POST .../confirm
 var pinned := {} ## point ids the backend reports as is_locked
+var sketch_flip := false ## GET .../sketches/{id} says the sketch is flipped (the flat app flipped it): an older backend then sends no frame, so the table refuses it
 var sketch_plane: Variant = null ## what GET .../sketches/{id} says the plane is ("XY" for a reference plane, null for one made on a face)
 var reference_ids := {} ## id -> true: what a convert route asked to be a reference helper made (points and shapes), as the real backend's Sketch.reference_ids
 var edge_vertices_for: Callable = Callable() ## Callable(body id, edge index) -> [vertex index a, vertex index b]: the two corners of a STRAIGHT edge, for POST .../convert-entities/edge on one
@@ -186,7 +187,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		if origin_id == "":
 			origin_id = next_id("pt")
 			points[origin_id] = Vector2.ZERO
-		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": false, "rotation_quarter_turns": 0})
+		return _ok({"id": path.get_file(), "plane": sketch_plane, "origin_point_id": origin_id, "flip": sketch_flip, "rotation_quarter_turns": 0})
 	if path.ends_with("/features/sketch"):
 		var made_sketch := {"id": "feat1", "sketch_id": "sk1", "plane_feature_id": body.get("plane_feature_id")}
 		if body is Dictionary and str(body.get("origin", "")) == "auto":

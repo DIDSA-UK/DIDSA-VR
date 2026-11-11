@@ -1520,12 +1520,15 @@ func reopen_sketch(feature_id: String) -> bool:
 		if not refs.is_empty() and refs[0] is Dictionary:
 			var ref: Dictionary = (refs[0] as Dictionary).get("face_ref", refs[0])
 			chosen_face = {"body_id": str(ref.get("body_id", "")), "index": int(ref.get("index", 0))}
-	plane = SketchMath.with_origin(plane, row) # a sketch whose origin was moved in the flat app (or "auto" on a face) is drawn from there
-	if plane.is_empty() or bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
+	# The backend's resolved frame (anchor plane -> alignment -> flip / turns -> origin) when the row has one; else the plane with its origin moved
+	# (an older backend), which cannot place a flipped or turned sketch, so that one is refused.
+	var framed := SketchMath.has_frame(row)
+	plane = SketchMath.with_frame(plane, row)
+	if plane.is_empty() or (not framed and (bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0)):
 		chosen_plane = ""
 		chosen_face = {}
 		set_state("pick_plane")
-		table.set_status("That sketch is flipped or turned in the flat app, or its plane can't be found, so it can't be opened here yet.")
+		table.set_status("That sketch's frame can't be worked out here.")
 		return false
 	var new_session := SketchSession.new(Callable(self, "_call"))
 	new_session.owner_part_id = part_id
@@ -2845,7 +2848,10 @@ func start_curve_picks(limit := 0) -> void:
 
 
 func _plane_for_row(row: Dictionary) -> Dictionary:
-	## The plane of a finished sketch (a Build row) as a basis in the part's frame, or {} when it can't be placed (flipped or turned in the flat app).
+	## The frame of a finished sketch (a Build row) in the part's frame: the backend's resolved frame when the row has one (a flipped, turned or
+	## edge-aligned sketch included), else the plane with its origin moved (an older backend, which cannot place a flipped or turned sketch: {}).
+	if SketchMath.has_frame(row):
+		return SketchMath.with_frame({}, row)
 	var described: Dictionary = await _call(HTTPClient.METHOD_GET, "/sketch/sketches/%s" % str(row["sketch_id"]), null)
 	if not described["ok"] or not (described["json"] is Dictionary):
 		return {}
@@ -2853,9 +2859,9 @@ func _plane_for_row(row: Dictionary) -> Dictionary:
 	if bool(info.get("flip", false)) or int(info.get("rotation_quarter_turns", 0)) != 0:
 		return {}
 	if info.get("plane") is String:
-		return SketchMath.with_origin(SketchMath.fixed_basis(str(info["plane"])), row)
+		return SketchMath.with_frame(SketchMath.fixed_basis(str(info["plane"])), row)
 	if row.get("plane_feature_id") != null:
-		return SketchMath.with_origin(SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"]))), row)
+		return SketchMath.with_frame(SketchMath.basis_from_plane_response(table.build.row(str(row["plane_feature_id"]))), row)
 	return {}
 
 

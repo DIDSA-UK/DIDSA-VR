@@ -697,3 +697,10 @@ PATCH /document/parts/{id}/features/{feature_id}/sketch-origin    {"origin": <re
   profile but exactly one open chain of lines / arcs (construction entities do not count). Only a thin Revolve can use such a sketch (a solid
   one still needs a closed profile, 400 otherwise).
 - **File lookup `likely`** (V1): see `scripts/file_lookup.gd` and the vectors; nothing on the wire.
+- **Sketch alignment and the resolved frame (V2).** `PATCH /document/parts/{id}/features/{feature_id}/sketch-alignment` with `{"x_axis_ref": <flat SketchOrEdgeRef> | null}` (a straight Body
+  edge `{"edge_ref": {...}}` or a Sketch Line `{sketch_id, entity_type: "line", entity_id}` of an EARLIER sketch) makes its direction (projected into the plane) the sketch's +X; flip /
+  turns then act relative to it. 422 types: `alignment_edge_not_straight`, `alignment_reference_not_upstream`, `alignment_edge_parallel_to_normal`. Every sketch-feature row now
+  carries `x_axis_ref` and the whole resolved frame: `resolved_frame_origin`, `resolved_x_axis`, `resolved_y_axis`, `resolved_normal` (world / part frame, mm; a flipped sketch's frame is
+  left-handed: x cross y = -normal) and `aligned_x_axis` / `aligned_y_axis` (the anchor axes after the alignment, before flip / turns). A point at (u, v) is at
+  `resolved_frame_origin + u * resolved_x_axis + v * resolved_y_axis`. `resolved_origin` keeps its old meaning (set only for a stored origin that resolves). A lost alignment reports
+  `x_axis_ref.edge_ref` / `x_axis_ref.sketch_entity_ref` in `lost_references` and the frame is the unaligned one.

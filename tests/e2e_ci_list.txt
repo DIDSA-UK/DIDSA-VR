@@ -10,6 +10,7 @@ e2e_build_tree
 e2e_features
 e2e_revolve
 e2e_revolve_thin
+e2e_sketch_frame
 e2e_sketch_select
 e2e_sketch_infer
 e2e_sketch_merge

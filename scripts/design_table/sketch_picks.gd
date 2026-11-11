@@ -43,7 +43,7 @@ func _init() -> void:
 
 func load_sketches(call: Callable, part_id: String, rows: Array, plane_for: Callable, skip_feature_id: String = "") -> int:
 	## `rows`: the Build tree's feature rows; `plane_for`: Callable(row) -> the sketch's plane basis in the part's frame, or {} when it can't be
-	## placed (a flipped or turned sketch: left out, as reopening one is). Returns how many curves can be picked.
+	## placed (only a flipped or turned sketch from an older backend that sends no resolved frame: left out, as reopening one is). Returns how many curves can be picked.
 	curves.clear()
 	sketches.clear()
 	tints.clear()

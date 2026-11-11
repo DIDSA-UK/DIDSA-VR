@@ -147,7 +147,7 @@ func open_sketch(spec: Dictionary) -> bool:
 		return false
 	sketch_id = str(sketch["json"]["sketch_id"])
 	feature_id = str(sketch["json"]["id"])
-	plane = SketchMath.with_origin(plane, sketch["json"]) # the sketch's (0, 0) may not be the plane's origin
+	plane = SketchMath.with_frame(plane, sketch["json"]) # the sketch's (0, 0) may not be the plane's origin; the frame is the backend's own when it sends one
 	_undo.clear()
 	# The backend makes the sketch's origin point lazily, the first time the sketch itself is read: read it, so the origin is a real point
 	# (snappable, constrainable, the end of a dimension) like in the flat app.
