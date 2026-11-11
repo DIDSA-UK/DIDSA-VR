@@ -130,11 +130,12 @@ static func _mixed_actions(c: Dictionary, n: int) -> Array:
 
 static func _sketch_actions(sketch: Dictionary) -> Array:
 	var closed := bool(sketch.get("closed", false))
+	var open_chain := bool(sketch.get("open_chain", false)) # a thin Revolve can use one open line chain
 	var no_shape := "No closed shape"
 	return [
 		_a("edit_sketch", "Edit sketch", GROUP_CREATE),
 		_a("extrude", "Extrude", GROUP_CREATE, closed, "" if closed else no_shape),
-		_a("revolve", "Revolve", GROUP_CREATE, closed, "" if closed else no_shape),
+		_a("revolve", "Revolve", GROUP_CREATE, closed or open_chain, "" if (closed or open_chain) else no_shape),
 		_a("sweep", "Sweep", GROUP_CREATE, closed, "" if closed else no_shape),
 		_a("loft", "Loft", GROUP_CREATE, closed, "" if closed else no_shape),
 		_a("delete_feature", "Delete", GROUP_MODIFY),
