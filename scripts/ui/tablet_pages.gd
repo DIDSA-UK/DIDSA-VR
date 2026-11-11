@@ -75,6 +75,7 @@ var _mates_alignment_button: Button
 var _mates_flip_button: Button
 var _mates_next_button: Button
 var _mates_relax_button: Button
+var _mates_relax_fix_button: Button ## V-6: Relax fix (only the fixed flag), under Relax mates
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
 var _appearance_page: RefCounted = null ## appearance_page.gd, once built
@@ -758,10 +759,26 @@ func _build_mates_page() -> Control:
 			_mates_tool.set_relaxed(on)
 	)
 	if _mates_tool and _mates_tool.has_signal("sandbox_changed"):
-		_mates_tool.sandbox_changed.connect(func(on: bool) -> void:
-			_mates_relax_button.set_pressed_no_signal(on)
-			_show_relax_state(on))
+		_mates_tool.sandbox_changed.connect(func(_on: bool) -> void: _refresh_relax_buttons())
 	bulk.add_child(_mates_relax_button)
+	_mates_relax_fix_button = Button.new()
+	_mates_relax_fix_button.text = "Relax fix"
+	_mates_relax_fix_button.toggle_mode = true
+	_mates_relax_fix_button.custom_minimum_size = Vector2(0, 56)
+	_mates_relax_fix_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mates_relax_fix_button.tooltip_text = "Only the fixed flag is relaxed: grab a fixed part and its whole assembly comes with it, every mate kept. Temporary."
+	_mates_relax_fix_button.toggled.connect(func(on: bool) -> void:
+		var scenes = _main.get("scenes_tool") if _main != null else null
+		if not on and scenes != null and scenes.scene_unsaved():
+			_mates_relax_fix_button.set_pressed_no_signal(true) # (the same unsaved-scene guard as Relax mates)
+			scenes.request_back()
+			_open_tool.call("scenes")
+			return
+		if _mates_tool:
+			_mates_tool.set_relaxed_fixed(on)
+		_refresh_relax_buttons()
+	)
+	page.add_child(_mates_relax_fix_button)
 	bulk.add_child(_button("Enforce all", func() -> void:
 		var owner_part_id: String = _main.current_root_part_id()
 		if _mates_tool and owner_part_id != "":
@@ -1443,6 +1460,19 @@ func _build_settings_display() -> Control:
 
 func _show_relax_state(on: bool) -> void:
 	_mates_relax_button.text = "Return parts" if on else "Relax mates"
+
+
+func _refresh_relax_buttons() -> void:
+	## Both toggles follow the mates tool: Relax mates is on for the full sandbox, Relax fix for the fixed-only one (greyed, saying why, while all are relaxed).
+	if _mates_tool == null or _mates_relax_button == null:
+		return
+	_mates_relax_button.set_pressed_no_signal(_mates_tool.relaxed)
+	_show_relax_state(_mates_tool.relaxed)
+	if _mates_relax_fix_button != null:
+		_mates_relax_fix_button.set_pressed_no_signal(_mates_tool.relaxed_fixed)
+		_mates_relax_fix_button.text = "Return parts" if _mates_tool.relaxed_fixed else "Relax fix"
+		_mates_relax_fix_button.disabled = _mates_tool.relaxed
+		_mates_relax_fix_button.tooltip_text = "Mates are already relaxed" if _mates_tool.relaxed else "Only the fixed flag is relaxed: grab a fixed part and its whole assembly comes with it, every mate kept. Temporary."
 
 
 func _build_settings_appearance() -> Control:

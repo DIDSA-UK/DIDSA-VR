@@ -83,7 +83,7 @@ func is_saving() -> bool:
 
 func is_temporary() -> bool:
 	## Painting now goes into the sandbox's temporary layer (mates relaxed), not the document.
-	return mates_tool != null and bool(mates_tool.get("relaxed"))
+	return mates_tool != null and (mates_tool.get("relaxed") == true or mates_tool.get("relaxed_fixed") == true) # (Relax fix too: moves and paint are temporary, V-6)
 
 
 func panel_title() -> String:
