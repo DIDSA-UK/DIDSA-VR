@@ -94,7 +94,8 @@ Ubuntu's `chromium-browser` is a snap wrapper that does not run in a container.
 The address is the base only: the app adds `/ws`. An `http(s)://` address is taken as `ws(s)://`. The same rules as a server's address apply:
 plain `ws://` only on your own network.
 
-**3. Open the Browser.** *Connected* then a page means it works. *Could not connect to the browser relay at ...* means one of: the relay is not
+**3. Open the Browser.** It says *Connected. Tap the address bar to open a page.* and shows a blank white page (it starts on about:blank);
+tap the address bar, type an address or search words, and Go. (Before 11 Nov 2026 the window stayed empty even when connected: see `status.md`.) *Could not connect to the browser relay at ...* means one of: the relay is not
 running (step 1's `curl`), the address or port is wrong, the key is the CAD key instead of `BROWSER_RELAY_API_KEY` (the relay closes the connection
 before it opens, so a wrong key looks the same as no answer), or the headset is on another network. The relay allows 2 tabs at once
 (`BROWSER_RELAY_MAX_SESSIONS`); closing the window frees its tab.

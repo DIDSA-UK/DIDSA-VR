@@ -32,6 +32,9 @@ extends "res://scripts/diegetic_panel.gd"
 const _DEVICE_WIDTH := 800
 const _DEVICE_HEIGHT := 600
 const _SCREENCAST_QUALITY := 70
+## Godot's WebSocketPeer accepts at most 64 KiB per message by default; one JPEG frame of a real page is ~200 KB as base64 (measured against a
+## live relay + Chromium, 11 Nov 2026), and a bigger message closes the connection (code 1009, "Message too big"). Plenty of room above that.
+const RELAY_INBOUND_BUFFER := 4 * 1024 * 1024
 
 var _relay_url := "" ## e.g. "ws://your-relay-host:8100" - no trailing slash, no "/ws" (appended below)
 var _relay_api_key := ""
@@ -40,6 +43,7 @@ var _start_url := "about:blank"
 var _ws: WebSocketPeer
 var _next_id := 1
 var _connected := false
+var _screencast_request_id := -1 ## the id of the last Page.startScreencast sent (see _start_screencast)
 
 var _view: TextureRect
 var _status_label: Label
@@ -181,6 +185,7 @@ func _on_closed() -> void:
 func _connect_to_relay() -> void:
 	_ws = WebSocketPeer.new()
 	_ws.handshake_headers = PackedStringArray(["X-API-Key: " + _relay_api_key])
+	_ws.inbound_buffer_size = RELAY_INBOUND_BUFFER
 	var err := _ws.connect_to_url(_relay_url.rstrip("/") + "/ws")
 	if err != OK:
 		_status_label.text = "Couldn't start connecting to relay (error %d)" % err
@@ -203,7 +208,7 @@ func _poll_relay() -> void:
 	if state == WebSocketPeer.STATE_OPEN:
 		if not _connected:
 			_connected = true
-			_status_label.text = "Connected"
+			_status_label.text = "Connected. Tap the address bar to open a page."
 			_send_startup_sequence()
 		while _ws.get_available_packet_count() > 0:
 			var packet := _ws.get_packet()
@@ -219,10 +224,15 @@ func _send_startup_sequence() -> void:
 	_send_cdp("Page.enable", {})
 	_send_cdp("Emulation.setDeviceMetricsOverride", build_device_metrics_params(_DEVICE_WIDTH, _DEVICE_HEIGHT))
 	_send_cdp("Page.navigate", {"url": _start_url})
-	_send_cdp(
-		"Page.startScreencast",
-		build_start_screencast_params(_DEVICE_WIDTH, _DEVICE_HEIGHT, _SCREENCAST_QUALITY)
-	)
+	_start_screencast()
+
+
+func _start_screencast() -> void:
+	## (Re)starts the screencast. Chrome refuses it while the first navigation is still swapping the page ("Not attached to an active page":
+	## the window then stayed empty with no error, owner's report 11 Nov 2026), and a navigation to another site can end it, so it is sent
+	## again whenever the top frame finishes loading (_handle_incoming). Starting it again while it runs is harmless.
+	_screencast_request_id = _next_id
+	_send_cdp("Page.startScreencast", build_start_screencast_params(_DEVICE_WIDTH, _DEVICE_HEIGHT, _SCREENCAST_QUALITY))
 
 
 func edit_address() -> void:
@@ -283,6 +293,11 @@ func _handle_incoming(text: String) -> void:
 			var url := extract_frame_url(parsed)
 			if not url.is_empty() and _url_bar != null:
 				_url_bar.text = url
+		"page_loaded":
+			_start_screencast()
+		"error":
+			if int(parsed.get("id", -1)) == _screencast_request_id:
+				_screencast_request_id = -1 # refused mid-navigation: the next "page_loaded" starts it
 		_:
 			pass # response to a fire-and-forget command, or an event we don't act on
 
@@ -406,6 +421,12 @@ static func parse_incoming(text: String) -> Dictionary:
 		return {"kind": "screencast_frame", "params": data.get("params", {})}
 	if method == "Page.frameNavigated":
 		return {"kind": "frame_navigated", "params": data.get("params", {})}
+	if method == "Page.loadEventFired" or method == "Page.frameStoppedLoading":
+		# about:blank fires only frameStoppedLoading, a real page both; either means the page is there and a screencast can start.
+		return {"kind": "page_loaded", "params": data.get("params", {})}
+	if method == "" and data.has("error") and data.has("id"):
+		var error = data.get("error")
+		return {"kind": "error", "id": int(data.get("id")), "message": str(error.get("message", "")) if typeof(error) == TYPE_DICTIONARY else str(error)}
 	return {"kind": "other"}
 
 
