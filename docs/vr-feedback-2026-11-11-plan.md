@@ -14,11 +14,12 @@ The file-format and desktop-mode items from the same notes are in `DIDSA-UK/DIDS
 | V-2 | Relaxed mates: cycling to the parent keeps small movements of the child | Bug | **Low: not found by reading; repro first** |
 | V-3 | Appearance tool: a paint shows nothing until the next paint | Bug | High (a race, read in the code) |
 | V-4 | Mate preview ghost sometimes missing though Create moves the parts | Bug | High (preview skips a step Create does) |
-| V-5 | No "Fix / Float" on the mates quick wheel (and a Relax-fix wedge) | Missing feature (confirmed absent) | Certain |
+| V-5 | Fix / Float: controlled from the Assembly Tree, not the wheel; the wheel gets only "Relax fix" | Decision | n/a |
 | V-6 | "Relax fix mates": grab a grounded assembly and carry it, mates intact; temporary | Feature | n/a (owner's rules below) |
+| V-7 | Assembly Tree: state icons (fixed, constraint, hidden), selection both ways, an action bar (Fix / Float, Hide, Isolate, Rename, Room, Delete), stays current | Feature + bug (repeat sub-assemblies select the wrong part) | High (read) |
 
-Suggested order: **V-3 → V-4 → V-1 → V-5 → V-6**, with **V-2** investigated in parallel (it needs a reproduction before any fix).
-V-5 and V-6 both change `scripts/ui/wheel_flows.gd` `_mates_entries`; do them together or in that order.
+Suggested order: **V-3 → V-4 → V-1 → V-7 → V-5 → V-6**, with **V-2** investigated in parallel (it needs a reproduction before any fix).
+V-7 brings Fix / Float (V-5); V-6 adds the Relax fix wedge to `scripts/ui/wheel_flows.gd` `_mates_entries`.
 
 Vocabulary the notes use: **"fix mate"** = an occurrence's `fixed` (grounded) flag; the backend has no "fix" mate type
 (`MateType` is coincident, concentric, parallel, distance, angle, gear, rack_pinion, screw, limit_*).
@@ -119,7 +120,7 @@ one; check which depth it was.
    connection in `main.gd`. The latter also shows "Holding X (n parts)" and the breadcrumb on the wrist: check that is wanted;
    if not, emit only the refusal text on `tool_message`.
 2. Add a **short** hand message for the fixed case, as the owner asked: `"Part is fixed"` as the title or first words, then the rest
-   ("Unfix it to move it, or Relax fix mates"). Keep the existing long text for the status line. Haptic already fires; keep it.
+   ("Float it in the Assembly Tree, or Relax fix"). Keep the existing long text for the status line. Haptic already fires; keep it.
 3. Make `_group_refusal` complete: for any depth, walk the group's chain of occurrences (`gs.prefix` / `group_parts`) and refuse if
    **any ancestor level is fixed** (use `occurrence_state(owner)` for the top level and `_nested_states[part_id]["occurrences"]`
    for deeper ones; add `mates_tool.group_fixed(owner_part_id, occurrence_id) -> bool` next to `group_state`). Use it for the depth > 1 case.
@@ -174,33 +175,20 @@ reproduced if that is the outcome.
 
 ---
 
-## V-5: Fix / Float on the mates quick wheel (confirmed absent) and a "Relax fix" wedge
+## V-5: Fix / Float lives in the Assembly Tree (owner's decision, 11 Nov); the wheel gets only "Relax fix"
 
-`scripts/ui/wheel_flows.gd` `_mates_entries()` has six wedges: Create, Type (sub-wheel), Flip, Clear picks (straight down), Relax / Return
-parts, All tools. Fix / Float exists **only** on the tablet (`ui/tablet_pages.gd` ~773 "Fix / Float selected part" →
-`mates_tool.toggle_fixed(_main.current_selected_part())`).
+**Decision.** Fix / Float is **not** a mates-wheel action and not a mate type. It is controlled from the **Assembly Tree** (V-7), as in
+desktop CAD (the flat app already does it there: `component_context_menu.dart` Fix / Float, and a push-pin in
+`assembly_tree_panel.dart`). The earlier wheel-wedge and "Fix as a mate type" ideas are dropped.
 
-**Decision (owner: a sub-wheel is not ideal): no sub-wheel. Two plain top-level wedges on the mates ring, eight in all.**
-The root ring already has **ten** wedges (`root_entries()`), so eight on the mates ring is within what the wheel draws; the only rule
-is that the wedge straight down (above the pill) is never a sub-wheel, and with eight wedges that is still Clear picks.
-Clockwise from the top: Create · Type · Flip · **Fix / Float** · Clear picks (down) · **Relax fix** · Relax / Return parts · All tools.
-Put the two new ones either side of the bottom wedge: they are the two "ground" actions, next to the existing Relax.
-- Check `tool_wheel_math.wedge_for` / `wedge_outline` / `tile_width_at` at 8: the names must fit their tiles (the tiles at 3 and 9
-  o'clock are the narrow ones; the root ring's note says put long names on the wide tiles). Names: "Fix / Float" (swaps to "Fix" or
-  "Float" by state), "Relax fix" ("Return" while on). Update the comment above `_mates_entries` (it says "six wedges").
-- Alternatives considered and rejected: the Type sub-wheel (Fix is not a mate type here: the backend has no fix mate, it is a flag on
-  the occurrence) and a controller button (not discoverable, and the two hands' buttons are all taken: grip, trigger, stick, A/B).
-  The tablet button stays.
-- **Fix / Float target:** the laser-selected part (`_main.current_selected_part()`), else the part of the most recent mate pick
-  (`_picks.back()`'s occurrence). Greyed with the hint "Select a part first (laser-select it)" when neither exists (the
-  `_action(...)` helper takes a `hint_disabled`). The label follows `mates_tool.is_fixed(part)`.
-- Calls `mates_tool.toggle_fixed(part)` (a coroutine); also `say("X is now fixed")` so it shows on the wrist hint (today only
-  the mates prompt shows it). A fixed part gets a small marker so it is visible which parts are fixed (see V-6 UI note).
-- Add an icon to `ui/ui_icons.gd` (a pin / anchor). Update the wheel tests that count wedges (`ls tests | grep wheel`) and any text that
-  describes the mates ring (`landing/tips.gd`, `docs/`).
+What stays on the mates ring: **one** new wedge, **Relax fix** (V-6), beside Relax / Return parts, so it sits where Relax mates sits
+(mates ring, tablet toggle under "Relax mates", the pill turns into Return while on). Seven wedges, clockwise from the top: Create ·
+Type · Flip · Clear picks (straight down) · Relax fix · Relax / Return parts · All tools (check the order puts Clear straight down at
+seven; if not, move one wedge so it is; the bottom wedge is never a sub-wheel). Update the comment above `_mates_entries` ("six
+wedges") and the wheel tests that count wedges.
 
-**Test.** Entry-list test: both entries exist; Fix / Float disabled with no selection; label flips with the fixed flag; Relax fix
-label flips to "Return" when on. `toggle_fixed` is covered by the e2e mates tests.
+The tablet's "Fix / Float selected part" button (`tablet_pages.gd` ~773) stays as a fast path for the laser-selected part; it calls the
+same function as the tree (one implementation: `mates_tool.toggle_fixed`, made undoable in V-7).
 
 ---
 
@@ -233,6 +221,7 @@ Relax / Return parts does ("reinforce").
   "Mates are already relaxed").
 
 **Implementation sketch.**
+0. UI: the wedge in V-5, the tablet toggle, the pill. Fix / Float itself is in the tree (V-7).
 1. `mates_tool.gd`: `var relaxed_fixed := false`, `set_relaxed_fixed(on)` (off = `return_parts()`), a pure
    `grounded_cluster(owner_part_id, occurrence_id) -> Array[String]` (unit-testable), `in_sandbox()` = `relaxed or relaxed_fixed`
    for "moves are temporary" readers. Go through every use of `relaxed` (about 40: `grep -n "relaxed" scripts/*.gd scripts/ui/*.gd`)
@@ -247,7 +236,7 @@ Relax / Return parts does ("reinforce").
    `_find_loaded_part(owner, occ)` for each id; nested clusters inside a sub-assembly use `_nested_states`; if the cluster crosses a
    sub-assembly boundary take the whole sub-assembly (the group levels from `group_index.gd`).
 4. Haptics / messages: a short buzz on carry start; `say("Moving the fixed assembly: Return puts it back")` once per press.
-5. UI: V-5's "Relax fix" wedge (label "Return" while on) and a toggle under "Relax mates" on the tablet (`tablet_pages.gd` ~742) with
+5. UI: V-5's "Relax fix" wedge (the only one) (label "Return" while on) and a toggle under "Relax mates" on the tablet (`tablet_pages.gd` ~742) with
    the same unsaved-scene guard the existing toggle has. `wheel_flows.gd` prompt (~115): "Fix mates relaxed: grab a fixed part
    and its assembly comes with it. Return puts everything back." While on, `pill_entry()` is Return (as for full relax). The
    mates-ring prompt names the mode. While fix-relax is on, tint fixed parts' brackets / add a small pin marker so the user can see
@@ -262,6 +251,90 @@ reports an empty basis (stuck): promotes to the cluster carry without a pose jum
 drag; (d) Return restores every pose in one undo step; (e) fix-relax then full Relax keeps `_home`; (f) off by default and not
 persisted across a reload. **Cannot be tested headless:** how the carry feels with the hand, and the real solver's stuck report
 timing (the live-backend e2e `tests/e2e_mates_motion.gd` can cover the second).
+
+---
+
+## V-7: the Assembly Tree, made a real CAD tree (owner: "we've neglected the tree")
+
+**What exists** (`scripts/assembly_tree_window.gd`, 375 lines, a floating `diegetic_panel` 0.28 x 0.34 m / 480 x 600 px, opened from the
+tablet): lazy GET `/parts/{id}/occurrences` per level, Part names filled in, rows with an expand arrow, a name button, and two buttons on
+**every** row: **Room** and **Delete** (two-press "Sure? (n mates)"). Tapping a name calls `main.select_part_by_occurrence_id(id)`.
+
+**Gaps found.**
+1. **No state on the rows.** `OccurrenceResponse` already returns `fixed`, `hidden`, `suppressed`, `color`, and unresolved files
+   (`resolved_part_id == null`); none is shown. The backend's `GET /parts/{id}/constraint-status` (fixed / fully constrained /
+   under-constrained with DOF / over-constrained; what the flat app's tree icons use) is not read.
+2. **Tree → world selection is wrong for repeats.** `select_part_by_occurrence_id` matches the **first** visible node whose
+   `occurrence_id` meta equals the row's id. A sub-assembly placed twice has the **same** child occurrence ids under both
+   placements, so a row under the second placement selects the part in the first. Match on the full path instead (`group_path`
+   meta, `group_index.gd`: the occurrence ids from the root down).
+3. **Sub-assembly rows can't be selected** ("expand it and select one of its own parts"), although the world can now select a group
+   (`controller.select_group_level`).
+4. **No world → tree.** The controller has no selection signal; selecting in the world does not highlight, expand to, or scroll to
+   the row.
+5. **No Fix / Float, Hide / Show, Isolate, Rename** from the tree; Room and Delete are always on screen on every row, which crowds a
+   480 px panel and makes a mis-press on Delete easy.
+6. **Goes stale.** It only refreshes on `mark_stale()` (file opened, part added) or the Refresh button, not after a mate, a fix, a
+   move, a delete in the world, or a room edit.
+
+**Design.**
+
+*Row layout* (one line each, left to right): indent · expand arrow · **state icon** · name (dimmed when hidden, struck / amber when
+unresolved or suppressed) · nothing else. Per-row buttons go: the actions are on the **selected** row only (below).
+State icon, one slot, same rule as the flat app (`_buildConstraintBadge`): **pin** = fixed; **lock** = fully constrained; **open
+lock** = under-constrained (the DOF count in the hint); **warning** = over-constrained; nothing for a free, unmated part. Add `pin`
+and `lock_open` / `warning` to `ui/ui_icons.gd` if missing (`lock` and `eye_off` exist). A hidden occurrence also gets `eye_off`.
+Constraint status comes from one GET per expanded level's Part (`/parts/{part}/constraint-status`, keyed by occurrence id); fall
+back to the `fixed` flag alone if the call fails.
+
+*Selection, both ways* (one selection, shared with the world):
+- Tap a row: a leaf selects its part, matched by **path** (fixes gap 2); a sub-assembly row selects the whole group
+  (`select_group_level` with the level built from the row's path; `GroupIndex.levels` already builds these); the root row clears the
+  selection. The selected row is highlighted with the theme's selection colour.
+- Add `signal selection_changed(node: Node3D, level: Dictionary)` to `controller.gd`, emitted from `_set_selection`, `_clear_selection`
+  and `select_group_level`. The tree listens (via `main.gd`): it expands the ancestors (fetching levels as needed), highlights the
+  row, and scrolls it into view (`scroll_target` is the `ScrollContainer`). Debounce so a fast laser sweep doesn't refetch.
+- Optional, after the above: laser hover on a row pre-highlights the part in the world (the same overlay `face_highlight` /
+  `_set_grab_hover` uses), and hovering a part highlights its row.
+
+*Actions on the selected row*: an **action bar** at the bottom of the window (fixed position, so it never scrolls away), showing the
+actions for the selected row; greyed with the reason when not allowed:
+- **Fix / Float** (label by state). `PATCH /parts/{owner}/occurrences/{occ}` `{"fixed": bool}` where owner = the row's
+  `parent_part_id`. For the active root this is `mates_tool.toggle_fixed`; generalise it to take `(owner, occ, label)` so nested rows
+  work too, and update the right state afterwards (`occurrences` for the active root, `_other_states` for a room's Part,
+  `_nested_states` for a sub-assembly's). Make it **one undo step** (`command_stack.push`, persists). A fixed occurrence's mates now
+  anchor on it: call the same refresh the mates tool does after a change (`refresh_mates` / `refresh_nested_state`).
+  Not offered on the root row, on a pattern copy (its place is the pattern's), or on an unresolved file.
+- **Hide / Show** and **Isolate**: use the world's existing, undoable hide (`main.gd` `_push_visibility_command` and the isolate
+  code ~783), applied to every node under the row's path, so the tree and the Show / Hide wheel agree. Do not write the backend
+  `hidden` flag here: the VR client's hide is a view action today; changing that is a separate decision (the flat app does write it).
+- **Rename**: the popup keyboard (`popup_keyboard.gd`), `PATCH ... {"name_override": text}` (empty clears). One undo step.
+- **Room** (open / close the row's Part as an Assembly Room) and **Delete** (two-press, "Sure? (n mates)"): the existing code,
+  moved from every row to the bar.
+- Later, not in this pass: Mate (start the Mates tool with this part as the first pick), Appearance (paint this row's level), a
+  Mates folder under each assembly listing its mates (select one → `mates_tool` highlight, delete), search.
+
+*Keeping it current*: refresh the affected level (not the whole tree; keep the expanded state and the selection) on
+`mates_tool.mates_changed`, `mates_tool.document_changed`, `room_manager.rooms_changed`, a delete or add, and after its own actions.
+Keep the Refresh button.
+
+*Size*: the panel may need to grow (taller, e.g. 0.28 x 0.42 m) for the action bar; check readability at `open_distance` in the UI lab
+(`lab/ui_lab.tscn`, F6) and `tests/` render checks.
+
+**Where the flat app already is.** `client/lib/viewport3d/assembly_tree_panel.dart` has the pin and constraint icons, and
+`component_context_menu.dart` has Edit alone, Focus, Move / Rotate, Hide, Isolate, Fix / Float, Mate, Pattern, Rename, Appearance,
+Delete. Use it as the reference for wording and rules (e.g. "Float this component first" for a fixed part's Move / Rotate), so the
+two apps behave the same. Nothing in this item changes the backend.
+
+**Tests** (`tests/assembly_tree_window.gd` exists for the pure row code; `tests/e2e_assembly_tree.gd` for the live backend):
+- pure: rows carry `fixed` / `hidden` / unresolved; the state icon chosen for each constraint state; the action list for a row
+  (root, top-level, nested, pattern copy, unresolved);
+- path selection: two placements of one sub-assembly, select a child row under the second, the node selected is the second's (fails
+  today);
+- world → tree: emitting `selection_changed` for a nested part expands its ancestors and marks its row;
+- Fix / Float from a nested row PATCHes the parent Part's occurrence, updates `_nested_states`, and undo reverts it (fake backend);
+- e2e: fix from the tree, then a grab of that part is refused with the V-1 message.
+**Cannot be tested headless:** readability and reach of the bar in the headset.
 
 ---
 
