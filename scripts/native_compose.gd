@@ -77,10 +77,14 @@ static func find_file(ref: String, bases: Array) -> String:
 	return ""
 
 
-static func compose(root_path: String, search_dirs: Array = [], choices: Dictionary = {}) -> Dictionary:
+static func compose(root_path: String, search_dirs: Array = [], choices: Dictionary = {}, accept_likely: bool = false) -> Dictionary:
 	## {ok, text, root_part_id, parsed (the root file as read), resolved: int, unresolved: [String], relinked: [{key, ref, path,
 	## file, via, path_mismatch}], review: [{key, part_id, occurrence_id, ref, ref_part_id, result, candidates: [{path, file,
 	## part_id}], path_mismatch}], bases, error}. `text` is ready to POST. With nothing to resolve it is the root file's own text.
+	## `accept_likely` (DIDSA-CAD docs/flutter-testing-feedback-2026-11-11-plan.md item 1b): a reference with no stored id whose file moved
+	## with the project folder (file_lookup.gd's "likely") is left in `review` (result "likely", its one candidate) and never used; with
+	## true it is used as if found (`via` "folder" in `relinked`) and its own references are looked at too. A shift learned from a
+	## reference found by id, by folder or by your pick is tried first on later misses (item 1c).
 	var out := {"ok": false, "text": "", "root_part_id": "", "parsed": null, "resolved": 0, "unresolved": [], "relinked": [], "review": [], "bases": [], "error": ""}
 	if not FileAccess.file_exists(root_path):
 		out["error"] = "No such file: %s" % root_path
@@ -114,6 +118,8 @@ static func compose(root_path: String, search_dirs: Array = [], choices: Diction
 		"resolved": 0,
 		"bases": bases,
 		"choices": choices,
+		"accept_likely": accept_likely,
+		"shifts": [], # the folder shifts learned so far, newest first (file_lookup.gd shift_between)
 		"index": null, # file_index.gd's entries, built the first time a reference misses
 		"relinked": [],
 		"review": [],
@@ -156,8 +162,14 @@ static func unresolved_note(composed: Dictionary) -> String:
 	if not moved.is_empty():
 		var names := PackedStringArray()
 		for m in moved:
-			names.append("%s -> %s" % [str(m["ref"]).get_file(), m["path"]])
+			names.append("%s -> %s%s" % [str(m["ref"]).get_file(), m["path"], " (by folder)" if m["via"] == "folder" else ""])
 		note = " %d moved file%s found in %s: %s." % [moved.size(), "" if moved.size() == 1 else "s", "its new place" if moved.size() == 1 else "new places", ", ".join(names)]
+	var likely := 0
+	for item in composed.get("review", []):
+		if item["result"] == "likely":
+			likely += 1
+	if likely > 0:
+		note += " %d file%s look%s like %s moved with the project folder: Files > References has Use them." % [likely, "" if likely == 1 else "s", "s" if likely == 1 else "", "it" if likely == 1 else "they"]
 	if missing.is_empty():
 		return note
 	return note + " %d referenced file%s not loaded: %s." % [missing.size(), "" if missing.size() == 1 else "s", ", ".join(PackedStringArray(missing))]
@@ -241,6 +253,7 @@ static func _locate(state: Dictionary, occ: Dictionary, ref: String, key: String
 		if chosen_ref == "" or not FileAccess.file_exists(chosen):
 			state["unresolved"].append("%s (the chosen file is not in the project folder)" % ref)
 			return {}
+		_learn_shift(state, ref, chosen_ref)
 		return {"file": chosen, "ref": chosen_ref, "relinked": {"key": key, "ref": ref, "path": chosen_ref, "file": chosen, "via": "choice", "path_mismatch": false}}
 	var ref_id := ref_part_id_of(occ)
 	var file := find_file(ref, state["bases"])
@@ -262,16 +275,38 @@ static func _locate(state: Dictionary, occ: Dictionary, ref: String, key: String
 	if at_path != null and not file_by_path.has(at_path["path"]):
 		file_by_path[at_path["path"]] = {"path": at_path["path"], "file": file, "part_id": str(at_path["part_id"]) if at_path["part_id"] != null else ""}
 	var answer := FileLookup.find_file({"external_ref": ref, "ref_part_id": ref_id if ref_id != "" else null}, at_path, entries)
-	if answer["result"] == "found":
+	# Item 1c: a shift learned from an earlier reference. A shifted file with the stored id is found; with no stored id it is "likely".
+	if (state["shifts"] as Array).size() > 0 and answer["result"] != "found" and answer["result"] != "ask":
+		for shift in state["shifts"]:
+			var shifted: String = FileLookup.apply_shift(shift, ref)
+			if shifted == "":
+				continue
+			var hit := false
+			for candidate in FileLookup.files_at(shifted, entries):
+				if ref_id != "" and candidate["part_id"] == ref_id:
+					answer = {"result": "found", "path": candidate["path"], "via": "id", "candidates": [], "path_mismatch": answer["path_mismatch"]}
+					hit = true
+					break
+				if ref_id == "" and answer["result"] != "likely":
+					answer = {"result": "likely", "path": candidate["path"], "via": "suffix", "candidates": [], "path_mismatch": false}
+					hit = true
+					break
+			if hit:
+				break
+	var use_likely: bool = answer["result"] == "likely" and bool(state["accept_likely"])
+	if answer["result"] == "found" or use_likely:
 		var found: Dictionary = file_by_path[answer["path"]]
-		return {"file": found["file"], "ref": str(answer["path"]), "relinked": {"key": key, "ref": ref, "path": answer["path"], "file": found["file"], "via": answer["via"], "path_mismatch": answer["path_mismatch"]}}
+		_learn_shift(state, ref, str(answer["path"]))
+		return {"file": found["file"], "ref": str(answer["path"]), "relinked": {"key": key, "ref": ref, "path": answer["path"], "file": found["file"], "via": "folder" if use_likely else answer["via"], "path_mismatch": answer["path_mismatch"]}}
 	var candidates := []
-	for path in answer["candidates"]:
+	for path in (answer["candidates"] if answer["result"] != "likely" else [answer["path"]]):
 		var c: Dictionary = file_by_path[path]
 		candidates.append({"path": path, "file": c["file"], "part_id": c["part_id"]})
 	state["review"].append({"key": key, "part_id": str(part.get("id", "")), "occurrence_id": str(occ.get("id", "")), "ref": ref,
 		"ref_part_id": ref_id, "result": answer["result"], "candidates": candidates, "path_mismatch": answer["path_mismatch"]})
 	match answer["result"]:
+		"likely":
+			state["unresolved"].append("%s (probably moved with the project folder; see Files > References)" % ref)
 		"ask":
 			state["unresolved"].append("%s (moved; %d copies found, pick one in Files > References)" % [ref, candidates.size()])
 		"suggest":
@@ -279,6 +314,16 @@ static func _locate(state: Dictionary, occ: Dictionary, ref: String, key: String
 		_:
 			state["unresolved"].append("%s (not found)" % ref)
 	return {}
+
+
+static func _learn_shift(state: Dictionary, stored_ref: String, found_path: String) -> void:
+	var shift := FileLookup.shift_between(stored_ref, found_path)
+	if shift.is_empty():
+		return
+	for known in state["shifts"]:
+		if FileLookup.same_shift(known, shift):
+			return
+	(state["shifts"] as Array).push_front(shift)
 
 
 static func _resolve_file(state: Dictionary, file: String, ref: String, ancestors: Array) -> String:

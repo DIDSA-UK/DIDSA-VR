@@ -1318,14 +1318,28 @@ func _references_rows() -> Array:
 			rows.append(_candidate_row(_locate_key, _locate_ref_id, f))
 		return rows
 	var r: Dictionary = _main.reference_review()
+	# Item 1b (Decision 1): the question the flat app asks in a dialog. VR has no modal dialogs, so it is a header row.
+	if bool(r.get("likely_pending", false)):
+		var n := int(r["likely"])
+		rows.append({"id": "likely-header", "title": "%d file%s look%s like %s moved with the project folder" % [n, "" if n == 1 else "s", "s" if n == 1 else "", "it" if n == 1 else "they"],
+			"subtitle": "No recorded part id, but a file with the same folder and name is in the project folder. Nothing is loaded until you say so.", "state": "warn",
+			"actions": [{"label": "Use them", "accent": true, "callback": _main.use_likely_references}, {"label": "Not now", "callback": _main.leave_likely_references}]})
+		rows.append({"id": "likely-toggle", "title": "Don't ask again this session", "subtitle": "On: the next Use them / Not now is remembered until the app closes.",
+			"state": "ok" if _main.folder_match_dont_ask else "normal",
+			"actions": [{"label": "On" if _main.folder_match_dont_ask else "Off", "callback": _main.set_folder_match_dont_ask.bind(not _main.folder_match_dont_ask)}]})
+	elif r.get("folder_match_answer") != null:
+		rows.append({"id": "likely-session", "title": "Folder matches: " + ("used automatically this session" if r["folder_match_answer"] else "left as suggestions this session"),
+			"subtitle": "Held in memory until the app closes.", "state": "ok", "actions": [{"label": "Ask again", "callback": _main.ask_folder_match_again}]})
 	for m in r["relinked"]:
-		var how := "picked by you" if m["via"] == "choice" else "found by its part id"
+		var how := "picked by you" if m["via"] == "choice" else ("found by folder" if m["via"] == "folder" else "found by its part id")
 		rows.append({"id": "moved:" + str(m["key"]), "title": "%s -> %s" % [str(m["ref"]).get_file(), m["path"]],
 			"subtitle": "Moved, %s%s. Save as new file writes the new path." % [how, "; the file at the old path is a different part" if m["path_mismatch"] else ""], "state": "ok"})
 	for item in r["review"]:
 		var ref := str(item["ref"])
 		var why := "Not found in the project folder or the models folders."
 		match str(item["result"]):
+			"likely":
+				why = "Probably moved with the project folder. Nothing is loaded until you use it."
 			"ask":
 				why = "Moved, and %d files carry this part (copies?). Pick the right one; nothing is loaded until you do." % (item["candidates"] as Array).size()
 			"suggest":
@@ -1334,14 +1348,18 @@ func _references_rows() -> Array:
 			"actions": [{"label": "Locate...", "callback": _start_locate.bind(str(item["key"]), ref, str(item["ref_part_id"]))},
 				{"label": "Leave missing", "callback": _main.leave_reference_missing.bind(str(item["key"]))}]})
 		for c in item["candidates"]:
-			rows.append(_candidate_row(str(item["key"]), str(item["ref_part_id"]), c))
+			rows.append(_candidate_row(str(item["key"]), str(item["ref_part_id"]), c, str(item["result"]) == "likely"))
 	return rows
 
 
-func _candidate_row(key: String, ref_part_id: String, c: Dictionary) -> Dictionary:
+func _candidate_row(key: String, ref_part_id: String, c: Dictionary, likely := false) -> Dictionary:
 	## One file that could be the reference's: Use re-opens the assembly with it. A file that is not the placed part (another id, or one
 	## that couldn't be read) needs a second press: never a silent swap.
 	var same := ref_part_id != "" and str(c["part_id"]) == ref_part_id
+	if likely:
+		# No stored id to compare, but the folder and name agree once the leading folders are set aside: one press (the user asked to see it).
+		return {"id": "use:%s:%s" % [key, c["file"]], "title": str(c["path"]), "subtitle": "Same folder and name under the project folder.", "state": "normal",
+			"actions": [{"label": "Use", "accent": true, "callback": _use_reference.bind(key, str(c["file"]))}]}
 	return {"id": "use:%s:%s" % [key, c["file"]], "title": str(c["path"]),
 		"subtitle": "The placed part." if same else "A different part, or one that couldn't be read: press Use twice to use it anyway.",
 		"state": "normal" if same else "warn",

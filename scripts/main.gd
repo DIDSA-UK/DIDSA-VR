@@ -63,6 +63,13 @@ var _startup_compose_note := "" ## native_compose.gd's "N referenced files not l
 var _reference_choices: Dictionary = {} ## finding moved files: native file -> {"<part id>/<occurrence id>": the file the user picked for it}
 var _reference_review: Dictionary = {"root": "", "relinked": [], "review": [], "bases": []} ## the last opened file's moved / missing references
 var _references_left: Dictionary = {} ## review keys the user chose to leave missing (hidden on the References page until the next open)
+## The answer to "N files look like they moved with the project folder" (DIDSA-CAD docs/flutter-testing-feedback-2026-11-11-plan.md item 1b):
+## null = ask on the Files > References header row, true = use them without asking, false = leave them as suggestions. Held in memory only for
+## this run of the app (never in secrets.cfg or the saved settings); it applies to later opens and room adds.
+var folder_match_answer = null
+var folder_match_dont_ask := false ## the header row's "Don't ask again this session" toggle: the next Use them / Not now is remembered
+var _accept_likely_roots: Dictionary = {} ## native file -> true once Use them was pressed for it (this open and the re-open)
+var _likely_dismissed: Dictionary = {} ## native file -> true once Not now was pressed for it (the header row goes away)
 var _dirty_from_relink := false ## the only unsaved change is a moved file's corrected path: picking another reference re-opens without asking
 var last_saved_path := "" ## the .didsa the last save wrote
 var document_is_demo := false ## what is shown is a demo model shipped in the APK (res://demo/): read-only, so replacing it never asks (Quest 3 report, 21 Oct 2026)
@@ -1499,7 +1506,8 @@ func native_search_dirs() -> Array:
 func compose_native(path: String, choices: Dictionary = {}) -> Dictionary:
 	## `path` with every file its occurrences reference folded in, ready to POST (native_compose.gd's compose()); `choices` are the
 	## user's picks for moved / missing references (reference_review()).
-	return NativeCompose.compose(path, native_search_dirs(), choices)
+	var accept: bool = folder_match_answer == true or _accept_likely_roots.has(path)
+	return NativeCompose.compose(path, native_search_dirs(), choices, accept)
 
 
 # --- Finding moved files (DIDSA-CAD docs/moved-files-scope.md, F2) ------------------------------------------------------
@@ -1510,6 +1518,7 @@ func _note_references(path: String, composed: Dictionary) -> void:
 	if _reference_review.get("root", "") != path:
 		_references_left.clear()
 	_reference_review = {"root": path, "relinked": composed.get("relinked", []), "review": composed.get("review", []), "bases": composed.get("bases", [])}
+	_likely_dismissed.erase(path)
 	if not _reference_review["relinked"].is_empty():
 		mark_dirty()
 		_dirty_from_relink = true
@@ -1522,7 +1531,50 @@ func reference_review() -> Dictionary:
 	for item in _reference_review.get("review", []):
 		if not _references_left.has(item["key"]):
 			open.append(item)
-	return {"root": _reference_review.get("root", ""), "relinked": _reference_review.get("relinked", []), "review": open, "bases": _reference_review.get("bases", [])}
+	var likely := 0
+	for item in open:
+		if item["result"] == "likely":
+			likely += 1
+	var root: String = _reference_review.get("root", "")
+	return {"root": root, "relinked": _reference_review.get("relinked", []), "review": open, "bases": _reference_review.get("bases", []),
+		"likely": likely, "likely_pending": likely > 0 and folder_match_answer == null and not _likely_dismissed.has(root), "folder_match_answer": folder_match_answer}
+
+
+func use_likely_references() -> void:
+	## "Use them": opens the file again with accept_likely, as choose_reference() re-opens with a pick (and with the same rule: when the only
+	## unsaved change is a corrected path from that open, nothing is lost, so it doesn't ask). With the toggle on, the answer is remembered.
+	var root: String = _reference_review.get("root", "")
+	if root == "":
+		return
+	if folder_match_dont_ask:
+		folder_match_answer = true
+	_accept_likely_roots[root] = true
+	if document_dirty and _dirty_from_relink:
+		mark_clean()
+	open_native_file(root)
+
+
+func leave_likely_references() -> void:
+	## "Not now": they stay suggestions (each with its one candidate and a Use). With the toggle on, later opens don't ask either.
+	var root: String = _reference_review.get("root", "")
+	if folder_match_dont_ask:
+		folder_match_answer = false
+	if root != "":
+		_likely_dismissed[root] = true
+	references_changed.emit()
+
+
+func set_folder_match_dont_ask(on: bool) -> void:
+	folder_match_dont_ask = on
+	references_changed.emit()
+
+
+func ask_folder_match_again() -> void:
+	folder_match_answer = null
+	folder_match_dont_ask = false
+	_accept_likely_roots.clear()
+	_likely_dismissed.clear()
+	references_changed.emit()
 
 
 func choose_reference(key: String, file: String) -> void:

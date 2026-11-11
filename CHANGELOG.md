@@ -3,6 +3,15 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## Branch `ccr-b1fb757b-j3dwf3` (11 Nov, not merged; DIDSA-CAD plan `docs/flutter-testing-feedback-2026-11-11-plan.md`, V1-V3 as they land)
+
+Headless-tested; the V1 vector copy needs the DIDSA-CAD change on the same-named branch (its `docs/file-lookup/vectors.json`). Not checked on the headset.
+
+- **V1, folder shift in the file-lookup rule (item 1b / 1c).** `scripts/file_lookup.gd` gains step 2b: a reference with **no stored id** whose file has the same path once leading folders are dropped or added (folder and name agree, one match at the largest shared depth) is `likely` (`via: "suffix"`), never used by the rule itself; ties, a name-only match, a non-suffix match and a stored id the file does not carry stay suggestions (now ordered by shared depth, then path). `tests/fixtures/file_lookup_vectors.json` is the 25-case copy of the CAD vectors.
+- `scripts/native_compose.gd` `compose(..., accept_likely)`: `likely` is left in `review` (result `likely`, its one candidate) and its children are not visited; with `accept_likely` it is used (`via: "folder"` in `relinked`) and its own references are looked at. A shift learned from a reference found by id, by folder or by your pick is tried first on later misses (an id-bearing reference then finds id-less ones that moved the same way).
+- **Asking.** No modal dialogs in VR, so the load status line says "N files look like they moved with the project folder" and **Files > References** starts with a header row: **Use them** / **Not now** and a **Don't ask again this session** toggle. Use them re-opens with `accept_likely` (as `choose_reference` re-opens with a pick; the "only unsaved change is a corrected path" rule is kept). The answer lives in memory on `main.gd` (`folder_match_answer`, never `secrets.cfg` or settings) and applies to later opens and room adds; **Ask again** clears it.
+- Tests: `file_lookup_vectors` (25 cases), `moved_files` (3-level id-less fixture under a new root: not accepted -> level 1 `likely`, deeper levels not visited; accepted -> all levels resolved, `external_ref` corrected at each; one id-bearing reference teaches the shift; a stored id the shifted file lacks is never used; the real `main.gd` session answer: Not now + toggle is remembered and skips the question on the next open, Ask again clears it; the header row and a one-press Use for a likely candidate), `stress_moved_files` (its model of the rule now includes the suffix and learned-shift steps; 1500 worlds).
+
 ## Branch `ccr-41dea9ce-xw2oi0` (10 Nov, not merged; owner's bug report)
 
 Headless-tested (`tests/empty_start.gd`, +7 lines that fail without the fix); not checked on the headset.

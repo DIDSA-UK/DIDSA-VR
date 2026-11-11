@@ -131,6 +131,7 @@ func _world(n: int) -> void:
 	all.append({"path": "Root.didsa", "id": "root"})
 
 	# --- the model of the rule (docs/moved-files-scope.md section 2), in order, with "a part id is used once" bookkeeping
+	var shifts: Array = [] # item 1c, newest first: [from segments (lower-cased), to segments (as written)]
 	var loaded_ids := {"root": "Root.didsa"}
 	var loaded_files := {"Root.didsa": true}
 	for occ in occs:
@@ -161,11 +162,52 @@ func _world(n: int) -> void:
 			var by_id := visible.filter(func(f) -> bool: return stored != "" and f["id"] == stored)
 			if by_id.size() == 1:
 				chosen = by_id[0]
+				_learn(shifts, ref, chosen["path"])
 			elif by_id.size() > 1:
 				expect["result"] = "ask"
 			else:
 				var names := visible.filter(func(f) -> bool: return _name_key(f["path"]) == _name_key(ref))
 				expect["result"] = "suggest" if (not names.is_empty() or at != null) else "missing"
+				# Item 1b, written from the plan (not from file_lookup.gd): with no stored id, exactly one name match with the most
+				# trailing segments in common (at least 2, and one path the other with leading folders dropped) is "likely".
+				if stored == "" and not names.is_empty():
+					var ref_segs := _segs(ref)
+					var best_k := -1
+					var best_count := 0
+					var best_whole := false
+					for f in names:
+						var fs := _segs(f["path"])
+						var k := 0
+						while k < mini(ref_segs.size(), fs.size()) and ref_segs[ref_segs.size() - 1 - k] == fs[fs.size() - 1 - k]:
+							k += 1
+						if k > best_k:
+							best_k = k
+							best_count = 1
+							best_whole = k == mini(ref_segs.size(), fs.size())
+						elif k == best_k:
+							best_count += 1
+					if best_count == 1 and best_k >= 2 and best_whole:
+						expect["result"] = "likely"
+				# Item 1c: a learned shift tried on the miss (an id match beats it; it never overrides a plain id match).
+				var hit = null
+				for sh in shifts:
+					var shifted := _apply(sh, ref)
+					if shifted == "":
+						continue
+					for f in visible:
+						if _segs(f["path"]) == _segs(shifted):
+							if stored != "" and f["id"] == stored:
+								hit = f
+							elif stored == "" and expect["result"] != "likely":
+								expect["result"] = "likely"
+								hit = f
+							break
+					if hit != null:
+						break
+				if hit != null and stored != "":
+					chosen = hit
+					expect["result"] = ""
+					_learn(shifts, ref, hit["path"])
 		if chosen != null:
 			# Loading it: a file that isn't a single readable part, or whose part id another file already brought in, stays unresolved.
 			if chosen["id"] == "" or (loaded_ids.has(chosen["id"]) and loaded_ids[chosen["id"]] != chosen["path"]):
@@ -212,6 +254,56 @@ func _world(n: int) -> void:
 	_check(int(composed["resolved"]) == resolved_n, "resolved count %d should be %d" % [int(composed["resolved"]), resolved_n])
 
 
+func _segs(path: String) -> Array:
+	## Lower-cased path segments, the file name without its native extension.
+	var parts: Array = []
+	for seg in path.strip_edges().replace("\\", "/").split("/"):
+		if seg != "" and seg != ".":
+			parts.append(seg.to_lower())
+	if not parts.is_empty():
+		parts[parts.size() - 1] = _name_key(str(parts[parts.size() - 1]))
+	return parts
+
+
+func _raw(path: String) -> Array:
+	var parts: Array = []
+	for seg in path.strip_edges().replace("\\", "/").split("/"):
+		if seg != "" and seg != ".":
+			parts.append(seg)
+	return parts
+
+
+func _learn(shifts: Array, stored: String, found: String) -> void:
+	var a := _raw(stored)
+	var b := _raw(found)
+	var tail := 0
+	while tail < mini(a.size(), b.size()) and str(a[a.size() - 1 - tail]).to_lower() == str(b[b.size() - 1 - tail]).to_lower():
+		tail += 1
+	if tail < 1:
+		return
+	var from: Array = a.slice(0, a.size() - tail).map(func(x) -> String: return str(x).to_lower())
+	var to: Array = b.slice(0, b.size() - tail)
+	if from.is_empty() and to.is_empty():
+		return
+	for sh in shifts:
+		if "/".join(PackedStringArray(sh[0])) == "/".join(PackedStringArray(from)) and "/".join(PackedStringArray(sh[1])) == "/".join(PackedStringArray(to)):
+			return
+	shifts.push_front([from, to])
+
+
+func _apply(shift: Array, stored: String) -> String:
+	var a := _raw(stored)
+	var from: Array = shift[0]
+	if a.size() < from.size():
+		return ""
+	for i in from.size():
+		if str(a[i]).to_lower() != from[i]:
+			return ""
+	var out: Array = (shift[1] as Array).duplicate()
+	out.append_array(a.slice(from.size()))
+	return "/".join(PackedStringArray(out))
+
+
 func _id_of(files: Array, path: String) -> String:
 	for f in files:
 		if f["path"] == path:
@@ -233,7 +325,7 @@ func _invariants(composed: Dictionary) -> void:
 			if o.get("resolved_part_id") != null and str(o["resolved_part_id"]) != "":
 				pass # an unresolved older reference keeps its stored resolved_part_id (the backend seeds ref_part_id from it and drops it)
 	for item in composed["review"]:
-		_check(item["result"] in ["ask", "suggest", "missing"], "a review item with result %s" % str(item["result"]))
+		_check(item["result"] in ["ask", "suggest", "missing", "likely"], "a review item with result %s" % str(item["result"]))
 		_check((item["result"] == "ask") == (item["candidates"].size() > 1 and item["result"] == "ask"), "ask has several candidates")
 
 
