@@ -1259,7 +1259,7 @@ func _refresh_dirty_label() -> void:
 	if _dirty_label == null or _main == null:
 		return
 	var dir: String = ProjectSettings.globalize_path(_main.save_dir())
-	_dirty_label.text = ("Unsaved changes. Save before opening or starting anything else. New files go to %s" if _main.document_dirty else "Nothing unsaved. New files go to %s") % dir
+	_dirty_label.text = ("Unsaved changes. Save before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
 	if _new_assembly_button:
 		_new_assembly_button.text = "New assembly" if _new_assembly_armed_until_ms == 0 else _new_assembly_armed_text()
 
