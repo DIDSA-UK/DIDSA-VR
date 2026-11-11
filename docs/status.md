@@ -77,6 +77,12 @@ Everything below is headless-, software-render- and (where stated) real-backend-
      passed, and Godot's WebSocket refuses http(s)). Now a **Relay** form per server, `ws://` / `wss://` in pairing codes, and DIDSA-CAD's
      Connect a VR headset puts the relay in the code (same branch name there). How to set it up: [`servers.md`](servers.md#setting-up-the-browser-the-browser-relay).
      `tests/servers.gd`, `pairing_payload.gd`, `pairing_flow.gd`, `browser_window.gd`.
+   - **Browser connected but showed nothing (owner, 11 Nov, relay behind a Cloudflare tunnel):** two bugs, reproduced against a live relay and
+     Chromium in the build session. Chrome refused `Page.startScreencast` because it arrived while the first navigation was still swapping the page
+     ("Not attached to an active page"), so no frame ever came; and a real page's frame (~200 KB) is over Godot's default 64 KiB WebSocket message
+     limit, which closes the connection (1009). Now the screencast is restarted whenever the page finishes loading, and the relay connection takes
+     4 MiB messages (`browser_window.gd`). After the fix, about:blank and a busy 800x600 page both show through the real window; before, nothing.
+     The live run needs Chromium and the relay, so it is not in the suite; `tests/browser_window.gd` checks the pieces. Not checked on the headset.
 
 ## Cross-repo
 

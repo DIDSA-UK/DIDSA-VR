@@ -93,6 +93,14 @@ func _initialize() -> void:
 	# The relay address as WebSocketPeer needs it (it refuses http(s):// with error 31, Godot 4.7.2): bug report 10 Nov 2026.
 	print("SMOKE relay address: ws:// kept, trailing slash and /ws dropped: ", BrowserWindow.relay_ws_url(" ws://192.168.1.9:8100/ws/ ") == "ws://192.168.1.9:8100")
 	print("SMOKE relay address: http(s):// becomes ws(s)://: ", BrowserWindow.relay_ws_url("http://192.168.1.9:8100") == "ws://192.168.1.9:8100" and BrowserWindow.relay_ws_url("HTTPS://relay.example.net/") == "wss://relay.example.net")
+	# A blank window with "Connected" (owner's report, 11 Nov 2026): Chrome refused Page.startScreencast mid-navigation, and a real page's frame
+	# was bigger than WebSocketPeer's default 64 KiB message limit. Run against a live relay + Chromium: before, no frame at all; after, about:blank
+	# and an 800x600 busy page both shown (the live run is not in this suite: it needs Chromium and the relay).
+	print("SMOKE a page finishing loading restarts the screencast (loadEventFired and frameStoppedLoading): ", BrowserWindow.parse_incoming('{"method":"Page.loadEventFired","params":{}}')["kind"] == "page_loaded" and BrowserWindow.parse_incoming('{"method":"Page.frameStoppedLoading","params":{"frameId":"F"}}')["kind"] == "page_loaded")
+	var refused := BrowserWindow.parse_incoming('{"id":4,"error":{"code":-32000,"message":"Not attached to an active page"}}')
+	print("SMOKE a refused command is read as an error with its id: ", refused["kind"] == "error" and refused["id"] == 4 and "Not attached" in refused["message"])
+	print("SMOKE ...a plain command response is still not an error: ", BrowserWindow.parse_incoming('{"id":5,"result":{}}')["kind"] == "other")
+	print("SMOKE the relay connection takes a 1 MB message (a real page's frame is ~200 KB; the default limit is 64 KiB): ", BrowserWindow.RELAY_INBOUND_BUFFER >= 1024 * 1024)
 	print("SMOKE a relay that never opened says what to check (key, port, network): ", "BROWSER_RELAY_API_KEY" in BrowserWindow.relay_failure_text("ws://a:8100", false, -1) and "8100" in BrowserWindow.relay_failure_text("ws://a:8100", false, -1))
 
 	quit()
