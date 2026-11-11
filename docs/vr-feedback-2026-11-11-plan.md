@@ -14,14 +14,15 @@ The file-format and desktop-mode items from the same notes are in `DIDSA-UK/DIDS
 | Item | Summary | Kind | Cause certainty |
 |---|---|---|---|
 | V-1 | Grabbing a fixed parent assembly does nothing, with no "part is fixed" message on the hand | Bug (feedback) | High: the message path is known; which refusal fired is not |
-| V-2 | Relaxed mates: cycling to the parent keeps small movements of the child | Bug | **Low: not found by reading; repro first** |
+| V-2 | Cycling to the parent: the part moves a little before you leave the dead zone, and it is kept | Bug | **High: the world gesture drags the model during the latch (read)** |
 | V-3 | Appearance tool: a paint shows nothing until the next paint | Bug | **Medium: one real race, but narrower than first thought; instrument first** |
 | V-4 | Mate preview ghost sometimes missing though Create moves the parts | Bug | **Medium: several silent no-ghost paths; instrument first** |
 | V-5 | Fix / Float: controlled from the Assembly Tree, not the wheel; the wheel gets only "Relax fix" | Decision | n/a |
 | V-6 | "Relax fix mates": grab a grounded assembly and carry it, mates intact; temporary | Feature | n/a (owner's rules below) |
+| V-8 | Sketch dimension: the keyboard opens behind the sketch sheet | Bug + placement design | High (read: the geometry) |
 | V-7 | Assembly Tree, phase T1 of `feature-tree-review-2026-11-11.md`: state icons, selection both ways, a bottom action bar (Fix / Float, view-only Hide, Isolate, Rename, Room, Delete), stays current | Feature + bugs (confirmed) | High (read) |
 
-Suggested order: **V-1 → V-7 → V-5 → V-6**, with **V-3, V-4 and V-2** started by their instrumentation / reproduction steps in
+Suggested order: **V-1 → V-7 → V-5 → V-6**, with **V-2 and V-8** (small, causes known) any time, and **V-3, V-4** started by their instrumentation steps in
 parallel (each is a small first PR: logs plus a test), then fixed once the cause is known.
 V-7 brings Fix / Float (V-5); V-6 adds the Relax fix wedge to `scripts/ui/wheel_flows.gd` `_mates_entries`.
 
@@ -145,37 +146,33 @@ on both `group_message` and `tool_message`; the caption carries "(fixed)". Hapti
 
 ---
 
-## V-2: relaxed mates, cycling to the parent keeps small child movements (reproduce first)
+## V-2: the part moves before you leave the dead zone (cause found on the second pass)
 
-**What the owner wants.** Grip a part, cycle (trigger) to its parent, then move: the child must not have moved relative to the parent.
+**Owner (11 Nov):** "I thought I saw the part making small movements before I left the dead zone." That rules the latch path in,
+and it points at the cause.
 
-**What the code says.** The grip **latches** and moves nothing: `_try_grab` → `_begin_latch(target)` (only for parts inside a
-sub-assembly, `GroupIndex.has_groups`, and only with `group_deadzone > 0`); trigger clicks `_cycle_latch`; leaving the dead
-sphere runs `_commit_latch` → `_begin_group_hold(target, level)` → `GroupSet.new(...)` (which records `starts` at *that* moment)
-and `_begin_hold(target, target.global_transform)` (grab offset taken at that moment). By that code nothing moves during the
-cycling, so **the cause was not found by reading**. Do not guess a fix; reproduce.
+**Cause (read, high confidence).** While a grip is latched, nothing tells the **world gesture** that the hand is busy.
+`two_hand_model.gd` decides a grip is "on empty space" with `_hand_free_ignoring_button(hand)`: false if the hand holds the section
+gizmo, a window, the table part, a room handle, is placing a room, has the wheel open, or `hand.held_node != null`. During the latch
+`held_node` is still null (the hold only starts at commit) and there is no "latched" meta, so the hand counts as **free** and the
+one-hand gesture `_update_one_hand` **drags the whole model with the hand** inside the dead zone. That is the small movement seen.
+At commit `held_node` is set, the gesture ends, and the model stays where it was dragged. (The model moves as a whole, so what you
+see is the part you are holding drift with your hand, which is exactly what the latch promises not to do: `assembly-rooms-scope.md`
+4.1, "the grab latches but the part does not move".) The same leak happens for a room's model when the latch is in a room.
 
-**Candidates to check, in order.**
-1. **The latch is not what is running.** With `group_deadzone` Off (Settings > Rooms, `app_settings.gd`), or for a part
-   `GroupIndex.has_groups` says has no groups, the grip takes the *part* at once (`_begin_part_hold`) and it follows the hand
-   immediately. Check the setting and `has_groups` on the owner's assembly. If this is it, the bug is that a grip can move the child
-   before the user can choose: latch regardless of the setting for a part inside a sub-assembly, or make "Off" mean "take the
-   innermost, no cycling" and say so.
-2. **The thumbstick moves the selected child during the latch.** `controller.gd` `_physics_process` turns / pushes `selected_node`
-   with the stick and A / B whenever something is selected (~line 221-245); nothing there checks `_latch`. If the child was also
-   laser-selected, a touch of the stick (or A / B) while cycling moves it, and the group taken at commit keeps that offset. Fix: no
-   stick / A / B manipulation while `_latch` is active.
-3. **Something else moved members before the commit**: a *selected group's* `follow()`, scene / sandbox ghost updates while relaxed,
-   or `two_hand_model.gd` (the other hand's gesture; it skips only `held` nodes, and latched nodes are not `held` yet).
-(The first draft's "hand rotation at commit" candidate was wrong: `_begin_hold` takes the grab offset from the hand **at commit**, so a
-rotation during the latch causes no jump.)
+**Fix.** In `controller.gd`, set a meta on the hand while latched (`set_meta("grip_latched", true)` in `_begin_latch`, false in
+`_end_latch`), and add it to the list in `two_hand_model._hand_free_ignoring_button` (the same pattern as `window_held` /
+`table_part_held` / `room_handle_held`). If the gesture started in the frame before the latch (order of `_process` vs the input
+event), `_end_gesture()` runs on the next frame; check that ending it does not leave a one-frame offset (it shouldn't: the gesture
+moves the model only while it runs).
 
-**First step (a test, not a fix).** Extend `tests/group_select.gd`: grip a child in a two-level fixture, move the hand inside the
-dead zone and rotate it a little, click the trigger twice, assert **every member's global transform is unchanged** at every step, then
-move the hand out and assert the first frame after commit does not change any member's pose. Run it with mates relaxed
-and unrelaxed. If it passes, the cause is not in this path: ask the owner for the exact sequence (hand held still? Off setting? which
-depth?) and add logging at `_begin_latch`, `_cycle_latch`, `_commit_latch`. State plainly in the PR that the cause was not
-reproduced if that is the outcome.
+**Second, smaller leak (same family).** `controller._physics_process` turns / pushes the **laser-selected** part with the stick and
+A / B even while a grip is latched (nothing checks `_latch`). Block stick / A / B manipulation while `_latch` is not empty.
+
+**Tests** (headless): the arbitration metas are testable without a runtime (`_hand_free_ignoring_button` was split out for exactly
+this): a hand with `grip_latched` is not free; `tests/group_select.gd`: latch, move the hand inside the dead zone, the model root's
+transform is unchanged. **Owner re-test:** grip a part in a sub-assembly, wiggle inside the sphere, cycle, leave: nothing should
+move until you leave the sphere.
 
 ---
 
@@ -260,6 +257,39 @@ reports an empty basis (stuck): promotes to the cluster carry without a pose jum
 drag; (d) Return restores every pose in one undo step; (e) fix-relax then full Relax keeps `_home`; (f) off by default and not
 persisted across a reload. **Cannot be tested headless:** how the carry feels with the hand, and the real solver's stuck report
 timing (the live-backend e2e `tests/e2e_mates_motion.gd` can cover the second).
+
+---
+
+## V-8: sketch dimension: the keyboard opens behind the sketch sheet
+
+**Cause (read).** Every keyboard request goes through `main.open_keyboard_for` → `popup_keyboard.gd` `open_for` →
+`_place_in_front_of_camera()`: the numeric keypad opens **0.6 m in front of your eyes, 0.1 m below them**, facing you
+(yaw only). Since T4 (`test-report-30-oct-plan.md`) the design table's **sketch sheet stands at the slab's front edge**, hinged
+there and tilted back about 15°, which is about where you stand to sketch: the 0.6 m point lands behind or inside the sheet. Also,
+once you have moved the keyboard it reopens **where you left it** for as long as you are within 3 m (`_moved_poses`), which at the
+table can also be behind the sheet. The dimension callers (`table_editor.gd` `_type_dimension`, ~1830 / ~2002) pass no position.
+
+**Recommendation: the same place every time, relative to what asked for it, not to your head.**
+- **At the design table: dock it under the sheet, in front of the slab's front edge, low and tilted back like a laptop keyboard in
+  front of its screen** (the full keyboard already opens "on your lap" for the same reason). It never covers the sketch (it sits
+  below the sheet's lower edge), it is never behind it (it is on your side of the hinge), it is in easy laser reach, and it is
+  the same place for every value typed at the table: a dimension, a feature value, an option, a text, a rename. The tree is docked
+  at the left of the console and the properties panel at the right, so the front is the free side.
+  Implement as a dock pose in the **console's frame** (like `table_tree_window.dock_position`), passed in the options:
+  `open_keyboard_for(text, cb, {"anchor": console_node, "dock": Transform3D(...)})`. The keyboard follows the console when it is
+  moved or recalled. If the user carries the keyboard somewhere else at the table, remember that pose **in the console's frame**
+  (not the world's), so it stays put relative to the table.
+- **For a floating window** (the browser, a calculator, the tablet's rename fields): below that window, tilted, as the full keyboard is.
+- **With no context** (the thumbstick scale entry): in front of you, as now.
+- **Safety net for every case:** after placing it, cast from the eyes to its centre; if anything (a window, the table, the sheet) is in
+  the way, bring it towards you until it is clear (never closer than ~0.3 m). Godot has no physics colliders on the panels, so test
+  against the panels' and the sheet's quads (their AABBs) rather than physics.
+- **While typing a dimension, show the typed value on the dimension in the sketch as you type** (the ghost dimension's label), so
+  you don't have to look between the keyboard's display and the sketch. Optional, small, and it makes the keyboard's position matter less.
+
+**Tests** (headless): with the table open and a sketch open, `_type_dimension` opens the keyboard at the dock (to 1 cm) and in front of
+the sheet's plane on the camera's side; the eye-to-keyboard check moves it in front of a panel placed in the way; a moved keyboard at the
+table reopens at the same console-frame pose after the console is recalled. **Headset:** reach and readability of the dock.
 
 ---
 

@@ -42,7 +42,7 @@ Bugs (confirmed by reading the code):
 | # | Problem | Where |
 |---|---|---|
 | B1 | **A row under a repeated sub-assembly selects the wrong part.** `main.select_part_by_occurrence_id` takes the first visible node whose `occurrence_id` meta matches. That meta is the occurrence id **within its own Part** (`mesh_identity.gd` from the glb extras, `mesh_export.py`), so both placements of a sub-assembly carry the same child ids. The row under the second placement selects the part in the first. | `main.gd` ~793 |
-| B2 | **The root row selects an arbitrary body.** The root row's id is `""`; the root's own bodies and every pattern copy also have `occurrence_id == ""`, so tapping the root selects whichever comes first. | same |
+| B2 | **The root row selects an arbitrary body** (it should select the whole assembly: owner, 11 Nov). The root row's id is `""`; the root's own bodies and every pattern copy also have `occurrence_id == ""`, so tapping the root selects whichever comes first. | same |
 | B3 | **Delete on a nested row edits a shared Part silently.** It deletes the occurrence from the sub-assembly's Part, which changes every placement of that sub-assembly; the room console says "used N times" for exactly this reason, the tree does not. | `assembly_tree_window.gd` `_on_delete_pressed` |
 | B4 | **Refresh throws the tree away.** `mark_stale()` sets `_tree = []`; every refresh collapses everything you had expanded. | `mark_stale`, `_refresh_root` |
 | B5 | **The table PARTS tab lost Room and Delete** by overriding `_add_row_actions` (probably by design for space, but nothing replaced them). | `table_tree_window.gd` `_add_row_actions` |
@@ -96,7 +96,7 @@ One line per row: indent · expander icon (not ">" / "v" text) · **state icon**
 
 - **Tree → world**: a leaf row selects its node **by path** (`group_path` meta, `group_index.gd`: the occurrence ids from the scope's
   root down; fixes B1). A sub-assembly row selects the whole group (`select_group_level`; `GroupIndex.levels` builds the level).
-  The root row selects nothing (fixes B2) or, if wanted, the whole assembly as a group.
+  The root row selects the whole assembly as a group (owner's answer; fixes B2, which picked an arbitrary body).
 - **World → tree**: add `signal selection_changed(node, level)` to `controller.gd` (emitted from `_set_selection`,
   `_clear_selection`, `select_group_level`). The tree expands the ancestors (fetching levels as needed), highlights the row and
   scrolls it into view (`scroll_target`). Debounce.
@@ -172,7 +172,7 @@ T1 can be built inside `assembly_tree_window.gd` with the pure parts already in 
   constraint state; instance names; the action list and greyed reasons per row kind (root, top-level, nested, pattern copy, missing
   file); path building.
 - B1: two placements of one sub-assembly; selecting a child row under the second selects the second's node (fails today). B2: the
-  root row selects nothing.
+  root row selects every part of the scope as one group.
 - World → tree: `selection_changed` for a nested part expands its ancestors and marks its row.
 - Fix / Float on a nested row PATCHes the parent Part's occurrence, updates `_nested_states`, undo reverts it (fake backend).
 - Refresh after a mate keeps the expanded rows and the selection.
@@ -180,9 +180,10 @@ T1 can be built inside `assembly_tree_window.gd` with the pure parts already in 
 - e2e (`tests/e2e_assembly_tree.gd`): fix from the tree, then a grip on that part is refused with the "Part is fixed" message.
 - **Not testable headless:** readability, reach, the pulse and the leader line as seen in the headset.
 
-## 7. Questions for the owner (the defaults are in brackets)
+## 7. Owner's answers (11 Nov)
 
-1. Instance names: "Bolt <2>" (SOLIDWORKS) or "Bolt (2)"? [**<2>**]
-2. BUILD tab: move its action strip to the bottom bar too? [**yes, one pattern everywhere**]
-3. Room tree: a window docked beside the console, or a tab inside the console? [**docked window**, like the table]
-4. Tapping the root row: select nothing, or select the whole assembly? [**nothing**]
+1. Instance names: **"Bolt <2>"**.
+2. BUILD tab: **yes**, its actions move to the bottom bar: one pattern everywhere.
+3. Room tree: **a docked window** beside the console, like the table's tree.
+4. Tapping the root row: **selects the whole assembly** (as a group: every part lights up, the stick and A / B move it as one, as a
+   selected sub-assembly does; `select_group_level` with a level that holds every part of the scope). This replaces "selects nothing" in R3.
