@@ -14,8 +14,8 @@ The file-format and desktop-mode items from the same notes are in `DIDSA-UK/DIDS
 | V-2 | Relaxed mates: cycling to the parent keeps small movements of the child | Bug | **Low: not found by reading; repro first** |
 | V-3 | Appearance tool: a paint shows nothing until the next paint | Bug | High (a race, read in the code) |
 | V-4 | Mate preview ghost sometimes missing though Create moves the parts | Bug | High (preview skips a step Create does) |
-| V-5 | No "Fix / Float" on the mates quick wheel | Missing feature (confirmed absent) | Certain |
-| V-6 | "Relax fix mates": a sandbox for grounded parts only, so the assembly follows | Feature | n/a (design below) |
+| V-5 | No "Fix / Float" on the mates quick wheel (and a Relax-fix wedge) | Missing feature (confirmed absent) | Certain |
+| V-6 | "Relax fix mates": grab a grounded assembly and carry it, mates intact; temporary | Feature | n/a (owner's rules below) |
 
 Suggested order: **V-3 → V-4 → V-1 → V-5 → V-6**, with **V-2** investigated in parallel (it needs a reproduction before any fix).
 V-5 and V-6 both change `scripts/ui/wheel_flows.gd` `_mates_entries`; do them together or in that order.
@@ -174,75 +174,94 @@ reproduced if that is the outcome.
 
 ---
 
-## V-5: no Fix / Float on the mates quick wheel (confirmed absent)
+## V-5: Fix / Float on the mates quick wheel (confirmed absent) and a "Relax fix" wedge
 
-`scripts/ui/wheel_flows.gd` `_mates_entries()` has six wedges: Create, Type (sub-wheel), Flip, Clear picks, Relax / Return parts,
-All tools. The comment says the bottom 60° belong to the "Clear" pill and a sub-wheel must not sit there. Fix / Float exists **only**
-on the tablet (`ui/tablet_pages.gd` ~773 "Fix / Float selected part" → `mates_tool.toggle_fixed(_main.current_selected_part())`).
+`scripts/ui/wheel_flows.gd` `_mates_entries()` has six wedges: Create, Type (sub-wheel), Flip, Clear picks (straight down), Relax / Return
+parts, All tools. Fix / Float exists **only** on the tablet (`ui/tablet_pages.gd` ~773 "Fix / Float selected part" →
+`mates_tool.toggle_fixed(_main.current_selected_part())`).
 
-**Design (follows the existing ring rules).** Replace the single "Relax" wedge with a **sub-wheel**? No: the rule in
-`wheel_flows.gd` ~204 says Return parts must be a top-level wedge on every ring while relaxed. So:
-- Add a **"Fix / Float"** wedge to the mates ring (it becomes 7 wedges: check `tool_wheel_math.wedge_for`/`wedge_outline` handle
-  7 and that the straight-down slot stays the pill; if the ring looks crowded at 7, make **"Ground"** a sub-wheel
-  ("Fix / Float", "Relax fix mates" from V-6, "Relax all mates"/"Return parts") placed in the slot Relax has now, and keep "Return
-  parts" top-level while relaxed as the existing code does. **Recommended: this sub-wheel**: it needs no 7th wedge, and V-6's new
-  toggle belongs in it.)
-- Fix / Float acts on **the part under the laser, else the laser-selected part** (`_main.current_selected_part()`). On the wheel the
-  hand is busy pointing at wedges, so do not require a fresh pick: use the selection, and when nothing is selected the entry is
-  greyed with the hint "Select a part first (laser-select it)" (the `_action(...)` helper already takes a `hint_disabled`).
-  Label by state: "Float" if the selected part is fixed, "Fix" if not (like `_relax_entry` swaps its label); `mates_tool.is_fixed(part)`.
-- Call `mates_tool.toggle_fixed(part)` (a coroutine; the existing `_report` message "X is now grounded (fixed)" goes to the
-  mates prompt; also `say(...)` it so it shows on the wrist hint).
-- Add an icon to `ui/ui_icons.gd` ("fix"/pin). Update `tests/wheel_*` tests that count wedges (`ls tests | grep wheel`) and
-  `docs` wheel descriptions (`landing/tips.gd` if it mentions the wheel).
+**Decision (owner: a sub-wheel is not ideal): no sub-wheel. Two plain top-level wedges on the mates ring, eight in all.**
+The root ring already has **ten** wedges (`root_entries()`), so eight on the mates ring is within what the wheel draws; the only rule
+is that the wedge straight down (above the pill) is never a sub-wheel, and with eight wedges that is still Clear picks.
+Clockwise from the top: Create · Type · Flip · **Fix / Float** · Clear picks (down) · **Relax fix** · Relax / Return parts · All tools.
+Put the two new ones either side of the bottom wedge: they are the two "ground" actions, next to the existing Relax.
+- Check `tool_wheel_math.wedge_for` / `wedge_outline` / `tile_width_at` at 8: the names must fit their tiles (the tiles at 3 and 9
+  o'clock are the narrow ones; the root ring's note says put long names on the wide tiles). Names: "Fix / Float" (swaps to "Fix" or
+  "Float" by state), "Relax fix" ("Return" while on). Update the comment above `_mates_entries` (it says "six wedges").
+- Alternatives considered and rejected: the Type sub-wheel (Fix is not a mate type here: the backend has no fix mate, it is a flag on
+  the occurrence) and a controller button (not discoverable, and the two hands' buttons are all taken: grip, trigger, stick, A/B).
+  The tablet button stays.
+- **Fix / Float target:** the laser-selected part (`_main.current_selected_part()`), else the part of the most recent mate pick
+  (`_picks.back()`'s occurrence). Greyed with the hint "Select a part first (laser-select it)" when neither exists (the
+  `_action(...)` helper takes a `hint_disabled`). The label follows `mates_tool.is_fixed(part)`.
+- Calls `mates_tool.toggle_fixed(part)` (a coroutine); also `say("X is now fixed")` so it shows on the wrist hint (today only
+  the mates prompt shows it). A fixed part gets a small marker so it is visible which parts are fixed (see V-6 UI note).
+- Add an icon to `ui/ui_icons.gd` (a pin / anchor). Update the wheel tests that count wedges (`ls tests | grep wheel`) and any text that
+  describes the mates ring (`landing/tips.gd`, `docs/`).
 
-**Test.** Wheel entry list test: the entry exists, is disabled with no selection, label flips with the part's `fixed` flag.
-`toggle_fixed` is already covered by the e2e mates tests.
+**Test.** Entry-list test: both entries exist; Fix / Float disabled with no selection; label flips with the fixed flag; Relax fix
+label flips to "Return" when on. `toggle_fixed` is covered by the e2e mates tests.
 
 ---
 
-## V-6: "Relax fix mates": sandbox for grounded parts only
+## V-6: "Relax fix mates": move a grounded assembly as one, mates intact
 
-**Request.** Like "Relax mates", but only for **fix** (grounded) occurrences, so the user can pick up the part in the world and the
-rest of the assembly stays in context.
+**Owner's description (settled).** With fix-relax on, the user can grab a grounded part, **or a part grounded by mates to another grounded
+part**, and move / turn the assembly around in the world **while all its mates are maintained**. Fix mates are a staple of CAD and
+let the designer control the design; relaxing them is a **temporary** switch, and turning it off sends everything back exactly as
+Relax / Return parts does ("reinforce").
 
-**Interpretation (confirm with the owner; the default below is the plan).** With fix-relax on:
-- A grounded part can be grabbed (no `is_locked` refusal, no `_group_refusal` "is grounded"), **and the parts mated (directly or
-  through a chain of mates) to it move with it as one rigid cluster**, so nothing is pulled apart. That is "the assembly stays in
-  context". Mates stay **enforced**: it is not the full sandbox, where mated parts are left behind.
-- The move is **temporary**, like Relax: nothing is saved; **Return parts** puts everything back (reusing the sandbox's `_home`
-  poses and `return_parts()`), and the tablet/wheel toggle shows "Return parts" the same way.
-- Alternative reading (a persistent move of the whole assembly, i.e. an ordinary "move assembly" gesture) is simpler but is what the
-  existing whole-model grab does already; so the plan assumes the temporary-cluster reading. **Ask the owner if it is wrong.**
+**Rules.**
+- Only **fixed** is relaxed. Every other mate stays enforced. This is **not** the full sandbox (where mated parts are left behind).
+- **Grounded cluster** = every part reachable by mates (breadth-first through `mates`, skipping coupler / limit mates, which place
+  nothing; pattern copies follow their source) from a **fixed** part. Grabbing a part that is *in* a grounded cluster **and has no
+  free motion** (fixed itself, or fully constrained by its mates to that cluster) carries the **whole cluster rigidly**, anchor =
+  the part in hand. All relative poses in it are unchanged, so every mate stays satisfied.
+- A part in the cluster **with free motion** (a hinge, a slider) keeps its ordinary constrained drag (it moves within what its mates
+  allow; the rest stays put): relaxing fix does not change that. The cluster only moves when what you hold cannot move on its own.
+  **How to tell:** the existing live solve already says it: `_accept_anchor` (`mates_tool.gd` ~2620) sets `state["stuck"]` when the
+  backend returns an empty free-motion `basis` ("fully constrained: it can't move. Relax all mates..."). With fix-relax on, that
+  moment **promotes the drag to a cluster carry** from the part's current pose (rebase the hold: `_grab_offset` from the hand and
+  the part now, so there is no jump) instead of just buzzing. A *fixed* part never starts a solve: it carries the cluster at once.
+- Parts **not** connected to a fixed part by mates (free parts, a separate cluster with no ground) are untouched: ordinary grab.
+- **Temporary, like Relax:** nothing is saved (no `persist_pose`, no PATCH). Each part moved is remembered in `_home` the first time
+  it is carried (same structure as `_enter_sandbox`), and "Return" restores every remembered pose in one undo step
+  (`return_parts()`), exactly as the full sandbox does. Undo / redo of "return parts" works the same.
+- Mates made or edited while fix-relax is on are solved when the parts go home, as in the sandbox (`note_sandbox_mate`).
+- Two modes, one rule for the pill and prompt: `relaxed` (all) and `relaxed_fixed` (fix only). Turning **Relax** (all) on while
+  fix-relax is on promotes to the full sandbox **keeping `_home`**; turning fix-relax on while Relax is on is a no-op (greyed with
+  "Mates are already relaxed").
 
-**Implementation sketch (`scripts/mates_tool.gd`, `controller.gd`, wheel and tablet).**
-1. State: `var relaxed_fixed := false` and `set_relaxed_fixed(on)`. Entering it calls `_enter_sandbox({})` (records `_home` for all
-   parts, `relaxed` stays false so mates are still enforced everywhere else); to keep the two modes distinct add a
-   `sandbox_kind: "all" | "fixed"` and make `is_sandboxed(part)` true in `fixed` mode only for the cluster being moved. Check every
-   reader of `relaxed` (about 40 sites: `grep -n "relaxed" scripts/*.gd scripts/ui/*.gd`) and decide per site whether it means "mates
-   not enforced" (leave false in fixed mode) or "the sandbox exists, moves are temporary" (use a new `in_sandbox()` that is true for
-   both). The appearance tool's "temporary paint while relaxed" (`appearance_tool.gd is_temporary`) should follow `in_sandbox()`.
-2. Cluster: a pure function `mate_cluster(owner_part_id, occurrence_id) -> Array[String]`: breadth-first over `mates` (each mate
-   names two occurrences; skip coupler/limit mates, which do not place), the anchor first. Pattern copies follow their source.
-   Pure and unit-testable (`tests/mates_tool.gd`).
-3. Grab: in `controller._try_grab`, when `relaxed_fixed` and the target is fixed (`mates_tool.is_fixed(target)`), skip the
-   `is_locked` refusal and build a `GroupSet`-like carrier from the cluster's nodes (reuse `GroupSet`; it already
-   moves members rigidly about an anchor and has `follow()`, `restore()`, `finals()`). Hold the anchor as a group
-   (`_held_group`), so `_update_held_part` does not call `constrain_drag`. Release: do **not** call `_finish_group_move` save paths
-   (`persist_group_pose`); the move is a sandbox move (`sandbox` flag, as `_finish_group_move` already computes with
-   `mates_tool.is_sandboxed(gs.anchor)`).
-4. A fixed part that is **inside a sub-assembly** (nested): the same, with the sub-assembly's mates from
-   `_nested_states`. If the cluster crosses a boundary, take the whole sub-assembly (use the group machinery's levels).
-5. V-1's refusals consult `relaxed_fixed`: a fixed ancestor no longer refuses.
-6. UI: wheel (V-5's sub-wheel): "Relax fix mates" toggle, label "Return parts" while on (like `_relax_entry`); tablet: a second
-   toggle under "Relax mates" in `tablet_pages.gd` ~742 with the same sandbox rules (Scenes page asks before losing unsaved
-   changes: reuse its guard). The two relax modes are exclusive: turning on "Relax mates" while fix-relax is on promotes to full
-   relax without forgetting `_home`. The prompt text in `wheel_flows.gd` ~115 says which mode is on.
-7. Messages: `_report("Fix mates relaxed: grab a fixed part and its mated parts come with it. Return parts puts everything back.")`.
+**Implementation sketch.**
+1. `mates_tool.gd`: `var relaxed_fixed := false`, `set_relaxed_fixed(on)` (off = `return_parts()`), a pure
+   `grounded_cluster(owner_part_id, occurrence_id) -> Array[String]` (unit-testable), `in_sandbox()` = `relaxed or relaxed_fixed`
+   for "moves are temporary" readers. Go through every use of `relaxed` (about 40: `grep -n "relaxed" scripts/*.gd scripts/ui/*.gd`)
+   and decide: "mates are not enforced" (keep on `relaxed`) vs "temporary / has a sandbox" (use `in_sandbox()`): the appearance tool's
+   temporary paint, scenes, `is_sandboxed`, the pill, `_return_parts`, the tablet toggle text.
+2. `is_locked(part)` (fixed + mated + enforced, the "grounded by a mate" refusal in `controller._try_grab`): false when `relaxed_fixed`.
+   `_group_refusal` (V-1): a fixed level no longer refuses when `relaxed_fixed`.
+3. `controller.gd`: when the target is in a grounded cluster and carrying applies, build the carrier from the cluster's nodes (reuse
+   `GroupSet`: anchor + `follow()` / `restore()` / `finals()`), set `_held_group`, so `_update_held_part` skips `constrain_drag`, and
+   release does **not** save (`_finish_group_move` already computes `sandbox := mates_tool.is_sandboxed(gs.anchor)`: make every
+   cluster member `is_sandboxed` while carried, and record `_home` for them on first carry). The cluster's nodes come from
+   `_find_loaded_part(owner, occ)` for each id; nested clusters inside a sub-assembly use `_nested_states`; if the cluster crosses a
+   sub-assembly boundary take the whole sub-assembly (the group levels from `group_index.gd`).
+4. Haptics / messages: a short buzz on carry start; `say("Moving the fixed assembly: Return puts it back")` once per press.
+5. UI: V-5's "Relax fix" wedge (label "Return" while on) and a toggle under "Relax mates" on the tablet (`tablet_pages.gd` ~742) with
+   the same unsaved-scene guard the existing toggle has. `wheel_flows.gd` prompt (~115): "Fix mates relaxed: grab a fixed part
+   and its assembly comes with it. Return puts everything back." While on, `pill_entry()` is Return (as for full relax). The
+   mates-ring prompt names the mode. While fix-relax is on, tint fixed parts' brackets / add a small pin marker so the user can see
+   what will carry.
+6. The ghost / lines options (Settings > Assemble: "Relaxed: ghost where each part goes back" / "line to where it goes back") apply to
+   fix-relax too, since they read `_home`.
 
-**Tests.** Pure cluster test; a headless sandbox test in `tests/mates_sandbox.gd` style: fixed part + two mated parts, relax-fix,
-move the anchor through the controller's group path, assert the cluster moved rigidly (relative poses unchanged), the stored
-state was not written (no PATCH on the fake backend), `Return parts` restores every pose, and an unmated part is not moved.
+**Tests (headless; `tests/mates_sandbox.gd` style, with `fake_mates_tool.gd`).** (a) pure cluster test: fixed A, B mated to A, C mated to
+B, D unmated, E on a separate ungrounded pair; the cluster of A is {A,B,C}; (b) grab A with fix-relax on: A, B, C move rigidly
+(relative transforms unchanged to tolerance), D and E do not, nothing PATCHed on the fake backend; (c) grab C when the fake solve
+reports an empty basis (stuck): promotes to the cluster carry without a pose jump; with a non-empty basis it stays a constrained
+drag; (d) Return restores every pose in one undo step; (e) fix-relax then full Relax keeps `_home`; (f) off by default and not
+persisted across a reload. **Cannot be tested headless:** how the carry feels with the hand, and the real solver's stuck report
+timing (the live-backend e2e `tests/e2e_mates_motion.gd` can cover the second).
 
 ---
 
