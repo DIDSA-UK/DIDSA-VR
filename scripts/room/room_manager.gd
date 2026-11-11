@@ -263,6 +263,8 @@ func add_file_to_room(room: Node, path: String) -> bool:
 	var e := edit_api()
 	var composed: Dictionary = _main.compose_native(path) if _main != null and _main.has_method("compose_native") else NativeCompose.compose(path) # the files a sub-assembly references come too
 	var text: String = composed["text"]
+	if _main != null and _main.has_method("note_composed_files") and composed["ok"]:
+		_main.note_composed_files(composed) # (V-9: the file's Parts are saved back to it)
 	if e == null or not composed["ok"] or text == "":
 		status.emit("Couldn't read %s as a native file." % path.get_file())
 		return false

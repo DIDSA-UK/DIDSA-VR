@@ -49,6 +49,7 @@ e2e_mate_highlight
 e2e_table_context
 e2e_groups
 e2e_bug_report
+e2e_project_save
 e2e_appearance
 e2e_scenes
 e2e_moved_files
