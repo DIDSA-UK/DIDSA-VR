@@ -475,12 +475,22 @@ func _show_latch_level() -> void:
 	var levels: Array = _latch["levels"]
 	var level: Dictionary = levels[_latch["level"]]
 	var box := GroupIndex.union_aabb(level["members"])
-	var brackets := GroupCues.brackets(box.grow(0.004))
+	var marks := _level_marks(levels, _latch["target"])
+	var refused: bool = str(marks[_latch["level"]]) != ""
+	var brackets := GroupCues.brackets(box.grow(0.004), GroupCues.REFUSED_COLOUR if refused else GroupCues.COLOUR)
 	_scene_root().add_child(brackets)
-	var text := GroupIndex.breadcrumb(levels, _latch["level"])
+	var text := GroupIndex.breadcrumb(levels, _latch["level"], marks)
 	var cap := GroupCues.caption(text, box.get_center() + Vector3(0.0, box.size.y * 0.5 + 0.07, 0.0))
 	_scene_root().add_child(cap)
 	_latch["cues"] = [brackets, cap]
+
+
+func _level_marks(levels: Array, target: Node3D) -> Array:
+	## V-1: per level, what a grip would be refused for ("fixed", "mated", "held" or ""), so the caption can say so BEFORE the hand leaves the dead zone.
+	var marks: Array = []
+	for level in levels:
+		marks.append(str(refusal_for(level, target).get("kind", "")))
+	return marks
 
 
 func _cycle_latch() -> void:
@@ -488,7 +498,7 @@ func _cycle_latch() -> void:
 	_latch["level"] = (int(_latch["level"]) + 1) % levels.size()
 	_show_latch_level()
 	trigger_haptic_pulse("haptic", 0.0, 0.35, 0.05, 0.0)
-	group_message.emit(GroupIndex.breadcrumb(levels, _latch["level"]))
+	group_message.emit(GroupIndex.breadcrumb(levels, _latch["level"], _level_marks(levels, _latch["target"])))
 
 
 func _end_latch() -> void:
@@ -536,7 +546,7 @@ func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 	var refusal := _group_refusal(gs)
 	if refusal != "":
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
-		group_message.emit(refusal)
+		_say_refusal(refusal_for(level, target))
 		return
 	_held_group = gs
 	gs.set_flag("held", true)
@@ -545,22 +555,50 @@ func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 	group_message.emit("Holding %s (%d parts)" % [gs.label, gs.members.size()])
 
 
+func _say_refusal(r: Dictionary) -> void:
+	## V-1: a refused group grip reaches the hand (the wrist hint, through tool_message) AND the status line (group_message), whatever the depth. The hand gets the
+	## short words ("Drive is fixed: ..."), the status line the long ones.
+	if r.is_empty():
+		return
+	tool_message.emit(str(r["short"]))
+	group_message.emit(str(r["text"]))
+
+
 func _group_refusal(gs) -> String:
-	## Why this sub-assembly can't be moved now ("" if it can). Only a top-level one is saved, so only its grounding and mates matter.
-	if mates_tool != null and mates_tool.relaxed:
-		return "" # the sandbox: anything moves, nothing is saved, it all goes home after
-	if gs.depth == 1 and mates_tool != null:
-		match mates_tool.group_state(gs.root_part_id, gs.occurrence_id()):
-			"grounded":
-				return "%s is grounded (fixed): unground it to move it." % gs.label
-			"mated":
-				return "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % gs.label
-	if gs.depth > 1 and mates_tool != null and gs.prefix.size() >= gs.depth:
+	## Why this sub-assembly can't be moved now ("" if it can).
+	var level := {"depth": gs.depth, "prefix": gs.prefix, "label": gs.label}
+	return str(refusal_for(level, gs.anchor).get("text", ""))
+
+
+func refusal_for(level: Dictionary, anchor: Node3D) -> Dictionary:
+	## Pure given the mates tool's state: what refusing a grip on `level` (a GroupIndex level: depth, prefix, label) of the part `anchor` would say, or {} when it
+	## would not be refused. {"kind": "fixed" | "mated" | "held", "text": the long sentence, "short": what the hand shows}. Used when the grip commits and, to
+	## warn before committing, while the trigger cycles levels.
+	var depth := int(level.get("depth", 0))
+	if depth < 1 or mates_tool == null or bool(mates_tool.relaxed):
+		return {} # a part alone has its own refusals in _try_grab; the sandbox moves anything, saves nothing
+	var label := str(level.get("label", "This"))
+	var prefix: Array = level.get("prefix", [])
+	var parts: Array = anchor.get_meta("group_parts", []) if is_instance_valid(anchor) else []
+	var root := str(anchor.get_meta("group_root", "")) if is_instance_valid(anchor) else ""
+	if depth > 1 and prefix.size() >= depth:
 		# A sub-assembly inside another moves on screen only: one its parent's mates hold would just be pulled off them.
-		var parts: Array = gs.anchor.get_meta("group_parts", [])
-		if parts.size() >= gs.depth - 1 and mates_tool.nested_occurrence_locked(str(parts[gs.depth - 2]), str(gs.prefix[gs.depth - 1])):
-			return "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % gs.label
-	return ""
+		if parts.size() >= depth - 1 and mates_tool.nested_occurrence_locked(str(parts[depth - 2]), str(prefix[depth - 1])):
+			var t2 := "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % label
+			return {"kind": "held", "text": t2, "short": t2}
+	# Fixed anywhere on the chain: this level itself, or a sub-assembly it sits in (a fixed assembly holds everything inside it where it is).
+	for k in range(1, mini(depth, prefix.size()) + 1):
+		var owner := root if k == 1 else (str(parts[k - 2]) if parts.size() >= k - 1 else "")
+		if mates_tool.group_fixed(owner, str(prefix[k - 1])):
+			var own := k == depth
+			var names: Array = anchor.get_meta("group_names", []) if is_instance_valid(anchor) else []
+			var holder := label if own else (str(names[k - 1]) if names.size() >= k else "an assembly above it")
+			var text := "%s is fixed (grounded): Float it first to move it." % label if own else "%s sits inside %s, which is fixed (grounded): Float that first to move it." % [label, holder]
+			return {"kind": "fixed", "text": text, "short": "Part is fixed: %s. Float it first." % (label if own else holder)}
+	if depth == 1 and str(mates_tool.group_state(root, str(prefix[0]) if not prefix.is_empty() else "")) == "mated":
+		var t := "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % label
+		return {"kind": "mated", "text": t, "short": t}
+	return {}
 
 
 func _finish_group_move(gs) -> void:

@@ -2132,6 +2132,17 @@ func group_state(owner_part_id: String, occurrence_id: String) -> String:
 	return "ok"
 
 
+func group_fixed(owner_part_id: String, occurrence_id: String) -> bool:
+	## V-1: whether the occurrence `occurrence_id` placed by the Part `owner_part_id` is fixed (grounded), at ANY depth: the active root's and a room's
+	## Part by their own state, a deeper sub-assembly by `_nested_states`. False when this tool knows nothing of it.
+	if owner_part_id == "" or occurrence_id == "":
+		return false
+	var state := occurrence_state(owner_part_id)
+	if state.is_empty():
+		state = _nested_states.get(owner_part_id, {})
+	return bool(state.get("occurrences", {}).get(occurrence_id, {}).get("fixed", false))
+
+
 func group_pose(owner_part_id: String, occurrence_id: String) -> Variant:
 	## The occurrence's stored pose (a Transform3D, in the frame its node sits in), read from the backend unless this tool wrote or read it already.
 	## null if it could not be read. A coroutine.

@@ -42,9 +42,12 @@ static func sphere(radius: float) -> MeshInstance3D:
 	return node
 
 
-static func brackets(world_box: AABB) -> MeshInstance3D:
-	## Corner brackets round a world-space box, drawn on top.
-	var node := DropCue.build(world_box, COLOUR)
+const REFUSED_COLOUR := Color(1.0, 0.7, 0.15) ## amber: a level a grip would be refused (V-1)
+
+
+static func brackets(world_box: AABB, colour: Color = COLOUR) -> MeshInstance3D:
+	## Corner brackets round a world-space box, drawn on top. `colour` amber (REFUSED_COLOUR) marks a level that can't be moved.
+	var node := DropCue.build(world_box, colour)
 	node.name = "GroupBrackets"
 	return node
 
