@@ -155,6 +155,9 @@ var mate_minimal_movement := true:
 		request_preview()
 var relaxed := false ## the SANDBOX (set_relaxed): mates are not enforced and every move is on screen only, until the parts go home
 var return_glide_s := 0.45 ## how long the parts take to glide home when the sandbox ends (0: at once; tests)
+var relaxed_fixed := false ## V-6: only FIXED is relaxed: a grounded part (and what is mated to it) can be carried, every other mate stays enforced; temporary, like `relaxed`
+var _constraint_status: Dictionary = {} ## V-6: top-level occurrence id -> the backend's constraint status ("fixed" / "fully_constrained" / "under_constrained" / "over_constrained")
+const CLUSTER_SKIP_TYPES := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"] ## mates that place nothing: they don't join a part to a cluster
 var sandbox_ghosts := false ## while relaxed, a see-through copy of each moved part where it will go back to (Settings > Assemble)
 var sandbox_lines := false ## while relaxed, a thin line from each moved part to its home (Settings > Assemble)
 
@@ -1220,7 +1223,7 @@ func create_mate() -> Dictionary:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_occurrence_id: String = _driven_for_picks()
 	var driven_fixed := bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_occurrence_id, {}).get("fixed", false))
-	var atomic := not relaxed and not driven_fixed
+	var atomic := not in_sandbox() and not driven_fixed
 	_busy = true
 	var part := _find_loaded_part(owner_part_id, driven_occurrence_id)
 	if atomic and part != null:
@@ -1237,12 +1240,12 @@ func create_mate() -> Dictionary:
 		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
 	clear_picks()
 	document_changed.emit()
-	if relaxed:
+	if in_sandbox():
 		note_sandbox_mate(owner_part_id, driven_occurrence_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "mate %s" % (label_or(part, str(part.name)) if part != null else driven_occurrence_id))
 	await refresh_mates(owner_part_id)
-	if not relaxed and driven_fixed:
+	if not in_sandbox() and driven_fixed:
 		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
 	return {"ok": true, "error": ""}
 
@@ -1294,7 +1297,7 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 	if refs.size() == 2:
 		driven_id = _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", "")))
 	var driven_fixed := driven_id != "" and bool(occurrence_state(owner_part_id).get("occurrences", {}).get(driven_id, {}).get("fixed", false))
-	var atomic := not relaxed and driven_id != "" and not driven_fixed
+	var atomic := not in_sandbox() and driven_id != "" and not driven_fixed
 	_busy = true
 	var part := _find_loaded_part(owner_part_id, driven_id) if atomic else null
 	if part != null:
@@ -1321,12 +1324,12 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 			_pending_edit[edit_key] = detail["branch_changes"]
 		return {"ok": false, "error": _friendly_error(result)}
 	document_changed.emit()
-	if relaxed:
+	if in_sandbox():
 		note_sandbox_mate(owner_part_id, driven_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (label_or(part, str(part.name)) if part != null else driven_id))
 	await refresh_mates(owner_part_id)
-	if not relaxed and driven_fixed:
+	if not in_sandbox() and driven_fixed:
 		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	return {"ok": true, "error": ""}
 
@@ -1377,7 +1380,7 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 	## sub-assembly is put back where the stored tree places it (a nested part moved by hand with mates relaxed moved on screen only).
 	## Returns {ok, solved, problems} (ok = every mate was satisfied) and emits enforce_finished with the same.
 	## In the sandbox the parts go home first: solving from a scattered layout is what the sandbox exists to avoid.
-	if relaxed:
+	if in_sandbox():
 		await return_parts()
 	await refresh_state(owner_part_id)
 	var solved := 0
@@ -1474,13 +1477,126 @@ func set_relaxed(on: bool) -> void:
 		await return_parts()
 
 
+func set_relaxed_fixed(on: bool) -> void:
+	## V-6, "Relax fix": only the fixed flag is relaxed. On: every placed part's pose is remembered (as Relax all does), a fixed part (or a part the mates hold
+	## to one) can be grabbed and its whole grounded assembly carried, all mates stay enforced, nothing that moves is saved. Off: everything goes back (Return parts).
+	## Already relaxed (all): nothing to do.
+	if on == relaxed_fixed:
+		return
+	if on:
+		if relaxed:
+			_report("Mates are already relaxed.")
+			return
+		relaxed_fixed = true
+		_remember_homes({})
+		_report("Fix mates relaxed: grab a fixed part and its assembly comes with it. Return puts everything back.")
+		sandbox_changed.emit(true)
+		await refresh_constraint_status()
+	else:
+		await return_parts()
+
+
+func refresh_constraint_status() -> void:
+	## Reads which of the root's parts the mates hold completely (GET /parts/{id}/constraint-status), for deciding at the grab whether a part can move on
+	## its own or carries its assembly. A failure leaves it unknown: such a part keeps its ordinary drag.
+	var owner := _current_owner_part_id
+	if owner == "":
+		return
+	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/constraint-status" % owner, null)
+	_constraint_status.clear()
+	if result["ok"] and result["json"] is Dictionary:
+		for occ in result["json"]:
+			var entry = result["json"][occ]
+			if entry is Dictionary:
+				_constraint_status[str(occ)] = str(entry.get("status", ""))
+
+
+static func cluster_of(mate_list: Array, fixed: Dictionary, occurrence_id: String) -> Array:
+	## Pure (V-6): the GROUNDED CLUSTER of the top-level occurrence `occurrence_id`: every occurrence reachable from it through mates (those that place something:
+	## not couplers or limits), when at least one of them is fixed; else []. `fixed`: occurrence id -> bool. Sorted.
+	var adjacent := {}
+	for mate in mate_list:
+		if not (mate is Dictionary) or CLUSTER_SKIP_TYPES.has(str(mate.get("type", ""))):
+			continue
+		var tops: Array = mated_tops([mate]).keys()
+		for a in tops:
+			for b in tops:
+				if a != b:
+					adjacent[a] = (adjacent.get(a, []) as Array) + [b]
+	var seen := {occurrence_id: true}
+	var queue: Array = [occurrence_id]
+	while not queue.is_empty():
+		var at: String = queue.pop_front()
+		for next in adjacent.get(at, []):
+			if not seen.has(next):
+				seen[next] = true
+				queue.append(next)
+	var any_fixed := false
+	for id in seen:
+		if bool(fixed.get(id, false)):
+			any_fixed = true
+	if not any_fixed:
+		return []
+	var out := seen.keys()
+	out.sort()
+	return out
+
+
+func grounded_cluster(owner_part_id: String, occurrence_id: String) -> Array:
+	## The grounded cluster of a top-level occurrence of the active root ([] for anything else, or when nothing in it is fixed).
+	if owner_part_id == "" or owner_part_id != _current_owner_part_id or occurrence_id == "":
+		return []
+	var fixed := {}
+	for occ in occurrences:
+		fixed[occ] = bool((occurrences[occ] as Dictionary).get("fixed", false))
+	return cluster_of(mates, fixed, occurrence_id)
+
+
+func cluster_carry_applies(part: Node3D) -> bool:
+	## V-6: with Relax fix on, does grabbing `part` carry its whole grounded assembly? See cluster_carry_applies_for.
+	return is_managed(part) and cluster_carry_applies_for(owner_of(part), _occ_id(part))
+
+
+func cluster_carry_applies_for(owner_part_id: String, occurrence_id: String) -> bool:
+	## Yes when the occurrence is fixed itself, or the backend says its mates hold it completely (fully / over-constrained: nothing of it can move alone), and it is in
+	## a grounded cluster. A part with free motion (a hinge, a slider) keeps its ordinary constrained drag.
+	if not relaxed_fixed or relaxed:
+		return false
+	if grounded_cluster(owner_part_id, occurrence_id).is_empty():
+		return false
+	return group_fixed(owner_part_id, occurrence_id) or ["fixed", "fully_constrained", "over_constrained"].has(str(_constraint_status.get(occurrence_id, "")))
+
+
+func cluster_nodes(part: Node3D) -> Array:
+	return cluster_nodes_for(owner_of(part), _occ_id(part))
+
+
+func cluster_nodes_for(owner_part_id: String, occurrence_id: String) -> Array:
+	## The world's nodes of the grounded cluster of a top-level occurrence (every part under each member's top-level occurrence, pattern copies with their source).
+	var ids: Array = grounded_cluster(owner_part_id, occurrence_id)
+	var out: Array = []
+	for node in get_tree().get_nodes_in_group("grabbable_parts"):
+		if not is_instance_valid(node) or node.has_meta("room_id") or node.has_meta("on_table"):
+			continue
+		var path: Array = node.get_meta("group_path", [])
+		var top := str(path[0]) if not path.is_empty() else _occ_id(node)
+		top = top.split(GroupIndex.PATTERN_SEGMENT)[0]
+		if ids.has(top) and owner_part_id != "":
+			out.append(node)
+	return out
+
+
 func is_sandboxed(part: Node3D) -> bool:
 	## This part's moves are the sandbox's: on screen only, back home when Relax goes off.
-	return relaxed and is_instance_valid(part) and _home.has(part)
+	return in_sandbox() and is_instance_valid(part) and _home.has(part)
 
 
-func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
-	relaxed = true
+func in_sandbox() -> bool:
+	## "Moves are temporary": every mate relaxed (`relaxed`) or only the fixed ones (`relaxed_fixed`, V-6). Use `relaxed` itself where the question is "are mates enforced".
+	return relaxed or relaxed_fixed
+
+
+func _remember_homes(home: Dictionary) -> void:
 	_home.clear()
 	if home.is_empty():
 		for node in get_tree().get_nodes_in_group("grabbable_parts"):
@@ -1490,6 +1606,14 @@ func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
 		for node in home:
 			if is_instance_valid(node):
 				_home[node] = home[node]
+
+
+func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
+	var promoting := relaxed_fixed and home.is_empty() # (V-6: Relax all while Relax fix is on keeps what was remembered)
+	relaxed = true
+	relaxed_fixed = false
+	if not promoting:
+		_remember_homes(home)
 	for node in arrangement:
 		if is_instance_valid(node):
 			(node as Node3D).transform = arrangement[node]
@@ -1499,7 +1623,7 @@ func _enter_sandbox(home: Dictionary, arrangement: Dictionary = {}) -> void:
 
 func sandbox_home_of(node: Node) -> Variant:
 	## Where a remembered part goes back to (its real pose), or null when it isn't remembered.
-	return _home.get(node) if relaxed else null
+	return _home.get(node) if in_sandbox() else null
 
 
 func arrange_in_sandbox(home: Dictionary, arrangement: Dictionary) -> void:
@@ -1547,7 +1671,7 @@ func sandbox_snapshot() -> Dictionary:
 func return_parts(record_undo: bool = true) -> Dictionary:
 	## Ends the sandbox: every remembered part glides home, ONE undo step (undoing it puts the arrangement back and relaxes again), then the
 	## mates made or edited while relaxed are solved from the home poses. Returns {ok, moved, problems}. A coroutine.
-	if not relaxed:
+	if not in_sandbox():
 		return {"ok": true, "moved": 0, "problems": []}
 	var homes := {}
 	var arrangement := {}
@@ -1557,12 +1681,13 @@ func return_parts(record_undo: bool = true) -> Dictionary:
 			if not (node as Node3D).transform.is_equal_approx(_home[node]):
 				arrangement[node] = (node as Node3D).transform
 	relaxed = false
+	relaxed_fixed = false
 	_home.clear()
 	_clear_cues()
 	sandbox_changed.emit(false)
 	if record_undo and command_stack != null and not arrangement.is_empty():
 		command_stack.push("return parts",
-			func() -> void: _enter_sandbox(homes, arrangement),
+			func() -> void: _enter_sandbox(homes, arrangement), # (undoing "return parts" relaxes again: all mates, whichever mode it was)
 			func() -> void: return_parts(false))
 	await _glide_home(arrangement.keys(), homes)
 	var problems: Array[String] = []
@@ -1607,7 +1732,7 @@ func _glide_home(nodes: Array, homes: Dictionary) -> void:
 
 func note_sandbox_mate(owner_part_id: String, occurrence_id: String) -> void:
 	## A mate was made or edited while relaxed (stored, not solved): its driven part is solved once the parts are home.
-	if not relaxed or occurrence_id == "":
+	if not in_sandbox() or occurrence_id == "":
 		return
 	for item in _sandbox_solve:
 		if item["owner"] == owner_part_id and item["occ"] == occurrence_id:
@@ -1618,7 +1743,7 @@ func note_sandbox_mate(owner_part_id: String, occurrence_id: String) -> void:
 # --- the sandbox's optional cues: a ghost at home, a line to it ---
 
 func _process(delta: float) -> void:
-	if not relaxed or not (sandbox_ghosts or sandbox_lines):
+	if not in_sandbox() or not (sandbox_ghosts or sandbox_lines):
 		if not _cues.is_empty():
 			_clear_cues()
 		return
@@ -1634,7 +1759,7 @@ func update_cues() -> void:
 	for node in _cues.keys():
 		if not is_instance_valid(node) or not _home.has(node) or (node as Node3D).transform.is_equal_approx(_home[node]):
 			_free_cue(node)
-	if not relaxed:
+	if not in_sandbox():
 		return
 	for node in _home:
 		if not is_instance_valid(node) or (node as Node3D).transform.is_equal_approx(_home[node]):
@@ -1746,7 +1871,7 @@ func refresh_state(owner_part_id: String) -> void:
 		await _load_labels(owner_part_id, result["json"])
 	await refresh_mates(owner_part_id)
 	await refresh_nested_state(owner_part_id)
-	if relaxed:
+	if in_sandbox():
 		_rebase_sandbox()
 
 
@@ -1947,7 +2072,7 @@ func is_mated(part: Node3D) -> bool:
 func is_locked(part: Node3D) -> bool:
 	## Grounded + mated + enforced: it's the anchor its mates are solved
 	## against, so it can't be moved on its own.
-	return not relaxed and not _mates_dirty(part) and is_fixed(part) and is_mated(part)
+	return not relaxed and not relaxed_fixed and not _mates_dirty(part) and is_fixed(part) and is_mated(part) # (Relax fix: a grounded part is carried with its assembly instead of refused)
 
 
 func is_constrained(part: Node3D) -> bool:
@@ -1998,22 +2123,59 @@ func notify_locked(part: Node3D) -> void:
 
 
 func toggle_fixed(part: Node3D) -> void:
-	## Tablet's Fix/Float: flips the selected part's grounded flag on the
-	## backend (the same field the flat app's Fix/Float toggle writes).
+	## Tablet's Fix/Float: flips the selected part's grounded flag on the backend (the same field the flat app's Fix/Float toggle writes). The Assembly Tree's
+	## Fix / Float bar calls the same function below (V-5, V-7).
 	if part == null or not is_managed(part):
 		_report("Select a placed part first (laser-select it).")
 		return
-	var occ := _occ_id(part)
-	var owner := owner_of(part)
-	var occs: Dictionary = occurrence_state(owner).get("occurrences", {})
-	var now_fixed := not bool(occs.get(occ, {}).get("fixed", false))
-	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner, occ], {"fixed": now_fixed})
+	await toggle_fixed_occurrence(owner_of(part), _occ_id(part), label_or(part, "the part"))
+
+
+func is_occurrence_fixed(owner_part_id: String, occurrence_id: String) -> bool:
+	return group_fixed(owner_part_id, occurrence_id)
+
+
+func toggle_fixed_occurrence(owner_part_id: String, occurrence_id: String, label: String) -> bool:
+	## Flips the `fixed` flag of the occurrence `occurrence_id` placed by the Part `owner_part_id` (the world's root, a room's Part or a deeper sub-assembly),
+	## one undo step. True if it was changed.
+	var now_fixed := not group_fixed(owner_part_id, occurrence_id)
+	return await set_occurrence_fixed(owner_part_id, occurrence_id, now_fixed, label, true)
+
+
+func set_occurrence_fixed(owner_part_id: String, occurrence_id: String, fixed: bool, label: String, record: bool) -> bool:
+	if owner_part_id == "" or occurrence_id == "":
+		_report("Nothing to %s here." % ("fix" if fixed else "float"))
+		return false
+	var result := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, occurrence_id], {"fixed": fixed})
 	if not result["ok"]:
-		_report("Couldn't %s %s: %s" % ["ground" if now_fixed else "float", label_or(part, "the part"), _friendly_error(result)])
-		return
-	occs[occ] = {"fixed": now_fixed}
+		_report("Couldn't %s %s: %s" % ["ground" if fixed else "float", label, _friendly_error(result)])
+		return false
+	var was := not fixed
+	_remember_fixed(owner_part_id, occurrence_id, fixed)
 	document_changed.emit()
-	_report("%s is now %s." % [label_or(part, "The part"), "grounded (fixed)" if now_fixed else "floating (free to move)"])
+	_report("%s is now %s." % [label, "grounded (fixed)" if fixed else "floating (free to move)"])
+	if record and command_stack != null:
+		command_stack.push("%s %s" % ["fix" if fixed else "float", label],
+			func() -> void: set_occurrence_fixed(owner_part_id, occurrence_id, was, label, false),
+			func() -> void: set_occurrence_fixed(owner_part_id, occurrence_id, fixed, label, false),
+			true)
+	return true
+
+
+func _remember_fixed(owner_part_id: String, occurrence_id: String, fixed: bool) -> void:
+	## Writes the new flag into every state dictionary that holds this occurrence: the active root's, a room's, and the nested one (a room's Part is also a
+	## sub-assembly of the world's root, so it can be in two).
+	var dicts: Array = []
+	if owner_part_id == _current_owner_part_id:
+		dicts.append(occurrences)
+	elif _other_states.has(owner_part_id):
+		dicts.append(_other_states[owner_part_id].get("occurrences", {}))
+	if _nested_states.has(owner_part_id):
+		dicts.append(_nested_states[owner_part_id].get("occurrences", {}))
+	for d in dicts:
+		var entry: Dictionary = (d as Dictionary).get(occurrence_id, {})
+		entry["fixed"] = fixed
+		(d as Dictionary)[occurrence_id] = entry
 
 
 func _choose_driven(first_occ: String, second_occ: String) -> String:
@@ -2713,6 +2875,9 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 	## stored, every member goes back to its pre-grab pose (spec §12).
 	state["finishing"] = true
 	state["sched"].invalidate()
+	if relaxed_fixed and is_sandboxed(part):
+		_finish_temporary_drag(part, state) # V-6: with Relax fix on a drag is temporary too: the live pose stands, nothing is stored
+		return
 	var path := "/parts/%s/occurrences/%s/mate-motion" % [state["owner"], state["occ"]]
 	var wish = state["wish"]
 	if wish == null:
@@ -2773,6 +2938,27 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 			if is_instance_valid(node):
 				node.transform = copy_starts[node] # the copies that followed the live drag go back too
 		_report("Couldn't keep that move (nothing was changed): %s" % _friendly_error(result if not result["ok"] else {"json": {"detail": {"type": "mate_solve_did_not_converge"}}}))
+	_drag.erase(part)
+
+
+func _finish_temporary_drag(part: Node3D, state: Dictionary) -> void:
+	## A constrained drag released while Relax fix is on (V-6): no commit request. Every member stays where the live solve showed it and ONE non-saving undo
+	## step records the move (Return parts takes it home with everything else).
+	var starts: Dictionary = state["starts"]
+	starts[state["occ"]] = state["start"]
+	var changes: Array = []
+	for occ in starts:
+		var node: Node3D = part if occ == state["occ"] else state["nodes"].get(occ)
+		if node == null or not is_instance_valid(node):
+			continue
+		var after := _local_pose(node)
+		if not (starts[occ] as Transform3D).is_equal_approx(after):
+			changes.append({"node": node, "before": starts[occ], "after": after})
+	var copy_starts: Dictionary = state.get("copy_starts", {})
+	for node in copy_starts:
+		if is_instance_valid(node) and not (copy_starts[node] as Transform3D).is_equal_approx(_local_pose(node)):
+			changes.append({"node": node, "before": copy_starts[node], "after": _local_pose(node)})
+	_push_group_move("move %s (temporary)" % label_or(part, str(part.name)), changes)
 	_drag.erase(part)
 
 

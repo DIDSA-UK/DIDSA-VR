@@ -114,6 +114,8 @@ func prompt_text() -> String:
 			return "Drive\n%s" % (drive.status_text() if drive != null else "")
 	if _mates != null and _mates.relaxed:
 		return "Mates relaxed\nMoves are temporary. Wheel: Return parts (under the ring) puts everything back."
+	if _mates != null and _mates.relaxed_fixed:
+		return "Fix mates relaxed\nGrab a fixed part and its assembly comes with it. Return puts everything back."
 	return ""
 
 
@@ -181,6 +183,26 @@ func _relax_entry() -> Dictionary:
 	return _action("mate_relax", "Relax mates", "relax", Color(0.96, 0.69, 0.25), "Move anything; it all goes back after", _relax_mates)
 
 
+func _relax_fix_entry() -> Dictionary:
+	## V-6, Relax fix: only the fixed flag is relaxed, so a grounded assembly can be carried with every mate kept. While it is on the wedge reads Return.
+	var accent := Color(0.96, 0.69, 0.25)
+	if _mates.relaxed_fixed:
+		return _action("mate_relax_fix", "Return", "undo", accent, "Everything goes back where it was", _return_parts, true, true)
+	return _action("mate_relax_fix", "Relax fix", "pin", accent, "Carry a fixed assembly with its mates kept; it all goes back after", _relax_fix, not _mates.relaxed, false, "Mates are already relaxed")
+
+
+func _relax_fix() -> void:
+	_mates.set_relaxed_fixed(true)
+	say("Fix mates relaxed: grab a fixed part and its assembly comes with it", 3.0)
+
+
+func _open_tree() -> void:
+	## The Tree wedge: the Assembly Tree, where Fix / Float lives (V-5).
+	var window = _main.get("_assembly_tree_window")
+	if window != null:
+		window.open()
+
+
 func _relax_mates() -> void:
 	_mates.set_relaxed(true)
 	say("Mates relaxed: moves are temporary", 3.0)
@@ -195,16 +217,16 @@ func _return_parts() -> void:
 		say("Unsaved scene: choose on the tablet", 3.0)
 		return
 	say("Returning parts", 2.0)
-	await _mates.set_relaxed(false)
+	await _mates.return_parts()
 	refresh_prompt()
 
 
 func pill_entry() -> Dictionary:
 	## The pill under every top-level ring: put the tool away. Greyed (with the reason) when there is nothing in the hand.
 	## While mates are relaxed it is Return parts instead, on every ring: leaving the sandbox never needs navigating.
-	if _mates != null and _mates.relaxed:
+	if _mates != null and (_mates.relaxed or _mates.relaxed_fixed):
 		return {"id": "return_parts", "label": "Return", "title": "Return parts", "icon": "undo", "accent": Color(0.96, 0.69, 0.25), "enabled": true,
-			"hint": "Mates are relaxed: every part goes back where it was", "hint_disabled": "", "run": _return_parts}
+			"hint": "Mates are relaxed: every part goes back where it was" if _mates.relaxed else "Fix mates are relaxed: every part goes back where it was", "hint_disabled": "", "run": _return_parts}
 	var in_hand: bool = _manager.active_id != ""
 	var def = _registry.tool_def(_manager.active_id) if in_hand else null
 	return {"id": "clear_tool", "label": "Clear", "title": "Clear tool", "icon": "close", "accent": Color(0.62, 0.70, 0.80), "text_colour": tokens.danger, "enabled": in_hand,
@@ -364,8 +386,9 @@ func _summon_table() -> void:
 
 
 func _mates_entries() -> Array:
-	## The bottom 60 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand
-	## would drill into it on the way to the pill): with six wedges Clear picks is the one straight down, Flip and Relax either side.
+	## The bottom 60 degrees of a top-level ring belong to the "Clear" pill, so a sub-wheel never sits there (the hand would drill into it on the way to the
+	## pill). Wedge i is centred at i * 360 / count degrees from the top, so only an EVEN count has a wedge straight down: eight wedges (V-5), clockwise from the top:
+	## Create (0) - Type (45) - Flip (90) - Relax fix (135) - Clear picks (180, straight down) - Relax / Return parts (225) - Tree (270) - All tools (315).
 	var need := _mates_pick_hint()
 	# A Width mate has four picks and a Symmetric one three, so "start again" is a heavy undo: that wedge takes back the LAST pick instead
 	# (undo a few times to clear).
@@ -384,8 +407,10 @@ func _mates_entries() -> Array:
 		_action("mate_create", "Create", "check", Color(0.40, 0.90, 0.60), "Make this mate", _create_mate, _mates.can_create(), false, need),
 		_submenu("mate_type", "Type", "mates", Color(0.37, 0.76, 1.00), "Coincident, concentric...", _mate_type_entries),
 		_action("mate_flip", flip_label, "flip", Color(0.37, 0.76, 1.00), flip_hint, _flip_mate, _mates.can_create(), false, need),
+		_relax_fix_entry(),
 		picks_entry, # (straight down, above the pill: never a sub-wheel there)
 		_relax_entry(),
+		_action("mate_tree", "Tree", "tree", Color(0.62, 0.70, 0.80), "Open the Assembly Tree: Fix / Float is there", _open_tree),
 		_submenu("all_tools", "All tools", "tools", Color(0.62, 0.70, 0.80), "Switch to another tool", root_entries),
 	]
 
