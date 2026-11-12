@@ -21,6 +21,8 @@ var poses := {}
 var saved := []
 func group_state(owner, occ):
 	return states.get(owner + '|' + occ, 'ok')
+func group_fixed(owner, occ):
+	return states.get(owner + '|' + occ, 'ok') == 'grounded' 
 func group_pose(owner, occ):
 	return poses.get(owner + '|' + occ, Transform3D.IDENTITY)
 func persist_group_pose(owner, occ, pose):
@@ -260,6 +262,44 @@ func _initialize() -> void:
 	await tick()
 	print("SMOKE ...nor a grounded one: ", hand._held_group == null and messages.back().contains("grounded"))
 	hand._try_release()
+
+	# V-1: every refusal reaches the hand (tool_message) as well as the status line (group_message), at any depth, and cycling warns before committing
+	var hand_said: Array[String] = []
+	hand.tool_message.connect(func(t: String) -> void: hand_said.append(t))
+	var scope_nodes: Array = hand._scope_nodes()
+	var real_levels: Array = GroupIndex.levels(kb[0], scope_nodes)
+	# (the bracket holds only this bolt here, so the real list leaves it out as the same thing as the bolt; a depth-2 level is built by hand to test the chain)
+	var lv2: Array = [real_levels[0], {"depth": 2, "prefix": ["s1", "k1"], "members": [kb[0]], "label": "Bracket"}, real_levels[1]]
+	print("SMOKE V-1 setup: the part, a bracket at depth 2 and the drive at depth 1: ", real_levels.size() == 2 and int(lv2[1]["depth"]) == 2 and int(lv2[2]["depth"]) == 1)
+	mates.states.clear()
+	mates.states["R|s1"] = "grounded"
+	var r1: Dictionary = hand.refusal_for(lv2[2], kb[0])
+	print("SMOKE V-1 a fixed top-level drive is refused, short words for the hand and long ones for the status line: ", r1.get("kind") == "fixed" and str(r1["short"]).begins_with("Part is fixed") and str(r1["text"]).contains("fixed"))
+	var r2: Dictionary = hand.refusal_for(lv2[1], kb[0])
+	print("SMOKE V-1 ...a bracket INSIDE that fixed drive (depth 2) is refused too, and names the assembly it sits in: ", r2.get("kind") == "fixed" and str(r2["text"]).contains("sits inside"))
+	mates.states.clear()
+	mates.states["S|k1"] = "grounded"
+	var r3: Dictionary = hand.refusal_for(lv2[1], kb[0])
+	print("SMOKE V-1 ...a bracket fixed inside a free drive (depth 2) is refused on its own level: ", r3.get("kind") == "fixed" and not str(r3["text"]).contains("sits inside") and hand.refusal_for(lv2[2], kb[0]).is_empty() and hand.refusal_for(lv2[0], kb[0]).is_empty())
+	var marks: Array = hand._level_marks(lv2, kb[0])
+	print("SMOKE V-1 the cycling caption marks the level a grip would be refused: ", marks == ["", "fixed", ""] and GroupIndex.breadcrumb(lv2, 1, marks).contains("(fixed)") and not GroupIndex.breadcrumb(lv2, 1, ["", "", ""]).contains("(fixed)"))
+	mates.states.clear()
+	mates.states["R|s1"] = "grounded" # (the real levels: the drive, depth 1, is fixed)
+	hand.global_position = kb[0].global_position
+	hand._try_grab()
+	hand._on_button_pressed("trigger_click") # (the drive level)
+	var caption = root.find_child("GroupCaption", true, false)
+	print("SMOKE V-1 while the latch waits on the fixed drive the caption says (fixed): ", hand._latch["level"] == 1 and caption != null and str(caption.text).contains("[Drive (fixed)]"))
+	hand_said.clear()
+	messages.clear()
+	hand.global_position += Vector3(0.1, 0, 0)
+	await tick()
+	print("SMOKE V-1 leaving the dead zone on a fixed level takes nothing, the hand is told (tool_message) and so is the status line (group_message): ", hand._held_group == null and hand.held_node == null and hand_said.size() == 1 and hand_said[0].begins_with("Part is fixed") and messages.size() == 1 and messages[0].contains("fixed"))
+	hand._try_release()
+	mates.states.clear()
+	mates.relaxed = true
+	print("SMOKE V-1 relaxed mates refuse nothing: ", hand.refusal_for(lv2[2], kb[0]).is_empty())
+	mates.relaxed = false
 	mates.states.clear()
 
 	# dead zone Off, and a top-level part

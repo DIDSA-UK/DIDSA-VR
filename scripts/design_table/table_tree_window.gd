@@ -357,6 +357,10 @@ func _place_in_front_of_camera() -> void:
 	transform = Transform3D(Basis(Vector3.UP, deg_to_rad(dock_yaw_degrees)), dock_position)
 
 
+func _uses_action_bar() -> bool:
+	return false # the PARTS tab keeps its inline Table / Bring buttons until phase T2 (docs/feature-tree-review-2026-11-11.md)
+
+
 func _add_row_actions(line: HBoxContainer, row: Dictionary, _is_expandable: bool) -> void:
 	var occurrence_id := str(row.get("id", ""))
 	if occurrence_id == "": # the root row is the assembly itself
