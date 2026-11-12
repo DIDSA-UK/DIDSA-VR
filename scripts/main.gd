@@ -71,6 +71,13 @@ var folder_match_dont_ask := false ## the header row's "Don't ask again this ses
 var _accept_likely_roots: Dictionary = {} ## native file -> true once Use them was pressed for it (this open and the re-open)
 var _likely_dismissed: Dictionary = {} ## native file -> true once Not now was pressed for it (the header row goes away)
 var _dirty_from_relink := false ## the only unsaved change is a moved file's corrected path: picking another reference re-opens without asking
+var _project_save = ProjectSave.new() ## V-9: which file each Part came from / was written to (project_save.gd)
+var _opened_native_path := "" ## the .didsa this session came from (or was last saved as): the root file a Save writes to and stamps references relative to
+var _preset_save_paths: Dictionary = {} ## part id -> the file an assembly import suggested for it (relative to the save folder), used by the first Save
+var pending_import: Dictionary = {} ## {path, source_format, probe}: a STEP / IGES file with several parts waiting on "as an assembly or as one part?" (the Files page asks)
+signal import_choice_changed()
+var save_conflicts: Array = [] ## the Parts the last Save did not write because their file changed on disk since it was read ([{id, name, path}])
+signal saved(result: Dictionary) ## a Save finished (the Files page shows what was written and what was not)
 var last_saved_path := "" ## the .didsa the last save wrote
 var document_is_demo := false ## what is shown is a demo model shipped in the APK (res://demo/): read-only, so replacing it never asks (Quest 3 report, 21 Oct 2026)
 var document_dirty := false ## the session has edits (a move, a mate, a design-table feature, a new part...) that no save has written: anything that REPLACES the document asks first
@@ -82,7 +89,8 @@ var _settings := preload("res://scripts/app_settings.gd").new() ## project folde
 const NewDocument := preload("res://scripts/design_table/new_document.gd") ## New assembly / New part: the backend sequences
 const BLANK_PART_SIZE_MM := 100.0 ## the placeholder box a brand-new, still empty part stands in with (see add_blank_part())
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
-const GroupIndex := preload("res://scripts/group_index.gd") ## the Assembly Tree selects by path (select_tree_row)
+const GroupIndex := preload("res://scripts/group_index.gd")
+const ProjectSave := preload("res://scripts/project_save.gd") ## V-9: one file per Part, saved in place ## the Assembly Tree selects by path (select_tree_row)
 const Landing := preload("res://scripts/landing/landing.gd") ## the first screen: a state of this world, see landing.gd
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
@@ -1379,6 +1387,8 @@ func unload_model() -> void:
 	_native_extras.clear()
 	visibility_ruled_parts.clear()
 	native_file_path = ""
+	_opened_native_path = ""
+	_project_save.clear()
 	_load_summary = ""
 	mark_clean()
 
@@ -1443,6 +1453,8 @@ func _begin_import() -> void:
 		return
 	_resolved_part_id = root_part_id
 	_remember_native_extras(parsed)
+	_opened_native_path = native_file_path
+	_project_save.register_composed(composed.get("part_files", {}))
 
 	_set_status("Importing %s (part %s) into the backend..." % [native_file_path.get_file(), _resolved_part_id])
 	_import_started_ms = Time.get_ticks_msec()
@@ -1512,7 +1524,7 @@ func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringA
 ## enum accepts (backend/app/document/models.py) — "step"/"stl"/"obj" go
 ## through the backend's importer; glb/gltf load straight into Godot with no
 ## backend round trip at all (see load_glb_file()).
-const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "stl": "stl", "obj": "obj"}
+const _BACKEND_IMPORT_FORMATS := {"step": "step", "stp": "step", "iges": "iges", "igs": "iges", "stl": "stl", "obj": "obj"}
 const _NATIVE_FORMATS := ["didsa", "didsaprt", "didsacad"] ## a plain JSON native save/export, any of the extensions it has had (current first; native_compose.gd) — same file, no format difference.
 
 func list_model_files() -> PackedStringArray:
@@ -1590,6 +1602,11 @@ func native_search_dirs() -> Array:
 		dirs.append(_settings.project_folder)
 	dirs.append_array(["res://models", "user://models"])
 	return dirs
+
+
+func note_composed_files(composed: Dictionary) -> void:
+	## V-9: the files of a component or room file that was just added, so Save writes its Parts back to them.
+	_project_save.add_files(composed.get("part_files", {}))
 
 
 func compose_native(path: String, choices: Dictionary = {}) -> Dictionary:
@@ -1734,6 +1751,8 @@ func _open_native_file_impl(path: String) -> void:
 
 	_resolved_part_id = root_part_id
 	_remember_native_extras(parsed)
+	_opened_native_path = path
+	_project_save.register_composed(composed.get("part_files", {}))
 	_set_status("Imported. Fetching assembly mesh...")
 	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=%s" % [
 		backend_url, API_PREFIX, _resolved_part_id, str(quality), str(include_hidden).to_lower()
@@ -1799,6 +1818,7 @@ func _add_component_file_impl(path: String) -> bool:
 		_set_status(composed["error"])
 		return false
 	var component_text: String = composed["text"]
+	note_composed_files(composed)
 	var e = room_manager.edit_api()
 	if e != null:
 		var refusal: String = await e.file_conflict(_resolved_part_id, component_text) # (the server only checks the file's root; see room_edit.gd)
@@ -1896,7 +1916,119 @@ func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bo
 	return true
 
 
+func pending_import_text() -> String:
+	## What the Files page says while a STEP / IGES file waits on its choice ("" = nothing waiting).
+	if pending_import.is_empty():
+		return ""
+	var probe: Dictionary = pending_import["probe"]
+	var count := int(probe.get("products", 0))
+	var noun := "solids" if pending_import["source_format"] == "iges" else "parts"
+	var subs := int(probe.get("assemblies", 0))
+	return "%s has %d %s%s. Open it as an assembly (a Part each, placed) or as one part?" % [str(pending_import["path"]).get_file(), count, noun, (" in %d sub-assemblies" % subs) if subs > 0 else ""]
+
+
+func resolve_import_choice(choice: String) -> void:
+	## The Files page's answer: "assembly", "one_part" or "" (cancel).
+	var pending := pending_import
+	pending_import = {}
+	import_choice_changed.emit()
+	if pending.is_empty() or choice == "":
+		return
+	if choice == "assembly":
+		if not confirm_discard("Open " + str(pending["path"]).get_file(), _import_assembly_file.bind(pending["path"], pending["source_format"])):
+			return
+		if not _claim_load("the import"):
+			return
+		await _import_assembly_file_impl(pending["path"], pending["source_format"])
+		_load_busy = false
+		return
+	_import_one_part_chosen = str(pending["path"])
+	await _import_external_file(pending["path"], pending["source_format"])
+
+
+var _import_one_part_chosen := "" ## the file the user said "as one part" for: the probe is not asked again
+
+
+func _probe_import(bytes: PackedByteArray, source_format: String) -> Dictionary:
+	## POST /import/probe: what the file holds, or {} when the backend cannot say (an older backend, a refusal): the file then imports as one part as before.
+	var req := HTTPRequest.new()
+	add_child(req)
+	req.request(backend_url + API_PREFIX + "/import/probe", BackendSession.headers(api_key, true), HTTPClient.METHOD_POST, JSON.stringify({"source_format": source_format, "data_base64": Marshalls.raw_to_base64(bytes)}))
+	var result: Array = await req.request_completed
+	req.queue_free()
+	if result[0] != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
+		return {}
+	var parsed = JSON.parse_string((result[3] as PackedByteArray).get_string_from_utf8())
+	return parsed if parsed is Dictionary else {}
+
+
+func _import_assembly_file(path: String, source_format: String) -> void:
+	if not confirm_discard("Open " + path.get_file(), _import_assembly_file.bind(path, source_format)):
+		return
+	if not _claim_load("the import"):
+		return
+	await _import_assembly_file_impl(path, source_format)
+	_load_busy = false
+
+
+func _import_assembly_file_impl(path: String, source_format: String) -> void:
+	## F-6: the file as an ASSEMBLY (a Part per product, an Occurrence per placement; IGES: one Part per solid) through POST /import/assembly ("open as new": the imported
+	## top assembly is the session's root). The new Parts have no files yet: their suggested names ("<folder>/<File>.didsa") are remembered, and the first Save writes
+	## them there, one file per Part (V-9).
+	var started_ms := Time.get_ticks_msec()
+	_set_status("Reading %s..." % path.get_file())
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var req := HTTPRequest.new()
+	add_child(req)
+	req.request(backend_url + API_PREFIX + "/import/assembly", BackendSession.headers(api_key, true), HTTPClient.METHOD_POST,
+		JSON.stringify({"source_format": source_format, "data_base64": Marshalls.raw_to_base64(bytes), "name": path.get_file().get_basename()}))
+	_set_status("Importing %s as an assembly..." % path.get_file())
+	var result: Array = await req.request_completed
+	var imported = _parse_import_response(result, "import %s as an assembly" % path.get_file(), req)
+	if imported == null:
+		return
+	var root_id := str(imported.get("root_part_id", ""))
+	if root_id == "":
+		_set_status("The assembly import for %s named no root part." % path.get_file())
+		req.queue_free()
+		return
+	_native_extras.clear()
+	visibility_ruled_parts.clear()
+	native_file_path = ""
+	_opened_native_path = ""
+	_project_save.clear()
+	_resolved_part_id = root_id
+	_preset_save_paths = {}
+	for part_id in imported.get("suggested_files", {}):
+		_preset_save_paths[str(part_id)] = str(imported["suggested_files"][part_id])
+	var mesh_url := "%s%s/parts/%s/assembly-mesh.glb?quality=%s&include_hidden=false" % [backend_url, API_PREFIX, root_id, str(quality)]
+	var mesh_result: Array = await _get_mesh_result(req, mesh_url)
+	req.queue_free()
+	if mesh_result[0] != HTTPRequest.RESULT_SUCCESS or int(mesh_result[1]) != 200:
+		_set_status("Mesh fetch for %s failed: %s" % [path.get_file(), _http_error_text(int(mesh_result[1]), int(mesh_result[0]), mesh_result[3])])
+		return
+	if not _show_model(mesh_result[3], "", spawn_scale):
+		return
+	mark_dirty() # (the new Parts have no files yet: a Save writes them)
+	var report: Dictionary = imported.get("report", {})
+	var skipped: Array = report.get("skipped", [])
+	var line := "Imported %d of %d parts as an assembly" % [int(report.get("imported", 0)), int(report.get("total", 0))]
+	if not skipped.is_empty():
+		line += "; %d skipped: %s" % [skipped.size(), ", ".join(PackedStringArray(skipped.map(func(s) -> String: return "%s (%s)" % [str(s.get("name", "")), str(s.get("reason", ""))])))]
+	_load_summary = "load: %s (assembly, via backend), %d ms" % [path.get_file(), Time.get_ticks_msec() - started_ms]
+	_set_status("%s. Save to write the files." % line)
+
+
 func _import_external_file(path: String, source_format: String) -> void:
+	# F-6: a STEP / IGES file with several parts asks how to open it first (the Files page shows the choice); "as one part" comes back here with the answer.
+	if (source_format == "step" or source_format == "iges") and _import_one_part_chosen != path and not backend_url.is_empty() and not api_key.is_empty() and FileAccess.file_exists(path):
+		var probe := await _probe_import(FileAccess.get_file_as_bytes(path), source_format)
+		if int(probe.get("products", 0)) > 1 or int(probe.get("assemblies", 0)) > 0:
+			pending_import = {"path": path, "source_format": source_format, "probe": probe}
+			import_choice_changed.emit()
+			_set_status(pending_import_text())
+			return
+	_import_one_part_chosen = ""
 	if not confirm_discard("Open " + path.get_file(), _import_external_file.bind(path, source_format)):
 		return
 	if not _claim_load("the import"):
@@ -1941,6 +2073,8 @@ func _import_external_file_impl(path: String, source_format: String) -> void:
 	_native_extras.clear()
 	visibility_ruled_parts.clear()
 	native_file_path = ""
+	_opened_native_path = ""
+	_project_save.clear()
 	req.request(backend_url + API_PREFIX + "/parts", headers, HTTPClient.METHOD_POST, JSON.stringify({"name": path.get_file().get_basename()}))
 	var create_result: Array = await req.request_completed
 	var part_json = _parse_import_response(create_result, "create a part for %s" % path.get_file(), req)
@@ -2152,7 +2286,7 @@ func confirm_discard(what: String, run: Callable = Callable()) -> bool:
 		discard_prompt_changed.emit()
 		_set_status("You have unsaved changes that \"%s\" will lose. Discard them, save first, or cancel (%s)." % [what, "on the monolith" if landing != null and landing.is_active() else "Files page"])
 	else:
-		_set_status("You have unsaved changes. Save first (Files > Save as new file), or do \"%s\" again within a few seconds to discard them." % what)
+		_set_status("You have unsaved changes. Save first (Files > Save), or do \"%s\" again within a few seconds to discard them." % what)
 	return false
 
 
@@ -2177,7 +2311,7 @@ func save_and_continue() -> void:
 	if _pending_discard.is_empty():
 		return
 	var pending := _pending_discard
-	if await save_native_snapshot() == "":
+	if not (await save_project())["ok"]:
 		return # the status line says why; the choice stays up
 	if _pending_discard != pending:
 		return # something else asked meanwhile
@@ -2236,6 +2370,8 @@ func _new_assembly_impl() -> bool:
 	_native_extras.clear()
 	visibility_ruled_parts.clear()
 	native_file_path = "" # a save from here is named "assembly-vr-..." rather than after the file that was open before
+	_opened_native_path = ""
+	_project_save.clear()
 	if not _show_model(body, "", spawn_scale):
 		return false
 	_set_status("New empty assembly. Open the design table and press New part.")
@@ -2387,6 +2523,61 @@ func save_native_snapshot(path: String = "") -> String:
 	last_saved_path = target
 	_set_status("Saved %s." % saved_location_text(target))
 	return target
+
+
+func _fetch_text(path: String) -> String:
+	## GET a backend route's body as text ("" on any failure).
+	var req := HTTPRequest.new()
+	add_child(req)
+	req.request("%s%s%s" % [backend_url, API_PREFIX, path], BackendSession.headers(api_key), HTTPClient.METHOD_GET)
+	var result: Array = await req.request_completed
+	req.queue_free()
+	if result[0] != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
+		return ""
+	return (result[3] as PackedByteArray).get_string_from_utf8()
+
+
+func save_project(policy: String = "ask") -> Dictionary:
+	## V-9: Save like the flat app: ONE FILE PER PART, in place (project_save.gd). Each Part's own native text is written to the file it came from (a new Part gets
+	## `<name>.didsa` beside the root file, the demos and a session with no file save to the project folder), unchanged Parts are skipped, a file changed on disk
+	## meanwhile is not overwritten unless `policy` says "overwrite" or "copy". Returns {ok, result}; `saved` is emitted. A coroutine.
+	if backend_url.is_empty() or api_key.is_empty():
+		_set_status("Saving needs a backend (see secrets.cfg.example).")
+		return {"ok": false, "result": {}}
+	_set_status("Saving...")
+	var text := await _fetch_text("/export/native")
+	var parsed = JSON.parse_string(text) if text != "" else null
+	if not (parsed is Dictionary) or int(parsed.get("schema_version", 0)) != _SNAPSHOT_SCHEMA_VERSION or not (parsed.get("document") is Dictionary):
+		_set_status("Couldn't save: the backend didn't send the session.")
+		return {"ok": false, "result": {}}
+	var document: Dictionary = parsed["document"]
+	var infos: Array = []
+	for part in document.get("parts", []):
+		infos.append({"id": str(part.get("id", "")), "name": str(part.get("name", "Part")), "occurrences": part.get("occurrences", [])})
+	var session := {"root_part_id": str(document.get("root_part_id", "")), "parts": infos}
+	var root_path := _opened_native_path if _opened_native_path != "" and not _opened_native_path.begins_with("res://") and FileAccess.file_exists(_opened_native_path) else ""
+	var folder := root_path.get_base_dir() if root_path != "" else save_dir()
+	if not DirAccess.dir_exists_absolute(folder):
+		DirAccess.make_dir_recursive_absolute(folder)
+	var fetch := func(part_id: String) -> String: return await _fetch_text("/export/native?part_id=%s" % part_id.uri_encode())
+	var preset := {}
+	for part_id in _preset_save_paths:
+		if not _project_save.files.has(part_id):
+			preset[part_id] = folder.path_join(str(_preset_save_paths[part_id]))
+	var result: Dictionary = await _project_save.save(session, fetch, folder, root_path, native_extras_to_add(parsed), policy, preset)
+	save_conflicts = result["conflicts"]
+	var ok: bool = (result["failed"] as Array).is_empty() and (result["conflicts"] as Array).is_empty()
+	var root_file: String = _project_save.path_of(str(session["root_part_id"]))
+	if root_file != "":
+		_opened_native_path = root_file # (a demo or a fresh session now has a root file: later saves update it in place)
+		last_saved_path = root_file
+		_native_root_id_cache.erase(root_file)
+	if ok:
+		mark_clean()
+		_preset_save_paths = {}
+	_set_status(ProjectSave.summary(result))
+	saved.emit(result)
+	return {"ok": ok, "result": result}
 
 
 func saved_location_text(target: String) -> String:
