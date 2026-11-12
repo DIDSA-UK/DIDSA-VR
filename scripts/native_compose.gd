@@ -81,11 +81,12 @@ static func compose(root_path: String, search_dirs: Array = [], choices: Diction
 	## {ok, text, root_part_id, parsed (the root file as read), resolved: int, unresolved: [String], relinked: [{key, ref, path,
 	## file, via, path_mismatch}], review: [{key, part_id, occurrence_id, ref, ref_part_id, result, candidates: [{path, file,
 	## part_id}], path_mismatch}], bases, error}. `text` is ready to POST. With nothing to resolve it is the root file's own text.
+	## `part_files` (V-9): Part id -> the file it was read from (the root's own Parts map to the root file), what a save writes each Part back to.
 	## `accept_likely` (DIDSA-CAD docs/flutter-testing-feedback-2026-11-11-plan.md item 1b): a reference with no stored id whose file moved
 	## with the project folder (file_lookup.gd's "likely") is left in `review` (result "likely", its one candidate) and never used; with
 	## true it is used as if found (`via` "folder" in `relinked`) and its own references are looked at too. A shift learned from a
 	## reference found by id, by folder or by your pick is tried first on later misses (item 1c).
-	var out := {"ok": false, "text": "", "root_part_id": "", "parsed": null, "resolved": 0, "unresolved": [], "relinked": [], "review": [], "bases": [], "error": ""}
+	var out := {"ok": false, "text": "", "root_part_id": "", "parsed": null, "resolved": 0, "unresolved": [], "relinked": [], "review": [], "bases": [], "error": "", "part_files": {}}
 	if not FileAccess.file_exists(root_path):
 		out["error"] = "No such file: %s" % root_path
 		return out
@@ -101,6 +102,9 @@ static func compose(root_path: String, search_dirs: Array = [], choices: Diction
 	if not _has_external_refs(root_parts):
 		out["ok"] = true
 		out["text"] = root_text
+		for part in root_parts:
+			if part is Dictionary:
+				out["part_files"][str(part.get("id", ""))] = root_path
 		return out
 
 	var bases: Array = [root_path.get_base_dir()]
@@ -147,6 +151,7 @@ static func compose(root_path: String, search_dirs: Array = [], choices: Diction
 	composed["sketches"] = sketches
 	out["ok"] = true
 	out["text"] = to_json(composed)
+	out["part_files"] = state["part_ids"]
 	out["resolved"] = state["resolved"]
 	out["unresolved"] = state["unresolved"]
 	out["relinked"] = state["relinked"]

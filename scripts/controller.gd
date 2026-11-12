@@ -427,6 +427,11 @@ func _try_grab() -> void:
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
 		mates_tool.notify_locked(target)
 		return
+	if target and _fix_relaxed() and mates_tool.cluster_carry_applies(target):
+		var cluster: Array = mates_tool.cluster_nodes(target)
+		if cluster.size() > 1:
+			_begin_cluster_carry(target, cluster) # V-6: Relax fix is on and this part is fixed (or held completely): its whole grounded assembly comes with it
+			return
 	if target:
 		if drive_tool != null:
 			drive_tool.on_grip() # (a run of the Drive tool and a hand drag must not both steer the group)
@@ -542,8 +547,29 @@ func _begin_part_hold(target: Node3D) -> void:
 	_begin_hold(target, target.global_transform)
 
 
+func _fix_relaxed() -> bool:
+	## V-6: the mates tool has Relax fix on (a stand-in without the flag counts as off).
+	return mates_tool != null and mates_tool.get("relaxed_fixed") == true
+
+
+func _begin_cluster_carry(target: Node3D, nodes: Array) -> void:
+	## V-6: carries a grounded assembly rigidly with `target` as the anchor, every relative pose unchanged so every mate stays satisfied. Nothing is saved (the
+	## sandbox remembers every part's home; Return puts them back).
+	var gs := GroupSet.new(target, {"depth": 0, "prefix": [], "members": nodes, "label": "the fixed assembly"})
+	_held_group = gs
+	gs.set_flag("held", true)
+	_begin_hold(target, target.global_transform)
+	trigger_haptic_pulse("haptic", 0.0, 0.5, 0.06, 0.0)
+	tool_message.emit("Moving the fixed assembly (%d parts): Return puts it back" % nodes.size())
+
+
 func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 	var gs := GroupSet.new(target, level)
+	if _fix_relaxed() and gs.depth == 1 and gs.occurrence_id() != "" and mates_tool.cluster_carry_applies_for(gs.root_part_id, gs.occurrence_id()):
+		var cluster: Array = mates_tool.cluster_nodes_for(gs.root_part_id, gs.occurrence_id())
+		if cluster.size() > 1:
+			_begin_cluster_carry(target, cluster) # (a sub-assembly of a grounded cluster: the whole cluster, V-6)
+			return
 	var refusal := _group_refusal(gs)
 	if refusal != "":
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
@@ -587,8 +613,8 @@ func refusal_for(level: Dictionary, anchor: Node3D) -> Dictionary:
 		if parts.size() >= depth - 1 and mates_tool.nested_occurrence_locked(str(parts[depth - 2]), str(prefix[depth - 1])):
 			var t2 := "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % label
 			return {"kind": "held", "text": t2, "short": t2}
-	# Fixed anywhere on the chain: this level itself, or a sub-assembly it sits in (a fixed assembly holds everything inside it where it is).
-	for k in range(1, mini(depth, prefix.size()) + 1):
+	# Fixed anywhere on the chain: this level itself, or a sub-assembly it sits in (a fixed assembly holds everything inside it where it is). Relax fix lets it through.
+	for k in range(1, (0 if _fix_relaxed() else mini(depth, prefix.size())) + 1):
 		var owner := root if k == 1 else (str(parts[k - 2]) if parts.size() >= k - 1 else "")
 		if mates_tool.group_fixed(owner, str(prefix[k - 1])):
 			var own := k == depth

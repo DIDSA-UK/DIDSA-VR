@@ -74,7 +74,10 @@ var _mates_branch_label: Label ## which orientation / side the preview shows, an
 var _mates_alignment_button: Button
 var _mates_flip_button: Button
 var _mates_next_button: Button
+var _save_conflict_box: VBoxContainer ## V-9: shown after a Save that left changed-on-disk files alone
+var _save_conflict_label: Label
 var _mates_relax_button: Button
+var _mates_relax_fix_button: Button ## V-6: Relax fix (only the fixed flag), under Relax mates
 var _mates_last_owner_part_id := ""
 var _measure_picks_label: Label
 var _appearance_page: RefCounted = null ## appearance_page.gd, once built
@@ -85,6 +88,8 @@ var _info_label: Label
 var _files_count_label: Label
 var _dirty_label: Label ## "Unsaved changes" on the Files page
 var _new_assembly_button: Button
+var _import_choice_box: VBoxContainer ## F-6: "as an assembly or as one part?" for a STEP / IGES file with several parts
+var _import_choice_label: Label
 var _discard_box: VBoxContainer ## Files page: "you have unsaved changes" with Discard / Save first / Cancel, while main.gd has a replace waiting
 var _discard_label: Label
 var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
@@ -758,10 +763,26 @@ func _build_mates_page() -> Control:
 			_mates_tool.set_relaxed(on)
 	)
 	if _mates_tool and _mates_tool.has_signal("sandbox_changed"):
-		_mates_tool.sandbox_changed.connect(func(on: bool) -> void:
-			_mates_relax_button.set_pressed_no_signal(on)
-			_show_relax_state(on))
+		_mates_tool.sandbox_changed.connect(func(_on: bool) -> void: _refresh_relax_buttons())
 	bulk.add_child(_mates_relax_button)
+	_mates_relax_fix_button = Button.new()
+	_mates_relax_fix_button.text = "Relax fix"
+	_mates_relax_fix_button.toggle_mode = true
+	_mates_relax_fix_button.custom_minimum_size = Vector2(0, 56)
+	_mates_relax_fix_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mates_relax_fix_button.tooltip_text = "Only the fixed flag is relaxed: grab a fixed part and its whole assembly comes with it, every mate kept. Temporary."
+	_mates_relax_fix_button.toggled.connect(func(on: bool) -> void:
+		var scenes = _main.get("scenes_tool") if _main != null else null
+		if not on and scenes != null and scenes.scene_unsaved():
+			_mates_relax_fix_button.set_pressed_no_signal(true) # (the same unsaved-scene guard as Relax mates)
+			scenes.request_back()
+			_open_tool.call("scenes")
+			return
+		if _mates_tool:
+			_mates_tool.set_relaxed_fixed(on)
+		_refresh_relax_buttons()
+	)
+	page.add_child(_mates_relax_fix_button)
 	bulk.add_child(_button("Enforce all", func() -> void:
 		var owner_part_id: String = _main.current_root_part_id()
 		if _mates_tool and owner_part_id != "":
@@ -1197,9 +1218,27 @@ func _build_files_page() -> Control:
 		_main.dirty_changed.connect(func(_d: bool) -> void: _refresh_dirty_label())
 	_refresh_dirty_label()
 	page.add_child(_build_discard_box())
+	page.add_child(_build_import_choice_box())
 	page.add_child(_button("Refresh list", _rescan_files))
-	page.add_child(_hint("Save writes the whole session, including edits made on the design table, as a new .didsa file the flat app can open. It never overwrites the file you opened.", true))
-	page.add_child(_button("Save as new file", func() -> void:
+	page.add_child(_hint("Save writes each part to its own file, in place, like the flat app (a new part gets a file beside the assembly; parts that did not change are left alone). A file changed on disk since it was opened is not overwritten.", true))
+	page.add_child(_button("Save", func() -> void:
+		await _main.save_project()
+		_rescan_files()))
+	_save_conflict_box = VBoxContainer.new()
+	_save_conflict_box.visible = false
+	_save_conflict_label = _hint("", true)
+	_save_conflict_box.add_child(_save_conflict_label)
+	_save_conflict_box.add_child(_button("Overwrite the changed files", func() -> void:
+		await _main.save_project("overwrite")
+		_rescan_files()))
+	_save_conflict_box.add_child(_button("Save those as copies", func() -> void:
+		await _main.save_project("copy")
+		_rescan_files()))
+	page.add_child(_save_conflict_box)
+	if _main != null:
+		_main.saved.connect(func(_r: Dictionary) -> void: _refresh_save_conflicts())
+	page.add_child(_hint("Save a copy (one file) writes the whole session as one new file, handy to share or back up. It is not Save: it never touches your part files.", true))
+	page.add_child(_button("Save a copy (one file)", func() -> void:
 		var saved: String = await _main.save_native_snapshot()
 		if saved != "":
 			_rescan_files()))
@@ -1209,11 +1248,21 @@ func _build_files_page() -> Control:
 	return page
 
 
+func _refresh_save_conflicts() -> void:
+	if _save_conflict_box == null or _main == null:
+		return
+	var names: PackedStringArray = []
+	for c in _main.save_conflicts:
+		names.append(str(c["name"]))
+	_save_conflict_box.visible = not names.is_empty()
+	_save_conflict_label.text = "Changed on disk since opened, so not saved: %s." % ", ".join(names)
+
+
 func _refresh_dirty_label() -> void:
 	if _dirty_label == null or _main == null:
 		return
-	var dir: String = ProjectSettings.globalize_path(_main.snapshot_path().get_base_dir())
-	_dirty_label.text = ("Unsaved changes. Save as new file before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
+	var dir: String = ProjectSettings.globalize_path(_main.save_dir())
+	_dirty_label.text = ("Unsaved changes. Save before opening or starting anything else. Saves go to %s" if _main.document_dirty else "Nothing unsaved. Saves go to %s") % dir
 	if _new_assembly_button:
 		_new_assembly_button.text = "New assembly" if _new_assembly_armed_until_ms == 0 else _new_assembly_armed_text()
 
@@ -1238,6 +1287,35 @@ func _build_discard_box() -> VBoxContainer:
 		_main.discard_prompt_changed.connect(_refresh_discard_box)
 	_refresh_discard_box()
 	return _discard_box
+
+
+func _build_import_choice_box() -> VBoxContainer:
+	## F-6: a STEP / IGES file with several parts waits here: as an assembly (a Part per product) or as one part.
+	_import_choice_box = VBoxContainer.new()
+	_import_choice_box.add_theme_constant_override("separation", tokens.gap)
+	_import_choice_label = _hint("")
+	_import_choice_box.add_child(_import_choice_label)
+	var row := _row()
+	row.add_child(_button("As an assembly", func() -> void:
+		await _main.resolve_import_choice("assembly")
+		_rescan_files(), &"ButtonAccent"))
+	row.add_child(_button("As one part", func() -> void:
+		await _main.resolve_import_choice("one_part")
+		_rescan_files()))
+	row.add_child(_button("Cancel", func() -> void: _main.resolve_import_choice("")))
+	_import_choice_box.add_child(row)
+	if _main != null:
+		_main.import_choice_changed.connect(_refresh_import_choice_box)
+	_refresh_import_choice_box()
+	return _import_choice_box
+
+
+func _refresh_import_choice_box() -> void:
+	if not is_instance_valid(_import_choice_box) or _main == null:
+		return
+	var text: String = _main.pending_import_text()
+	_import_choice_box.visible = text != ""
+	_import_choice_label.text = text
 
 
 func _refresh_discard_box() -> void:
@@ -1333,7 +1411,7 @@ func _references_rows() -> Array:
 	for m in r["relinked"]:
 		var how := "picked by you" if m["via"] == "choice" else ("found by folder" if m["via"] == "folder" else "found by its part id")
 		rows.append({"id": "moved:" + str(m["key"]), "title": "%s -> %s" % [str(m["ref"]).get_file(), m["path"]],
-			"subtitle": "Moved, %s%s. Save as new file writes the new path." % [how, "; the file at the old path is a different part" if m["path_mismatch"] else ""], "state": "ok"})
+			"subtitle": "Moved, %s%s. Save writes the new path." % [how, "; the file at the old path is a different part" if m["path_mismatch"] else ""], "state": "ok"})
 	for item in r["review"]:
 		var ref := str(item["ref"])
 		var why := "Not found in the project folder or the models folders."
@@ -1443,6 +1521,19 @@ func _build_settings_display() -> Control:
 
 func _show_relax_state(on: bool) -> void:
 	_mates_relax_button.text = "Return parts" if on else "Relax mates"
+
+
+func _refresh_relax_buttons() -> void:
+	## Both toggles follow the mates tool: Relax mates is on for the full sandbox, Relax fix for the fixed-only one (greyed, saying why, while all are relaxed).
+	if _mates_tool == null or _mates_relax_button == null:
+		return
+	_mates_relax_button.set_pressed_no_signal(_mates_tool.relaxed)
+	_show_relax_state(_mates_tool.relaxed)
+	if _mates_relax_fix_button != null:
+		_mates_relax_fix_button.set_pressed_no_signal(_mates_tool.relaxed_fixed)
+		_mates_relax_fix_button.text = "Return parts" if _mates_tool.relaxed_fixed else "Relax fix"
+		_mates_relax_fix_button.disabled = _mates_tool.relaxed
+		_mates_relax_fix_button.tooltip_text = "Mates are already relaxed" if _mates_tool.relaxed else "Only the fixed flag is relaxed: grab a fixed part and its whole assembly comes with it, every mate kept. Temporary."
 
 
 func _build_settings_appearance() -> Control:
