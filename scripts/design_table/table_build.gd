@@ -350,7 +350,7 @@ func edit_selected() -> void:
 	if in_tool != null and in_tool.edits_in_tool() and in_tool.edits_row(f):
 		await _table.editor.begin_tool_edit(selected_id)
 		return
-	_table._main.open_keyboard_for("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
+	_table.open_keyboard("%.2f" % BuildTree.value_of(f), func(text: String) -> void: edit_typed(selected_id, text), {"title": BuildTree.value_title(str(f["type"]))})
 
 
 func fix_selected() -> void:

@@ -60,6 +60,7 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd") ## which sp
 @export var stick_deadzone: float = 0.15
 @export var laser_length: float = 3.0 ## metres; the laser's length when nothing's in the way — see _update_laser_visual() for how it shortens to whatever it's actually hitting (a UI panel or a part)
 
+signal selection_changed(node: Node3D, level: Dictionary) ## the laser / tree selection changed: the selected part (null = cleared) and, for a sub-assembly, its level (V-7: the Assembly Tree follows it)
 signal group_message(text: String) ## something to tell the user about choosing / moving a sub-assembly (main.gd shows it)
 signal tool_message(text: String) ## what a shot tool did or why it did nothing (main.gd shows it on the status line and the wrist prompt)
 signal wheel_chord_started() ## trigger + grip pressed together on a hand with wheel_enabled: tool_wheel.gd opens the wheel
@@ -218,8 +219,8 @@ func _physics_process(delta: float) -> void:
 		drive_tool.feed(get_vector2("primary"), is_button_pressed("ax_button"), is_button_pressed("by_button"))
 	if _nudge_carried_panel(delta):
 		return # A/B belong to the floating window this hand is carrying, not to a selected part
-	if selected_node == null or _table_owns_input() or wheel_is_open():
-		return # (the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
+	if selected_node == null or _table_owns_input() or wheel_is_open() or not _latch.is_empty():
+		return # (a latched grip: the stick and A / B must not turn or push the laser-selected part either, V-2; the design table has this hand's stick and A / B while it is engaged: table_manip.gd)
 
 	var stick: Vector2 = get_vector2("primary")
 	# The laser on the wrist tablet / a floating window means the stick scrolls
@@ -426,6 +427,11 @@ func _try_grab() -> void:
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
 		mates_tool.notify_locked(target)
 		return
+	if target and _fix_relaxed() and mates_tool.cluster_carry_applies(target):
+		var cluster: Array = mates_tool.cluster_nodes(target)
+		if cluster.size() > 1:
+			_begin_cluster_carry(target, cluster) # V-6: Relax fix is on and this part is fixed (or held completely): its whole grounded assembly comes with it
+			return
 	if target:
 		if drive_tool != null:
 			drive_tool.on_grip() # (a run of the Drive tool and a hand drag must not both steer the group)
@@ -460,6 +466,7 @@ func _begin_latch(target: Node3D) -> void:
 		_begin_part_hold(target) # nothing wider to choose
 		return
 	_latch = {"target": target, "levels": levels, "level": 0, "at": global_position, "nodes": [], "cues": []}
+	set_meta("grip_latched", true) # (V-2: the world gesture in two_hand_model.gd must not drag the model while the dead zone is waited out)
 	var sphere := GroupCues.sphere(group_deadzone)
 	_scene_root().add_child(sphere)
 	sphere.global_position = global_position
@@ -474,12 +481,22 @@ func _show_latch_level() -> void:
 	var levels: Array = _latch["levels"]
 	var level: Dictionary = levels[_latch["level"]]
 	var box := GroupIndex.union_aabb(level["members"])
-	var brackets := GroupCues.brackets(box.grow(0.004))
+	var marks := _level_marks(levels, _latch["target"])
+	var refused: bool = str(marks[_latch["level"]]) != ""
+	var brackets := GroupCues.brackets(box.grow(0.004), GroupCues.REFUSED_COLOUR if refused else GroupCues.COLOUR)
 	_scene_root().add_child(brackets)
-	var text := GroupIndex.breadcrumb(levels, _latch["level"])
+	var text := GroupIndex.breadcrumb(levels, _latch["level"], marks)
 	var cap := GroupCues.caption(text, box.get_center() + Vector3(0.0, box.size.y * 0.5 + 0.07, 0.0))
 	_scene_root().add_child(cap)
 	_latch["cues"] = [brackets, cap]
+
+
+func _level_marks(levels: Array, target: Node3D) -> Array:
+	## V-1: per level, what a grip would be refused for ("fixed", "mated", "held" or ""), so the caption can say so BEFORE the hand leaves the dead zone.
+	var marks: Array = []
+	for level in levels:
+		marks.append(str(refusal_for(level, target).get("kind", "")))
+	return marks
 
 
 func _cycle_latch() -> void:
@@ -487,7 +504,7 @@ func _cycle_latch() -> void:
 	_latch["level"] = (int(_latch["level"]) + 1) % levels.size()
 	_show_latch_level()
 	trigger_haptic_pulse("haptic", 0.0, 0.35, 0.05, 0.0)
-	group_message.emit(GroupIndex.breadcrumb(levels, _latch["level"]))
+	group_message.emit(GroupIndex.breadcrumb(levels, _latch["level"], _level_marks(levels, _latch["target"])))
 
 
 func _end_latch() -> void:
@@ -496,6 +513,7 @@ func _end_latch() -> void:
 	GroupCues.clear(_latch.get("nodes", []))
 	GroupCues.clear(_latch.get("cues", []))
 	_latch = {}
+	set_meta("grip_latched", false)
 
 
 func _update_latch() -> void:
@@ -529,12 +547,33 @@ func _begin_part_hold(target: Node3D) -> void:
 	_begin_hold(target, target.global_transform)
 
 
+func _fix_relaxed() -> bool:
+	## V-6: the mates tool has Relax fix on (a stand-in without the flag counts as off).
+	return mates_tool != null and mates_tool.get("relaxed_fixed") == true
+
+
+func _begin_cluster_carry(target: Node3D, nodes: Array) -> void:
+	## V-6: carries a grounded assembly rigidly with `target` as the anchor, every relative pose unchanged so every mate stays satisfied. Nothing is saved (the
+	## sandbox remembers every part's home; Return puts them back).
+	var gs := GroupSet.new(target, {"depth": 0, "prefix": [], "members": nodes, "label": "the fixed assembly"})
+	_held_group = gs
+	gs.set_flag("held", true)
+	_begin_hold(target, target.global_transform)
+	trigger_haptic_pulse("haptic", 0.0, 0.5, 0.06, 0.0)
+	tool_message.emit("Moving the fixed assembly (%d parts): Return puts it back" % nodes.size())
+
+
 func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 	var gs := GroupSet.new(target, level)
+	if _fix_relaxed() and gs.depth == 1 and gs.occurrence_id() != "" and mates_tool.cluster_carry_applies_for(gs.root_part_id, gs.occurrence_id()):
+		var cluster: Array = mates_tool.cluster_nodes_for(gs.root_part_id, gs.occurrence_id())
+		if cluster.size() > 1:
+			_begin_cluster_carry(target, cluster) # (a sub-assembly of a grounded cluster: the whole cluster, V-6)
+			return
 	var refusal := _group_refusal(gs)
 	if refusal != "":
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
-		group_message.emit(refusal)
+		_say_refusal(refusal_for(level, target))
 		return
 	_held_group = gs
 	gs.set_flag("held", true)
@@ -543,22 +582,50 @@ func _begin_group_hold(target: Node3D, level: Dictionary) -> void:
 	group_message.emit("Holding %s (%d parts)" % [gs.label, gs.members.size()])
 
 
+func _say_refusal(r: Dictionary) -> void:
+	## V-1: a refused group grip reaches the hand (the wrist hint, through tool_message) AND the status line (group_message), whatever the depth. The hand gets the
+	## short words ("Drive is fixed: ..."), the status line the long ones.
+	if r.is_empty():
+		return
+	tool_message.emit(str(r["short"]))
+	group_message.emit(str(r["text"]))
+
+
 func _group_refusal(gs) -> String:
-	## Why this sub-assembly can't be moved now ("" if it can). Only a top-level one is saved, so only its grounding and mates matter.
-	if mates_tool != null and mates_tool.relaxed:
-		return "" # the sandbox: anything moves, nothing is saved, it all goes home after
-	if gs.depth == 1 and mates_tool != null:
-		match mates_tool.group_state(gs.root_part_id, gs.occurrence_id()):
-			"grounded":
-				return "%s is grounded (fixed): unground it to move it." % gs.label
-			"mated":
-				return "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % gs.label
-	if gs.depth > 1 and mates_tool != null and gs.prefix.size() >= gs.depth:
+	## Why this sub-assembly can't be moved now ("" if it can).
+	var level := {"depth": gs.depth, "prefix": gs.prefix, "label": gs.label}
+	return str(refusal_for(level, gs.anchor).get("text", ""))
+
+
+func refusal_for(level: Dictionary, anchor: Node3D) -> Dictionary:
+	## Pure given the mates tool's state: what refusing a grip on `level` (a GroupIndex level: depth, prefix, label) of the part `anchor` would say, or {} when it
+	## would not be refused. {"kind": "fixed" | "mated" | "held", "text": the long sentence, "short": what the hand shows}. Used when the grip commits and, to
+	## warn before committing, while the trigger cycles levels.
+	var depth := int(level.get("depth", 0))
+	if depth < 1 or mates_tool == null or bool(mates_tool.relaxed):
+		return {} # a part alone has its own refusals in _try_grab; the sandbox moves anything, saves nothing
+	var label := str(level.get("label", "This"))
+	var prefix: Array = level.get("prefix", [])
+	var parts: Array = anchor.get_meta("group_parts", []) if is_instance_valid(anchor) else []
+	var root := str(anchor.get_meta("group_root", "")) if is_instance_valid(anchor) else ""
+	if depth > 1 and prefix.size() >= depth:
 		# A sub-assembly inside another moves on screen only: one its parent's mates hold would just be pulled off them.
-		var parts: Array = gs.anchor.get_meta("group_parts", [])
-		if parts.size() >= gs.depth - 1 and mates_tool.nested_occurrence_locked(str(parts[gs.depth - 2]), str(gs.prefix[gs.depth - 1])):
-			return "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % gs.label
-	return ""
+		if parts.size() >= depth - 1 and mates_tool.nested_occurrence_locked(str(parts[depth - 2]), str(prefix[depth - 1])):
+			var t2 := "%s is held by mates inside its sub-assembly: take the sub-assembly it sits in, or Relax all mates." % label
+			return {"kind": "held", "text": t2, "short": t2}
+	# Fixed anywhere on the chain: this level itself, or a sub-assembly it sits in (a fixed assembly holds everything inside it where it is). Relax fix lets it through.
+	for k in range(1, (0 if _fix_relaxed() else mini(depth, prefix.size())) + 1):
+		var owner := root if k == 1 else (str(parts[k - 2]) if parts.size() >= k - 1 else "")
+		if mates_tool.group_fixed(owner, str(prefix[k - 1])):
+			var own := k == depth
+			var names: Array = anchor.get_meta("group_names", []) if is_instance_valid(anchor) else []
+			var holder := label if own else (str(names[k - 1]) if names.size() >= k else "an assembly above it")
+			var text := "%s is fixed (grounded): Float it in the Assembly Tree to move it." % label if own else "%s sits inside %s, which is fixed (grounded): Float that in the Assembly Tree to move it." % [label, holder]
+			return {"kind": "fixed", "text": text, "short": "Part is fixed: %s. Float it in the Assembly Tree." % (label if own else holder)}
+	if depth == 1 and str(mates_tool.group_state(root, str(prefix[0]) if not prefix.is_empty() else "")) == "mated":
+		var t := "%s has mates on it: a mated sub-assembly can't be moved as a unit yet." % label
+		return {"kind": "mated", "text": t, "short": t}
+	return {}
 
 
 func _finish_group_move(gs) -> void:
@@ -608,8 +675,11 @@ func _finish_group_move(gs) -> void:
 		save)
 	if save:
 		mates_tool.persist_group_pose(owner, occ, new_pose)
-	elif gs.depth > 1 and not sandbox:
-		group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
+	elif (gs.depth > 1 or gs.prefix.is_empty()) and not sandbox:
+		if gs.prefix.is_empty():
+			group_message.emit("The whole assembly moved on screen only: the parts' own places are not changed (V-7: selected from the tree's root row).")
+		else:
+			group_message.emit("%s moved on screen only: a sub-assembly inside another isn't saved from here (open it as a room to edit it)." % gs.label)
 
 
 func _arm_crumb() -> void:
@@ -689,6 +759,7 @@ func select_group_level(node: Node3D, level: Dictionary, point: Vector3) -> void
 			m.set_meta("selected", true)
 			m.material_overlay = _select_material
 	group_message.emit("Selected %s (%d parts)" % [_sel_group.label, _sel_group.members.size()])
+	selection_changed.emit(node, level)
 
 
 func _try_grab_table() -> bool:
@@ -1008,7 +1079,7 @@ func _arm_paint() -> void:
 		trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
 		tool_message.emit("Took the look of %s: %s." % [part.name, appearance_tool.Rule.key_of(got).replace(";", ", ")])
 		return
-	if bool(appearance_tool.is_busy()):
+	if bool(appearance_tool.is_saving()): # (a read still running is awaited by the paint itself, V-3)
 		tool_message.emit("Paint: still saving the last paint, shoot again in a moment.")
 		return
 	_paint_press = {"ms": Time.get_ticks_msec(), "node": part, "face_index": int(hit.get("face_index", -1)), "point": hit.get("point", part.global_position)}
@@ -1104,7 +1175,9 @@ func _finish_paint() -> void:
 
 
 func _paint_row(node: Node3D, row: Dictionary) -> void:
-	var result: Dictionary = await appearance_tool.apply(row, appearance_tool.root_of(node, _world_root()), _scope_nodes(), _world_root())
+	var root: String = appearance_tool.root_of(node, _world_root())
+	await appearance_tool.ensure_loaded(root) # (V-3: the breadcrumb path used to paint without waiting for the Part's lists)
+	var result: Dictionary = await appearance_tool.apply(row, root, _scope_nodes(), _world_root())
 	if not result.get("ok", false):
 		trigger_haptic_pulse("haptic", 0.0, 0.6, 0.12, 0.0)
 		tool_message.emit("Couldn't paint %s: %s" % [str(row.get("label", "")), str(result.get("error", "unknown error"))])
@@ -1281,9 +1354,27 @@ func _set_selection(node: Node3D, pivot_point: Vector3) -> void:
 	node.material_overlay = _select_material
 	_pivot_local = node.global_transform.affine_inverse() * pivot_point
 	_selected_start_transform = node.global_transform
+	selection_changed.emit(node, {})
+
+
+func selected_group_prefix() -> Variant:
+	## The occurrence-id prefix of the selected sub-assembly (an empty array for the whole assembly), or null when no group is selected.
+	return (_sel_level["prefix"] as Array) if _sel_group != null and _sel_level.has("prefix") else null
+
+
+func pulse_selection() -> void:
+	## V-7: a selection made from the tree flashes once (bright, then the normal overlay), so the eye finds a part that may be behind you or far away.
+	if _select_material == null or not is_inside_tree():
+		return
+	var normal := Color(1.0, 0.85, 0.1, 0.35)
+	_select_material.albedo_color = Color(1.0, 1.0, 0.6, 0.9)
+	var tween := create_tween()
+	tween.tween_property(_select_material, "albedo_color", normal, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func _clear_selection() -> void:
+	if selected_node != null:
+		selection_changed.emit(null, {})
 	if selected_node and _sel_group != null:
 		var gs = _sel_group
 		_sel_group = null

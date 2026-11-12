@@ -216,6 +216,40 @@ func _initialize() -> void:
 	GroupIndex.assign([fresh_copy], entries, "R")
 	_check(fresh_copy.get_meta("group_path", []) == ["bolt#pattern:p1:2"] and fresh_copy.get_meta("group_parts", []) == ["B"] and fresh_copy.get_meta("group_names", []) == ["Bolt (copy 2)"], "group_index tags a pattern copy with its #pattern: path, the source's Part and a copy name")
 
+	# --- V-3: a slow first read must not clobber a paint that landed while it was on its way, and a second ensure_loaded awaits the first
+	var slow_api := FakeApi.new()
+	slow_api.parts = {"R": {"name": "Rig", "occurrences": [FakeApi.row("bolt", "B")]}, "B": {"name": "Bolt"}}
+	slow_api.get_delay = 6
+	var slow_tool := Tool.new()
+	slow_tool.command_stack = CommandStack.new()
+	holder.add_child(slow_tool)
+	slow_tool.configure(slow_api)
+	slow_tool.world_root = "R"
+	var slow_bolt := _node(holder, "SlowBolt", "R", "bolt", "bolt", ["Bolt"], false)
+	slow_tool.ensure_loaded("R") # (not awaited: what the trigger-down does)
+	slow_tool.ensure_loaded("R") # (a second caller: must wait for the first, not start another read)
+	await process_frame
+	_check(slow_tool.is_busy() and not slow_tool.is_saving(), "V-3: while a read is running the tool is busy but not saving (a paint waits for the read instead of being refused)")
+	for i in 80:
+		if slow_api.calls.any(func(c: Dictionary) -> bool: return c["method"] == HTTPClient.METHOD_GET and str(c["path"]).ends_with("/R/appearance-overrides")):
+			break
+		await process_frame
+	await process_frame # (the overrides were READ, empty, and the answer is still in flight)
+	slow_tool.brush = {"colour": "#2A9D8F"}
+	var slow_result: Dictionary = await slow_tool.apply({"id": "part", "label": "Bolt", "record": {"path": "bolt"}, "members": [slow_bolt]}, "R", [slow_bolt], "R")
+	_check(slow_result["ok"] and slow_api.puts().size() == 1, "V-3: a paint through the breadcrumb path while the first read is still running is stored")
+	await slow_tool.ensure_loaded("R") # (waits for the running read)
+	var slow_list: Array = ((slow_tool.model()["parts"] as Dictionary)["R"] as Dictionary).get("appearance_overrides", [])
+	_check(slow_list.size() == 1 and slow_list[0]["appearance"] == {"colour": "#2A9D8F"}, "V-3: the read that finished after the paint did not erase it from the model (%s)" % str(slow_list))
+	_check(_albedo(slow_bolt) == Color.html("#2A9D8F"), "V-3: ...and the node still wears it")
+	var r_reads := slow_api.calls.filter(func(c: Dictionary) -> bool: return c["method"] == HTTPClient.METHOD_GET and str(c["path"]) == "/document/parts/R")
+	_check(r_reads.size() == 1, "V-3: two ensure_loaded calls made one read of the Part, not two (%d)" % r_reads.size())
+	_check(not slow_tool.is_busy(), "V-3: busy clears once the read and the save are done")
+	slow_tool.brush = {"colour": "#E9C46A"}
+	await slow_tool.apply({"id": "part", "label": "Bolt", "record": {"path": "bolt"}, "members": [slow_bolt]}, "R", [slow_bolt], "R")
+	slow_list = ((slow_tool.model()["parts"] as Dictionary)["R"] as Dictionary).get("appearance_overrides", [])
+	_check(slow_list.size() == 1 and slow_list[0]["appearance"] == {"colour": "#E9C46A"} and _albedo(slow_bolt) == Color.html("#E9C46A"), "V-3: two quick paints in a row: the second one is the one shown and kept")
+
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)
 	quit(0 if failures == 0 else 1)
 

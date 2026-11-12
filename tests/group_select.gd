@@ -12,6 +12,7 @@ const RoomEdit := preload("res://scripts/room/room_edit.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const FakeApi := preload("res://tests/fake_room_api.gd")
 const CommandStack := preload("res://scripts/command_stack.gd")
+const TwoHandModel := preload("res://scripts/two_hand_model.gd")
 
 const STUB := "extends Node
 var relaxed := false
@@ -20,6 +21,8 @@ var poses := {}
 var saved := []
 func group_state(owner, occ):
 	return states.get(owner + '|' + occ, 'ok')
+func group_fixed(owner, occ):
+	return states.get(owner + '|' + occ, 'ok') == 'grounded' 
 func group_pose(owner, occ):
 	return poses.get(owner + '|' + occ, Transform3D.IDENTITY)
 func persist_group_pose(owner, occ, pose):
@@ -184,6 +187,15 @@ func _initialize() -> void:
 	hand.global_position = p0 + Vector3(0.01, 0, 0)
 	await tick()
 	print("SMOKE moving the hand inside the dead zone commits nothing: ", not hand._latch.is_empty() and hand.held_node == null and kb[0].global_position.is_equal_approx(p0))
+	# V-2: while the grip is latched the hand is busy: the world gesture must not drag the model (it did, inside the dead zone)
+	var gesture := TwoHandModel.new()
+	print("SMOKE V-2 a latched grip marks the hand busy, so the whole-model gesture treats it as not free: ", hand.get_meta("grip_latched", false) == true and not gesture._hand_free_ignoring_button(hand))
+	hand.selected_node = kb[1] # (a laser-selected part: the stick / A / B turn and push it, but not while a grip is latched)
+	var sel_before: Transform3D = kb[1].global_transform
+	hand._physics_process(0.5)
+	print("SMOKE V-2 ...and the laser-selected part is not turned or pushed meanwhile, the model root is unmoved: ", kb[1].global_transform.is_equal_approx(sel_before) and kb[0].global_position.is_equal_approx(p0))
+	hand.selected_node = null
+	gesture.free()
 	hand._on_button_pressed("trigger_click")
 	print("SMOKE a trigger click widens what will be taken by one level, and says so: ", hand._latch["level"] == 1 and messages.size() > 0 and messages.back() == "Bolt < [Drive]")
 	hand._on_button_pressed("trigger_click")
@@ -192,6 +204,7 @@ func _initialize() -> void:
 	var steps := stack.history_labels().size()
 	hand.global_position = p0 + Vector3(0.1, 0, 0)
 	await tick()
+	print("SMOKE V-2 leaving the dead zone clears the busy mark (the hold's own markers take over): ", hand.get_meta("grip_latched", false) == false)
 	print("SMOKE leaving the dead zone takes the chosen level: the whole drive is held, anchored on the bolt gripped: ", hand._latch.is_empty() and hand._held_group != null and hand.held_node == kb[0] and hand._held_group.members.size() == 2)
 	print("SMOKE ...the sphere and brackets are gone: ", root.find_child("GroupDeadZone", true, false) == null and root.find_child("GroupBrackets", true, false) == null)
 	hand.global_position = p0 + Vector3(0.4, 0.1, 0)
@@ -249,6 +262,44 @@ func _initialize() -> void:
 	await tick()
 	print("SMOKE ...nor a grounded one: ", hand._held_group == null and messages.back().contains("grounded"))
 	hand._try_release()
+
+	# V-1: every refusal reaches the hand (tool_message) as well as the status line (group_message), at any depth, and cycling warns before committing
+	var hand_said: Array[String] = []
+	hand.tool_message.connect(func(t: String) -> void: hand_said.append(t))
+	var scope_nodes: Array = hand._scope_nodes()
+	var real_levels: Array = GroupIndex.levels(kb[0], scope_nodes)
+	# (the bracket holds only this bolt here, so the real list leaves it out as the same thing as the bolt; a depth-2 level is built by hand to test the chain)
+	var lv2: Array = [real_levels[0], {"depth": 2, "prefix": ["s1", "k1"], "members": [kb[0]], "label": "Bracket"}, real_levels[1]]
+	print("SMOKE V-1 setup: the part, a bracket at depth 2 and the drive at depth 1: ", real_levels.size() == 2 and int(lv2[1]["depth"]) == 2 and int(lv2[2]["depth"]) == 1)
+	mates.states.clear()
+	mates.states["R|s1"] = "grounded"
+	var r1: Dictionary = hand.refusal_for(lv2[2], kb[0])
+	print("SMOKE V-1 a fixed top-level drive is refused, short words for the hand and long ones for the status line: ", r1.get("kind") == "fixed" and str(r1["short"]).begins_with("Part is fixed") and str(r1["text"]).contains("fixed"))
+	var r2: Dictionary = hand.refusal_for(lv2[1], kb[0])
+	print("SMOKE V-1 ...a bracket INSIDE that fixed drive (depth 2) is refused too, and names the assembly it sits in: ", r2.get("kind") == "fixed" and str(r2["text"]).contains("sits inside"))
+	mates.states.clear()
+	mates.states["S|k1"] = "grounded"
+	var r3: Dictionary = hand.refusal_for(lv2[1], kb[0])
+	print("SMOKE V-1 ...a bracket fixed inside a free drive (depth 2) is refused on its own level: ", r3.get("kind") == "fixed" and not str(r3["text"]).contains("sits inside") and hand.refusal_for(lv2[2], kb[0]).is_empty() and hand.refusal_for(lv2[0], kb[0]).is_empty())
+	var marks: Array = hand._level_marks(lv2, kb[0])
+	print("SMOKE V-1 the cycling caption marks the level a grip would be refused: ", marks == ["", "fixed", ""] and GroupIndex.breadcrumb(lv2, 1, marks).contains("(fixed)") and not GroupIndex.breadcrumb(lv2, 1, ["", "", ""]).contains("(fixed)"))
+	mates.states.clear()
+	mates.states["R|s1"] = "grounded" # (the real levels: the drive, depth 1, is fixed)
+	hand.global_position = kb[0].global_position
+	hand._try_grab()
+	hand._on_button_pressed("trigger_click") # (the drive level)
+	var caption = root.find_child("GroupCaption", true, false)
+	print("SMOKE V-1 while the latch waits on the fixed drive the caption says (fixed): ", hand._latch["level"] == 1 and caption != null and str(caption.text).contains("[Drive (fixed)]"))
+	hand_said.clear()
+	messages.clear()
+	hand.global_position += Vector3(0.1, 0, 0)
+	await tick()
+	print("SMOKE V-1 leaving the dead zone on a fixed level takes nothing, the hand is told (tool_message) and so is the status line (group_message): ", hand._held_group == null and hand.held_node == null and hand_said.size() == 1 and hand_said[0].begins_with("Part is fixed") and messages.size() == 1 and messages[0].contains("fixed"))
+	hand._try_release()
+	mates.states.clear()
+	mates.relaxed = true
+	print("SMOKE V-1 relaxed mates refuse nothing: ", hand.refusal_for(lv2[2], kb[0]).is_empty())
+	mates.relaxed = false
 	mates.states.clear()
 
 	# dead zone Off, and a top-level part

@@ -83,7 +83,7 @@ func handle_option(ed, option_id: String) -> bool:
 		"pat_orient_keep":
 			o["pat_orient"] = "maintain_orientation"
 		"pat_skip":
-			ed.table._main.open_keyboard_for(", ".join((o["pat_skip"] as Array).map(func(i): return str(i))), func(text: String) -> void: skip_typed(ed, text),
+			ed.table.open_keyboard(", ".join((o["pat_skip"] as Array).map(func(i): return str(i))), func(text: String) -> void: skip_typed(ed, text),
 				{"mode": "full", "title": "Instances to skip, e.g. 2 4 (1 is the first copy; leave empty for none)"})
 		"clear_pattern":
 			ed.clear_picks()

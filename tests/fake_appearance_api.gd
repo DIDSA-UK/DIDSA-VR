@@ -14,6 +14,7 @@ extends RefCounted
 var parts: Dictionary = {}
 var calls: Array = []
 var fail_puts := false
+var get_delay := 0 ## frames a GET's answer is held back AFTER it was computed (a slow network: the answer is stale when it arrives)
 
 
 static func row(id: String, part_id: String, color: Variant = null) -> Dictionary:
@@ -30,6 +31,14 @@ static func _key(r: Dictionary) -> String:
 
 
 func request(method: int, path: String, body = null) -> Dictionary:
+	var answer: Dictionary = await _request_now(method, path, body)
+	if method == HTTPClient.METHOD_GET:
+		for i in get_delay:
+			await Engine.get_main_loop().process_frame
+	return answer
+
+
+func _request_now(method: int, path: String, body = null) -> Dictionary:
 	calls.append({"method": method, "path": path, "body": body})
 	await Engine.get_main_loop().process_frame
 	var bits := path.trim_prefix("/document/parts/").split("/")

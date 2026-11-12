@@ -160,7 +160,7 @@ is where the tree becomes the place to understand an assembly, not only to pick 
 
 | Phase | Contents | Size |
 |---|---|---|
-| **T1** (= V-7 in the feedback plan) | World tree: B1-B4 fixed, state icons (R2), selection both ways with the pulse (R3), the bottom bar with Fix / Float, Hide, Isolate, Rename, Room, Delete (R4), live refresh (R5), BUILD-tab styling | Medium-large |
+| **T1** (= V-7 in the feedback plan; **built**, headless only: see that plan's Progress notes) | World tree: B1-B4 fixed, state icons (R2), selection both ways with the pulse (R3), the bottom bar with Fix / Float, Hide, Isolate, Rename, Room, Delete (R4), live refresh (R5), BUILD-tab styling | Medium-large |
 | **T2** | The shared component (R1); the table PARTS tab moved onto it (Table / Bring in the bar, Room / Delete back); a tree per room (R6); the BUILD tab's actions in the bottom bar | Medium |
 | **T3** | Mates and Patterns sections (R7), leader line and Frame (R3), hover linking, search | Medium |
 

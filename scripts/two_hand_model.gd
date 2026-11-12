@@ -373,6 +373,10 @@ func _hand_free_ignoring_button(hand: XRController3D) -> bool:
 	# The tool wheel (tool_wheel.gd sets "wheel_open" from the trigger + grip chord until both are up): the grip belongs to it.
 	if hand.has_meta("wheel_open") and hand.get_meta("wheel_open"):
 		return false
+	# A grip latched in a sub-assembly's dead zone (controller.gd `_begin_latch`): held_node is still null until the hand leaves the
+	# sphere, but the grip is not on empty space, so the one-hand gesture must not drag the model meanwhile (V-2).
+	if hand.has_meta("grip_latched") and hand.get_meta("grip_latched"):
+		return false
 	# controller.gd exposes held_node; a hand carrying a part isn't free.
 	return hand.get("held_node") == null
 
