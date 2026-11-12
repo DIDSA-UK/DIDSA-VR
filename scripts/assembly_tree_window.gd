@@ -143,7 +143,12 @@ func _refresh_root() -> void:
 	_set_status("" if not occurrence_rows.is_empty() else "This assembly has no placed occurrences.")
 	_rebuild_rows()
 	await _apply_part_names(_tree)
+	# mark_stale() empties _tree and starts a newer refresh while this one is awaiting: stop, the newer one fills it.
+	if token != _refresh_token or _tree.is_empty():
+		return
 	await _load_status(_root_part_id)
+	if token != _refresh_token or _tree.is_empty():
+		return
 	_apply_status(_tree[0]["children"], _root_part_id)
 	_rebuild_rows()
 
