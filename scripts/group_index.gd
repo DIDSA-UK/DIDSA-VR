@@ -231,11 +231,13 @@ static func _label(node: Node, depth: int) -> String:
 	return str(names[names.size() - 1]) if depth == 0 or depth > names.size() else str(names[depth - 1])
 
 
-static func breadcrumb(levels_: Array, current: int) -> String:
-	## "Bolt < Bracket < Drive unit", the chosen level in brackets.
+static func breadcrumb(levels_: Array, current: int, marks: Array = []) -> String:
+	## "Bolt < Bracket < Drive unit", the chosen level in brackets. `marks` (parallel to the levels, optional): "fixed" adds " (fixed)" to that level (V-1).
 	var parts: PackedStringArray = []
 	for i in levels_.size():
 		var s := str(levels_[i]["label"])
+		if i < marks.size() and str(marks[i]) != "":
+			s += " (%s)" % str(marks[i])
 		parts.append("[%s]" % s if i == current else s)
 	return " < ".join(parts)
 
