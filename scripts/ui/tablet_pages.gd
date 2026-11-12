@@ -88,6 +88,8 @@ var _info_label: Label
 var _files_count_label: Label
 var _dirty_label: Label ## "Unsaved changes" on the Files page
 var _new_assembly_button: Button
+var _import_choice_box: VBoxContainer ## F-6: "as an assembly or as one part?" for a STEP / IGES file with several parts
+var _import_choice_label: Label
 var _discard_box: VBoxContainer ## Files page: "you have unsaved changes" with Discard / Save first / Cancel, while main.gd has a replace waiting
 var _discard_label: Label
 var _new_assembly_armed_until_ms := 0 ## New assembly discards what is loaded, so it needs a second press within this long
@@ -1216,6 +1218,7 @@ func _build_files_page() -> Control:
 		_main.dirty_changed.connect(func(_d: bool) -> void: _refresh_dirty_label())
 	_refresh_dirty_label()
 	page.add_child(_build_discard_box())
+	page.add_child(_build_import_choice_box())
 	page.add_child(_button("Refresh list", _rescan_files))
 	page.add_child(_hint("Save writes each part to its own file, in place, like the flat app (a new part gets a file beside the assembly; parts that did not change are left alone). A file changed on disk since it was opened is not overwritten.", true))
 	page.add_child(_button("Save", func() -> void:
@@ -1284,6 +1287,35 @@ func _build_discard_box() -> VBoxContainer:
 		_main.discard_prompt_changed.connect(_refresh_discard_box)
 	_refresh_discard_box()
 	return _discard_box
+
+
+func _build_import_choice_box() -> VBoxContainer:
+	## F-6: a STEP / IGES file with several parts waits here: as an assembly (a Part per product) or as one part.
+	_import_choice_box = VBoxContainer.new()
+	_import_choice_box.add_theme_constant_override("separation", tokens.gap)
+	_import_choice_label = _hint("")
+	_import_choice_box.add_child(_import_choice_label)
+	var row := _row()
+	row.add_child(_button("As an assembly", func() -> void:
+		await _main.resolve_import_choice("assembly")
+		_rescan_files(), &"ButtonAccent"))
+	row.add_child(_button("As one part", func() -> void:
+		await _main.resolve_import_choice("one_part")
+		_rescan_files()))
+	row.add_child(_button("Cancel", func() -> void: _main.resolve_import_choice("")))
+	_import_choice_box.add_child(row)
+	if _main != null:
+		_main.import_choice_changed.connect(_refresh_import_choice_box)
+	_refresh_import_choice_box()
+	return _import_choice_box
+
+
+func _refresh_import_choice_box() -> void:
+	if not is_instance_valid(_import_choice_box) or _main == null:
+		return
+	var text: String = _main.pending_import_text()
+	_import_choice_box.visible = text != ""
+	_import_choice_label.text = text
 
 
 func _refresh_discard_box() -> void:

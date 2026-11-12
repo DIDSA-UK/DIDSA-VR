@@ -207,16 +207,19 @@ func path_of(part_id: String) -> String:
 
 # --- save ------------------------------------------------------------------------------------------------------------------------------
 
-func save(session: Dictionary, fetch: Callable, folder: String, root_path: String, extras: Dictionary = {}, policy: String = "ask") -> Dictionary:
+func save(session: Dictionary, fetch: Callable, folder: String, root_path: String, extras: Dictionary = {}, policy: String = "ask", preset: Dictionary = {}) -> Dictionary:
 	## `session`: {"root_part_id": String, "parts": [{id, name, occurrences: [{resolved_part_id}]}]} (the full session's export); `fetch(part_id) -> String` a coroutine
 	## returning that Part's own native text ("" = failed); `folder`: where new files go; `root_path`: the file the session came from (the folder refs are relative
 	## to; "" = `folder`); `extras`: the root file's client-only keys. `policy`: what to do with a file changed on disk since it was read: "ask" (report, write
 	## nothing), "overwrite", "copy" (beside it as "<name> (copy).didsa") or "skip". Returns {saved: [{id, name, path}], unchanged: [names], conflicts:
 	## [{id, name, path}], failed: [{id, name, path, reason}], copies: [{id, name, path}]}. A coroutine.
+	## `preset`: part id -> an absolute path chosen for a Part that has no file yet (an assembly import's suggested "<folder>/<File>.didsa"), used instead of `<name>.didsa`.
 	var result := {"saved": [], "unchanged": [], "conflicts": [], "failed": [], "copies": []}
 	var parts: Array = session.get("parts", [])
 	var root_id := str(session.get("root_part_id", ""))
 	var root_folder := root_path.get_base_dir() if root_path != "" and not root_path.begins_with("res://") else folder
+	if root_path == "" and preset.has(root_id):
+		root_folder = str(preset[root_id]).get_base_dir() # a new root file: references are relative to where IT will be
 	var names := {}
 	for part in parts:
 		names[str(part.get("id", ""))] = str(part.get("name", "Part"))
@@ -227,6 +230,10 @@ func save(session: Dictionary, fetch: Callable, folder: String, root_path: Strin
 		if files.has(id):
 			path_for[id] = str(files[id]["path"])
 			taken[str(files[id]["path"]).to_lower()] = true
+	for id in names:
+		if not path_for.has(id) and preset.has(id):
+			path_for[id] = str(preset[id])
+			taken[str(preset[id]).to_lower()] = true
 	for id in names:
 		if not path_for.has(id):
 			path_for[id] = auto_path(folder, names[id], taken)
