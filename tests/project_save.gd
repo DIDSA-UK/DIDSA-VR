@@ -126,8 +126,21 @@ func _initialize() -> void:
 	var demo_save: Dictionary = await fresh.save(session, Callable(self, "fetch"), other, "res://demo/assemblies/x/x.didsa")
 	check("saving a demo writes every Part as a new file in the project folder, nothing back to res://", (demo_save["saved"] as Array).size() == 3 and FileAccess.file_exists(other.path_join("Assembly.didsa")) and (demo_save["failed"] as Array).is_empty())
 
+	# --- an assembly import's suggested paths (F-6): used for new Parts, and the root's references are relative to the ROOT's own folder
+	var imp_folder := ProjectSettings.globalize_path("user://test_project_save_import")
+	DirAccess.make_dir_recursive_absolute(imp_folder)
+	texts = {"T": part_text("T", "Top", "P"), "P": part_text("P", "Pin")}
+	var importer = ProjectSave.new()
+	var preset := {"T": imp_folder.path_join("Gearbox/Top.didsa"), "P": imp_folder.path_join("Gearbox/Pin.didsa")}
+	var imported: Dictionary = await importer.save({"root_part_id": "T", "parts": [{"id": "T", "name": "Top", "occurrences": [{"resolved_part_id": "P"}]}, {"id": "P", "name": "Pin", "occurrences": []}]}, Callable(self, "fetch"), imp_folder, "", {}, "ask", preset)
+	var top_text := read(imp_folder.path_join("Gearbox/Top.didsa"))
+	check("an imported assembly's Parts are written at their suggested paths (a folder named after the file)", (imported["saved"] as Array).size() == 2 and FileAccess.file_exists(imp_folder.path_join("Gearbox/Pin.didsa")))
+	check("...and the top's reference is relative to the top's own folder ('Pin.didsa', not 'Gearbox/Pin.didsa')", top_text.contains("\"external_ref\":\"Pin.didsa\""))
+	var reopened := NativeCompose.compose(imp_folder.path_join("Gearbox/Top.didsa"))
+	check("...so the folder reopens with every reference resolved", reopened["ok"] and int(reopened["resolved"]) == 1 and (reopened["unresolved"] as Array).is_empty())
+
 	# --- a failure is per Part
-	texts.erase("N")
+	texts = {"R": part_text("R", "Assembly", "B"), "B": part_text("B", "Bracket", "", "99")}
 	var failing: Dictionary = await saver.save(session, Callable(self, "fetch"), folder, "", {})
 	check("one Part the backend can't send is reported and the others still save", (failing["failed"] as Array).size() == 1 and failing["failed"][0]["name"] == "New part")
 	check("the summary reads 'Saved 3 files (A, B, C); 1 skipped: ...'", ProjectSave.summary({"saved": [{"name": "Bracket"}, {"name": "Frame"}, {"name": "Assembly"}], "conflicts": [{"name": "Pin"}], "failed": [], "copies": [], "unchanged": []}) == "Saved 3 files (Bracket, Frame, Assembly); 1 skipped: Pin changed on disk since it was opened." and ProjectSave.summary({"saved": [], "conflicts": [], "failed": [], "copies": [], "unchanged": ["a", "b"]}) == "Nothing to save: 2 files unchanged.")

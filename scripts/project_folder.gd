@@ -7,7 +7,7 @@ extends RefCounted
 
 const APP_FOLDER := "user://models" ## "Keep in app storage": what main.gd used before there was a project folder
 const DEFAULT_NAME := "DIDSA" ## Documents/DIDSA
-const MODEL_EXTENSIONS := ["glb", "gltf", "didsa", "didsaprt", "didsacad", "step", "stp", "stl", "obj"]
+const MODEL_EXTENSIONS := ["glb", "gltf", "didsa", "didsaprt", "didsacad", "step", "stp", "iges", "igs", "stl", "obj"]
 const LISTED_MAX := 60 ## folders shown at once in the chooser (a page that scrolls, not a wall)
 
 
