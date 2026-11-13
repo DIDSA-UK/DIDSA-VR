@@ -369,6 +369,31 @@ client-measured jump is at most one lever arm, and hold on a miss. Measured on a
 60-frame drag against a real backend: 1 grab anchor + 4 re-anchors + 1 commit =
 **6 requests** in ~0.7 s.
 
+## A mate's type from the picks, Peg in hole, pick points (DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`, M4)
+
+```
+POST .../occurrences/{id}/preview-mate-solve  {"type": "auto", "references": [A, B], ...}  -> suggested_type + the preview of that type
+POST .../occurrences/{id}/preview-mate-solve  {"type": "peg_in_hole", ...}                  -> Concentric + Coincident solved together
+POST /document/parts/{part_id}/mates?solve=   {"type": "peg_in_hole", ...}                  -> stores BOTH mates, atomically with the solve
+any of the above + "pick_points": [[x, y, z] | null, [x, y, z] | null]  (local to each occurrence, mm)  [+ "view_direction": [x, y, z], flat app]
+```
+- **`type: "auto"`** (preview only; a create answers 422 `auto_type_not_creatable`): the backend reads the two picks
+  (`app/document/mate_suggest.py`, the rule lives there so the two clients cannot drift): two round faces / circular edges (any mix)
+  `concentric`; a circular edge on each side, each lying on a flat face, `peg_in_hole`; two flat faces (or planes) `coincident`; a
+  flat face and a round one, or anything with a corner, a straight edge or a mid-plane, `null`. The answer carries
+  `suggested_type` (the key is present, possibly `null`, ONLY in the answer to an `auto` request) and, with a suggestion, is exactly
+  the preview of that type; with none it is `converged: false` and the client previews the type it shows. An older backend refuses
+  `auto` with a 422 (the literal check): `mates_tool.gd` then previews the type shown, as before.
+- **`peg_in_hole`**: Concentric on the two circular edges plus Coincident on the flat faces they lie on (touching: anti-aligned), as
+  one action. The Concentric's alignment is the one that agrees with the touching faces unless the request names one, so a pin dropped
+  upside down still seats. Create stores the two mates (the answer is the Concentric; the Coincident is in the next mates listing) or
+  neither; not two circular edges on flat faces is 422 `not_a_peg_in_hole` (the preview: `converged: false`).
+- **`pick_points`** (and `view_direction`) are accepted and checked (two entries, each null or three finite numbers) but **no solve
+  reads them**: no pick-point tie-break passed the M4 benchmark, so the answer is byte-for-byte the same with or without them.
+  `mates_tool.gd` sends the laser's hit point, local mm (`local_pick_point`), never a view direction.
+- **An older client is unaffected**: a request without `auto` / `peg_in_hole` gets the same bytes as before M4 (pinned in DIDSA-CAD
+  by `tests/test_mate_first_guess_m4.py`).
+
 ## Measure — read-only, stateless, no create/persist step
 
 ```

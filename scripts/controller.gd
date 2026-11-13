@@ -1214,7 +1214,7 @@ func _try_pick_mate_entity() -> void:
 	var part: Node3D = hit.get("part")
 	if part == null or mates_tool == null:
 		return
-	mates_tool.try_pick(part, hit.get("face_index", -1), _mate_entity(hit))
+	mates_tool.try_pick(part, hit.get("face_index", -1), _mate_entity(hit), hit.get("point", Vector3.INF))
 
 
 func _try_pick_measure_entity() -> void:

@@ -56,6 +56,7 @@ const _ICONS := {
 	# one icon per mate type (the wheel's Type ring and its Centre / Motion sub-rings)
 	"mate_coincident": '<path d="M6 24H42"/><path d="M24 5V19M18 13L24 19L30 13"/><path d="M24 43V29M18 35L24 29L30 35"/>',
 	"mate_concentric": '<circle cx="24" cy="24" r="18"/><circle cx="24" cy="24" r="9"/><path d="M24 24V24.5"/>',
+	"mate_peg_in_hole": '<path d="M4 30H17M31 30H44M4 42H44"/><path d="M17 30V42M31 30V42"/><rect x="12" y="6" width="24" height="8" rx="1"/><path d="M19 14V38M29 14V38"/>', # a headed pin seated in a plate's bore
 	"mate_parallel": '<path d="M10 38L22 10"/><path d="M26 38L38 10"/>',
 	"mate_distance": '<path d="M8 10V38M40 10V38"/><path d="M8 24H40"/><path d="M14 18L8 24L14 30M34 18L40 24L34 30"/>',
 	"mate_angle": '<path d="M8 40H42"/><path d="M8 40L34 12"/><path d="M25 40A17 17 0 0 0 19.6 28.3"/>',

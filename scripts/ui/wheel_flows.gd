@@ -16,10 +16,11 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "peg_in_hole": "Peg in hole", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
+	"peg_in_hole": "A pin seated in a hole (a rim on each part)",
 	"parallel": "Faces / edges run alongside",
 	"distance": "A set gap (you type it)",
 	"angle": "A set angle (you type it)",
@@ -424,8 +425,9 @@ func _mates_pick_hint() -> String:
 	return "Pick two faces first"
 
 
-## The Type ring is kept to seven wedges (twelve crowded the labels and left no room for a distinct icon each): the five basic types, then two sub-rings.
-const MATE_RING_BASIC := ["coincident", "concentric", "parallel", "distance", "angle"]
+## The Type ring is kept small (twelve crowded the labels and left no room for a distinct icon each): the basic types, then two sub-rings. M4 added
+## Peg in hole after Concentric (eight wedges now: not judged on the headset).
+const MATE_RING_BASIC := ["coincident", "concentric", "peg_in_hole", "parallel", "distance", "angle"]
 const MATE_RING_CENTRE := ["width", "symmetric"]
 const MATE_RING_MOTION := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
 

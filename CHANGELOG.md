@@ -3,6 +3,13 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## M4 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "A better first guess"; headless only, not checked on the headset)
+
+- **The mate type from the picks.** Until a type is set by hand (tablet, wheel), the first preview of each new pair of picks asks the backend (`type: "auto"`) and the Mates tool starts on its `suggested_type` from that one answer: two flat faces Coincident, two round faces / circular edges Concentric, a circular edge on each part (each on a flat face) **Peg in hole**, a flat face and a round one nothing (the type shown is then previewed as before; so is an older backend that refuses `auto`). A type set by hand stays until the tool is switched on again. The status line says the type was suggested, and the tablet's type buttons follow the tool's type.
+- **Peg in hole** is a mate type (tablet, and a wheel wedge after Concentric with its own icon: the Type ring has eight wedges now, not judged on the headset): Concentric on the two rims plus Coincident on the flat faces they lie on, previewed and created as one action by the backend.
+- **Pick points.** The laser's hit point is sent with the preview and Create as `pick_points`, local to each occurrence in mm. The backend accepts them and does not use them: no pick-point tie-break passed the DIDSA-CAD M4 benchmark.
+- Test: `tests/mates_suggested_type.gd` (fake backend). Not run against a live backend in this repo (`ci_e2e.sh` not run for M4).
+
 ## M5 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
 
 - **Rigid sets shown.** The Assembly Tree window reads the backend's `rigid_set` from `constraint-status`: the rows of a set share a font colour and read "moves with <lead>" (the lead: "moves with N other parts"). Grabbing a part of a set outlines every part that moves with it for `PULSE_SECONDS`, the same body outline the mate highlight uses (`MatesTool.pulse_rigid_set`; the status is read by `refresh_constraint_status`). Tests: `occurrence_tree_model`, `mate_highlight`.

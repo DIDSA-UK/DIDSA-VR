@@ -46,7 +46,7 @@ func _initialize() -> void:
 	print("SMOKE the tablet and the wheel have a label (and the wheel a hint) for them: ", TabletPages.MATE_TYPE_LABELS.slice(types.size() - 2) == ["Limit distance", "Limit angle"] and MatesTool.LIMIT_TYPES.all(func(t: String) -> bool: return WheelFlows.MATE_TYPE_LABELS.has(t) and WheelFlows.MATE_TYPE_HINTS.has(t)))
 	print("SMOKE type labels: ", MatesTool.type_label("limit_distance") == "Limit distance" and MatesTool.type_label("limit_angle") == "Limit angle")
 
-	# --- the wheel's Type ring: seven wedges (five basic, Centre, Motion), every type reachable once, each with its own icon
+	# --- the wheel's Type ring: eight wedges (six basic, Centre, Motion; M4 added Peg in hole), every type reachable once, each with its own icon
 	var ring: Array = WheelFlows.MATE_RING_BASIC + WheelFlows.MATE_RING_CENTRE + WheelFlows.MATE_RING_MOTION
 	var sorted_ring := ring.duplicate()
 	sorted_ring.sort()

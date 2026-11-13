@@ -67,7 +67,7 @@ const DofHysteresis := preload("res://scripts/motion/dof_hysteresis.gd")
 const ReanchorScheduler := preload("res://scripts/motion/reanchor_scheduler.gd")
 const CopyPose := preload("res://scripts/motion/pattern_copy_pose.gd") ## where a pattern copy stands for a source at a pose (live, during a drag)
 const LocalRetraction := preload("res://scripts/motion/local_retraction.gd") ## reads the limit mates of a version-6 model (their measured values); its solve is not run per frame (see _limit_stop)
-const MATE_TYPES: Array[String] = ["coincident", "concentric", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
+const MATE_TYPES: Array[String] = ["coincident", "concentric", "peg_in_hole", "parallel", "distance", "angle", "width", "symmetric", "gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
 ## The coupler ("motion") mates (docs/gears-and-motion-plan.md): they place nothing, they keep a relation between how far the two parts MOVE, so turning
 ## one turns the other. Two axis picks (a round face, a circular edge or a straight edge; the rack's second a straight edge), a value (gear: ratio, B
 ## turns per A turn; rack and pinion: mm of rack per pinion turn; screw: mm per turn) and a sense ("Reverse" / "Left-hand"). `mate_value` 0 is Auto for
@@ -103,11 +103,13 @@ var mate_type := "coincident":
 			limit_max = null
 			preview_limit_value = null
 		mate_type = v
+		if not _quiet_type:
+			type_chosen = true # M4: set from outside (the tablet, the wheel, a test): the user's own type stays
 		if crosses and not _picks.is_empty():
 			clear_picks() # a Width mate and the two-pick types pick different things: start the picks over
 			return
 		reset_branch_choice() # a choice made for another kind of mate means nothing here
-		request_preview()
+		request_preview() # (not while a suggestion is put in place: see request_preview)
 ## A Width mate's offset from the centre (mm, never negative: the side is the Flip side control); 0 = centred exactly.
 var width_offset := 0.0:
 	set(v):
@@ -226,6 +228,7 @@ func is_busy() -> bool:
 func set_active(on: bool) -> void:
 	active = on
 	if on:
+		type_chosen = false # M4: a fresh start takes the backend's suggestion again
 		clear_highlight() # picking starts: the pick colours are for the picks
 	else:
 		clear_picks()
@@ -401,6 +404,8 @@ func _stop_pulse() -> void:
 
 func clear_picks() -> void:
 	_picks.clear()
+	_suggestion_key = ""
+	suggested_type = ""
 	_status = ""
 	_width_error = ""
 	_width_seq += 1
@@ -522,6 +527,8 @@ func _status_text_core() -> String:
 					value_note = " (%s, from the teeth)" % coupler_value_text(mate_type, preview_coupler_value)
 				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
+				if suggested_type != "" and suggested_type == mate_type:
+					return "%s, suggested from the picks (change the type if it is not what you want). Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create." % type_label(mate_type)
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			if _preview_note != "":
 				return _preview_note
@@ -551,7 +558,53 @@ func picked_labels() -> Array:
 	return out
 
 
-func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
+## M4 (DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`, "A better first guess"): until the user picks a type by hand
+## (any set of `mate_type` from outside: the tablet, the wheel) the first preview of each new pair of picks asks the backend for the type (`type: "auto"`):
+## two flat faces Coincident, two round faces / circular edges Concentric, a circular edge on each part (each on a flat face) Peg in
+## hole, a flat face and a round one nothing. The tool then starts on the suggestion; the user can still change it. Reset when the tool
+## is switched on.
+const PEG_IN_HOLE_TYPE := "peg_in_hole"
+var type_chosen := false ## the user picked a type by hand since the tool was switched on
+var suggested_type := "" ## the backend's suggestion for the current picks ("" = none, or not asked)
+var _suggestion_key := "" ## the picks the backend was last asked about
+var _quiet_type := false ## set while the suggestion is put in place: the answer in hand IS its preview
+
+
+func asks_for_type() -> bool:
+	## Whether the next preview asks the backend for the type (see `type_chosen`).
+	return not type_chosen and not is_multi() and _picks.size() == pick_target() and picks_key(_picks) != _suggestion_key
+
+
+static func picks_key(picks: Array) -> String:
+	## Pure - what identifies a pair of picks for the suggestion (the references, in order).
+	var parts := PackedStringArray()
+	for p in picks:
+		parts.append("%s|%s" % [str(p.get("occurrence_id", "")), JSON.stringify(p.get("subshape_ref", {}))])
+	return ";".join(parts)
+
+
+static func local_pick_point(part: Node3D, hit_world: Vector3) -> Array:
+	## Pure - a laser hit (world, metres) as a point local to the picked occurrence, in the backend's mm (a part node's own transform
+	## is the occurrence's pose in mm under `assembly_root`, whose basis carries mm -> m: see `_apply_solved_transform`). [] when unknown.
+	if part == null or not part.is_inside_tree() or not hit_world.is_finite():
+		return []
+	var local := part.global_transform.affine_inverse() * hit_world
+	return [local.x, local.y, local.z]
+
+
+func pick_points_payload() -> Array:
+	## The `pick_points` of the two picks (references order; null for one without a point), or [] when neither has one. The backend
+	## accepts them and does not use them yet (no pick-point tie-break passed the M4 bench). No view direction: that is the flat app's.
+	var out := []
+	var any := false
+	for p in _picks:
+		var point: Array = p.get("pick_point", [])
+		out.append(point if point.size() == 3 else null)
+		any = any or point.size() == 3
+	return out if any else []
+
+
+func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}, hit_point := Vector3.INF) -> void:
 	## Called by controller.gd's trigger handler while the tool is active.
 	## Always sets status and emits picks_changed, even on rejection, so the
 	## wrist tablet can show *why* a pick didn't count.
@@ -599,6 +652,7 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}) -> void:
 		"face_index": face_index,
 		"entity": entity if kind != "face" else {},
 		"kind": kind,
+		"pick_point": local_pick_point(part, hit_point), # M4: where the laser landed, local mm ([] if unknown)
 	})
 	_status = ""
 	_width_error = ""
@@ -690,6 +744,8 @@ func movement_param() -> String:
 func request_preview() -> void:
 	## Re-runs the dry run for the mate as it is set up now (the backend's preview-mate-solve: same body as
 	## Create, nothing stored, nothing moved). With fewer than two picks, or no backend, the ghost is removed.
+	if _quiet_type:
+		return # M4: the suggested type is being put in place and the answer in hand is its preview (the setters it runs must not ask again)
 	_preview_seq += 1
 	if not active or _picks.size() != pick_target() or _width_error != "" or backend_url == "" or not is_inside_tree():
 		_clear_ghost()
@@ -792,6 +848,8 @@ static func type_label(type: String) -> String:
 			return "Limit distance"
 		"limit_angle":
 			return "Limit angle"
+		"peg_in_hole":
+			return "Peg in hole"
 		"width", "symmetric", "gear", "screw":
 			return type.capitalize()
 	return type.capitalize()
@@ -1039,10 +1097,26 @@ func branch_text() -> String:
 func _run_preview(seq: int) -> void:
 	var owner_part_id: String = _picks[0]["owner_part_id"]
 	var driven_id: String = _driven_for_picks()
-	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], build_create_payload())
+	var asking := asks_for_type()
+	var key := picks_key(_picks)
+	var body := build_create_payload()
+	if asking:
+		body["type"] = "auto" # M4: the backend picks the type and answers with the preview of it
+		body.erase("value")
+	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], body)
 	if seq != _preview_seq or _picks.size() != pick_target():
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
+	if asking:
+		_suggestion_key = key
+		var suggestion = json.get("suggested_type") if result["ok"] and json is Dictionary else null
+		suggested_type = str(suggestion) if suggestion is String and str(suggestion) in MATE_TYPES else ""
+		if suggested_type == "":
+			request_preview() # no suggestion (or a backend older than M4 refused "auto"): preview the type shown, as before
+			return
+		_quiet_type = true
+		mate_type = suggested_type # the answer in hand is the preview of this type
+		_quiet_type = false
 	var members: Array = preview_members(json, driven_id) if result["ok"] and json is Dictionary else []
 	_branch_changes = []
 	_branch_notice = ""
@@ -1183,6 +1257,10 @@ func build_create_payload(with_branch_changes := false) -> Dictionary:
 			payload["limit_max"] = float(limit_max)
 	if with_branch_changes and not _branch_changes.is_empty():
 		payload["branch_changes"] = confirmed_changes(_branch_changes)
+	if not is_multi():
+		var points := pick_points_payload()
+		if not points.is_empty():
+			payload["pick_points"] = points
 	return payload
 
 
