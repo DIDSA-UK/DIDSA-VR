@@ -185,6 +185,8 @@ var branch_controls: Array = [] ## the preview's `controls`: the branch fields (
 var branch_resolved: Dictionary = {} ## the preview's `resolved`: the branch the ghost shows
 var branch_alternatives: Array = [] ## the preview's `alternatives`, nearest first: what "Next solution" steps through
 var _branch_changes: Array = [] ## the earlier mates the latest preview needs on their other branch ([{mate_id, field, from, to}]); Create sends them back
+var preview_budget_exhausted := false ## M2: the latest preview ran out of its time budget (`budget_exhausted`; an older backend omits it = false), so its alternatives / conflicts may be incomplete: the status line says so, as a note, never an error
+const BUDGET_NOTE := "Search stopped early: there may be more solutions."
 var _preview_note := "" ## V-4: why the latest preview drew no ghost (shown instead of "Ready", and logged as "DIDSA VR: preview: ..."); "" = nothing to say
 var _branch_notice := "" ## the sentence telling the user so (branch_notice())
 var _flip_base := -1 ## a coupler: the sense (0 / 1) the backend chose by default, which "Reverse" / "Left-hand" is measured from (-1 = not known yet)
@@ -404,6 +406,7 @@ func clear_picks() -> void:
 	_branch_changes = []
 	_branch_notice = ""
 	_preview_note = ""
+	preview_budget_exhausted = false
 	branch_controls = []
 	branch_resolved = {}
 	branch_alternatives = []
@@ -482,6 +485,13 @@ func back_pick() -> void:
 
 
 func status_text() -> String:
+	var text := _status_text_core()
+	if preview_budget_exhausted and _status == "" and _width_error == "" and _picks.size() == pick_target() and text != "":
+		return "%s %s" % [text, BUDGET_NOTE] # after what the preview says (the ghost, a branch sentence, why there is none), not instead of it
+	return text
+
+
+func _status_text_core() -> String:
 	if _status != "":
 		return _status
 	if is_multi():
@@ -1036,10 +1046,12 @@ func _run_preview(seq: int) -> void:
 	_branch_changes = []
 	_branch_notice = ""
 	_preview_note = ""
+	preview_budget_exhausted = false
 	branch_controls = []
 	branch_resolved = {}
 	branch_alternatives = []
 	if result["ok"] and json is Dictionary:
+		preview_budget_exhausted = json.get("budget_exhausted", false) == true # an older backend omits it
 		branch_controls = json.get("controls", []) if json.get("controls") is Array else []
 		branch_resolved = json.get("resolved", {}) if json.get("resolved") is Dictionary else {}
 		branch_alternatives = json.get("alternatives", []) if json.get("alternatives") is Array else []
@@ -2564,7 +2576,7 @@ func _adopt_limit_model(state: Dictionary, model_json) -> void:
 	## rows) it costs 12 to 70 ms a frame in GDScript, which a headset cannot spare; the cheap stop below does the same job for the motion the mates allow.
 	if model_json == null:
 		return
-	var model = LocalRetraction.try_parse(model_json, 8, 1024)
+	var model = LocalRetraction.try_parse(model_json, 8, 1024) # (the limits of a version-8 model: its members are the sets' leads, see _limit_stop)
 	state["limits"] = model if model != null and model.has_limits() else null
 
 
@@ -2578,9 +2590,17 @@ func _limit_stop(state: Dictionary, poses: Array, record := false) -> Array:
 		state["at_limit"] = false
 	var model = state["limits"]
 	var hyst = state["hyst"]
-	if model == null or hyst.active == null or model.member_ids != state["members"]:
+	if model == null or hyst.active == null:
 		return poses
-	if model.limits_in_range(poses):
+	# The model's members are this drag's members - or, from version 8 (rigid sets), its rigid-set LEADS, the followers riding along: `lead` maps each model member
+	# to its index in `poses` (empty = the same list). A limit never touches a follower (a limit's members are never merged into a set), so the model's
+	# poses are the leads' and the displacement below scales every member's twist together: a follower's spatial screw from its anchor pose is its lead's.
+	var lead: Array = _model_member_indices(model, state["members"])
+	if lead.is_empty() and not model.has_sets() and model.member_ids != state["members"]:
+		return poses
+	if lead.is_empty() and model.has_sets():
+		return poses # a model of another group
+	if model.limits_in_range(_of_leads(poses, lead)):
 		return poses
 	var refs: Array = hyst.active.refs
 	var twists: Array = []
@@ -2589,15 +2609,49 @@ func _limit_stop(state: Dictionary, poses: Array, record := false) -> Array:
 	var lo := 0.0
 	var hi := 1.0
 	var measured: Array = model.limit_member_indices() # only these members' poses decide a limit's value: the search moves only them
+	if not lead.is_empty():
+		measured = measured.map(func(k: int) -> int: return int(lead[k]))
 	for _step in 16: # the fraction to 1/65536: 56 mm of travel to a thousandth of a millimetre, 200 degrees to 0.003
 		var mid := (lo + hi) / 2.0
-		if model.limits_in_range(_scaled_poses(refs, twists, mid, measured)):
+		if model.limits_in_range(_of_leads(_scaled_poses(refs, twists, mid, measured), lead)):
 			lo = mid
 		else:
 			hi = mid
 	if record:
 		state["at_limit"] = true
 	return _scaled_poses(refs, twists, lo)
+
+
+static func _model_member_indices(model, members: Array) -> Array:
+	## Version 8 (rigid sets): where each of the model's members (the leads) sits in the drag's `members`, in the model's order - empty for a model without sets
+	## (its members ARE the drag's members, compared by the caller) and for a model that is not of this group (the leads and followers together must be exactly the
+	## drag's members).
+	if not model.has_sets():
+		return []
+	var all: Array = model.member_ids.duplicate()
+	all.append_array(model.follower_ids())
+	if all.size() != members.size():
+		return []
+	var out: Array = []
+	for id in model.member_ids:
+		var at := members.find(id)
+		if at < 0:
+			return []
+		out.append(at)
+	for id in model.follower_ids():
+		if not members.has(id):
+			return []
+	return out
+
+
+static func _of_leads(poses: Array, lead: Array) -> Array:
+	## The poses of the model's members out of all the drag's members (`lead` from `_model_member_indices`; empty = the same list).
+	if lead.is_empty():
+		return poses
+	var out: Array = []
+	for i in lead:
+		out.append(poses[int(i)])
+	return out
 
 
 static func _scaled_poses(refs: Array, twists: Array, fraction: float, only: Array = []) -> Array:

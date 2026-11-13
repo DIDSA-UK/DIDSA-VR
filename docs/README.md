@@ -52,7 +52,7 @@ Kept for the reasoning behind decisions; do not treat as current.
 | [`implementation-plan.md`](implementation-plan.md) | Phases 5-6: references, dimensioning and modelling depth. |
 | [`sketch-as-seed-plan.md`](sketch-as-seed-plan.md) | Sketch as seed and the Visibility tool. |
 | [`handover-references-overhaul.md`](handover-references-overhaul.md) | Handover for the references overhaul (2026-10-06). |
-| [`local-retraction-benchmark.md`](local-retraction-benchmark.md) | Headset benchmark: GDScript nearest-point retraction (no-go for wiring). |
+| [`local-retraction-benchmark.md`](local-retraction-benchmark.md) | Headset benchmark: GDScript nearest-point retraction (no-go for wiring); M2: the reduced version-8 models, desktop numbers and what to run on the Quest. |
 
 ## Conventions
 

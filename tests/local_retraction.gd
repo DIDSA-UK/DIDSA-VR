@@ -68,6 +68,8 @@ func _initialize() -> void:
 		_num(Local.COUPLER_MODEL_VERSION, float(c["local_coupler_model_version"]), "const local_coupler_model_version", 0.5)
 	if c.has("local_follow_model_version"):
 		_num(Local.FOLLOW_MODEL_VERSION, float(c["local_follow_model_version"]), "const local_follow_model_version", 0.5)
+	if c.has("local_rigid_model_version"):
+		_num(Local.RIGID_MODEL_VERSION, float(c["local_rigid_model_version"]), "const local_rigid_model_version", 0.5)
 	if c.has("local_limit_model_version"):
 		_num(Local.LIMIT_MODEL_VERSION, float(c["local_limit_model_version"]), "const local_limit_model_version", 0.5)
 		_num(Local.LIMIT_ROUNDS, float(c["local_limit_rounds"]), "const local_limit_rounds", 0.5)
@@ -92,6 +94,25 @@ func _initialize() -> void:
 		var wishes := _poses_in(inp["wishes"])
 		var fallback := _poses_in(inp["fallback_poses"])
 		var r: Dictionary = model.frame(poses, wishes, fallback, float(inp["lever_arm"]))
+		# version 8: every follower with its lead at the shown / the raw local answer (the same pins as the leads')
+		if exp.has("followers"):
+			if not model.has_sets():
+				_fail(id, "a model with rigid_sets reports has_sets()")
+			var want_ids: Array = (exp["followers"] as Dictionary).keys()
+			want_ids.sort()
+			var got_ids: Array = (r["followers"] as Dictionary).keys()
+			got_ids.sort()
+			var model_ids: Array = model.follower_ids()
+			model_ids.sort()
+			if got_ids != want_ids or model_ids != want_ids:
+				_fail(id, "follower ids %s / %s vs %s" % [str(got_ids), str(model_ids), str(want_ids)])
+			else:
+				for fid in want_ids:
+					_pose(r["followers"][fid], exp["followers"][fid], "%s follower %s shown" % [id, fid], tol)
+					if float(exp["residual_inf"]) <= 1e-9:
+						_pose(r["local_followers"][fid], exp["local_followers"][fid], "%s follower %s local" % [id, fid], tol)
+		elif model.has_sets() or r.has("followers"):
+			_fail(id, "no rigid sets expected")
 		if exp.has("held_limits"):
 			var held: Array = model.held_limits().keys()
 			held.sort()
@@ -150,7 +171,7 @@ func _initialize() -> void:
 	# a row cap below the model's own count refuses it; a larger one (the limit read of a big group) takes it
 	print("SMOKE try_parse honours its row cap: ", Local.try_parse(base, 8, base_rows - 1) == null and Local.try_parse(base, 8, base_rows) != null, " rows ", base_rows)
 	var bad_version: Dictionary = base.duplicate(true)
-	bad_version["version"] = Local.FOLLOW_MODEL_VERSION + 1 # (was LIMIT_MODEL_VERSION + 1 before version 7 existed)
+	bad_version["version"] = Local.RIGID_MODEL_VERSION + 1 # (was FOLLOW_MODEL_VERSION + 1 before version 8 existed)
 	var old_version: Dictionary = base.duplicate(true)
 	old_version["version"] = 1 # the pre-branch model (sign-agnostic residuals) is not evaluated
 	var bad_type: Dictionary = base.duplicate(true)
@@ -202,13 +223,15 @@ func _initialize() -> void:
 		for m in mdl["mates"]:
 			if m["a"].has("follow") or m["b"].has("follow"):
 				has_follow = true
-		if int(mdl["version"]) != (7 if has_follow else (6 if has_limit else (5 if has_coupler else (4 if has_pair else 3)))):
+		if int(mdl["version"]) != (8 if mdl.has("rigid_sets") else 7 if has_follow else (6 if has_limit else (5 if has_coupler else (4 if has_pair else 3)))):
 			versions_ok = false
-	print("SMOKE every golden model is version 7 with a follower side, 6 with a limit, 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
+	print("SMOKE every golden model is version 8 with rigid sets, 7 with a follower side, 6 with a limit, 5 with a coupler, else 4 exactly when a side has a pair: ", versions_ok)
 	if not versions_ok:
 		failures += 1
 
 	_limit_rules(cases)
+	_rigid_rules(cases)
+	_reduced_models()
 	_pair_cost(cases)
 
 	# the production limit: the 5- and 8-member vector models are refused at MAX_MEMBERS (stay on the projector)
@@ -295,6 +318,175 @@ func _limit_rules(cases: Array) -> void:
 		f_ok = f_model.held_limits().keys() == ["gap"]
 	print("SMOKE a version-7 model that holds a follower still holds its limit stop: ", f_ok)
 	if not f_ok:
+		failures += 1
+
+
+## Version 8 (rigid sets) -- mirrors client/test/local_retraction_test.dart "version 8 (rigid sets)": the local-rigid-* models parse (and move their leads only),
+## `rigid_sets` outside version 8 is malformed, so are a lead out of range or listed twice, a follower that is a lead or a duplicate, a bad offset; a version-8
+## model without sets is ordinary and a lead without followers keeps the diagonal metric bit for bit; a set weighs what its members would.
+func _rigid_rules(cases: Array) -> void:
+	var ids := ["local-rigid-bolt-turn-3deg-x", "local-rigid-bolt-slide-and-spin", "local-rigid-grab-the-set-turn-5deg-y", "local-rigid-set-on-fixed-bolt-turn-20deg"]
+	var model_of := func(id: String) -> Dictionary:
+		return (cases.filter(func(x): return x["id"] == id)[0]["input"]["model"] as Dictionary).duplicate(true)
+	var parse_ok := true
+	for id in ids:
+		var spec: Dictionary = model_of.call(id)
+		var m = Local.try_parse(spec)
+		parse_ok = parse_ok and int(spec["version"]) == Local.RIGID_MODEL_VERSION and m != null and m.has_sets() and m.members == (spec["members"] as Array).size() and m.follower_ids() == ["rib", "cover"]
+	print("SMOKE version 8 parsing (local-rigid models parse as version 8, leads only; followers are follower_ids): ", parse_ok)
+	if not parse_ok:
+		failures += 1
+
+	var first: String = ids[0]
+	var no_sets: Dictionary = (cases[0]["input"]["model"] as Dictionary).duplicate(true)
+	no_sets["version"] = Local.RIGID_MODEL_VERSION
+	var plain_ok: bool = Local.try_parse(no_sets) != null and not Local.try_parse(no_sets).has_sets()
+	no_sets["rigid_sets"] = []
+	plain_ok = plain_ok and Local.try_parse(no_sets) != null and not Local.try_parse(no_sets).has_sets()
+	print("SMOKE a version-8 model without rigid_sets (or with an empty list) is an ordinary model: ", plain_ok)
+	if not plain_ok:
+		failures += 1
+
+	# rigid_sets outside version 8, whatever the version -- also a version-7 model (a followed pattern copy) that gains one
+	var outside := true
+	for v in [Local.MODEL_VERSION, Local.PAIR_MODEL_VERSION, Local.COUPLER_MODEL_VERSION, Local.LIMIT_MODEL_VERSION, Local.FOLLOW_MODEL_VERSION]:
+		var spec: Dictionary = model_of.call(first)
+		spec["version"] = v
+		outside = outside and Local.try_parse(spec) == null
+	var v7: Dictionary = model_of.call("local-follow-linear-slide-and-spin")
+	outside = outside and Local.try_parse(v7) != null
+	v7["rigid_sets"] = model_of.call(first)["rigid_sets"]
+	outside = outside and Local.try_parse(v7) == null
+	print("SMOKE rigid_sets in a model of version 3 to 7 (including a v7 that follows a copy) -> null: ", outside)
+	if not outside:
+		failures += 1
+
+	var malformed := true
+	for bad_lead in [-1, 2, 7]:
+		var spec: Dictionary = model_of.call(first)
+		spec["rigid_sets"][0]["member"] = bad_lead
+		malformed = malformed and Local.try_parse(spec) == null
+	var twice: Dictionary = model_of.call(first)
+	twice["rigid_sets"].append((twice["rigid_sets"][0] as Dictionary).duplicate(true))
+	malformed = malformed and Local.try_parse(twice) == null
+	var is_lead: Dictionary = model_of.call(first)
+	is_lead["rigid_sets"][0]["followers"][0]["id"] = is_lead["members"][0]
+	malformed = malformed and Local.try_parse(is_lead) == null
+	var dup: Dictionary = model_of.call(first)
+	dup["rigid_sets"][0]["followers"][1]["id"] = "rib"
+	malformed = malformed and Local.try_parse(dup) == null
+	var no_id: Dictionary = model_of.call(first)
+	(no_id["rigid_sets"][0]["followers"][0] as Dictionary).erase("id")
+	malformed = malformed and Local.try_parse(no_id) == null
+	var bad_t: Dictionary = model_of.call(first)
+	bad_t["rigid_sets"][0]["followers"][0]["t"] = [1.0, 2.0]
+	malformed = malformed and Local.try_parse(bad_t) == null
+	var bad_r: Dictionary = model_of.call(first)
+	bad_r["rigid_sets"][0]["followers"][0]["r"] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+	malformed = malformed and Local.try_parse(bad_r) == null
+	var empty: Dictionary = model_of.call(first)
+	empty["rigid_sets"][0]["followers"] = []
+	malformed = malformed and Local.try_parse(empty) == null
+	var no_list: Dictionary = model_of.call(first)
+	(no_list["rigid_sets"][0] as Dictionary).erase("followers")
+	malformed = malformed and Local.try_parse(no_list) == null
+	var bad_side: Dictionary = model_of.call(first)
+	bad_side["mates"][0]["a"]["member"] = 2
+	malformed = malformed and Local.try_parse(bad_side) == null
+	# the member cap counts leads, not followers
+	malformed = malformed and Local.try_parse(model_of.call(first), 2) != null and Local.try_parse(model_of.call(first), 1) == null
+	print("SMOKE malformed rigid sets -> null (lead out of range / twice, follower = lead / duplicate / no id, bad offset, empty set, bad mate side; the cap counts leads): ", malformed)
+	if not malformed:
+		failures += 1
+
+	# a lead without followers keeps the diagonal path bit for bit: a version-8 twin of a version-3 model answers identically
+	var inp: Dictionary = cases.filter(func(x): return x["id"] == "local-floating-bolt-slide-and-spin")[0]["input"]
+	var twin_spec: Dictionary = (inp["model"] as Dictionary).duplicate(true)
+	twin_spec["version"] = Local.RIGID_MODEL_VERSION
+	var plain = Local.try_parse(inp["model"], 8)
+	var twin = Local.try_parse(twin_spec, 8)
+	var p0 := _poses_in(inp["poses"])
+	var w0 := _poses_in(inp["wishes"])
+	var lever := float(inp["lever_arm"])
+	var a: Array = plain.retract(p0, w0, Local.local_scale(plain.members, lever))
+	var b: Array = twin.retract(p0, w0, Local.local_scale(twin.members, lever))
+	var same := true
+	for i in a.size():
+		same = same and a[i]["t"] == b[i]["t"] and a[i]["r"] == b[i]["r"]
+	print("SMOKE a lead without followers keeps the diagonal metric bit for bit (v8 twin of a v3 model): ", same)
+	if not same:
+		failures += 1
+
+	# the set weighs what its members would: the bare lead all but reaches the wish, the set (followers wishing to stay) stops short of it
+	var g_inp: Dictionary = cases.filter(func(x): return x["id"] == "local-rigid-grab-the-set-turn-5deg-y")[0]["input"]
+	var bare_spec: Dictionary = (g_inp["model"] as Dictionary).duplicate(true)
+	bare_spec.erase("rigid_sets")
+	bare_spec["version"] = Local.FOLLOW_MODEL_VERSION
+	var gp := _poses_in(g_inp["poses"])
+	var gw := _poses_in(g_inp["wishes"])
+	var glever := float(g_inp["lever_arm"])
+	var with_set = Local.try_parse(g_inp["model"], 8)
+	var bare = Local.try_parse(bare_spec, 8)
+	var got_set: Array = with_set.retract(gp, gw, Local.local_scale(2, glever))
+	var got_bare: Array = bare.retract(gp, gw, Local.local_scale(2, glever))
+	var goal := Se3.norm3(Se3.rotvec_from_rot(gw[0]["r"]))
+	var turn_set := Se3.norm3(Se3.rotvec_from_rot(got_set[0]["r"]))
+	var turn_bare := Se3.norm3(Se3.rotvec_from_rot(got_bare[0]["r"]))
+	var weigh_ok: bool = absf(turn_bare - goal) < 5e-4 and turn_set < turn_bare - 1e-5 and turn_set > 0.0
+	# ... and the followers stay rigid with their lead whatever it did
+	var rigid_ok := true
+	var followers: Dictionary = with_set.expand_followers(got_set)
+	for f in (g_inp["model"]["rigid_sets"][0]["followers"] as Array):
+		var rel := Se3.mat_mul(Se3.mat_transpose(got_set[0]["r"]), followers[f["id"]]["r"])
+		var want_r: Array = []
+		for row in f["r"]:
+			want_r.append_array(row)
+		for i in 9:
+			rigid_ok = rigid_ok and absf(rel[i] - float(want_r[i])) < 1e-12
+		var d := [followers[f["id"]]["t"][0] - got_set[0]["t"][0], followers[f["id"]]["t"][1] - got_set[0]["t"][1], followers[f["id"]]["t"][2] - got_set[0]["t"][2]]
+		var local := Se3.mat_vec(Se3.mat_transpose(got_set[0]["r"]), d)
+		for i in 3:
+			rigid_ok = rigid_ok and absf(local[i] - float(f["t"][i])) < 1e-9
+	print("SMOKE a set weighs what its members would (the set stops short of the wish, the bare lead does not): ", weigh_ok, "; followers stay rigid with the lead: ", rigid_ok)
+	if not (weigh_ok and rigid_ok):
+		failures += 1
+
+
+## M2: the 22 reduced models (constraint model version 8) of DIDSA-CAD's M0 scaling scenes, `tests/fixtures/m0_reduced_models.json` (a copy of DIDSA-CAD's
+## `client/test/data/m0_reduced_models.json`, written by `backend/tests/export_m0_reduced_models.py`): every one parses with the caps lifted, the ones up to 8 leads
+## and 80 rows converge in one frame and keep their followers rigid, and the count inside the GDScript production limit (3 members, 64 rows) is what the sizes say.
+## (Timing is tests/bench_local_retraction.gd, never a gate.)
+func _reduced_models() -> void:
+	var all = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/m0_reduced_models.json"))
+	var parse_ok: bool = all is Array and (all as Array).size() == 22
+	var inside_limit := 0
+	var converged := true
+	var rigid := true
+	var frames := 0
+	for e in all:
+		var lead_ids: Array = e["model"]["members"]
+		var model = Local.try_parse(e["model"], 64, 1024)
+		parse_ok = parse_ok and model != null and int(e["model"]["version"]) == Local.RIGID_MODEL_VERSION
+		if model == null:
+			continue
+		if Local.try_parse(e["model"]) != null:
+			inside_limit += 1
+		if model.members > 8 or model.rows > 80:
+			continue # (a frame of the 19-lead bolted chain takes seconds in GDScript)
+		var poses := _poses_in(e["poses"])
+		var r: Dictionary = model.frame(poses, _poses_in(e["wishes"]), poses, float(e["lever_arm"]))
+		frames += 1
+		converged = converged and float(r["residual_inf"]) < 1e-6 and lead_ids.size() == model.members
+		var followers: Dictionary = model.expand_followers(r["local_poses"])
+		for lead in model.members:
+			for f in model._followers[lead]:
+				var rel := Se3.mat_mul(Se3.mat_transpose(r["local_poses"][lead]["r"]), followers[f["id"]]["r"])
+				for i in 9:
+					rigid = rigid and absf(rel[i] - float(f["r"][i]) ) < 1e-12
+	# chain / frame variants are one lead (16 of the 22); the linkage's fixed variant is 3 leads and 40 rows (inside); its floating variant has 4, the bolted chains 7 to 19
+	var count_ok := inside_limit == 17
+	print("SMOKE the 22 reduced models parse (caps lifted), converge in one frame (", frames, " of them run) and keep their followers rigid; ", inside_limit, " of 22 are inside 3 members / 64 rows: ", parse_ok and converged and rigid and count_ok)
+	if not (parse_ok and converged and rigid and count_ok):
 		failures += 1
 
 

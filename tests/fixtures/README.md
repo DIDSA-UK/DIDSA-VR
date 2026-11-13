@@ -36,7 +36,7 @@ any other local model.
 
 ## `motion_vectors.json` — golden vectors for the free-motion projector
 
-A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (155 cases, tolerance 1e-9; constraint-model versions 3 to 7),
+A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (159 cases, tolerance 1e-9; constraint-model versions 3 to 8),
 the normative test data for `scripts/motion/*.gd` (and for the Dart port in
 DIDSA-CAD `client/lib/motion/`). `tests/motion_vectors.gd` runs every kind in it.
 Do not edit it here: regenerate it in DIDSA-CAD (`python tools/motion_vectors/generate.py`)
@@ -53,7 +53,8 @@ and copy it over.
 - Re-copied for an ANGLE about a hinge (`docs/mate-solution-choice-plan.md`): constraint-model version 3 (`hinge_direction` on a side, one more ANGLE row), 4 new `local_retract` cases (35 now).
 - Re-copied for constraint model v4 (a side's `pair`, Width / Symmetric over moving parts), DIDSA-CAD branch `claude/constraint-model-v4` at `d6b303c` (PR #303): 17 new `local-width-*` cases (52 `local_retract`), `local_pair_model_version` constant.
 - Re-copied for constraint model v7 (a side's `follow`: pattern copies that follow their source), DIDSA-CAD branch `ccr-8db48425-oxdljy` (S1 of `pattern-followers-smoothness-plan.md`): 8 new `local-follow-*` cases (79 `local_retract`), `local_follow_model_version` constant.
-- sha256 `804141041017a9d8921e6184bddedd88d67b99827c86846a1d17cf3942eb09db`.
+- Re-copied for constraint model v8 (rigid sets, DIDSA-CAD M1), DIDSA-CAD `main` at `c39efdf` (M2 changes nothing in the vectors): 4 new `local-rigid-*` cases (83 `local_retract`, `followers` / `local_followers` in their expected), `local_rigid_model_version` constant.
+- sha256 `5b30ee3bd3b3fd7439d861450721371a4c5854ef2f62cdd606c70ed0697cf4da`.
 - `tests/motion_vectors.gd` FAILS if a DIDSA-CAD checkout is reachable (`DIDSA_CAD_DIR`,
   else `../DIDSA-CAD`) and its `docs/motion/vectors.json` differs from this copy, so a
   regenerated file cannot be missed silently. Without a checkout it says so and runs on the copy.
@@ -81,6 +82,13 @@ appearance), so its mesh is two indexed primitives. Used by `tests/appearance_gl
 Regenerate from `DIDSA-CAD/backend` with its environment:
 `python /path/to/didsa-vr/tests/fixtures/make_appearance_split_glb.py /path/to/didsa-vr/tests/fixtures/appearance_split.glb`
 (body ids are new each time; the tests read them from the file).
+
+## `m0_reduced_models.json` — the reduced constraint models of DIDSA-CAD's M0 scaling scenes
+
+A **copy** of DIDSA-CAD's `client/test/data/m0_reduced_models.json`, written by `backend/tests/export_m0_reduced_models.py` (`cd backend && CAD_API_KEY=test-api-key python -m tests.export_m0_reduced_models ../client/test/data/m0_reduced_models.json`):
+for each of the 22 M0 scene variants (chain, bolted chain, frame, linkage; floating and with the base fixed) the version-8 constraint model `solve_group` exports (the members are the rigid-set leads), the leads' stored poses and a wish
+(the grabbed part 5 mm along x and 5 degrees about z away), lever arm 100 mm. Used by `tests/local_retraction.gd` (every model parses, converges in one frame) and by the benchmark
+(`tests/bench_local_retraction.gd`, `scenes/bench_local_retraction.tscn`: `docs/local-retraction-benchmark.md`). Regenerate it in DIDSA-CAD and copy it over; do not edit it here.
 
 ## `pattern_copy_pose_vectors.json` — golden vectors for a pattern copy's pose
 
