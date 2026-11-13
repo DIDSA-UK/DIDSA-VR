@@ -97,6 +97,8 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 
 11. **Rigid sets shown (13 Nov, M5; headless only):** the Assembly Tree window marks the parts one set of mates locks together (a shared row colour and "moves with <lead>"), and grabbing one outlines the whole set for a moment (the mate highlight's pulse). Reads `rigid_set` from `constraint-status`; an older backend has none. Not checked on the headset: whether the colour and the pulse read well. A set locked to a fixed part has no id (its members read fully constrained), so it shows no set note.
 
+12. **Glide preview and edit-mate preview (13 Nov, M3; headless only):** a mate preview moves the real part (0.25 s glide, an outline stays at the start; Clear / a changed pick glide it back; Create keeps it there and stores the STORED pose); editing a mate (Flip, Lock rotation, Value) previews first with an Apply change / Cancel row. `MatesTool.preview_glide` false keeps the old see-through copy; there is no Settings switch for it yet (the flat app has one). **Not checked on the headset: the glide time and ease, how the outline reads, whether the Apply step suits an edit.** `tests/mate_glide.gd`.
+
 ## Cross-repo
 
 Backend and flat client: `DIDSA-UK/DIDSA-CAD` (roadmap in its `docs/roadmap.md`). Mates, measure, occurrences, import-features and the
