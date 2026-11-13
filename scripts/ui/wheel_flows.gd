@@ -16,10 +16,11 @@ extends Node3D
 const Visibility := preload("res://scripts/design_table/visibility.gd")
 const WristHint := preload("res://scripts/ui/wrist_hint.gd")
 
-const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
+const MATE_TYPE_LABELS := {"coincident": "Coincident", "concentric": "Concentric", "peg_in_hole": "Peg in hole", "parallel": "Parallel", "distance": "Distance", "angle": "Angle", "width": "Width", "symmetric": "Symmetric", "gear": "Gear", "rack_pinion": "Rack and pinion", "screw": "Screw", "limit_distance": "Limit distance", "limit_angle": "Limit angle"}
 const MATE_TYPE_HINTS := {
 	"coincident": "Faces touch, edges meet",
 	"concentric": "Round things share an axis",
+	"peg_in_hole": "A pin seated in a hole (a rim on each part)",
 	"parallel": "Faces / edges run alongside",
 	"distance": "A set gap (you type it)",
 	"angle": "A set angle (you type it)",
@@ -424,8 +425,9 @@ func _mates_pick_hint() -> String:
 	return "Pick two faces first"
 
 
-## The Type ring is kept to seven wedges (twelve crowded the labels and left no room for a distinct icon each): the five basic types, then two sub-rings.
-const MATE_RING_BASIC := ["coincident", "concentric", "parallel", "distance", "angle"]
+## The Type ring is kept small (twelve crowded the labels and left no room for a distinct icon each): the basic types, then two sub-rings. M4 added
+## Peg in hole after Concentric (eight wedges now: not judged on the headset).
+const MATE_RING_BASIC := ["coincident", "concentric", "peg_in_hole", "parallel", "distance", "angle"]
 const MATE_RING_CENTRE := ["width", "symmetric"]
 const MATE_RING_MOTION := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"]
 
@@ -454,7 +456,12 @@ func _mate_type_actions(types: Array) -> Array:
 
 func _set_mate_type(type: String) -> void:
 	_mates.mate_type = type
-	if type == "distance" or type == "angle":
+	if type == "distance" and not _mates.value_typed:
+		# M4.1: nothing typed for these picks: the ghost holds the distance the parts are apart now (measured), so the keyboard starts on it
+		# once known and an empty entry keeps it
+		var shown: String = ("%.3f" % float(_mates.measured_value)).rstrip("0").rstrip(".") if _mates.measured_value != null else ""
+		_main.open_keyboard_for(shown, _apply_mate_value.bind(type, "mm"), {"title": "Distance (mm; empty keeps the measured distance)"})
+	elif type == "distance" or type == "angle":
 		var unit := "mm" if type == "distance" else "degrees"
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
 	elif type == "screw":
@@ -501,6 +508,9 @@ func _apply_width_offset(text: String) -> void:
 
 
 func _apply_mate_value(text: String, type: String, unit: String) -> void:
+	if type == "distance" and text.strip_edges() == "" and not _mates.value_typed:
+		say("Distance: the measured one, where the parts are now" if _mates.measured_value != null else "Distance: type a value")
+		return # M4.1: empty keeps the measured distance (nothing typed)
 	var parsed: Dictionary = _mates.parse_value(type, text)
 	if not parsed["ok"]:
 		say(str(parsed["error"]), 4.0)

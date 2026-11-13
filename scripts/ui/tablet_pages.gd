@@ -26,7 +26,7 @@ const NativeCompose := preload("res://scripts/native_compose.gd") ## which file 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
-const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"]
+const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Peg in hole", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
 const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
 const COLOUR_SWATCHES: Array[Dictionary] = AppearancePage.PALETTE ## the tool wheel's palette is the Appearance page's
@@ -68,6 +68,7 @@ var _speed_label: Label
 var _speed_slider: HSlider
 var _mates_picks_label: Label
 var _mates_value_label: Label
+var _mates_type_row: Control ## M4: the Mate type buttons, kept on the tool's type (a suggestion from the picks, or the wheel, changes it)
 var _mates_toggles_row: Control ## Allow rotation / Minimal movement: neither means anything for a coupler (nothing moves when one is made)
 var _mates_create_button: Button
 var _mates_branch_label: Label ## which orientation / side the preview shows, and where Next solution is (MatesTool.branch_text)
@@ -675,10 +676,11 @@ func _build_mates_page() -> Control:
 		if _mates_tool:
 			_mates_tool.back_pick()
 	))
-	page.add_child(_choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
+	_mates_type_row = _choice_row("Mate type", MATE_TYPE_LABELS, 0, func(i: int) -> void:
 		if _mates_tool:
 			_mates_tool.mate_type = _mates_tool.MATE_TYPES[i]
-	, 5))
+	, 5)
+	page.add_child(_mates_type_row)
 	var toggles := _row()
 	_mates_toggles_row = toggles
 	page.add_child(toggles)
@@ -809,11 +811,25 @@ func _branch_button(text: String, on_press: Callable) -> Button:
 	return button
 
 
+func _sync_mates_type_row(tool) -> void:
+	## M4: the pressed type button follows the tool's type without firing it (a type the backend suggested is not the user's choice).
+	if _mates_type_row == null or not is_instance_valid(_mates_type_row):
+		return
+	var index: int = tool.MATE_TYPES.find(tool.mate_type)
+	var i := 0
+	for line in _mates_type_row.get_children():
+		for button in line.get_children():
+			if button is Button and (button as Button).toggle_mode:
+				(button as Button).set_pressed_no_signal(i == index)
+				i += 1
+
+
 func _refresh_mates_branch_controls() -> void:
 	## Shows exactly the branch controls the latest preview named, with their current values; Next solution only with two or more.
 	if _mates_branch_label == null or _mates_tool == null:
 		return
 	var tool = _mates_tool
+	_sync_mates_type_row(tool)
 	if _mates_toggles_row != null:
 		_mates_toggles_row.visible = not tool.is_coupler() and not tool.is_limit()
 	var text: String = tool.branch_text()
@@ -827,6 +843,8 @@ func _refresh_mates_branch_controls() -> void:
 		_mates_value_label.text = _coupler_value_label(tool)
 	elif _mates_value_label != null and tool.is_limit():
 		_mates_value_label.text = _limit_value_label(tool)
+	elif _mates_value_label != null and tool.mate_type == "distance" and not tool.value_typed and tool.measured_value != null:
+		_mates_value_label.text = "Value: %s mm (measured: where the parts are now)" % _trim_mate_value(tool.mate_value) # M4.1
 	var steps: int = tool.branch_alternatives.size()
 	_mates_next_button.visible = steps > 1
 	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
