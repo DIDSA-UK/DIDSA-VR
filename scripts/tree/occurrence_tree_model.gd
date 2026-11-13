@@ -103,6 +103,37 @@ static func state_hint(row: Dictionary, dof: int = -1) -> String:
 	return "fixed" if bool(row.get("fixed", false)) else ""
 
 
+static func set_note(rows: Array, row: Dictionary) -> String:
+	## M5: what a row says about its rigid set (`row["rigid_set"]`, the backend's id = the set's lead occurrence): the lead "moves with N other part(s)", the rest
+	## "moves with <lead name>"; "" outside a set. `rows` are the rows of the same level.
+	var set_id := str(row.get("rigid_set", ""))
+	if set_id == "":
+		return ""
+	if set_id == str(row.get("id", "")):
+		var others := 0
+		for r in rows:
+			if str(r.get("rigid_set", "")) == set_id and r != row:
+				others += 1
+		return "moves with %d other part%s" % [others, "" if others == 1 else "s"] if others > 0 else ""
+	for r in rows:
+		if str(r.get("id", "")) == set_id:
+			return "moves with %s" % str(r.get("name", "the lead"))
+	return "moves with other parts"
+
+
+static func set_colour_index(rows: Array, set_id: String) -> int:
+	## M5: one colour slot per rigid set at a level (the set's place among the level's sets sorted by id); -1 outside a set.
+	if set_id == "":
+		return -1
+	var ids: Array = []
+	for r in rows:
+		var sid := str(r.get("rigid_set", ""))
+		if sid != "" and not ids.has(sid):
+			ids.append(sid)
+	ids.sort()
+	return ids.find(set_id)
+
+
 static func actions_for(row: Dictionary, ctx: Dictionary = {}) -> Array:
 	## The bottom bar's actions for a selected row: [{id, label, enabled, why}] in display order. `ctx`: {hidden: bool (every node under the row is hidden in
 	## the view), has_nodes: bool (the row stands for something on screen), room_text: String ("Room" / "Close room" / "Cancel", "" = none),

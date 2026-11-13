@@ -3,6 +3,10 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## M5 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
+
+- **Rigid sets shown.** The Assembly Tree window reads the backend's `rigid_set` from `constraint-status`: the rows of a set share a font colour and read "moves with <lead>" (the lead: "moves with N other parts"). Grabbing a part of a set outlines every part that moves with it for `PULSE_SECONDS`, the same body outline the mate highlight uses (`MatesTool.pulse_rigid_set`; the status is read by `refresh_constraint_status`). Tests: `occurrence_tree_model`, `mate_highlight`.
+
 ## Branch `m2-v8-limit-stop-caps` (13 Nov, not merged; DIDSA-CAD plan `docs/mates-storage-sessions-plan-2026-11-12.md`, M2)
 
 Headless-tested. Nothing was run on a headset and the GDScript solve is **not** enabled per frame: that waits for a Quest run of the bench scene (`docs/local-retraction-benchmark.md`, "M2").

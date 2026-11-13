@@ -41,6 +41,7 @@ var _status_label: Label
 var _rows_box: VBoxContainer
 var _selected: Array = [] ## V-7: the path of the selected row (the occurrence ids from the root; [] = the root row) ...
 var _has_selected := false ## ... valid only while this is true
+const SET_COLOURS := [Color(0.35, 0.65, 1.0), Color(1.0, 0.55, 0.35), Color(0.45, 0.8, 0.5), Color(0.75, 0.5, 0.9), Color(0.95, 0.85, 0.3), Color(0.3, 0.8, 0.85)]
 var _constraint: Dictionary = {} ## Part id -> {occurrence id: {status, dof}} from GET /parts/{id}/constraint-status
 var _row_controls: Dictionary = {} ## path key -> the row's Control, for scrolling a selection into view
 var _bar: Control ## the bottom action bar (never scrolls away)
@@ -236,6 +237,10 @@ func _apply_status(rows: Array, part_id: String) -> void:
 		var entry = by_occ.get(str(row["id"]))
 		row["status"] = str(entry.get("status", "")) if entry is Dictionary else ""
 		row["dof"] = int(entry.get("dof", -1)) if entry is Dictionary else -1
+		row["rigid_set"] = str(entry["rigid_set"]) if entry is Dictionary and entry.get("rigid_set") is String else "" # M5: an older backend omits it
+	for row in rows:
+		row["set_note"] = Model.set_note(rows, row)
+		row["set_slot"] = Model.set_colour_index(rows, str(row["rigid_set"]))
 
 
 func _on_row_selected(row: Dictionary) -> void:
@@ -411,6 +416,8 @@ func _add_rows(rows: Array, depth: int, parent_part_id: String) -> void:
 		name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
 		if bool(row.get("missing", false)):
 			name_button.add_theme_color_override("font_color", tokens.warn) # amber: the file is missing
+		if int(row.get("set_slot", -1)) >= 0:
+			name_button.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
 		if bool(row.get("suppressed", false)) or _row_view_hidden(row):
 			name_button.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
 		name_button.pressed.connect(_on_row_selected.bind(row))
@@ -431,6 +438,8 @@ func _row_text(row: Dictionary) -> String:
 		text += "  · hidden"
 	if hint != "" and not bool(row.get("missing", false)):
 		text += "  · %s" % hint
+	if str(row.get("set_note", "")) != "":
+		text += "  · %s" % str(row["set_note"])
 	return text
 
 

@@ -55,6 +55,10 @@ func _initialize() -> void:
 		Model.state_icon(rows[1]) == "pin" and Model.state_icon(rows[0]) == "" and Model.state_icon(rows[3]) == "warning"
 		and Model.state_icon({"status": "fully_constrained"}) == "lock" and Model.state_icon({"status": "under_constrained"}) == "lock_open"
 		and Model.state_icon({"status": "over_constrained"}) == "warning" and Model.state_icon({"status": "fixed"}) == "pin" and Model.state_icon({"status": "", "fixed": true}) == "pin")
+	# M5: rigid sets (`rigid_set` = the set's lead occurrence id)
+	var set_rows := [{"id": "a", "name": "Plate", "rigid_set": "a"}, {"id": "b", "name": "Bolt", "rigid_set": "a"}, {"id": "c", "name": "Cover", "rigid_set": "a"}, {"id": "d", "name": "Loose", "rigid_set": ""}, {"id": "e", "name": "Arm", "rigid_set": "e"}, {"id": "f", "name": "Pin", "rigid_set": "e"}]
+	check("the lead of a rigid set says how many parts move with it, the others name the lead, a loose part says nothing", Model.set_note(set_rows, set_rows[0]) == "moves with 2 other parts" and Model.set_note(set_rows, set_rows[1]) == "moves with Plate" and Model.set_note(set_rows, set_rows[3]) == "" and Model.set_note(set_rows, set_rows[4]) == "moves with 1 other part")
+	check("one colour slot per set at a level, in id order; none outside a set", Model.set_colour_index(set_rows, "a") == 0 and Model.set_colour_index(set_rows, "e") == 1 and Model.set_colour_index(set_rows, "") == -1)
 	check("the state hint names the state, with the DOF when it is under-constrained", Model.state_hint({"status": "under_constrained"}, 2) == "under-constrained (2 DOF)" and Model.state_hint(rows[3]) == "missing file" and Model.state_hint({"fixed": true}) == "fixed" and Model.state_hint({}) == "")
 
 	var ctx := {"has_nodes": true, "hidden": false, "room_text": "Room"}

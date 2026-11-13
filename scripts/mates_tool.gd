@@ -156,6 +156,7 @@ var mate_minimal_movement := true:
 var relaxed := false ## the SANDBOX (set_relaxed): mates are not enforced and every move is on screen only, until the parts go home
 var return_glide_s := 0.45 ## how long the parts take to glide home when the sandbox ends (0: at once; tests)
 var relaxed_fixed := false ## V-6: only FIXED is relaxed: a grounded part (and what is mated to it) can be carried, every other mate stays enforced; temporary, like `relaxed`
+var _rigid_set: Dictionary = {} ## M5: top-level occurrence id -> the id of the rigid set it moves as one with (the backend's `rigid_set`; absent = in none)
 var _constraint_status: Dictionary = {} ## V-6: top-level occurrence id -> the backend's constraint status ("fixed" / "fully_constrained" / "under_constrained" / "over_constrained")
 const CLUSTER_SKIP_TYPES := ["gear", "rack_pinion", "screw", "limit_distance", "limit_angle"] ## mates that place nothing: they don't join a part to a cluster
 var sandbox_ghosts := false ## while relaxed, a see-through copy of each moved part where it will go back to (Settings > Assemble)
@@ -1516,11 +1517,48 @@ func refresh_constraint_status() -> void:
 		return
 	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/constraint-status" % owner, null)
 	_constraint_status.clear()
+	_rigid_set.clear()
 	if result["ok"] and result["json"] is Dictionary:
 		for occ in result["json"]:
 			var entry = result["json"][occ]
 			if entry is Dictionary:
 				_constraint_status[str(occ)] = str(entry.get("status", ""))
+				if entry.get("rigid_set") is String: # an older backend omits it; null = in no set (or locked to a fixed part)
+					_rigid_set[str(occ)] = str(entry["rigid_set"])
+
+
+static func rigid_set_members(rigid_sets: Dictionary, occurrence_id: String) -> Array:
+	## Pure (M5): the occurrence ids that move as one with `occurrence_id` (itself included, sorted), or [] when it is in no set or alone in it.
+	var set_id = rigid_sets.get(occurrence_id)
+	if set_id == null:
+		return []
+	var out: Array = []
+	for occ in rigid_sets:
+		if rigid_sets[occ] == set_id:
+			out.append(str(occ))
+	out.sort()
+	return out if out.size() > 1 else []
+
+
+func pulse_rigid_set(part: Node3D) -> int:
+	## M5: at the grab, outlines every part that moves as one with `part` (the same body outline pulse the mate highlight uses) so it is clear why they all follow.
+	## Returns how many other parts were outlined (0 when `part` is in no set).
+	var owner := owner_of(part)
+	var members := rigid_set_members(_rigid_set, _occ_id(part))
+	if members.is_empty() or not is_inside_tree():
+		return 0
+	var entries: Array = []
+	var others := 0
+	for occ in members:
+		var node := _find_loaded_part(owner, occ, part)
+		if node == null:
+			continue
+		if node != part:
+			others += 1
+		for body in node.get_meta("body_ids", []):
+			entries.append({"part": node, "body_id": str(body)})
+	_pulse(entries)
+	return others
 
 
 static func cluster_of(mate_list: Array, fixed: Dictionary, occurrence_id: String) -> Array:
@@ -2441,6 +2479,7 @@ func constrain_drag(part: Node3D, desired_global: Transform3D) -> Transform3D:
 	if state.is_empty():
 		state = _new_drag_state(part)
 		_drag[part] = state
+		pulse_rigid_set(part) # M5: outline the parts that move with this one
 		_ensure_patterns(str(state["owner"])) # not awaited: the copies follow from the frame the answer is in (see _apply_copies)
 	if bool(state["finishing"]):
 		return parent.global_transform * state["shown_grabbed"] # released: the commit round trip is in flight, nothing follows the hand any more
