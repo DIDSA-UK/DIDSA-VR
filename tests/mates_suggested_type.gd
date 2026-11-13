@@ -100,6 +100,7 @@ func _initialize() -> void:
 	print("SMOKE the user can change it: the next preview is their type: ", tool.type_chosen and tool.types_sent().back() == "distance" and tool.mate_type == "distance")
 	print("SMOKE ...and the suggested note goes: ", not tool.status_text().contains("suggested"))
 	tool.clear_picks()
+	tool.mate_value = 4.0 # a distance typed for the new picks (M4.1 would otherwise measure them first: tests/mates_measured_distance.gd)
 	var before := tool.bodies.size()
 	tool.try_pick(a, 1)
 	tool.try_pick(b, 0)
@@ -124,6 +125,7 @@ func _initialize() -> void:
 	# --- an older backend refuses "auto": the tool previews as before
 	tool.set_active(false)
 	tool.set_active(true)
+	tool.mate_value = 4.0 # typed (as above)
 	tool.answers = {"auto": "refuse", "distance": {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose(9.0)}]}}
 	before = tool.bodies.size()
 	tool.try_pick(a, 0)

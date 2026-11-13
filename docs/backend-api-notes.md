@@ -394,6 +394,15 @@ any of the above + "pick_points": [[x, y, z] | null, [x, y, z] | null]  (local t
 - **An older client is unaffected**: a request without `auto` / `peg_in_hole` gets the same bytes as before M4 (pinned in DIDSA-CAD
   by `tests/test_mate_first_guess_m4.py`).
 
+## A Distance where the parts are (M4.1)
+
+`preview-mate-solve` with `type: "distance"`, **no `value`** and `measure_value: true`: the backend measures the two picks at the stored
+poses (`app/document/mate_measure.py`: two planes, a plane and a point, two axes or two points; mm, never negative, rounded to a
+micrometre) and answers the ordinary preview at that distance, plus `measured_value` (the key only in the answer to such a request; null when
+the picks cannot be measured, and then `converged: false`). The side is Closest (where the part is now). `mates_tool.gd` asks once per pair of
+picks while nothing is typed and then sends the measured value like a typed one. Without `measure_value` (an older client) a distance with no
+value is still `converged: false`; with a `value` the flag is ignored.
+
 ## Measure — read-only, stateless, no create/persist step
 
 ```

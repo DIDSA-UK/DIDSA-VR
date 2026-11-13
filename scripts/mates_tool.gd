@@ -97,7 +97,9 @@ var mate_type := "coincident":
 	set(v):
 		var crosses := (v in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type) or (mate_type in [WIDTH_TYPE, SYMMETRIC_TYPE] and v != mate_type)
 		if v != mate_type and (v in COUPLER_TYPES or mate_type in COUPLER_TYPES):
+			_quiet_value = true
 			mate_value = 0.0 # a distance typed for another kind of mate is not a ratio, a travel or a lead (0 = Auto)
+			_quiet_value = false
 		if v != mate_type:
 			limit_min = null # a range typed for one limit is not another's
 			limit_max = null
@@ -118,7 +120,17 @@ var width_offset := 0.0:
 var mate_value := 0.0:
 	set(v):
 		mate_value = v
+		if not _quiet_value:
+			value_typed = true # M4.1: set from outside (the keyboard): the user's own distance, never measured over
 		request_preview()
+
+## M4.1 (DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`): a Distance with nothing typed for the current picks is previewed
+## where the parts are (the backend measures them, `measure_value`): parallel at the current distance, on the current side, and
+## `mate_value` starts on that distance (SOLIDWORKS' order: then type the one you want). Before, it was previewed at 0 (flush).
+var value_typed := false ## the user typed a value for this mate (reset with the picks)
+var measured_value = null ## the distance the backend measured for the current picks (null = none)
+var _measured_key := "" ## the picks it was measured for
+var _quiet_value := false ## set while the measured / reset value is put in place: not the user's
 ## A limit mate's range (mm, or degrees for an angle): null = no bound on that side. Not both null.
 var limit_min = null:
 	set(v):
@@ -406,6 +418,9 @@ func clear_picks() -> void:
 	_picks.clear()
 	_suggestion_key = ""
 	suggested_type = ""
+	_measured_key = ""
+	measured_value = null
+	value_typed = false
 	_status = ""
 	_width_error = ""
 	_width_seq += 1
@@ -527,6 +542,8 @@ func _status_text_core() -> String:
 					value_note = " (%s, from the teeth)" % coupler_value_text(mate_type, preview_coupler_value)
 				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
+				if mate_type == "distance" and not value_typed and measured_value != null:
+					return "Distance %s mm: where the parts are now. Set value to type the one you want; Flip if the side is wrong, then Create." % _trim_number(float(measured_value))
 				if suggested_type != "" and suggested_type == mate_type:
 					return "%s, suggested from the picks (change the type if it is not what you want). Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create." % type_label(mate_type)
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
@@ -1103,10 +1120,28 @@ func _run_preview(seq: int) -> void:
 	if asking:
 		body["type"] = "auto" # M4: the backend picks the type and answers with the preview of it
 		body.erase("value")
+	var measuring := not asking and mate_type == "distance" and not value_typed and key != _measured_key
+	if measuring:
+		body.erase("value") # M4.1: the backend measures the picks and previews at that distance
+		body["measure_value"] = true
 	var result := await _api_request(HTTPClient.METHOD_POST, "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s" % [owner_part_id, driven_id, movement_param()], body)
 	if seq != _preview_seq or _picks.size() != pick_target():
 		return # a newer setting (or Clear) has replaced this one
 	var json = result.get("json")
+	if measuring:
+		_measured_key = key
+		var measured = json.get("measured_value") if result["ok"] and json is Dictionary else null
+		measured_value = float(measured) if measured is float or measured is int else null
+		if measured_value != null:
+			_quiet_value = true
+			_quiet_type = true # (request_preview stays quiet: the answer in hand is the preview at this value)
+			mate_value = measured_value
+			_quiet_type = false
+			_quiet_value = false
+		elif not (result["ok"] and json is Dictionary and json.has("measured_value")):
+			value_typed = true # an older backend: preview the value shown, as before (no more asking for these picks)
+			request_preview()
+			return
 	if asking:
 		_suggestion_key = key
 		var suggestion = json.get("suggested_type") if result["ok"] and json is Dictionary else null

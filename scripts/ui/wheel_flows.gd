@@ -456,7 +456,12 @@ func _mate_type_actions(types: Array) -> Array:
 
 func _set_mate_type(type: String) -> void:
 	_mates.mate_type = type
-	if type == "distance" or type == "angle":
+	if type == "distance" and not _mates.value_typed:
+		# M4.1: nothing typed for these picks: the ghost holds the distance the parts are apart now (measured), so the keyboard starts on it
+		# once known and an empty entry keeps it
+		var shown: String = ("%.3f" % float(_mates.measured_value)).rstrip("0").rstrip(".") if _mates.measured_value != null else ""
+		_main.open_keyboard_for(shown, _apply_mate_value.bind(type, "mm"), {"title": "Distance (mm; empty keeps the measured distance)"})
+	elif type == "distance" or type == "angle":
 		var unit := "mm" if type == "distance" else "degrees"
 		_main.open_keyboard_for(("%.3f" % _mates.mate_value).rstrip("0").rstrip("."), _apply_mate_value.bind(type, unit), {"title": "%s (%s)" % [MATE_TYPE_LABELS[type], unit]})
 	elif type == "screw":
@@ -503,6 +508,9 @@ func _apply_width_offset(text: String) -> void:
 
 
 func _apply_mate_value(text: String, type: String, unit: String) -> void:
+	if type == "distance" and text.strip_edges() == "" and not _mates.value_typed:
+		say("Distance: the measured one, where the parts are now" if _mates.measured_value != null else "Distance: type a value")
+		return # M4.1: empty keeps the measured distance (nothing typed)
 	var parsed: Dictionary = _mates.parse_value(type, text)
 	if not parsed["ok"]:
 		say(str(parsed["error"]), 4.0)

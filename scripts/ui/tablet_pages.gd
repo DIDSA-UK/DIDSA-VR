@@ -843,6 +843,8 @@ func _refresh_mates_branch_controls() -> void:
 		_mates_value_label.text = _coupler_value_label(tool)
 	elif _mates_value_label != null and tool.is_limit():
 		_mates_value_label.text = _limit_value_label(tool)
+	elif _mates_value_label != null and tool.mate_type == "distance" and not tool.value_typed and tool.measured_value != null:
+		_mates_value_label.text = "Value: %s mm (measured: where the parts are now)" % _trim_mate_value(tool.mate_value) # M4.1
 	var steps: int = tool.branch_alternatives.size()
 	_mates_next_button.visible = steps > 1
 	var index: int = _MatesTool.alternative_index(tool.branch_alternatives, tool.shown_alignment(), tool.shown_secondary_flip())
