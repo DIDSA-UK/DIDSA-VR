@@ -10,6 +10,7 @@ const FolderChooser := preload("res://scripts/ui/folder_chooser.gd")
 const ProjectFolder := preload("res://scripts/project_folder.gd")
 const PairingPayload := preload("res://scripts/landing/pairing_payload.gd")
 const ServerAddress := preload("res://scripts/landing/server_address.gd")
+const StorageProbe := preload("res://scripts/storage_probe.gd")
 
 const LOWER_BY := 0.28 ## metres below where a window opens (10 cm under the eyes)
 
@@ -40,6 +41,7 @@ var launcher_viewport_size := Vector2i(880, 660)
 var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
 var _relay_for := "" ## the saved server whose Browser relay is being typed ("" = none): its form shows under the list
 var _relay_form := {"relay_url": "", "relay_api_key": ""}
+var _storage_report := "" ## the last "Check storage" result (S0 spike), shown under the button while the page redraws
 var _relay_note := "" ## what the last relay Save said
 var _page_before_discard := "" ## the page the "Unsaved changes" choice replaced, to go back to once it is decided
 
@@ -306,6 +308,22 @@ func _build_servers() -> void:
 	save.disabled = test.disabled
 	row.add_child(save)
 	_body.add_child(_hint("The list is kept in %s on this headset. To load it without typing, see docs/servers.md." % OS.get_user_data_dir()))
+	# S0 spike (DIDSA-CAD docs/shared-storage-scope.md): where this app's own storage is and how much room it has, for the owner to read off
+	# the headset (docs/android-build.md, "Storage for server projects").
+	var storage := _action("Check storage", _check_storage, 0)
+	storage.name = "CheckStorage"
+	_body.add_child(storage)
+	if _storage_report != "":
+		var result := _hint(_storage_report)
+		result.name = "StorageReport"
+		_body.add_child(result)
+
+
+func _check_storage() -> void:
+	var report := StorageProbe.report()
+	_storage_report = StorageProbe.text(report)
+	print(StorageProbe.log_line(report))
+	show_page("servers")
 
 
 func _server_row(entry: Dictionary) -> Control:

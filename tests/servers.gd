@@ -194,6 +194,12 @@ func _initialize() -> void:
 	check("no servers: the page says none is set and offers the form", "No server is set" in _all_text(body) and body.find_child("Form_url", true, false) != null and body.find_child("Server_*", true, false) == null)
 	check("Save and Test are off until there is an address and a key", body.find_child("SaveForm", true, false).disabled and body.find_child("TestForm", true, false).disabled)
 	check("Scan is offered", body.find_child("Scan", true, false) != null and not body.find_child("Scan", true, false).disabled)
+	# S0 spike: Check storage reports where user:// is and how much room it has (the owner reads it off the headset)
+	body.find_child("CheckStorage", true, false).pressed.emit()
+	await frames(2)
+	var storage_report = launcher._body.find_child("StorageReport", true, false)
+	check("Check storage shows where the app's storage is, its free space and a timed write and read", storage_report != null and storage_report.text.contains("App storage (user://)") and storage_report.text.contains("MB written in"))
+	body = launcher._body
 	body.find_child("Form_url", true, false).pressed.emit()
 	await frames(1)
 	check("tapping Address opens the full keyboard", main._keyboard.is_open())
