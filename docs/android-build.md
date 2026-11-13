@@ -162,6 +162,20 @@ D) is **not** built: it needs a native plugin, which `CLAUDE.md` does not allow.
    If Horizon OS shows no All files access page, it can be granted over USB: `adb shell appops set uk.didsa.vr MANAGE_EXTERNAL_STORAGE allow` (the package name from the preset), then restart the app. Not tried.
 4. Does *Allow opening files from other apps* open the system's All files access page for the app? Does Settings then say "allowed"? **Owner, 10 Nov (Quest 3): no page opened.** Cause: the app asked for `"MANAGE_EXTERNAL_STORAGE"`, and Godot's Android `PermissionsUtil` (read in the 4.5 source; the same file in 4.7 not checked) only opens the page for the full name `android.permission.MANAGE_EXTERNAL_STORAGE`; any other name fails its lookup and is skipped without a word. **Fixed 10 Nov:** the full name, and the app now asks **at every launch** (2 s after start) until it is allowed, as well as from the button. It is not a pop-up: Android opens a Settings page with a switch for the app; turn it on and come back. The permission must be in the APK: Export > Permissions > **Manage External Storage** ticked (the example preset has it; *Read/Write External Storage* is not the same thing), or the page has no switch for the app. Whether `OS.get_granted_permissions()` then reports it on Horizon OS (Godot checks `Environment.isExternalStorageManager()` for this one) is still to see. After the fixed build: ____
 
+## Storage for server projects (S0 spike, 13 Nov 2026)
+
+DIDSA-CAD's shared storage (`docs/shared-storage-scope.md` there) plans to keep a local copy of each server project in the app's own
+storage, `user://`, which needs no storage permission. Before that is built: where `user://` really is on the Quest, how much room it has,
+and whether a file there can be seen from outside the app. **Launcher > Servers > Check storage** writes and reads back a 20 MB file and
+shows the folder, the free space and the times; the same line goes to `adb logcat` (filter `DIDSA VR: storage`).
+
+**To check on the headset (write the answers here):**
+1. What does Check storage say for *App storage (user://)*? (Expected `/data/user/0/<package>/files` or `/storage/emulated/0/Android/data/<package>/files`.) ____
+2. *Free there*? ____ And for *Documents*? ____
+3. The 20 MB write and read times? ____
+4. Can the Quest Files app, or a PC over USB, see that folder? (It matters only for support: the store's copy never needs to be opened by hand.) ____
+5. After updating the app with `adb install -r`, is the folder's content still there? (It should be; an uninstall deletes it.) ____
+
 ## What was checked, and what was not
 
 Checked (`tests/android_config.gd`, headless, plus by hand in a scratch copy of the project):

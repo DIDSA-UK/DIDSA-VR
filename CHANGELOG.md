@@ -3,6 +3,11 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## S0 spike (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, shared storage; desktop only, not run on the headset)
+
+- **Launcher > Servers > Check storage**: where the app's own storage (`user://`) is, how much room it has (and Documents), and the time to write and read a 20 MB file, also logged for `adb logcat` (`DIDSA VR: storage:`). For the owner to read off the Quest before S3 keeps server projects as a mirror folder there (DIDSA-CAD `docs/shared-storage-scope.md`; the questions are in `docs/android-build.md`, "Storage for server projects").
+- Test: `tests/storage_probe.gd`; the button is in `tests/servers.gd`.
+
 ## M4.1 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
 
 - **A Distance starts where the parts are.** With nothing typed for the current picks, the Mates tool asks the backend to measure (`measure_value`) and previews the parts parallel at their current distance, on their current side; the value starts on that distance (before: 0, flush). A typed value wins; new picks are measured again. The wheel's keyboard starts on the measured distance (empty until it is known; empty keeps it); the tablet's value line says "measured". An older backend gets the old preview.
