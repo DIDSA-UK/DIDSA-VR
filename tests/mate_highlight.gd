@@ -155,6 +155,19 @@ func _initialize() -> void:
 	check("a mate whose part is out of view says so in the status line", "behind you" in tool.status_text())
 	tool.highlight_mate("")
 
+	# --- M5: grabbing a part of a rigid set outlines every part that moves with it (the same body outline pulse), and reads `rigid_set` from the status answer
+	check("rigid_set_members: a set's members, sorted; a part in no set or alone in its set has none", MatesTool.rigid_set_members({"oB": "oA", "oA": "oA", "oC": "oC"}, "oB") == ["oA", "oB"] and MatesTool.rigid_set_members({"oB": "oA", "oA": "oA", "oC": "oC"}, "oC").is_empty() and MatesTool.rigid_set_members({"oA": "oA"}, "x").is_empty())
+	tool._rigid_set = {"oA": "oA", "oB": "oA"}
+	var others: int = tool.pulse_rigid_set(a)
+	await frames(1)
+	check("grabbing a member of a set outlines the whole set (both bodies) for a moment and counts the others", others == 1 and tool._pulse_sources.size() == 2 and fh.hover_key(tool._pulse_sources[0]) == "solid:bodyA" and fh.hover_key(tool._pulse_sources[1]) == "solid:bodyB")
+	t0 = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(MatesTool.PULSE_SECONDS * 1000.0) + 400:
+		await process_frame
+	check("...and the outline lets go after the pulse", tool._pulse_sources.is_empty())
+	tool._rigid_set = {}
+	check("a part in no set outlines nothing", tool.pulse_rigid_set(a) == 0 and tool._pulse_sources.is_empty())
+
 	# --- the side panel: tap a selectable row
 	var side := SidePanelUI.new()
 	root.add_child(side)
