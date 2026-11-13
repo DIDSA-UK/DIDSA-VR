@@ -2,7 +2,8 @@ extends Node
 ## On-headset (or any device) timing of the GDScript local retraction: scenes/bench_local_retraction.tscn. ONE call of every case per rendered
 ## frame (so it shares the frame with the real render loop and the thermal state is realistic), a summary printed every REPORT_EVERY seconds
 ## (`adb logcat -s godot` on a Quest; the console elsewhere) and shown on a Label3D in front of you. Runs DURATION seconds.
-## One entry per frame, round-robin (k=1, k=2, k=3, the projector; `--all` adds the k=5 and k=8 rows, which are slow and drop the frame rate).
+## One entry per frame, round-robin (k=1, k=2, k=3, three reduced version-8 models, the projector; `--all` adds the k=5 and k=8 rows and the reduced
+## linkage / bolted-chain models, which are slow and drop the frame rate).
 ## Options (Godot user args, after `--`): --duration=180  --report=15  --all
 ## Not part of the app: see docs/local-retraction-benchmark.md.
 
@@ -45,8 +46,8 @@ func _ready() -> void:
 	add_child(label)
 	bench = Bench.new()
 	if not bench.setup(include_large):
-		label.text = "benchmark setup failed (fixture missing from the export? add *.json to the export filter)"
-		print("SMOKE BENCH FAILED: setup (is tests/fixtures/motion_vectors.json in the export?)")
+		label.text = "benchmark setup failed (fixtures missing from the export? add *.json to the export filter)"
+		print("SMOKE BENCH FAILED: setup (are tests/fixtures/motion_vectors.json and m0_reduced_models.json in the export?)")
 		set_process(false)
 		return
 	print("SMOKE BENCH start: ", Engine.get_version_info()["string"], " on ", OS.get_name(), " ", OS.get_processor_name(), " xr=", get_viewport().use_xr, " duration=", duration, " s")

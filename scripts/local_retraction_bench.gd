@@ -5,14 +5,31 @@ extends RefCounted
 ## per rendered frame so it competes with the real render loop and the thermal state is realistic).
 ##
 ## Cases: bolt in a fixed plate (k=1), floating bolt + plate (k=2), the 5-box row cut to its first 3 boxes (k=3, synthetic, 4 residual
-## rows per mate), and the full 5- and 8-box rows (information only: beyond the GDScript limit MAX_MEMBERS). Every call is one
+## rows per mate), and the full 5- and 8-box rows (information only: beyond the GDScript limit MAX_MEMBERS); then the reduced models below. Every call is one
 ## full frame(): trust-region iterations + polish + the acceptance residual, Jacobians included. The projector's own frame on a
 ## golden `project` case is timed as the reference cost the app already pays.
+##
+## M2 (DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`): the REDUCED models. Since M1 a group's rigid sets are merged into one body per set and
+## the exported constraint model (version 8) has one member per set (a "lead"), so a 10-part chain is one lead and no rows. `tests/fixtures/m0_reduced_models.json`
+## (a copy of DIDSA-CAD's `client/test/data/m0_reduced_models.json`, written by `backend/tests/export_m0_reduced_models.py`) holds the models of the 22 M0 scaling
+## scene variants; the cases below time a frame() on three of them (one lead with nine or eight followers: no rows, 16 rows, 12 rows: the shapes a typical group now has)
+## and, with `include_large`, on the linkage (3 and 4 leads, 40 rows) and a bolted chain (7 leads, 76 rows), which are too slow to share a headset frame with the
+## others (they are for information).
 
 const Se3 := preload("res://scripts/motion/se3.gd")
 const Local := preload("res://scripts/motion/local_retraction.gd")
 const Projector := preload("res://scripts/motion/free_motion_projector.gd")
 const FIXTURE := "res://tests/fixtures/motion_vectors.json"
+const REDUCED_FIXTURE := "res://tests/fixtures/m0_reduced_models.json"
+## [label, scene, variant, only with include_large]
+const REDUCED := [
+	["v8 chain-10 floating (1 lead, 9 followers, 0 rows)", "chain-10", "floating", false],
+	["v8 chain-10 fixed (1 lead, 8 followers, 16 rows)", "chain-10", "fixed", false],
+	["v8 frame-10 fixed (1 lead, 8 followers, 12 rows)", "frame-10", "fixed", false],
+	["v8 linkage fixed (3 leads, 20 followers, 40 rows)", "linkage-payload-20", "fixed", true],
+	["v8 linkage floating (4 leads, 20 followers, 40 rows)", "linkage-payload-20", "floating", true],
+	["v8 chain-5-bolts fixed (7 leads, 3 followers, 76 rows)", "chain-5-bolts", "fixed", true],
+]
 
 var cases: Array = [] ## [{name, model, poses, wishes, lever, k, rows}]
 var projector_case := {}
@@ -59,6 +76,8 @@ func setup(include_large: bool = false) -> bool:
 			return false
 		cases.append({"name": s[0], "model": model, "poses": poses, "wishes": wishes, "lever": float(inp["lever_arm"])})
 		samples[s[0]] = PackedFloat64Array()
+	if not _setup_reduced(include_large):
+		return false
 	# the projector's own frame (what the app already pays), from a golden `project` case with a basis
 	for c in doc["cases"]:
 		if c["kind"] == "project" and (c["input"]["basis"] as Array).size() > 0 and (c["input"]["refs"] as Array).size() >= 2:
@@ -71,6 +90,35 @@ func setup(include_large: bool = false) -> bool:
 			}
 			samples[projector_case["name"]] = PackedFloat64Array()
 			break
+	return true
+
+
+func _setup_reduced(include_large: bool) -> bool:
+	if not FileAccess.file_exists(REDUCED_FIXTURE):
+		return false
+	var all = JSON.parse_string(FileAccess.get_file_as_string(REDUCED_FIXTURE))
+	if not (all is Array):
+		return false
+	for spec in REDUCED:
+		if spec[3] and not include_large:
+			continue
+		var entry: Dictionary = {}
+		for e in all:
+			if e["scene"] == spec[1] and e["variant"] == spec[2]:
+				entry = e
+		if entry.is_empty():
+			return false
+		var model = Local.try_parse(entry["model"], 64, 1024) # the caps lifted: the cost is the point
+		if model == null:
+			return false
+		cases.append({
+			"name": spec[0],
+			"model": model,
+			"poses": entry["poses"].map(func(p): return Se3.pose_from_json(p)),
+			"wishes": entry["wishes"].map(func(p): return Se3.pose_from_json(p)),
+			"lever": float(entry["lever_arm"]),
+		})
+		samples[spec[0]] = PackedFloat64Array()
 	return true
 
 

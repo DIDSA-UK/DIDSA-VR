@@ -6,12 +6,15 @@ extends RefCounted
 ## constraint-only polish. The result is used only if it converged and is close enough to the projector's answer
 ## (`frame()`), otherwise the projector's poses are shown — never worse than the projection.
 ##
-## Mirrors client/lib/motion/local_retraction.dart line for line (and backend app/document/constraint_model.py); the SAME golden
+## Mirrors client/lib/motion/local_retraction.dart (and backend app/document/constraint_model.py; the set metric of version 8 in a closed form, see _set_metric); the SAME golden
 ## vectors (kind `local_retract`) gate all three. Every residual is zero ONLY on the branch its mate names (`alignment` /
 ## `side` / `perp`, +1 or -1 per mate in the model; absent or 0 reads as +1): docs/mate-solution-choice-plan.md. Poses are {"t": [x,y,z], "r": [9 floats row-major]} like se3.gd.
 ##
-## COST: GDScript is much slower than Dart; the plan limits this port to small groups (LOCAL_MAX_MEMBERS = 3) until it has been
-## measured on the headset (tests/bench_local_retraction.gd).
+## COST: GDScript is much slower than Dart; the plan limits this port to small groups (MAX_MEMBERS = 3) until it has been
+## measured on the headset (tests/bench_local_retraction.gd). Version 8 (M2: rigid sets) counts LEADS, not parts: a 10-part chain is one lead. On the reduced models
+## of the 22 M0 scenes (desktop, docs/local-retraction-benchmark.md) one frame costs about 0.4 ms (one lead, no rows) to 2 ms (one lead, 12 to 16 rows), 11 to 14 ms
+## for the linkage (3 or 4 leads, 40 rows) and ~60 ms for a bolted chain (7 leads, 76 rows); the Quest was 2.5x slower than the desktop in October. The caps are not
+## raised and the solve is still NOT run per frame in the app: that is the owner's call after a Quest run (the bench scene); only the limit stop reads the model.
 
 const Se3 := preload("res://scripts/motion/se3.gd")
 
@@ -24,13 +27,14 @@ const ROTATION_CAP := 0.6 ## rad per iteration, any member
 const LAMBDA_ABS := 1e-9
 const ACCEPT_RESIDUAL := 1e-6
 const ACCEPT_DISTANCE := 0.5 ## of max(L, hand distance from the start pose)
-const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the headset (Dart: 8)
+const MAX_MEMBERS := 3 ## GDScript: small groups only until measured on the headset (Dart: 8); with version 8 these are leads (rigid sets), see the header
 const MAX_ROWS := 64
 const MODEL_VERSION := 3 ## 3: an ANGLE about a hinge also fixes the swing sense (hinge_direction on a side); 2: branch-specific residuals (alignment / side / perp per mate)
 const PAIR_MODEL_VERSION := 4 ## 4 = 3 plus an optional `pair` on a side: the second face of a Width / Symmetric mid-plane over two members (the backend emits 4 only then)
 const COUPLER_MODEL_VERSION := 5 ## 5 = coupler mates (gear / rack_pinion / screw): rows on each side's MOVE from its `anchor` pose; `set_anchors` re-bases them at every accepted anchor
 const FOLLOW_MODEL_VERSION := 7 ## 7 = a side (and a `pair`) may carry `follow`: a pattern COPY that follows its source member, pose `(Rs R, Rs t + ts)` or, with `keep_rotation`, `(R, Rs t + ts)`; a superset of 3 to 6, emitted only when some side has one
 const LIMIT_MODEL_VERSION := 6 ## 6 = limit mates (limit_distance / limit_angle): an inequality row with `min` / `max`, held at the nearest bound only while violated (see `retract`); a superset of 3 to 5
+const RIGID_MODEL_VERSION := 8 ## 8 = rigid sets: `members` are the sets' LEADS, `rigid_sets` gives each lead's followers as constant offsets (pose `(R_L r, R_L t + t_L)`); the set metric weighs a set as its members would (see `_retract_once`); a superset of 3 to 7, emitted only when the group has a set
 const LIMIT_ROUNDS := 3 ## active-set rounds of one retraction
 const LIMIT_TOL := 1e-6 ## mm / degrees a value may sit outside its range before the limit counts as violated
 const DISTANCE_FLOOR := 1e-3 ## mm: divisor floor of the mm-scaled squared DISTANCE residuals (axis-axis, point-point)
@@ -46,6 +50,7 @@ var n := 0 ## 6 * members
 var _mates: Array = []
 var _anchors: Array = [] ## version 5: the pose each member had at the latest accepted anchor (the base of a coupler's rows); empty = the exported ones
 var _jac := true ## false = residual-only evaluation (no derivative arithmetic)
+var _followers: Array = [] ## version 8: per lead (by member index) an Array of {"id", "r" (9, row-major), "t" (3)}; empty arrays for a model without sets
 var _held := {} ## the limits `retract` is holding at a bound, {mate id: bound}: set by the latest `retract` (reset at its start), so `residual` / `residual_inf` right after it include the held rows
 
 
@@ -53,6 +58,37 @@ var _held := {} ## the limits `retract` is holding at a bound, {mate id: bound}:
 func set_anchors(poses: Array) -> void:
 	if poses.size() == members:
 		_anchors = poses.duplicate()
+
+
+## Whether the model has rigid sets (version 8 with followers).
+func has_sets() -> bool:
+	for list in _followers:
+		if not (list as Array).is_empty():
+			return true
+	return false
+
+
+## The followers' occurrence ids, in lead order (empty without sets). `member_ids` + `follower_ids()` are every occurrence the model moves.
+func follower_ids() -> Array:
+	var out: Array = []
+	for list in _followers:
+		for f in list:
+			out.append(f["id"])
+	return out
+
+
+## Every follower's pose {id: pose} with the leads at `leads` (one pose per member, the model's order): `(R_L r, R_L t + t_L)`.
+func expand_followers(leads: Array) -> Dictionary:
+	var out := {}
+	for i in members:
+		for f in _followers[i]:
+			out[f["id"]] = _compose(leads[i], f)
+	return out
+
+
+static func _compose(lead: Dictionary, f: Dictionary) -> Dictionary:
+	var off := Se3.mat_vec(lead["r"], f["t"])
+	return Se3.make_pose([off[0] + lead["t"][0], off[1] + lead["t"][1], off[2] + lead["t"][2]], Se3.mat_mul(lead["r"], f["r"]))
 
 
 ## Whether the model holds a limit mate.
@@ -82,9 +118,9 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 	if not (json is Dictionary):
 		return null
 	var version := int(json.get("version", 0))
-	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION and version != FOLLOW_MODEL_VERSION:
+	if version != MODEL_VERSION and version != PAIR_MODEL_VERSION and version != COUPLER_MODEL_VERSION and version != LIMIT_MODEL_VERSION and version != FOLLOW_MODEL_VERSION and version != RIGID_MODEL_VERSION:
 		return null
-	var v6 := version == LIMIT_MODEL_VERSION or version == FOLLOW_MODEL_VERSION # 7 is a superset of 6 (limits, couplers, pairs)
+	var v6 := version == LIMIT_MODEL_VERSION or version == FOLLOW_MODEL_VERSION or version == RIGID_MODEL_VERSION # 7 is a superset of 6 (limits, couplers, pairs), 8 of 7 (and adds the rigid sets)
 	var ids: Array = json.get("members", [])
 	if ids.is_empty() or ids.size() > max_members:
 		return null
@@ -92,6 +128,11 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 	model.members = ids.size()
 	model.member_ids = ids
 	model.n = 6 * ids.size()
+	# `rigid_sets` belongs to version 8 only; a set names its lead by index and a follower's id is none of the members'.
+	var followers = _parse_sets(json.get("rigid_sets"), version == RIGID_MODEL_VERSION, ids)
+	if followers == null:
+		return null
+	model._followers = followers
 	for raw in json.get("mates", []):
 		var type := str(raw["type"])
 		var coupler := _COUPLER_TYPES.has(type)
@@ -109,7 +150,7 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 			return null
 		for side in [a, b]:
 			# `follow` belongs to version 7 only (a malformed step makes `_parse_side` return null).
-			if (side["follow"] != null or (side["pair"] != null and side["pair"]["follow"] != null)) and version != FOLLOW_MODEL_VERSION:
+			if (side["follow"] != null or (side["pair"] != null and side["pair"]["follow"] != null)) and version != FOLLOW_MODEL_VERSION and version != RIGID_MODEL_VERSION:
 				return null
 			# `anchor` belongs to version 5 (and 6, the superset) only.
 			if side["ar"] != null and version != COUPLER_MODEL_VERSION and not v6:
@@ -157,6 +198,46 @@ static func try_parse(json, max_members: int = MAX_MEMBERS, max_rows: int = MAX_
 			if model.rows > max_rows:
 				return null
 	return model
+
+
+## The `rigid_sets` of a version-8 model as an Array (one entry per lead) of follower Arrays of {id, r, t}; null = malformed (a `rigid_sets` outside
+## version 8, a lead index out of range or listed twice, a follower without an id, a bad offset, an id used twice or that is also a lead).
+static func _parse_sets(raw, v8: bool, leads: Array):
+	var out: Array = []
+	for _i in leads.size():
+		out.append([])
+	if raw == null:
+		return out
+	if not v8 or not (raw is Array):
+		return null
+	var seen := {}
+	for id in leads:
+		seen[str(id)] = true
+	var used := {}
+	for entry in raw:
+		if not (entry is Dictionary) or not entry.has("member") or not (entry.get("followers") is Array):
+			return null
+		var lead := int(entry["member"])
+		if lead < 0 or lead >= leads.size() or used.has(lead):
+			return null
+		used[lead] = true
+		var list: Array = []
+		for f in entry["followers"]:
+			if not (f is Dictionary) or not (f.get("id") is String) or seen.has(f["id"]):
+				return null
+			if not (f.get("r") is Array) or not (f.get("t") is Array) or f["r"].size() != 3 or f["t"].size() != 3:
+				return null
+			var r: Array = []
+			for row in f["r"]:
+				if not (row is Array) or row.size() != 3:
+					return null
+				r.append_array(_floats(row))
+			seen[f["id"]] = true
+			list.append({"id": f["id"], "r": r, "t": _floats(f["t"])})
+		if list.is_empty():
+			return null
+		out[lead] = list
+	return out
 
 
 ## A side as {member, geo, fr, ft, pair}; `pair` is null or the same shape holding only `porigin` / `pnormal`. Returns null when
@@ -857,17 +938,6 @@ static func _solve(m: PackedFloat64Array, b: PackedFloat64Array, k: int) -> Pack
 	return x
 
 
-func _scaled_rows(jac: Array, w: Array) -> Array:
-	var a: Array = []
-	for row in jac:
-		var out := PackedFloat64Array()
-		out.resize(n)
-		for c in n:
-			out[c] = row[c] / w[c]
-		a.append(out)
-	return a
-
-
 ## Sequential nearest-point retraction (spec §4b): `iterations` trust-region steps towards `wishes`, then `polish`
 ## constraint-only steps. `w` = per-coordinate metric (see local_scale).
 ##
@@ -890,18 +960,24 @@ func retract(poses: Array, wishes: Array, w: Array, iterations: int = ITERATIONS
 
 func _retract_once(poses: Array, wishes: Array, w: Array, iterations: int, polish: int) -> Array:
 	var cur: Array = poses.duplicate()
+	var sets := has_sets()
 	for _it in iterations:
 		var ev = _evaluate(cur)
 		var r: PackedFloat64Array = ev[0]
+		var fin: Array = _factors(cur, w) if sets else [] # version 8: F⁻¹ of every lead that has followers (null for the others)
 		var g := PackedFloat64Array()
 		for i in members:
 			g.append_array(PackedFloat64Array(Se3.pose_delta(wishes[i], cur[i])))
-		var a := _scaled_rows(ev[1], w)
+		var a := _scaled_rows(ev[1], w, fin)
 		var y0 := PackedFloat64Array()
 		y0.resize(n)
+		if sets:
+			y0 = _target(cur, poses, g, w, fin)
+		else:
+			for c in n:
+				y0[c] = w[c] * g[c]
 		var n0 := 0.0
 		for c in n:
-			y0[c] = w[c] * g[c]
 			n0 += y0[c] * y0[c]
 		n0 = sqrt(n0)
 		if n0 > TRUST:
@@ -923,11 +999,7 @@ func _retract_once(poses: Array, wishes: Array, w: Array, iterations: int, polis
 			y.resize(n)
 			for c in n:
 				y[c] = y0[c] - corr[c]
-		var dx := PackedFloat64Array()
-		dx.resize(n)
-		for c in n:
-			dx[c] = y[c] / w[c]
-		cur = _step(cur, _cap_rotation(dx))
+		cur = _step(cur, _cap_rotation(_unscale(y, w, fin)))
 	for _it in polish:
 		var ev2 = _evaluate(cur)
 		var r2: PackedFloat64Array = ev2[0]
@@ -938,13 +1010,221 @@ func _retract_once(poses: Array, wishes: Array, w: Array, iterations: int, polis
 			big = maxf(big, absf(x))
 		if big < 1e-12:
 			break
-		var corr2 := _correction(_scaled_rows(ev2[1], w), r2)
-		var dx2 := PackedFloat64Array()
-		dx2.resize(n)
+		var fin2: Array = _factors(cur, w) if sets else []
+		var corr2 := _correction(_scaled_rows(ev2[1], w, fin2), r2)
+		var neg := PackedFloat64Array()
+		neg.resize(n)
 		for c in n:
-			dx2[c] = -corr2[c] / w[c]
-		cur = _step(cur, _cap_rotation(dx2))
+			neg[c] = -corr2[c]
+		cur = _step(cur, _cap_rotation(_unscale(neg, w, fin2)))
 	return cur
+
+
+# --- rigid sets (version 8): the set metric ---
+#
+# A set costs what its members would cost moving separately. In the lead's chart a follower at world offset d = R_L t moves by Ad(d)·[v, w] = [v + w × d, w], so
+# M = diag(s_L²) + Σ_m Ad(d_m)ᵀ diag(s_m²) Ad(d_m), F = its upper Cholesky factor (FᵀF = M), A = J F⁻¹, dx = F⁻¹ y, and
+# y0 = F⁻ᵀ (s_L² ∘ g_L + Σ_m Ad_mᵀ (s_m² ∘ g_m)) with g_m the move taking follower m back to its REST pose (its lead's pose at the START of the
+# retraction times its offset). `s_L` is the lead's weight row of `w`, `s_m` the grabbed row [1,1,1,L,L,L] (the first member's) × LOCAL_FOLLOWER. A lead without
+# followers keeps the diagonal path (`y / w`, `w ∘ g`), bit for bit as before version 8. `fin[i]` is lead i's F⁻¹ (36 floats, row-major, upper triangular) or null.
+
+func _factors(cur: Array, w: Array) -> Array:
+	var out: Array = []
+	for i in members:
+		if (_followers[i] as Array).is_empty():
+			out.append(null)
+		else:
+			out.append(_inv_upper_cholesky(_set_metric(i, cur[i], w)))
+	return out
+
+
+static func _follower_row(w: Array) -> Array:
+	var fs: Array = []
+	for c in 6:
+		fs.append(w[c] * LOCAL_FOLLOWER)
+	return fs
+
+
+func _set_metric(lead: int, pose: Dictionary, w: Array) -> PackedFloat64Array:
+	## M = diag(s_L²) + Σ_m Ad(d_m)ᵀ diag(s_m²) Ad(d_m). A follower's weight row is [f, f, f, g, g, g] (the grabbed row [1,1,1,L,L,L] × LOCAL_FOLLOWER), so with
+	## a = f², b = g² and D = [d]x the product is [[a I, -a D], [a D, a (|d|² I - d dᵀ) + b I]] (because -D D = |d|² I - d dᵀ): summed over the followers
+	## that needs only Σ d, Σ d dᵀ and Σ |d|² - the same matrix as the 6x6 products, a few multiplications per follower instead of ~200.
+	var fs := _follower_row(w)
+	var a: float = fs[0] * fs[0]
+	var b: float = fs[3] * fs[3]
+	var r: Array = pose["r"]
+	var sx := 0.0
+	var sy := 0.0
+	var sz := 0.0
+	var sxx := 0.0
+	var syy := 0.0
+	var szz := 0.0
+	var sxy := 0.0
+	var sxz := 0.0
+	var syz := 0.0
+	var count := 0
+	for f in _followers[lead]:
+		var t: Array = f["t"]
+		var dx: float = r[0] * t[0] + r[1] * t[1] + r[2] * t[2]
+		var dy: float = r[3] * t[0] + r[4] * t[1] + r[5] * t[2]
+		var dz: float = r[6] * t[0] + r[7] * t[1] + r[8] * t[2]
+		sx += dx
+		sy += dy
+		sz += dz
+		sxx += dx * dx
+		syy += dy * dy
+		szz += dz * dz
+		sxy += dx * dy
+		sxz += dx * dz
+		syz += dy * dz
+		count += 1
+	var dd := sxx + syy + szz
+	var m := PackedFloat64Array()
+	m.resize(36)
+	for c in 6:
+		m[c * 6 + c] = w[6 * lead + c] * w[6 * lead + c]
+	for c in 3:
+		m[c * 6 + c] += a * count
+		m[(3 + c) * 6 + 3 + c] += b * count + a * dd
+	# -a [S]x (top right) and a [S]x (bottom left); [S]x = [[0, -sz, sy], [sz, 0, -sx], [-sy, sx, 0]]
+	var sk := [0.0, -sz, sy, sz, 0.0, -sx, -sy, sx, 0.0]
+	for i in 3:
+		for j in 3:
+			m[i * 6 + 3 + j] = -a * sk[i * 3 + j]
+			m[(3 + i) * 6 + j] = a * sk[i * 3 + j]
+	# bottom right: - a Σ d dᵀ
+	var outer := [sxx, sxy, sxz, sxy, syy, syz, sxz, syz, szz]
+	for i in 3:
+		for j in 3:
+			m[(3 + i) * 6 + 3 + j] -= a * outer[i * 3 + j]
+	return m
+
+
+## U⁻¹ for the upper Cholesky factor U (UᵀU = M, positive diagonal) of the symmetric positive-definite 6x6 `m`. Returns an empty array if M is not positive definite.
+static func _inv_upper_cholesky(m: PackedFloat64Array) -> PackedFloat64Array:
+	var l := PackedFloat64Array()
+	l.resize(36)
+	for i in 6:
+		for j in range(i + 1):
+			var sum := m[i * 6 + j]
+			for k in j:
+				sum -= l[i * 6 + k] * l[j * 6 + k]
+			if i == j:
+				if sum <= 0.0:
+					return PackedFloat64Array()
+				l[i * 6 + i] = sqrt(sum)
+			else:
+				l[i * 6 + j] = sum / l[j * 6 + j]
+	var inv := PackedFloat64Array()
+	inv.resize(36)
+	for c in 6:
+		for r in range(c, -1, -1):
+			var sum := 1.0 if r == c else 0.0
+			for k in range(r + 1, c + 1):
+				sum -= l[k * 6 + r] * inv[k * 6 + c]
+			inv[r * 6 + c] = sum / l[r * 6 + r]
+	return inv
+
+
+func _scaled_rows(jac: Array, w: Array, fin: Array = []) -> Array:
+	var a: Array = []
+	for row in jac:
+		var out := PackedFloat64Array()
+		out.resize(n)
+		for i in members:
+			var inv = fin[i] if not fin.is_empty() else null
+			if inv == null:
+				for c in range(6 * i, 6 * i + 6):
+					out[c] = row[c] / w[c]
+			else:
+				for c in 6:
+					var sum := 0.0
+					for k in range(c + 1):
+						sum += row[6 * i + k] * inv[k * 6 + c]
+					out[6 * i + c] = sum
+		a.append(out)
+	return a
+
+
+## F⁻¹ y: the step in the twist coordinates (`y / w` without sets).
+func _unscale(y: PackedFloat64Array, w: Array, fin: Array) -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	out.resize(n)
+	for i in members:
+		var inv = fin[i] if not fin.is_empty() else null
+		if inv == null:
+			for c in range(6 * i, 6 * i + 6):
+				out[c] = y[c] / w[c]
+		else:
+			for r in 6:
+				var sum := 0.0
+				for c in range(r, 6):
+					sum += inv[r * 6 + c] * y[6 * i + c]
+				out[6 * i + r] = sum
+	return out
+
+
+## y0 of a retraction with sets (see the section comment); `start` = the poses the retraction started from (the followers' rest).
+## A follower's move to its rest pose is g_m = [(R_rest - R_L) t_m + (t_rest - t_L), rotvec(R_rest R_Lᵀ)] (every follower turns with its lead, so the rotation part is
+## the lead's own), and Ad(d)ᵀ [a g_v; b g_w] = [a g_v; a d × g_v + b g_w] (a, b as in `_set_metric`): so acc = s_L² ∘ g_L + [a Σ g_v ; a Σ d × g_v + m b g_w].
+func _target(cur: Array, start: Array, g: PackedFloat64Array, w: Array, fin: Array) -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	out.resize(n)
+	var fs := _follower_row(w)
+	var a: float = fs[0] * fs[0]
+	var b: float = fs[3] * fs[3]
+	for i in members:
+		var inv = fin[i]
+		if inv == null:
+			for c in range(6 * i, 6 * i + 6):
+				out[c] = w[c] * g[c]
+			continue
+		var acc: Array = []
+		for c in 6:
+			acc.append(w[6 * i + c] * w[6 * i + c] * g[6 * i + c])
+		var rl: Array = cur[i]["r"]
+		var tl: Array = cur[i]["t"]
+		var rr: Array = start[i]["r"]
+		var tr: Array = start[i]["t"]
+		var omega := Se3.rotvec_from_rot(Se3.mat_mul(rr, Se3.mat_transpose(rl)))
+		var dt := [tr[0] - tl[0], tr[1] - tl[1], tr[2] - tl[2]]
+		var count := 0
+		var gvx := 0.0
+		var gvy := 0.0
+		var gvz := 0.0
+		var cx := 0.0
+		var cy := 0.0
+		var cz := 0.0
+		for f in _followers[i]:
+			var t: Array = f["t"]
+			var dx: float = rl[0] * t[0] + rl[1] * t[1] + rl[2] * t[2]
+			var dy: float = rl[3] * t[0] + rl[4] * t[1] + rl[5] * t[2]
+			var dz: float = rl[6] * t[0] + rl[7] * t[1] + rl[8] * t[2]
+			var hx: float = rr[0] * t[0] + rr[1] * t[1] + rr[2] * t[2]
+			var hy: float = rr[3] * t[0] + rr[4] * t[1] + rr[5] * t[2]
+			var hz: float = rr[6] * t[0] + rr[7] * t[1] + rr[8] * t[2]
+			var vx: float = hx - dx + dt[0]
+			var vy: float = hy - dy + dt[1]
+			var vz: float = hz - dz + dt[2]
+			gvx += vx
+			gvy += vy
+			gvz += vz
+			cx += dy * vz - dz * vy
+			cy += dz * vx - dx * vz
+			cz += dx * vy - dy * vx
+			count += 1
+		acc[0] += a * gvx
+		acc[1] += a * gvy
+		acc[2] += a * gvz
+		acc[3] += a * cx + b * count * omega[0]
+		acc[4] += a * cy + b * count * omega[1]
+		acc[5] += a * cz + b * count * omega[2]
+		for r in 6:
+			var sum := 0.0
+			for c in range(r + 1):
+				sum += inv[c * 6 + r] * acc[c] # F⁻ᵀ[r][c] = F⁻¹[c][r]
+			out[6 * i + r] = sum
+	return out
 
 
 ## One frame: retract from `poses` (the previous displayed poses) towards `wishes` (grabbed: the hand; followers: their previous
@@ -960,13 +1240,18 @@ func frame(poses: Array, wishes: Array, fallback: Array, lever: float) -> Dictio
 	# A held limit is a stop the projector (the fallback) knows nothing of - it would show the part going on through it - so the distance guard
 	# cannot judge the answer: a converged result with a limit held is accepted as it is.
 	var ok := res <= ACCEPT_RESIDUAL and (not _held.is_empty() or dist <= ACCEPT_DISTANCE * maxf(lever, wish_step))
-	return {
+	var out := {
 		"accepted": ok,
 		"poses": got if ok else fallback,
 		"local_poses": got,
 		"residual_inf": res,
 		"fallback_distance": dist,
 	}
+	if has_sets():
+		# version 8: every follower's pose (by id) with the leads at the shown / the raw local answer
+		out["followers"] = expand_followers(out["poses"])
+		out["local_followers"] = out["followers"] if ok else expand_followers(got)
+	return out
 
 
 ## Iterations for a frame whose hand wish is `wish_step` (weighted mm) from the start pose.

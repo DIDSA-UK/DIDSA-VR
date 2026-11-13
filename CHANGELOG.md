@@ -3,6 +3,15 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## Branch `m2-v8-limit-stop-caps` (13 Nov, not merged; DIDSA-CAD plan `docs/mates-storage-sessions-plan-2026-11-12.md`, M2)
+
+Headless-tested. Nothing was run on a headset and the GDScript solve is **not** enabled per frame: that waits for a Quest run of the bench scene (`docs/local-retraction-benchmark.md`, "M2").
+
+- **Constraint model version 8 (rigid sets).** `scripts/motion/local_retraction.gd` reads it: the members are the sets' leads, `rigid_sets` gives each lead's followers as offsets, a lead with followers uses the set metric (a closed form of `Σ Ad(d)ᵀ diag(s²) Ad(d)`, Cholesky), a lead without keeps the old diagonal path bit for bit; `has_sets()`, `follower_ids()`, `expand_followers()`, and `frame()` returns `followers` / `local_followers`. `rigid_sets` outside version 8 and the other malformed shapes return null. The four `local-rigid-*` vectors (the fixture is re-copied from DIDSA-CAD `main`: 159 cases) pass to 1e-9 with their followers.
+- **The limit stop works for a group with a limit and a rigid set.** Since M1 such a group's model is version 8, which `try_parse` rejected, so `_adopt_limit_model` kept nothing and the stop was off. `_limit_stop` now maps the model's leads onto the drag's members (leads and followers) and scales every member's displacement back together. `tests/limit_mates_v8.gd` (new).
+- **`budget_exhausted`.** A preview that ran out of its time budget adds "Search stopped early: there may be more solutions." to the mate status line, after what it already says, never as an error (`tests/mates_preview_note.gd`).
+- **Benchmark.** `scripts/local_retraction_bench.gd` and the bench scene time three reduced models (`tests/fixtures/m0_reduced_models.json`, from DIDSA-CAD's M0 scenes): desktop 0.43 ms (one lead, no rows) to 2.2 ms (16 rows) per frame; `--all` adds the linkage and a bolted chain. Caps `MAX_MEMBERS` 3 / `MAX_ROWS` 64 unchanged.
+
 ## Branch `ccr-b1fb757b-j3dwf3` (11 Nov, not merged; DIDSA-CAD plan `docs/flutter-testing-feedback-2026-11-11-plan.md`, V1-V3 as they land)
 
 Headless-tested; the V1 vector copy needs the DIDSA-CAD change on the same-named branch (its `docs/file-lookup/vectors.json`). Not checked on the headset.

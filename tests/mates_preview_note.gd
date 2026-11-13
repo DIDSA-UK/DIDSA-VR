@@ -86,6 +86,42 @@ func _initialize() -> void:
 	await _frames(10)
 	print("SMOKE a converged answer that moves nothing says so: ", tool.status_text().contains("moved nothing"))
 
+	# M2: `budget_exhausted` (M1.1: the preview ran out of its time budget; an older backend omits it = false) is shown as a note after what the status already says
+	var note: String = MatesTool.BUDGET_NOTE
+	print("SMOKE the note is the agreed sentence: ", note == "Search stopped early: there may be more solutions.")
+	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}], "budget_exhausted": true}
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE budget_exhausted: true with a ghost says so after the usual line, not instead of it: ", tool.preview_budget_exhausted and tool.preview_visible() and tool.status_text().begins_with("Preview shown in blue") and tool.status_text().ends_with(note))
+	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}], "budget_exhausted": false}
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE a budget_exhausted of false adds nothing: ", not tool.preview_budget_exhausted and not tool.status_text().contains("Search stopped"))
+	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}]}
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE an older backend without the field reads as false: ", not tool.preview_budget_exhausted and not tool.status_text().contains("Search stopped"))
+	tool.answer = {"converged": false, "conflicting": ["m2"], "budget_exhausted": true}
+	tool.mates = [{"id": "m2", "type": "distance"}]
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE ...also with a conflict sentence (the note comes after it): ", tool.status_text().contains("conflicts with an earlier mate") and tool.status_text().ends_with(note), " | ", tool.status_text())
+	tool.answer = {"converged": false, "budget_exhausted": true}
+	tool.mates = []
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE ...and with no placement (the reason, then the note): ", tool.status_text().begins_with("No preview:") and tool.status_text().ends_with(note))
+	tool.ok = false
+	tool.request_preview()
+	await _frames(10)
+	print("SMOKE a refused request clears the flag (nothing was searched): ", not tool.preview_budget_exhausted and not tool.status_text().contains("Search stopped"))
+	tool.ok = true
+	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}], "budget_exhausted": true}
+	tool.request_preview()
+	await _frames(10)
+	tool.clear_picks()
+	print("SMOKE clearing the picks clears the flag and the note: ", not tool.preview_budget_exhausted and not tool.status_text().contains("Search stopped"))
+
 	tool.clear_picks()
 	print("SMOKE clearing the picks clears the note: ", tool._preview_note == "")
 	quit(0)

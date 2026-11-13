@@ -64,7 +64,7 @@ Wire the local retraction into the VR drag only for the member counts that pass,
 | 1.5 - 3 ms | not worth it: keep the projector; revisit with a cheaper solver (sparse rows, fewer iterations) |
 | > 3 ms | no |
 
-Whatever the verdict, VR stays correct: the projector is the fallback and the only path above `MAX_MEMBERS` (= 3).
+Whatever the verdict, VR stays correct: the projector is the fallback and the only path above `MAX_MEMBERS` (= 3; from version 8 these are rigid-set leads, see the M2 section at the end).
 
 ## Run it on the headset (about 20 minutes)
 
@@ -94,3 +94,54 @@ because on the desktop numbers the unoptimised port is already ~10x the projecto
 ## Addendum, 23 Oct: the gear train (limit mates, M9)
 
 The VR drag was going to run the nearest-point solve per frame for groups with a limit mate. Measured on the gear train demo's real constraint model (pinion, gear, rack, crank: 4 members, 42 rows, `Local.try_parse(model, 8)`, a desktop, headless): **11.7 ms per `frame()` with no limit held and 69 ms with one held** (the active-set rounds run the retraction two to four times). Far over a headset frame (11 ms) before the Quest's slower CPU is counted. So VR does not run it for such groups: the drag keeps the limit-blind projection and stops it at the limit with a bisection on the limit values (`MatesTool._limit_stop`, 0.8 ms for the same four members, only while a limit is violated). See `limit-mates-scope.md`.
+
+## M2 (13 Nov 2026): the reduced models (constraint model version 8), and what to run on the headset
+
+Context: DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`, M1 and M2. Since M1 the backend merges the members its mates lock together
+into one body per rigid set, and the constraint model it exports (version 8) has one member per set (the "lead"), the rest as constant
+offsets (`rigid_sets`). A 10-part chain is now one lead with no rows (floating) or 16 rows (held to the ground), instead of 10 members and 144
+rows. `local_retraction.gd` reads version 8 (the set metric, the followers posed from their leads: `has_sets()`, `follower_ids()`,
+`expand_followers()`, and `frame()` returns `followers` / `local_followers`); all `local-rigid-*` vectors pass to 1e-9
+(`tests/local_retraction.gd`). `tests/fixtures/m0_reduced_models.json` holds the exported models of the 22 M0 scene variants.
+
+**Desktop, NOT the headset** (Godot 4.7.2 headless, Xeon 2.1 GHz, 4 threads, 1000 warm calls per case, one full `frame()` per call; run
+`"$GODOT" --headless --path . --script res://tests/bench_local_retraction.gd -- --calls=1000`):
+
+| case | leads (followers) | rows | mean | p95 | max |
+|---|---|---|---|---|---|
+| k=1 bolt in plate (October's row) | 1 | 10 | 1.05 ms | 1.53 ms | 3.0 ms |
+| k=3 row of 3 boxes (October's row) | 3 | ~20 | 2.86 ms | 4.16 ms | 7.9 ms |
+| **v8 chain-10 floating** | 1 (9) | 0 | **0.43 ms** | **0.65 ms** | 2.5 ms |
+| **v8 chain-10 fixed** (base fixed) | 1 (8) | 16 | 2.22 ms | 3.22 ms | 5.9 ms |
+| **v8 frame-10 fixed** | 1 (8) | 12 | 1.72 ms | 2.46 ms | 5.0 ms |
+| v8 linkage fixed (`--all`) | 3 (20) | 40 | 11.2 ms | 16.1 ms | 34 ms |
+| v8 linkage floating (`--all`) | 4 (20) | 40 | 14.8 ms | 21.6 ms | 46 ms |
+| v8 chain-5-bolts fixed (`--all`) | 7 (3) | 76 | 68 ms | 99 ms | 226 ms |
+| *the projector's frame (what VR pays today)* | 3 | 5 basis rows | 0.12 ms | 0.19 ms | 0.35 ms |
+
+How to read it: the followers add little (a lead with nine followers and no rows costs 0.43 ms: the set metric is a sum over the followers, evaluated
+in closed form: `projector-spec.md` §4b "Clients"; the literal 6x6 products measured 1.93 ms for the same case), the rows dominate (16 rows:
+five times more). In October the Quest ran this solver about **2.5 times slower than this desktop** and measured k=1 at 3.1 ms p95, a no-go against the
+rule below. **Expectation, not a measurement:** the same ratio puts the rows-free case (a floating group, however many parts) at about 1.6 ms p95 on the Quest,
+just over the rule, and every case with rows (a group held to the ground: 12 to 16 rows, 6 to 8 ms) well over it. `MAX_MEMBERS` (3) and `MAX_ROWS` (64) are
+not raised: the solve is not run per frame in the app, so they gate nothing today, and these numbers give no case for loosening them.
+
+**Whether to run the GDScript solve per frame on the headset is the owner's decision after a Quest run. Nothing in the app enables it.**
+The limit stop (`MatesTool._limit_stop`) reads a version-8 model since M2 (a group with a limit and a set had no stop before: `tests/limit_mates_v8.gd`);
+it does not run the solve (about 0.5 ms for a lead and a follower).
+
+### What to run (about 20 minutes, the same steps as above with one change)
+
+1. Desktop first: `GODOT=/path/to/godot-4.7.2 tests/run_all.sh` (or `"$GODOT" --headless --path . --script res://tests/local_retraction.gd`, expect `SMOKE PASSED`).
+2. Build the benchmark APK exactly as under "Run it on the headset" (Main Scene = `res://scenes/bench_local_retraction.tscn`, reverted afterwards; Android preset; the
+   *Resources* filter `*.json` in "Filters to export non-resource files" now has to carry **two** files: `tests/fixtures/motion_vectors.json` and `tests/fixtures/m0_reduced_models.json`; a
+   debug APK). If the label says "benchmark setup failed", the second file is missing from the export.
+3. `adb install -r bench.apk`, `adb logcat -c && adb logcat -s godot`, put the headset on and leave it running the full **180 s** (the late `t=1xx s` lines are the honest ones: the chip
+   throttles). It does one `frame()` per rendered frame in round-robin over seven entries (k=1, k=2, k=3, **v8 chain-10 floating, v8 chain-10 fixed, v8 frame-10 fixed**, the projector), so each is
+   sampled every seventh frame. Do **not** add `--all` (it adds the linkage and the bolted chain, which take 10 to 70 ms and make the app crawl).
+4. Send the `FINAL` lines and the headset model / firmware. The rows that matter are the three `v8 ...` ones; the rest are the October rows for comparison.
+5. The rule (unchanged): **p95 at most 1.5 ms and max at most 4 ms** for a case = it may be wired for groups of that shape, behind an app setting, default off first; 1.5 to 3 ms = not worth it; above 3 ms = no.
+   Likely outcome by the extrapolation above: `v8 chain-10 floating` borderline, the other two a no.
+6. If a case passes, the wiring is a separate change (where `mates_tool.gd` shows the frame: `_frame_poses`), to be made on the owner's say, with `expand_followers()` for the followers.
+
+Not settled by this: the Quest figures for the reduced models (none were measured), the stereo render load (the October run was a flat 2D app), and the network round trips.
