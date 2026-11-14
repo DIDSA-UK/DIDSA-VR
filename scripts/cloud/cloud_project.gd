@@ -23,7 +23,7 @@ extends RefCounted
 ##   * 412 / 409 give a per-file clash with who changed it and when, and three choices (resolve()): Keep mine, Take theirs (mine kept locally until the next sync after the
 ##     one that finishes the resolution), Save mine as a copy ("<name> (<device>, <date>).didsa", a NEW Part id: cloud_remint.gd); a deleted or moved file is a clash too;
 ##   * an unreachable store queues the save and never loses it; 413 and 400 show the store's message, 401 names the key; a file over 100 MB that fails while the store
-##     still answers may be the Cloudflare tunnel's limit (no chunking: that is S4); a save whose bytes equal the version it was read at is not sent;
+##     still answers may be the Cloudflare tunnel's limit (a file over 90 MB, or one a tunnel refuses, goes up in chunks that resume: S4; only an older store without uploads.chunked reports it); a save whose bytes equal the version it was read at is not sent;
 ##   * sync(): ask the change feed from the saved cursor first, flag queued saves it shows are now stale as clashes, refresh files others changed, then send the queue as
 ##     one commit. A refused cursor (400 bad_cursor) falls back to the tree.
 
@@ -34,7 +34,10 @@ const NativeCompose := preload("res://scripts/native_compose.gd")
 const FileIndex := preload("res://scripts/file_index.gd")
 
 const TUNNEL_LIMIT := 100 * 1024 * 1024 ## a Cloudflare tunnel's documented request limit (free plan; not measured here)
-const UPLOAD_KEEP_MS := 50 * 60 * 1000 ## the store keeps an upload an hour
+const UPLOAD_KEEP_MS := 50 * 60 * 1000 ## the store keeps an upload an hour (and each chunk renews it)
+const CHUNK_THRESHOLD := 90 * 1024 * 1024 ## S4: a file over this goes up in chunks (headroom under the tunnel's 100 MB request limit)
+const CHUNK_BYTES := 32 * 1024 * 1024 ## ...of this size (the store's own advice, `chunk_size`, wins when it is smaller)
+const CHUNK_RETRIES := 3 ## a chunk the store did not answer is retried this many times in a row before the sync gives up (the upload resumes next time)
 
 signal changed ## the summary may have changed (a sync ended, a choice was made)
 
@@ -51,9 +54,9 @@ var unsent_missing: Array = [] ## queued saves whose mirror file is gone (the wa
 var last_error := ""
 var syncing := false
 var tunnel_limit := TUNNEL_LIMIT ## tests lower it
+var chunk_threshold := CHUNK_THRESHOLD ## tests lower these two
+var chunk_bytes := CHUNK_BYTES
 
-var _stat := {} ## path -> {size, mtime, sha}
-var _last_scan_at := 0
 var _rerun := false
 var _blocked := "" ## the queue contents a send failed for; not retried by the timer until they change
 var _uploads := {} ## path -> {id, sha, at_ms}
@@ -94,7 +97,7 @@ func _record(info: Dictionary) -> void:
 	state.files[entry["path"]] = entry
 	state.tree[entry["path"]] = entry.duplicate()
 	state.behind.erase(entry["path"])
-	_stat.erase(entry["path"])
+	state.stat.erase(entry["path"])
 
 
 func _record_sent(info: Dictionary) -> void:
@@ -103,6 +106,7 @@ func _record_sent(info: Dictionary) -> void:
 	state.queue.erase(str(info["path"]))
 	problems.erase(str(info["path"]))
 	_uploads.erase(str(info["path"]))
+	state.uploads.erase(str(info["path"]))
 
 
 func _set_tree(files: Array) -> void:
@@ -128,20 +132,24 @@ func scan() -> Dictionary:
 	var found := CloudFiles.list_files(mirror_dir)
 	var result := {"new": [], "changed": [], "reverted": []}
 	var dirty := false
-	var previous_scan := _last_scan_at
+	var hashed := false
 	for rel in found:
 		var full: String = found[rel]
 		var size := CloudFiles.file_size(full)
 		var mtime := FileAccess.get_modified_time(full)
-		var cached = _stat.get(rel)
+		var cached = state.stat.get(rel)
 		var sha := ""
-		if cached != null and int(cached["size"]) == size and int(cached["mtime"]) == mtime and mtime < previous_scan - 1:
+		# The size / modified-time shortcut (kept across restarts, S4): the same size and mtime as when the file was hashed, and the file had been still for more than
+		# a second by then (a write in the same second as the hash could leave both unchanged: git's "racy" rule). Anything else is hashed.
+		if cached != null and int(cached["size"]) == size and int(cached["mtime"]) == mtime and mtime < int(cached["seen"]) - 1:
 			sha = str(cached["sha"])
 		else:
 			sha = CloudFiles.hash_file(full)
+			hashed = true
 		if sha == "":
 			continue # unreadable right now (being written?): the next scan sees it
-		_stat[rel] = {"size": size, "mtime": mtime, "sha": sha}
+		if cached == null or not (int(cached["size"]) == size and int(cached["mtime"]) == mtime and mtime < int(cached["seen"]) - 1):
+			state.stat[rel] = {"size": size, "mtime": mtime, "sha": sha, "seen": int(Time.get_unix_time_from_system())} # (hashed just now)
 		var synced = state.files.get(rel)
 		if synced != null and sha == str(synced["sha256"]):
 			if state.queue.has(rel):
@@ -168,15 +176,15 @@ func scan() -> Dictionary:
 		state.queue[rel] = {"base": null if synced == null else int(synced["version"]), "queued_at_ms": now_ms(), "sha": sha, "clash": null, "reconciled": null}
 		result["changed" if synced != null else "new"].append(rel)
 		dirty = true
-	_last_scan_at = int(Time.get_unix_time_from_system())
-	for rel in _stat.keys():
+	for rel in state.stat.keys():
 		if not found.has(rel):
-			_stat.erase(rel)
+			state.stat.erase(rel)
+			dirty = true
 	unsent_missing = []
 	for rel in state.queue:
 		if not found.has(rel):
 			unsent_missing.append(rel)
-	if dirty:
+	if dirty or hashed:
 		state.save()
 	return result
 
@@ -322,7 +330,7 @@ func _apply_changes(latest: Dictionary, held: Dictionary, report: Dictionary) ->
 				CloudFiles.remove_file(abs_path(path)) # the store removed it; this copy was its last version, still in the store's history
 				state.files.erase(path)
 				state.tree.erase(path)
-				_stat.erase(path)
+				state.stat.erase(path)
 
 
 func _download(path: String) -> Dictionary:
@@ -409,6 +417,7 @@ func _adopt_equal() -> void:
 		if listed != null and str(state.queue[path]["sha"]) == str(listed["sha256"]):
 			state.files[path] = (listed as Dictionary).duplicate()
 			state.queue.erase(path)
+			state.uploads.erase(path)
 
 
 func _signature(paths: Array) -> String:
@@ -435,7 +444,7 @@ func _push(report: Dictionary) -> void:
 		report["error"] = last_error
 		return
 	var outcome: Dictionary
-	if entries.size() == 1:
+	if entries.size() == 1 and CloudFiles.file_size(abs_path(entries[0])) <= chunk_threshold:
 		outcome = await _send_single(entries[0])
 	else:
 		outcome = await _send_commit(entries)
@@ -469,6 +478,8 @@ func _send_single(path: String) -> Dictionary:
 		online = true
 		entry["clash"] = clash_from_current(answer["current"], entry["base"] == null)
 		return {"error": "%s changed on the server." % path.get_file()}
+	if answer["kind"] == "too_large" and not answer["from_store"]:
+		return await _send_commit([path]) # something in front of the store refused the body: the commit path can send it in pieces
 	return await _send_failed(answer, [path], bytes.size())
 
 
@@ -478,19 +489,12 @@ func _send_commit(entries: Array) -> Dictionary:
 		var changes: Array = []
 		var biggest := 0
 		for path in entries:
-			var bytes := CloudFiles.read_bytes(abs_path(path))
-			var sha := CloudFiles.hash_bytes(bytes)
-			biggest = maxi(biggest, bytes.size())
-			var known = _uploads.get(path)
-			var upload_id := ""
-			if known != null and str(known["sha"]) == sha and now_ms() - int(known["at_ms"]) < UPLOAD_KEEP_MS:
-				upload_id = str(known["id"])
-			else:
-				var up: Dictionary = await client.upload(project, bytes)
-				if not up["ok"]:
-					return await _send_failed(up, [path], bytes.size())
-				upload_id = str(up["json"]["upload_id"])
-				_uploads[path] = {"id": upload_id, "sha": sha, "at_ms": now_ms()}
+			var size := CloudFiles.file_size(abs_path(path))
+			biggest = maxi(biggest, size)
+			var up: Dictionary = await _upload_file(path, size)
+			if not up["ok"]:
+				return await _send_failed(up, [path], size)
+			var upload_id := str(up["upload_id"])
 			var base = state.queue[path]["base"]
 			changes.append({"op": "put", "path": path, "base_version": base, "upload_id": upload_id})
 		var answer: Dictionary = await client.commit(project, changes)
@@ -512,27 +516,134 @@ func _send_commit(entries: Array) -> Dictionary:
 		if answer["kind"] == "bad_request" and answer["code"] == "unknown_upload" and not retried:
 			retried = true
 			_uploads.clear() # an upload expired (the store keeps them an hour): upload everything again, once
+			state.uploads.clear()
 			continue
 		return await _send_failed(answer, entries, biggest)
 	return {}
+
+
+func _upload_file(path: String, size: int) -> Dictionary:
+	## The bytes of one queued file are on the store, ready for a commit: {ok, upload_id}, or a failed store answer. A file up to `chunk_threshold` goes in one request (kept for
+	## the hour, so a commit that has to be sent again does not upload again); a bigger one, or one a tunnel refused, in chunks (S4), resuming where the store says it got to.
+	var full := abs_path(path)
+	if size > chunk_threshold:
+		return await _upload_chunked(path, size, CloudFiles.hash_file(full))
+	var bytes := CloudFiles.read_bytes(full)
+	var sha := CloudFiles.hash_bytes(bytes)
+	var known = _uploads.get(path)
+	if known != null and str(known["sha"]) == sha and now_ms() - int(known["at_ms"]) < UPLOAD_KEEP_MS:
+		return {"ok": true, "upload_id": str(known["id"])}
+	var up: Dictionary = await client.upload(project, bytes)
+	if not up["ok"]:
+		if up["kind"] == "too_large" and not up["from_store"]:
+			var chunked: Dictionary = await _upload_chunked(path, bytes.size(), sha) # a tunnel with a lower limit than we thought: try chunks
+			if chunked["ok"] or chunked["kind"] != "no_chunking":
+				return chunked
+		return up
+	_uploads[path] = {"id": str(up["json"]["upload_id"]), "sha": sha, "at_ms": now_ms()}
+	return {"ok": true, "upload_id": str(up["json"]["upload_id"])}
+
+
+func _upload_chunked(path: String, size: int, sha: String) -> Dictionary:
+	## Chunked upload with resume. The session (id, hash, size) is kept in the private state before the first chunk, so a cut connection, a store that was switched off, or the
+	## app being closed all end the same way: next time the store is asked how far it got (`received`) and only the rest is sent. A changed file (another hash) starts over.
+	if sha == "":
+		return _failed_answer("error", "%s can't be read right now." % path.get_file())
+	var health: Dictionary = await client.health()
+	if health["kind"] == "unreachable":
+		return health
+	if not "uploads.chunked" in _features(health):
+		return _failed_answer("no_chunking", "This project store is too old for uploads over 100 MB (it does not list uploads.chunked).")
+	var id := ""
+	var received := 0
+	var known = state.uploads.get(path)
+	if known != null and str(known["sha"]) == sha and int(known["size"]) == size and now_ms() - int(known["at_ms"]) < UPLOAD_KEEP_MS:
+		var status: Dictionary = await client.upload_status(project, str(known["id"]))
+		if status["ok"]:
+			id = str(known["id"])
+			received = int(status["json"].get("received", 0))
+			if bool(status["json"].get("complete", false)):
+				return {"ok": true, "upload_id": id}
+		elif status["kind"] != "not_found":
+			return status # unreachable and the like: the session stays saved
+	if id == "":
+		state.uploads.erase(path)
+		var made: Dictionary = await client.upload_session(project, size, sha)
+		if not made["ok"]:
+			return made
+		id = str(made["json"]["upload_id"])
+		var advised := int(made["json"].get("chunk_size", chunk_bytes))
+		state.uploads[path] = {"id": id, "sha": sha, "size": size, "at_ms": now_ms()}
+		state.save()
+		if advised > 0 and advised < chunk_bytes:
+			chunk_bytes = advised
+	var file := FileAccess.open(abs_path(path), FileAccess.READ)
+	if file == null or file.get_length() != size:
+		return _failed_answer("error", "%s changed while it was being sent; it will be tried again." % path.get_file())
+	var failures := 0
+	while received < size:
+		file.seek(received)
+		var piece := file.get_buffer(mini(chunk_bytes, size - received))
+		var answer: Dictionary = await client.upload_chunk(project, id, received, piece)
+		if answer["ok"]:
+			failures = 0
+			received += piece.size()
+			state.uploads[path]["at_ms"] = now_ms()
+			continue
+		if answer["kind"] == "conflict" and answer["code"] == "wrong_offset":
+			var there := int(answer["json"].get("received", 0)) # a reply was lost: the store says where it really is
+			failures += 1 if there == received or there > size else 0 # (a store that keeps refusing the offset it names is not going to agree: give up, never loop)
+			if failures >= CHUNK_RETRIES:
+				return _failed_answer("error", "The project store and this headset disagree about how much of %s was uploaded; it will be tried again." % path.get_file())
+			received = clampi(there, 0, size)
+			continue
+		if answer["kind"] == "unreachable" and failures < CHUNK_RETRIES - 1:
+			failures += 1
+			continue
+		if answer["kind"] == "not_found":
+			state.uploads.erase(path) # it expired: the next attempt starts a new one
+		return answer
+	state.uploads[path]["at_ms"] = now_ms()
+	state.save()
+	var done: Dictionary = await client.upload_complete(project, id)
+	if done["ok"]:
+		return {"ok": true, "upload_id": id}
+	if done["kind"] == "bad_request" or done["kind"] == "not_found":
+		state.uploads.erase(path) # damaged on the way, or gone: the upload cannot be repaired, the next attempt starts again
+		state.save()
+	return done
+
+
+static func _features(health: Dictionary) -> Array:
+	var list = health["json"].get("api_features", []) if health["ok"] else []
+	return list if list is Array else []
+
+
+static func _failed_answer(kind: String, message: String) -> Dictionary:
+	return {"ok": false, "kind": kind, "message": message, "from_store": false, "code": "", "status": 0, "json": {}}
 
 
 func _send_failed(answer: Dictionary, paths: Array, size: int) -> Dictionary:
 	## A store answer that is not success and not a clash. The queue is kept as it is: nothing is lost.
 	var kind: String = answer["kind"]
 	if kind == "unreachable":
-		if size > tunnel_limit and await _server_answers():
-			return _problem(paths, "%s is %s. A server behind a Cloudflare tunnel can refuse an upload over 100 MB, and chunked upload is not built yet. The file was not saved to the server; it stays in the local copy." % [str(paths[0]).get_file(), size_text(size)])
+		if size > tunnel_limit and await _answers_without_chunking():
+			return _problem(paths, "%s is %s. A server behind a Cloudflare tunnel can refuse an upload over 100 MB, and this project store cannot take it in pieces. The file was not saved to the server; it stays in the local copy." % [str(paths[0]).get_file(), size_text(size)])
 		online = false
 		return {"unreachable": true}
 	online = true
 	match kind:
+		"no_chunking":
+			return _problem(paths, "%s is %s. %s The file was not saved to the server; it stays in the local copy until you update the store." % [str(paths[0]).get_file(), size_text(size), answer["message"]])
+		"error":
+			if answer["status"] == 0:
+				return {"error": answer["message"]} # not a store refusal (a file that changed while being read): tried again at the next sync
 		"auth":
 			auth_failed = true
 			return {"error": "The project store refused the key (401). Check the store key under Servers."}
 		"too_large":
 			var said: String = ("It says: %s. " % answer["message"]) if answer["from_store"] else "Something in front of it (a tunnel?) refused it. "
-			return _problem(paths, "%s is %s, which is too large for the project store. %sChunked upload is not built yet. The file was not saved to the server; it stays in the local copy until you choose Keep local only." % [str(paths[0]).get_file(), size_text(size), said])
+			return _problem(paths, "%s is %s, which is too large for the project store. %sThe file was not saved to the server; it stays in the local copy until you choose Keep local only." % [str(paths[0]).get_file(), size_text(size), said])
 		"bad_request":
 			return _problem(paths, "The project store refused this save: %s" % answer["message"])
 		"precondition_required":
@@ -544,6 +655,13 @@ func _problem(paths: Array, message: String) -> Dictionary:
 	for path in paths:
 		problems[path] = message
 	return {"error": message, "block": true}
+
+
+func _answers_without_chunking() -> bool:
+	## The store answers but cannot take a big file in pieces: then a failed upload of a file over the tunnel's limit is most likely the tunnel (a store that CAN chunk gets
+	## the file in chunks instead, so this message would be wrong for it).
+	var health: Dictionary = await client.health()
+	return health["kind"] != "unreachable" and not "uploads.chunked" in _features(health)
 
 
 func _server_answers() -> bool:
@@ -736,14 +854,14 @@ func _take_theirs(path: String, clash, result: Dictionary, as_copy: bool) -> Str
 		CloudFiles.remove_file(full)
 		state.files.erase(path)
 		state.tree.erase(path)
-		_stat.erase(path)
+		state.stat.erase(path)
 	elif not theirs_info.is_empty():
 		var wrote2 := CloudFiles.write_bytes_atomic(full, theirs)
 		if wrote2 != "":
 			return wrote2
 		state.files[path] = CloudState.info_from_store(theirs_info)
 		state.tree[path] = CloudState.info_from_store(theirs_info)
-		_stat.erase(path)
+		state.stat.erase(path)
 	state.queue.erase(path)
 	state.behind.erase(path)
 	problems.erase(path)

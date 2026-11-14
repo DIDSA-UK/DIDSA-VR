@@ -166,6 +166,28 @@ func upload(project: String, bytes: PackedByteArray) -> Dictionary:
 	return await _call("POST", "/projects/%s/uploads" % enc(project), {"Content-Type": "application/octet-stream"}, bytes)
 
 
+# Chunked upload (S4; the store lists "uploads.chunked" in /health api_features): a file too big for one request (a Cloudflare tunnel refuses a body over 100 MB).
+
+func upload_session(project: String, size: int, sha256: String) -> Dictionary:
+	## Opens a chunked upload: json.upload_id, chunk_size, received (0). The store checks the whole file against `sha256` at upload_complete.
+	return await _call("POST", "/projects/%s/uploads/sessions" % enc(project), {"Content-Type": "application/json"}, JSON.stringify({"size": size, "sha256": sha256}).to_utf8_buffer())
+
+
+func upload_status(project: String, upload_id: String) -> Dictionary:
+	## json.received (bytes the store has, in order), size, complete. 404 (code unknown_upload) once it has expired.
+	return await _call("GET", "/projects/%s/uploads/%s" % [enc(project), enc(upload_id)])
+
+
+func upload_chunk(project: String, upload_id: String, offset: int, bytes: PackedByteArray) -> Dictionary:
+	## Appends one chunk at `offset`, which must be what the store has received so far: otherwise 409 (kind "conflict", code wrong_offset, json.received says where to go on).
+	return await _call("PUT", "/projects/%s/uploads/%s?offset=%d" % [enc(project), enc(upload_id), offset], {"Content-Type": "application/octet-stream"}, bytes)
+
+
+func upload_complete(project: String, upload_id: String) -> Dictionary:
+	## Checks the size and SHA-256: ok -> json.upload_id, usable in a commit like a one-shot upload's. A hash mismatch is a 400 (code checksum_mismatch) and the upload is gone.
+	return await _call("POST", "/projects/%s/uploads/%s/complete" % [enc(project), enc(upload_id)])
+
+
 func commit(project: String, changes: Array, message: String = "") -> Dictionary:
 	## `changes`: [{op: "put", path, base_version (int, or null = create), upload_id}]. All or nothing: ok -> json.files (every new version), json.cursor;
 	## a 409 -> kind "conflict" with `conflicts` (every clash) and nothing written.

@@ -12,6 +12,9 @@ extends RefCounted
 ##                                     one sync has gone by; the following successful sync with nothing queued drops it)
 ##   ignored  path -> sha         a file the user chose to keep local only (a save the store will not take); a later change to the file queues it again
 ##   behind   path -> version     a file this session holds that the store has a newer version of (it is NOT refreshed under the open session)
+##   uploads  path -> {id, sha, size, at_ms}   a chunked upload that has begun (S4): kept so a closed app resumes it instead of starting a 150 MB file again
+##   stat     path -> {size, mtime, sha, seen}  the last hash of each mirror file and when it was taken (S4): a restart does not re-hash a file whose size and modified time
+##                                              are unchanged (and which was not modified within a second of being hashed)
 ##   cursor   String              where the store's change feed was last read ("" = never)
 ##
 ## Writes are atomic (temp file, then rename), so a kill mid-save leaves the last good file. A state file that can't be read starts clean (the mirror still has the
@@ -26,6 +29,8 @@ var queue: Dictionary = {}
 var mine: Dictionary = {}
 var ignored: Dictionary = {}
 var behind: Dictionary = {}
+var uploads: Dictionary = {}
+var stat: Dictionary = {}
 var cursor := ""
 var last_synced_ms := 0
 var load_error := ""
@@ -51,6 +56,8 @@ func load_from_disk() -> void:
 	mine.clear()
 	ignored.clear()
 	behind.clear()
+	uploads.clear()
+	stat.clear()
 	cursor = ""
 	last_synced_ms = 0
 	load_error = ""
@@ -88,6 +95,18 @@ func load_from_disk() -> void:
 	if newer is Dictionary:
 		for path in newer:
 			behind[str(path)] = int(newer[path])
+	var started = parsed.get("uploads", {})
+	if started is Dictionary:
+		for path in started:
+			var u = started[path]
+			if u is Dictionary and str(u.get("id", "")) != "":
+				uploads[str(path)] = {"id": str(u["id"]), "sha": str(u.get("sha", "")), "size": int(u.get("size", 0)), "at_ms": int(u.get("at_ms", 0))}
+	var seen_hashes = parsed.get("stat", {})
+	if seen_hashes is Dictionary:
+		for path in seen_hashes:
+			var h = seen_hashes[path]
+			if h is Dictionary and str(h.get("sha", "")) != "":
+				stat[str(path)] = {"size": int(h.get("size", -1)), "mtime": int(h.get("mtime", -1)), "sha": str(h["sha"]), "seen": int(h.get("seen", 0))}
 	cursor = str(parsed.get("cursor", ""))
 	last_synced_ms = int(parsed.get("last_synced_ms", 0))
 	store_url = str(parsed.get("store_url", ""))
@@ -119,7 +138,7 @@ static func _clash(raw) -> Variant:
 
 
 func to_dictionary() -> Dictionary:
-	var out := {"store_url": store_url, "project": project, "cursor": cursor, "last_synced_ms": last_synced_ms, "files": [], "tree": [], "queue": [], "mine": mine, "ignored": ignored, "behind": behind}
+	var out := {"store_url": store_url, "project": project, "cursor": cursor, "last_synced_ms": last_synced_ms, "files": [], "tree": [], "queue": [], "mine": mine, "ignored": ignored, "behind": behind, "uploads": uploads, "stat": stat}
 	for path in files:
 		out["files"].append(files[path])
 	for path in tree:
