@@ -338,10 +338,11 @@ func _statuses() -> void:
 	await u.project.sync()
 	await u.project.ensure_file("C.didsa")
 	u.project.tunnel_limit = 8
+	u.fake.chunked = false # (a store that can take chunks gets the file in pieces instead: tests/cloud_hardening.gd)
 	u.write_local("C.didsa", "more than eight bytes of text")
 	u.fake.fail_next("/files/", 0)
 	report = await u.project.sync(true)
-	_check(report["error"].contains("Cloudflare tunnel") and u.project.state.queue.has("C.didsa") and u.project.summary()["online"] == true, "a big upload that fails while the store still answers is explained as the tunnel's limit (no chunking), and kept")
+	_check(report["error"].contains("Cloudflare tunnel") and u.project.state.queue.has("C.didsa") and u.project.summary()["online"] == true, "a big upload that fails while the store still answers is explained as the tunnel's limit (a store without chunk support), and kept")
 	# a connection that drops on a small file is just offline
 	var d := _rig()
 	d.put_remote("D.didsa", "x")

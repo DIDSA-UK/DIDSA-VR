@@ -3,6 +3,16 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## S4, sync hardening (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "S4. Hardening"; headless, Xvfb and against a real store that is killed and restarted, **not run on a headset**; details in `docs/server-projects.md`, "S4: hardening")
+
+- **Chunked upload with resume**: a file over 90 MB, or one a tunnel refuses, goes up in 32 MB chunks through the store's new chunk routes, read from disk a chunk at a time; the session is kept in the private state so a cut connection, a store switched off or a closed app resumes where the store says it got to. A single big file is a one-file commit with its base version.
+- **A commit that landed with its reply lost** is recognised (no clash, no second version); two devices offline on one file are tested (first back wins, the three choices work, the same edit is no clash).
+- **Hash cache kept across restarts** (size, mtime, hash; git's racy-timestamp rule), so the first scan after a restart no longer hashes every file.
+- **Local copy size limit and clean-up** (`[cloud] cache_mb=`, default 2048, 0 = none): least recently used clean files only, across projects; Launcher > Servers has the folder, room and "Free up space now".
+- **Continue tile thumbnail** (`thumbnail_store.gd`, `room_thumbnail.gd` `render_model`).
+- Tests (new): `cloud_hardening` (53), `thumbnail_store` (12), `thumbnail_render` (6, Xvfb), `e2e_cloud_outage` (18). Headless suite 4687 SMOKE lines, 0 failures (was 4623).
+- Not checked: anything on a headset, a Cloudflare tunnel, any file near 100 MB, a Pi, killing the app mid-write.
+
 ## S3, server projects (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "S3. VR"; scope `docs/shared-storage-scope.md` there; headless and against a real project store, **not run on a headset**; details in `docs/server-projects.md`)
 
 - **A mirror folder per server project**: `Documents/DIDSA-Cloud/<server host>/<project>/`, visible and a sibling of `Documents/DIDSA` (not nested in it, not a dot-folder), so `native_compose.gd`, `file_lookup.gd`, `file_index.gd` and `project_save.gd` read and write it **unchanged** and the owner can drag files in by hand. The root is one setting (`[cloud] folder=` in `settings.cfg`); with *All files access* off, or a folder that can't be written, it falls back to `user://DIDSA-Cloud` and the Files page and the Servers page say so. The sync state (each file's version and hash as last synced, the queue of unsent saves, the change-feed cursor, the "mine" copies kept after Take theirs) is **private** (`user://didsa-cloud-state/`), so deleting the mirror cannot delete the queue; a queued save whose mirror file is gone is warned about.

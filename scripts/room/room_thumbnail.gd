@@ -36,7 +36,7 @@ func forget(room: Node) -> void:
 	_cache.erase(room.get_instance_id())
 
 
-static func build_copy(room: Node) -> Node3D:
+static func build_copy(room) -> Node3D: # (a Room, or the small ModelParts holder below: anything with content_root and parts)
 	## The room's visible parts, in its content's own (mm) frame, as plain mesh instances with their own colours. Null if there is nothing to show.
 	var copy := Node3D.new()
 	var inverse: Transform3D = room.content_root.global_transform.affine_inverse() if room.content_root.is_inside_tree() else Transform3D.IDENTITY
@@ -74,7 +74,36 @@ func render(room: Node) -> Texture2D:
 	if hit != null:
 		return hit
 	var key := cache_key(room)
-	var copy := build_copy(room)
+	var image: Image = await render_copy(build_copy(room))
+	if image == null:
+		return null
+	var texture := ImageTexture.create_from_image(image)
+	if is_instance_valid(room):
+		_cache[room.get_instance_id()] = {"key": key, "texture": texture}
+	return texture
+
+
+func render_model(content_root: Node3D) -> Image:
+	## S4: a picture of the model that is open (everything visible under `content_root`, e.g. the assembly root), for the landing's Continue tile. Same view as a room's
+	## tile. Null when there is nothing to show or nothing renders (headless).
+	if content_root == null or not is_instance_valid(content_root) or DisplayServer.get_name() == "headless":
+		return null
+	var holder := ModelParts.new()
+	holder.content_root = content_root
+	for node in Room._descendants(content_root):
+		if node is MeshInstance3D and (node as MeshInstance3D).mesh != null and (node as MeshInstance3D).is_visible_in_tree():
+			holder.parts.append(node)
+	return await render_copy(build_copy(holder))
+
+
+class ModelParts:
+	extends RefCounted
+	var content_root: Node3D
+	var parts: Array = []
+
+
+func render_copy(copy: Node3D) -> Image:
+	## Draws `copy` (from build_copy) once in an off-screen world and reads it back; the viewport is freed. Null when there is nothing to draw.
 	if copy == null:
 		return null
 	var bounds := Room.content_bounds(copy)
@@ -105,12 +134,7 @@ func render(room: Node) -> Texture2D:
 	camera.current = true
 	for i in 3:
 		await get_tree().process_frame # UPDATE_ONCE draws it with the next frame
-	var texture: Texture2D = null
-	var image := vp.get_texture().get_image() if is_instance_valid(vp) and vp.get_texture() != null else null
-	if image != null and not image.is_empty():
-		texture = ImageTexture.create_from_image(image)
+	var image: Image = vp.get_texture().get_image() if is_instance_valid(vp) and vp.get_texture() != null else null
 	if is_instance_valid(vp):
 		vp.queue_free()
-	if texture != null and is_instance_valid(room):
-		_cache[room.get_instance_id()] = {"key": key, "texture": texture}
-	return texture
+	return image if image != null and not image.is_empty() else null

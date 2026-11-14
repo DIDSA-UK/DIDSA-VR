@@ -56,3 +56,4 @@ e2e_scenes
 e2e_moved_files
 e2e_servers
 e2e_cloud_store
+e2e_cloud_outage

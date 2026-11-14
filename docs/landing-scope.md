@@ -47,7 +47,7 @@ and locomotion all keep working. It shows on every launch (Settings: "Show the l
 
 | Tile | What it does | Needs a server | Builds on |
 |---|---|---|---|
-| **Continue** | Reopens the last file (name and a thumbnail) | Native file: yes; glb: no | new `user://recent.cfg`; `load_model_file()` |
+| **Continue** | Reopens the last file (name and a thumbnail; the thumbnail was built in S4: `thumbnail_store.gd`, drawn once after a load, not checked on a headset) | Native file: yes; glb: no | new `user://recent.cfg`; `load_model_file()` |
 | **Open...** | The tablet's Files page, at the landing | Depends on file | existing Files page |
 | **New assembly** | Empty assembly, then the usual workspace | Yes | existing `new_document` |
 | **Demo models** | Grid of rockets and spacecraft with thumbnails. Pick one: **Full size** (stands it in front of you) or **On the desk** (1:50 on a plinth at waist height, so it can be grabbed and turned). | No | `load_glb_file()`; `demo/` |
