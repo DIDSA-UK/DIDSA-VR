@@ -10,6 +10,8 @@ const Rig := preload("res://tests/cloud_rig.gd")
 const FakeStore := preload("res://tests/fake_project_store.gd")
 const Payload := preload("res://scripts/landing/pairing_payload.gd")
 const ProjectSave := preload("res://scripts/project_save.gd")
+const RecentFile := preload("res://scripts/landing/recent_file.gd")
+const ThumbnailStore := preload("res://scripts/thumbnail_store.gd")
 
 var main
 var tab
@@ -185,6 +187,36 @@ func _initialize() -> void:
 	await _frames(3)
 	var servers_text := "\n".join(_texts(launcher._body))
 	_check("Server projects are copied to" in servers_text and "This device is called: Quest 3" in servers_text and "Project store address (optional)" in servers_text and "Project store key" in servers_text, "the Servers page shows where server projects are copied, this device's name, and the store's address and key fields")
+	# --- S4: the Servers page's space controls, and the Continue tile's picture
+	_check("Local copy folder" in servers_text and "Room for local copies: 2 GB" in servers_text and "Free up space now" in servers_text, "the Servers page has the local copy folder, the room for local copies (2 GB by default) and Free up space now")
+	main._settings.cloud_cache_mb = 2048
+	var cache_button: Button = launcher._body.find_child("CloudCache", true, false)
+	cache_button.pressed.emit()
+	await _frames(3)
+	_check(main._settings.cloud_cache_mb == 5120, "pressing the room button moves to the next size (2 GB -> 5 GB)")
+	main._settings.cloud_cache_mb = 2048
+	var previous_recent := OS.get_environment("DIDSA_RECENT_PATH")
+	var previous_thumbs := OS.get_environment("DIDSA_THUMBNAIL_DIR")
+	OS.set_environment("DIDSA_RECENT_PATH", "user://recent_thumb_ui_test.cfg")
+	OS.set_environment("DIDSA_THUMBNAIL_DIR", "user://thumbnails_ui_test")
+	var opened_file := ProjectSettings.globalize_path("user://thumb_ui_model.glb")
+	FileAccess.open(opened_file, FileAccess.WRITE).store_string("x")
+	RecentFile.remember(opened_file)
+	var plain: Dictionary = launcher.tiles()[0]
+	_check(plain["id"] == "continue" and not plain.has("thumb"), "the Continue tile has no picture before one is kept")
+	var picture := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	picture.fill(Color(0.2, 0.6, 0.9))
+	ThumbnailStore.save(opened_file, picture)
+	var with_picture: Dictionary = launcher.tiles()[0]
+	_check(with_picture.has("thumb") and with_picture["thumb"] is Texture2D and (with_picture["thumb"] as Texture2D).get_width() <= 96, "...and shows the kept picture, scaled to the tile, once there is one")
+	var tile_button: Button = launcher._tile_button(with_picture)
+	_check(tile_button.icon == with_picture["thumb"], "...as the tile button's icon")
+	tile_button.free()
+	ThumbnailStore.forget(opened_file)
+	DirAccess.remove_absolute(opened_file)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://recent_thumb_ui_test.cfg"))
+	OS.set_environment("DIDSA_RECENT_PATH", previous_recent)
+	OS.set_environment("DIDSA_THUMBNAIL_DIR", previous_thumbs)
 	launcher._form["name"] = "Workshop"
 	launcher._form["url"] = "https://cad.example.net"
 	launcher._form["api_key"] = "cadkey"

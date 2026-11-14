@@ -247,6 +247,9 @@ func _chunked(method: String, project: String, rest: PackedStringArray, query: S
 	if session == null or session["project"] != project:
 		return _json(404, {"error": "unknown_upload", "detail": "upload %s is unknown, expired or belongs to another project" % up_id})
 	var info := {"upload_id": up_id, "size": session["size"], "received": (session["bytes"] as PackedByteArray).size(), "complete": session["complete"]}
+	if rest.size() == 2 and method == "DELETE":
+		_sessions.erase(up_id)
+		return _json(200, {"cancelled": true})
 	if rest.size() == 2 and method == "GET":
 		return _json(200, info)
 	if rest.size() == 2 and method == "PUT":

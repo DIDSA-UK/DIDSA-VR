@@ -568,6 +568,8 @@ func _upload_chunked(path: String, size: int, sha: String) -> Dictionary:
 		elif status["kind"] != "not_found":
 			return status # unreachable and the like: the session stays saved
 	if id == "":
+		if known != null and str(known["id"]) != "":
+			await client.upload_cancel(project, str(known["id"])) # the file changed (or the session is useless): do not leave its bytes on the store
 		state.uploads.erase(path)
 		var made: Dictionary = await client.upload_session(project, size, sha)
 		if not made["ok"]:

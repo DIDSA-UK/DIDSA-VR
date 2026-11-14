@@ -188,6 +188,11 @@ func upload_complete(project: String, upload_id: String) -> Dictionary:
 	return await _call("POST", "/projects/%s/uploads/%s/complete" % [enc(project), enc(upload_id)])
 
 
+func upload_cancel(project: String, upload_id: String) -> Dictionary:
+	## Throws away an unfinished chunked upload (best effort: the store sweeps one nobody touches for an hour anyway).
+	return await _call("DELETE", "/projects/%s/uploads/%s" % [enc(project), enc(upload_id)])
+
+
 func commit(project: String, changes: Array, message: String = "") -> Dictionary:
 	## `changes`: [{op: "put", path, base_version (int, or null = create), upload_id}]. All or nothing: ok -> json.files (every new version), json.cursor;
 	## a 409 -> kind "conflict" with `conflicts` (every clash) and nothing written.

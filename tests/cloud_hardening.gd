@@ -116,6 +116,7 @@ func _interrupted() -> void:
 	e.write_local("Big.didsa", _big("f"))
 	e.fake.restart_store()
 	await e.project.sync()
+	_check(e.fake.requests_matching("DELETE", "/uploads/").size() == 1, "...and the abandoned session is cancelled on the store, not left to expire")
 	_check(e.remote_text("Big.didsa") == _big("f") and e.fake.version_of(e.name, "Big.didsa") == 1, "a file edited between attempts starts a new upload and the store gets only the new bytes")
 	# the store away for several syncs, then back: nothing lost, nothing duplicated
 	var o := _rig()

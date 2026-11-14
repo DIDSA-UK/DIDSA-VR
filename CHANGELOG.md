@@ -10,7 +10,7 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 - **Hash cache kept across restarts** (size, mtime, hash; git's racy-timestamp rule), so the first scan after a restart no longer hashes every file.
 - **Local copy size limit and clean-up** (`[cloud] cache_mb=`, default 2048, 0 = none): least recently used clean files only, across projects; Launcher > Servers has the folder, room and "Free up space now".
 - **Continue tile thumbnail** (`thumbnail_store.gd`, `room_thumbnail.gd` `render_model`).
-- Tests (new): `cloud_hardening` (52), `thumbnail_store` (12), `thumbnail_render` (6, Xvfb), `e2e_cloud_outage` (18). Headless suite 4687 SMOKE lines, 0 failures (was 4623).
+- Tests (new): `cloud_hardening` (53), `thumbnail_store` (12), `thumbnail_render` (6, Xvfb), `e2e_cloud_outage` (18). Headless suite 4687 SMOKE lines, 0 failures (was 4623).
 - Not checked: anything on a headset, a Cloudflare tunnel, any file near 100 MB, a Pi, killing the app mid-write.
 
 ## S3, server projects (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "S3. VR"; scope `docs/shared-storage-scope.md` there; headless and against a real project store, **not run on a headset**; details in `docs/server-projects.md`)
