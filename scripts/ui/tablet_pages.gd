@@ -196,6 +196,9 @@ func register(reg) -> void:
 	reg.add_tool("files", "models", "Models", "models", _build_files_page, {
 		"on_select": _rescan_files, "status": _files_status, "list": _files_rows, "list_empty": "No model files found.",
 		"help": "Open loads a model in place of the current one. Add merges a native file into the loaded assembly. New assembly starts an empty one. Needs a configured backend for STEP, STL and OBJ."})
+	reg.add_tool("files", "cloud", "Server projects", "cloud", _build_cloud_page, {
+		"caption": "synced · to send · clash", "on_select": _cloud_on_select, "status": _cloud_status, "list": _cloud_rows, "list_empty": "No server projects to show.",
+		"help": "Projects kept on your project store (the one DIDSA-CAD pairs with). Open a project to work on it: what you open is copied into a folder on this headset (the Documents/DIDSA-Cloud folder, or the app's own storage when All files access is off), which you can also drag files into by hand. Save writes there and the headset then sends the changes to the store as one commit; with no connection they wait and go on the next sync. If another device changed a file you also changed, you choose per file: Keep mine (mine becomes the next version), Take theirs (mine is kept here until the next sync after), or Save mine as a copy (a new file with a new part id). Symbols: tick = synced, arrow = waiting to send, cloud = on the server only, slash = not connected, mark = a clash to settle."})
 	reg.add_tool("files", "references", "References", "files", _build_references_page, {
 		"caption": "moved · missing files", "on_select": _cancel_locate, "status": _references_status, "list": _references_rows,
 		"list_empty": "Every file the opened assembly places was found where it was.",
@@ -1249,6 +1252,7 @@ func chips() -> Array:
 # --- Files -------------------------------------------------------------------------------
 
 var _files_folder_label: Label
+var _files_cloud_label: Label ## the Models page's line about server projects: where they are and what is waiting to sync
 
 func _build_files_page() -> Control:
 	var page := _page()
@@ -1258,6 +1262,10 @@ func _build_files_page() -> Control:
 	page.add_child(_files_folder_label)
 	if _main != null:
 		_files_folder_label.text = _main.folder_label()
+	_files_cloud_label = _hint("")
+	_files_cloud_label.name = "FilesCloud"
+	page.add_child(_files_cloud_label)
+	_refresh_files_cloud_label()
 	_files_count_label = Label.new()
 	page.add_child(_files_count_label)
 	_dirty_label = _hint("")
@@ -1412,6 +1420,14 @@ func _rescan_files() -> void:
 		_files_cache.append({"path": path, "native": native, "root_id": _main.native_file_root_part_id(path) if native else ""})
 	if _files_count_label:
 		_files_count_label.text = "%d model file(s) found" % _files_cache.size()
+	_refresh_files_cloud_label()
+
+
+func _refresh_files_cloud_label() -> void:
+	if _files_cloud_label == null or _main == null or _main.cloud == null:
+		return
+	var waiting: String = _main.cloud.waiting_text()
+	_files_cloud_label.text = "Server projects are under Files > Server projects." + ("" if waiting == "" else " Waiting: " + waiting + ".")
 
 
 # --- Files > References: finding moved files (DIDSA-CAD docs/moved-files-scope.md, F2) ---------------------------------
@@ -1529,6 +1545,282 @@ func _files_rows() -> Array:
 		if f["native"] and assembly_loaded and f["root_id"] != loaded_root:
 			actions.append({"label": "Add", "callback": _main.add_component_file.bind(path)})
 		rows.append({"id": path, "title": path.get_file(), "subtitle": path.get_extension().to_upper(), "state": "normal", "actions": actions})
+	return rows
+
+
+# --- Files > Server projects (S3: DIDSA-CAD docs/shared-storage-scope.md section 7) -------------------------------------------------------
+
+var _cloud_view := "projects" ## "projects" (the store's list) or "project" (one project's files, clashes and kept copies)
+var _cloud_name := ""
+var _cloud_note := "" ## the last thing a sync or a choice said
+var _cloud_rows_cache: Array = []
+var _cloud_dirty := true
+var _cloud_info_label: Label
+var _cloud_connected := false
+var _cloud_busy := false
+const CLOUD_ROWS_MAX := 150
+
+func _cloud() -> Node:
+	return _main.cloud if _main != null else null
+
+
+func _cloud_hook() -> void:
+	var c := _cloud()
+	if c != null and not _cloud_connected:
+		_cloud_connected = true
+		c.changed.connect(func() -> void: _cloud_dirty = true)
+
+
+func _cloud_on_select() -> void:
+	_cloud_hook()
+	var c := _cloud()
+	if c != null and c.active != null and _cloud_view == "projects" and _cloud_name == "":
+		_cloud_view = "project"
+		_cloud_name = c.active.project
+	_cloud_dirty = true
+	if c != null and c.is_configured() and not c.remote_listed:
+		_cloud_refresh_list()
+
+
+func _build_cloud_page() -> Control:
+	var page := _page()
+	_cloud_hook()
+	_cloud_info_label = _hint("")
+	_cloud_info_label.name = "CloudInfo"
+	page.add_child(_cloud_info_label)
+	page.add_child(_button("Refresh projects", func() -> void:
+		_cloud_view = "projects"
+		_cloud_name = ""
+		_cloud_refresh_list()))
+	page.add_child(_button("Sync now", _cloud_sync_now, &"ButtonAccent"))
+	page.add_child(_button("Back to the list of projects", func() -> void:
+		_cloud_view = "projects"
+		_cloud_name = ""
+		_cloud_dirty = true))
+	page.add_child(_button("New project...", _cloud_new_project))
+	page.add_child(_hint("The copy on this headset is a plain folder: files dragged into it are sent at the next sync, a file removed from it is only 'not downloaded' and is never deleted on the server.", true))
+	_refresh_cloud_info()
+	return page
+
+
+func _refresh_cloud_info() -> void:
+	if _cloud_info_label == null or not is_instance_valid(_cloud_info_label) or _cloud() == null:
+		return
+	var c := _cloud()
+	var lines: PackedStringArray = []
+	if not c.is_configured():
+		lines.append("No project store is set up for this server. Add its address and key on the launcher's Servers page, or pair with DIDSA-CAD's Connect a VR headset.")
+	else:
+		lines.append("Store: %s" % c.store_url)
+		var root: Dictionary = c.root_info()
+		lines.append("Local copy: %s" % ProjectSettings.globalize_path(str(root["path"])) if str(root["path"]).begins_with("user://") else "Local copy: %s" % root["path"])
+		if bool(root["fallback"]):
+			lines.append(str(root["note"]))
+		lines.append("This device is called \"%s\"." % c.device_name())
+		if str(c.remote_error) != "":
+			lines.append(str(c.remote_error))
+	_cloud_info_label.text = "\n".join(lines)
+
+
+func _cloud_status() -> String:
+	var c := _cloud()
+	if c == null:
+		return ""
+	if _cloud_busy:
+		return "Working..."
+	if _cloud_note != "":
+		return _cloud_note
+	if _cloud_view == "project" and c.active != null:
+		var s: Dictionary = c.active.summary()
+		return "%s: %s." % [c.active.project, _cloud_summary_words(s)]
+	return "Server projects"
+
+
+static func _cloud_summary_words(s: Dictionary) -> String:
+	var bits: PackedStringArray = []
+	if int(s["clash"]) > 0:
+		bits.append("%d clash%s to settle" % [s["clash"], "" if int(s["clash"]) == 1 else "es"])
+	if int(s["to_send"]) > 0:
+		bits.append("%d to send" % s["to_send"])
+	if bool(s.get("auth_failed", false)):
+		bits.append("the store refused the key")
+	elif s["online"] == false:
+		bits.append("not connected")
+	if bits.is_empty():
+		bits.append("synced")
+	return ", ".join(bits)
+
+
+static func cloud_icon(symbol: String) -> String:
+	## The sync-state symbol -> an icon name (ui_icons.gd).
+	match symbol:
+		"synced": return "cloud_done"
+		"to_send": return "cloud_up"
+		"clash": return "cloud_clash"
+		"offline": return "cloud_off"
+		_: return "cloud"
+
+
+func _cloud_refresh_list() -> void:
+	var c := _cloud()
+	if c == null:
+		return
+	_cloud_busy = true
+	await c.refresh_projects()
+	_cloud_busy = false
+	_cloud_note = ""
+	_cloud_dirty = true
+	_refresh_cloud_info()
+
+
+func _cloud_open_project(project_name: String) -> void:
+	var c := _cloud()
+	if c == null or _cloud_busy:
+		return
+	_cloud_busy = true
+	_cloud_view = "project"
+	_cloud_name = project_name
+	_cloud_dirty = true
+	var report: Dictionary = await c.open_project(project_name)
+	_cloud_busy = false
+	_cloud_note = str(report["text"])
+	_cloud_dirty = true
+	_refresh_cloud_info()
+
+
+func _cloud_sync_now() -> void:
+	var c := _cloud()
+	if c == null or c.active == null or _cloud_busy:
+		_cloud_note = "Open a project first."
+		return
+	_cloud_busy = true
+	var report: Dictionary = await c.sync_active(true)
+	_cloud_busy = false
+	_cloud_note = str(report["text"])
+	_cloud_dirty = true
+
+
+func _cloud_choose(path: String, choice: String) -> void:
+	var c := _cloud()
+	if c == null or c.active == null or _cloud_busy:
+		return
+	_cloud_busy = true
+	var result: Dictionary = await c.active.resolve({path: choice})
+	if not result["ok"]:
+		_cloud_busy = false
+		_cloud_note = str(result["error"])
+		_cloud_dirty = true
+		return
+	var report: Dictionary = await c.sync_active(true) # what was settled goes now (the rest waits until every clash is settled)
+	_cloud_busy = false
+	var extra := ""
+	if result["reload"]:
+		extra = " Open %s again to see the server's version." % path.get_file()
+	if not (result["copies"] as Dictionary).is_empty():
+		extra += " Your version was saved as %s." % str((result["copies"] as Dictionary).values()[0])
+	_cloud_note = str(report["text"]) + extra
+	_cloud_dirty = true
+
+
+func _cloud_new_project() -> void:
+	var c := _cloud()
+	if c == null or _main == null:
+		return
+	_main.open_keyboard_for("", func(text: String) -> void:
+		var clean := text.strip_edges()
+		if clean == "":
+			return
+		_cloud_busy = true
+		var made: Dictionary = await c.create_project(clean)
+		_cloud_busy = false
+		_cloud_note = ("Created %s on the project store." % clean) if made["ok"] else str(made["error"])
+		_cloud_dirty = true, {"mode": "full", "title": "New project name"})
+
+
+func _cloud_rows() -> Array:
+	var c := _cloud()
+	if c == null:
+		return []
+	_cloud_hook()
+	if _cloud_dirty:
+		_cloud_dirty = false
+		_cloud_rows_cache = _cloud_build_rows(c)
+		_refresh_cloud_info()
+	return _cloud_rows_cache
+
+
+func _cloud_build_rows(c: Node) -> Array:
+	var rows: Array = []
+	if _cloud_view == "project" and _cloud_name != "":
+		var p = c.project(_cloud_name)
+		var summary: Dictionary = p.summary()
+		rows.append({"id": "head", "title": "%s" % _cloud_name, "subtitle": _cloud_summary_words(summary) + ("" if int(summary["last_synced_ms"]) == 0 else ". Last synced %s." % Time.get_datetime_string_from_unix_time(int(summary["last_synced_ms"]) / 1000 + int(Time.get_time_zone_from_system().get("bias", 0)) * 60, true).substr(0, 16)),
+			"state": "warn" if int(summary["clash"]) > 0 else ("ok" if summary["symbol"] == "synced" else "normal"), "icon": cloud_icon(str(summary["symbol"])), "actions": [{"label": "Sync now", "callback": _cloud_sync_now, "accent": true}]})
+		for clash in p.conflicts():
+			var path: String = clash["path"]
+			var cl: Dictionary = clash["clash"]
+			var actions: Array = []
+			if cl["reason"] != "path_conflict":
+				actions.append({"label": "Keep mine", "callback": _cloud_choose.bind(path, "keep_mine"), "accent": true})
+			actions.append({"label": "Take theirs", "callback": _cloud_choose.bind(path, "take_theirs"), "confirm": true})
+			actions.append({"label": "Save mine as a copy", "callback": _cloud_choose.bind(path, "save_copy")})
+			rows.append({"id": "clash:" + path, "title": path, "subtitle": str(clash["text"]), "state": "warn", "icon": "cloud_clash", "actions": actions})
+		for path in summary["problems"]:
+			rows.append({"id": "problem:" + path, "title": path, "subtitle": str(summary["problems"][path]), "state": "error", "icon": "warn",
+				"actions": [{"label": "Keep local only", "callback": func() -> void:
+					p.keep_local_only(path), "confirm": true}, {"label": "Try again", "callback": _cloud_sync_now}]})
+		for path in summary["missing"]:
+			rows.append({"id": "missing:" + path, "title": path, "subtitle": "A save is waiting to be sent, but its file is gone from the local copy. Put the file back (or sync after restoring it).", "state": "error", "icon": "warn"})
+		for path in p.kept_copies():
+			rows.append({"id": "kept:" + path, "title": path.get_file() + " (your copy)", "subtitle": "Kept after Take theirs, until the next sync after this one.", "state": "normal", "icon": "cloud",
+				"actions": [{"label": "Put back as a file", "callback": func() -> void:
+					var made: Dictionary = p.restore_kept_as_file(path)
+					_cloud_note = ("Saved as %s." % made["path"]) if made["ok"] else str(made["error"])
+					_cloud_dirty = true}]})
+		var loaded_root: String = _main.current_root_part_id()
+		var shown := 0
+		var entries: Array = p.entries()
+		for e in entries:
+			if shown >= CLOUD_ROWS_MAX:
+				rows.append({"id": "more", "title": "%d more files" % (entries.size() - shown), "subtitle": "Open the rest from the Documents/DIDSA-Cloud folder or a smaller project.", "state": "normal"})
+				break
+			shown += 1
+			var path2: String = e["path"]
+			var symbol := "cloud_done"
+			match str(e["state"]):
+				"to_send": symbol = "cloud_up"
+				"clash": symbol = "cloud_clash"
+				"cloud": symbol = "cloud"
+				"local_only": symbol = "cloud_off"
+			var kind := path2.get_extension().to_upper()
+			var acts: Array = []
+			if NativeCompose.native_extension(path2) != "" or path2.get_extension().to_lower() in ["glb", "gltf", "step", "stp", "iges", "igs", "stl", "obj"]:
+				acts.append({"label": "Open", "accent": true, "callback": _main.open_cloud_file.bind(_cloud_name, path2)})
+				if e["native"] and not loaded_root.is_empty() and e["part_id"] != loaded_root:
+					acts.append({"label": "Add", "callback": _main.add_cloud_component.bind(_cloud_name, path2)})
+			rows.append({"id": "file:" + path2, "title": path2, "subtitle": "%s%s" % [kind, "  (on the server only)" if e["state"] == "cloud" else ""], "state": "warn" if e["state"] == "clash" else "normal", "icon": symbol, "actions": acts})
+		return rows
+	for name in c.all_project_names():
+		var known := false
+		var summary2: Dictionary = {}
+		var icon := "cloud"
+		var proj = c.project(str(name))
+		if proj.state.cursor != "" or not proj.state.queue.is_empty():
+			known = true
+			summary2 = proj.summary()
+			icon = cloud_icon(str(summary2["symbol"]))
+		var detail := ""
+		for remote in c.remote_projects:
+			if str(remote["name"]) == str(name):
+				detail = "%d file%s" % [int(remote["file_count"]), "" if int(remote["file_count"]) == 1 else "s"]
+				if remote.get("last_device") != null and str(remote["last_device"]) != "":
+					detail += ", last changed by %s" % remote["last_device"]
+		if known:
+			detail += ("" if detail == "" else ". ") + _cloud_summary_words(summary2)
+		elif detail == "":
+			detail = "Saved on this headset"
+		rows.append({"id": "project:" + str(name), "title": str(name), "subtitle": detail, "state": "warn" if known and int(summary2["clash"]) > 0 else "normal", "icon": icon,
+			"actions": [{"label": "Open", "accent": true, "callback": _cloud_open_project.bind(str(name))}]})
 	return rows
 
 

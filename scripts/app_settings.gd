@@ -19,6 +19,8 @@ static func path() -> String:
 
 var project_folder: String = ""
 var folder_asked: bool = false ## the first-run "where should projects be saved" question has been answered (an empty project_folder alone never means "not asked": it can be the app's own storage, chosen)
+var cloud_folder: String = "" ## where the local copies of server projects live ("" = Documents/DIDSA-Cloud; scripts/cloud/cloud_paths.gd): ONE setting, so it can move
+var device_name: String = "" ## what this headset calls itself to the project store ("" = the platform's name): shown to other devices as "who changed it", never identity
 var last_scene: String = "Mid"
 var reduce_motion: bool = false
 var ui_theme: String = "Navy" ## one of ui_themes.gd's ORDER
@@ -54,6 +56,8 @@ func load_from_disk() -> void:
 		return # no settings saved yet, or unreadable — defaults stand
 	project_folder = config.get_value("files", "project_folder", project_folder)
 	folder_asked = bool(config.get_value("files", "folder_asked", folder_asked or not project_folder.is_empty())) # an older settings file that already has a folder counts as asked
+	cloud_folder = str(config.get_value("cloud", "folder", cloud_folder))
+	device_name = str(config.get_value("cloud", "device_name", device_name))
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
@@ -89,6 +93,8 @@ func save_to_disk() -> void:
 	var config := ConfigFile.new()
 	config.set_value("files", "project_folder", project_folder)
 	config.set_value("files", "folder_asked", folder_asked)
+	config.set_value("cloud", "folder", cloud_folder)
+	config.set_value("cloud", "device_name", device_name)
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
@@ -120,6 +126,16 @@ func save_to_disk() -> void:
 	var err := config.save(path())
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [path(), err])
+
+
+func set_cloud_folder(path: String) -> void:
+	cloud_folder = path.strip_edges()
+	save_to_disk()
+
+
+func set_device_name(value: String) -> void:
+	device_name = value.strip_edges().substr(0, 40)
+	save_to_disk()
 
 
 func set_project_folder(path: String) -> void:

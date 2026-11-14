@@ -197,6 +197,10 @@ func open_files() -> void:
 	main.open_tablet_at("files")
 
 
+func open_server_projects() -> void:
+	main.open_tablet_at("files", "cloud")
+
+
 func new_assembly() -> void:
 	await main.new_assembly()
 

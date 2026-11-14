@@ -22,6 +22,8 @@ const BackendSession := preload("res://scripts/backend_session.gd") ## the API k
 @export var relay_url: String = "" ## Loaded from secrets.cfg's [browser_relay] section - the Browser window's
 ## own separate service (DIDSA-CAD repo, browser-relay/), not the CAD backend above.
 @export var relay_api_key: String = "" ## Matches the relay's BROWSER_RELAY_API_KEY.
+@export var store_url: String = "" ## The project store (DIDSA-CAD project-store/, S3): its address, from the server entry or secrets.cfg's [project_store] section.
+@export var store_key: String = "" ## ...and its own key (not the backend's).
 @export var native_file_path: String = "res://assembly.didsa" ## The exported native file to import before loading (only when the landing is off).
 @export var landing_enabled: bool = OS.get_environment("DIDSA_NO_LANDING") == "" ## false: no landing at start, the old start-up import (the tests set DIDSA_NO_LANDING; see tests/README.md)
 @export var landing_wait_seconds: float = 3.0 ## on a headset: how long to wait for tracking before placing the landing (a flat preview doesn't wait)
@@ -55,6 +57,9 @@ signal status_changed(text: String) ## every _set_status(): the landing's launch
 signal discard_prompt_changed() ## a replace is waiting on "discard your unsaved changes?" (the Files page shows the choice), or no longer is
 signal references_changed() ## the opened file's moved / missing references (reference_review()) changed: the Files > References page redraws
 const ProjectFolder := preload("res://scripts/project_folder.gd") ## the project folder: default, probe, chooser helpers (T1)
+const CloudManager := preload("res://scripts/cloud/cloud_manager.gd") ## S3: server projects (a mirror folder per project, kept level with the project store)
+const CloudPaths := preload("res://scripts/cloud/cloud_paths.gd")
+var cloud: Node ## the CloudManager (scripts/cloud/cloud_manager.gd); made in _ready()
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const STALE_MATES_KEY := "vr_stale_mates" ## the native-file extra that carries the design table's "mates need redoing" flags
 const DISCARD_CONFIRM_MS := 6000 ## how long a "this will discard your unsaved changes" warning stays armed for a second press
@@ -141,6 +146,7 @@ const API_PREFIX := "/document"
 
 func _ready() -> void:
 	_settings.load_from_disk()
+	_add_cloud()
 	UiThemes.set_fx(_settings.fx_enabled) # before anything is built, so the first frame already has the right look
 	if not UiThemes.apply(_settings.ui_theme):
 		UiThemes.apply("Navy")
@@ -610,11 +616,13 @@ func go_home() -> void:
 	landing.enter()
 
 
-func open_tablet_at(category_id: String) -> void:
-	## Opens the wrist tablet on a category (the landing's Open... and Settings tiles).
+func open_tablet_at(category_id: String, tool_id: String = "") -> void:
+	## Opens the wrist tablet on a category (the landing's Open... and Settings tiles), and on one of its tools when `tool_id` names it.
 	if not _tablet.is_open():
 		_tablet.open_tablet()
 	_tablet.ui.select_category(category_id)
+	if tool_id != "":
+		_tablet.ui.select_tool(tool_id)
 
 
 func show_landing_on_start() -> bool:
@@ -1173,12 +1181,16 @@ func ask_all_files_access_at_start() -> bool:
 
 
 func save_dir() -> String:
-	## Where saves go: the project folder if set, else the app's own user://models.
+	## Where saves go: the open server project's mirror, else the project folder if set, else the app's own user://models.
+	if cloud != null and cloud.active != null:
+		return cloud.active.mirror_dir
 	return _settings.project_folder if not _settings.project_folder.is_empty() else ProjectFolder.APP_FOLDER
 
 
 func folder_label() -> String:
 	## "Project folder: Documents/DIDSA" (or "App storage"), for the Files page header.
+	if cloud != null and cloud.active != null:
+		return "Server project %s: %s" % [cloud.active.project, ProjectFolder.short_name(cloud.active.mirror_dir)]
 	return "Project folder: %s" % ProjectFolder.short_name(_settings.project_folder)
 
 
@@ -1212,6 +1224,27 @@ func _process(delta: float) -> void:
 	_tablet.set_info("\n".join(lines))
 
 
+func _add_cloud() -> void:
+	cloud = CloudManager.new()
+	cloud.name = "Cloud"
+	cloud.settings = _settings
+	cloud.on_android = _on_android
+	cloud.all_files_granted = all_files_access_granted
+	cloud.held_provider = _cloud_held_paths
+	cloud.message.connect(_set_status)
+	add_child(cloud)
+
+
+func _cloud_held_paths() -> Array:
+	## The files the open session was composed from (project_save.gd's registry plus the opened root): the sync never refreshes these under the session.
+	var out: Array = []
+	for id in _project_save.files:
+		out.append(str(_project_save.files[id].get("path", "")))
+	if _opened_native_path != "":
+		out.append(_opened_native_path)
+	return out
+
+
 func _load_secrets() -> void:
 	if not FileAccess.file_exists(secrets_file_path):
 		return
@@ -1224,13 +1257,15 @@ func _load_secrets() -> void:
 	BackendSession.set_session_id(str(config.get_value("backend", "document_session", ""))) # optional: a fixed document session id (default: a fresh one per launch)
 	relay_url = config.get_value("browser_relay", "url", relay_url)
 	relay_api_key = config.get_value("browser_relay", "api_key", relay_api_key)
+	store_url = str(config.get_value("project_store", "url", store_url))
+	store_key = str(config.get_value("project_store", "api_key", store_key))
 
 
 func _load_servers() -> void:
 	## Which server to start on: res://secrets.cfg when it names one (the developer override), else the one chosen last in servers.cfg, else none.
 	if has_backend():
 		_secrets_server = {"id": "secrets", "name": "From secrets.cfg", "url": backend_url, "api_key": api_key, "document_session": "",
-			"relay_url": relay_url, "relay_api_key": relay_api_key, "readonly": true}
+			"relay_url": relay_url, "relay_api_key": relay_api_key, "store_url": store_url, "store_key": store_key, "readonly": true}
 		active_server_id = "secrets"
 	server_store.load_from_disk()
 	if active_server_id == "":
@@ -1245,6 +1280,8 @@ func _set_backend_from(entry: Dictionary) -> void:
 	api_key = str(entry.get("api_key", ""))
 	relay_url = str(entry.get("relay_url", ""))
 	relay_api_key = str(entry.get("relay_api_key", ""))
+	store_url = str(entry.get("store_url", ""))
+	store_key = str(entry.get("store_key", ""))
 	BackendSession.set_session_id(str(entry.get("document_session", "")))
 
 
@@ -1256,6 +1293,7 @@ func _apply_backend() -> void:
 	room_manager.configure_backend(backend_url, api_key)
 	design_table.configure_backend(backend_url, api_key)
 	_browser_window.configure_relay(relay_url, relay_api_key)
+	cloud.configure(store_url, store_key)
 
 
 func server_entries() -> Array[Dictionary]:
@@ -1297,6 +1335,8 @@ func switch_server(id: String) -> bool:
 		api_key = ""
 		relay_url = ""
 		relay_api_key = ""
+		store_url = ""
+		store_key = ""
 	else:
 		_set_backend_from(entry)
 	active_server_id = id
@@ -1350,6 +1390,38 @@ func set_server_relay(id: String, url: String, key: String) -> Dictionary:
 		_set_backend_from(entry)
 		_apply_backend()
 	return {"ok": true, "message": "Browser relay saved: %s" % clean if clean != "" else "Browser relay cleared."}
+
+
+func device_name() -> String:
+	return cloud.device_name()
+
+
+func set_device_name(value: String) -> void:
+	## What this headset calls itself to the project store ("" = the platform's name). Sent as X-Device-Name; never identity.
+	_settings.set_device_name(value)
+	for known in cloud.known_projects():
+		cloud.project(str(known)).client.device_name = cloud.device_name()
+	cloud.changed.emit()
+
+
+func set_server_store(id: String, url: String, key: String) -> Dictionary:
+	## The Servers page's project store for a saved server: {ok, message}. The address goes through ServerAddress.check() (plain http:// only on a local network); "" clears it.
+	## Applied at once if that server is in use.
+	var clean := ""
+	if url.strip_edges() != "":
+		var check := ServerAddress.check(url)
+		if check["level"] == ServerAddress.Level.REFUSED:
+			return {"ok": false, "message": str(check["message"])}
+		clean = str(check["url"])
+		if key.strip_edges() == "":
+			return {"ok": false, "message": "The project store needs its key (PROJECT_STORE_API_KEY on the store's machine)."}
+	var entry := server_store.set_store(id, clean, key if clean != "" else "")
+	if entry.is_empty():
+		return {"ok": false, "message": "That server is not in the list any more."}
+	if active_server_id == id:
+		_set_backend_from(entry)
+		_apply_backend()
+	return {"ok": true, "message": "Project store saved: %s" % clean if clean != "" else "Project store cleared."}
 
 
 var test_server_override: Callable = Callable() ## tests only: (url, key) -> {ok, message, code} in place of the real request (a pairing code cannot name localhost, where a stub server would be)
@@ -1551,6 +1623,26 @@ func list_model_files() -> PackedStringArray:
 	return found
 
 
+func open_cloud_file(project_name: String, path: String) -> void:
+	## A file of a server project: it and everything it places are brought into the mirror (the part index finds a moved Part), then it opens like any file.
+	_set_status("Opening %s from the server project %s..." % [path.get_file(), project_name])
+	var result: Dictionary = await cloud.open_file(project_name, path)
+	if not result["ok"]:
+		_set_status(str(result["error"]))
+		return
+	if not (result["missing"] as Array).is_empty():
+		_set_status("Opening %s; %d file%s it places could not be fetched (offline, or not in the project)." % [path.get_file(), result["missing"].size(), "" if result["missing"].size() == 1 else "s"])
+	load_model_file(str(result["full_path"]))
+
+
+func add_cloud_component(project_name: String, path: String) -> void:
+	var result: Dictionary = await cloud.open_file(project_name, path)
+	if not result["ok"]:
+		_set_status(str(result["error"]))
+		return
+	add_component_file(str(result["full_path"]))
+
+
 func load_model_file(path: String) -> void:
 	## Dispatches on extension: a bare .glb/.gltf loads straight from disk;
 	## .didsa/.DIDSAprt is a full-replace open of a different native file at
@@ -1596,9 +1688,12 @@ func native_file_root_part_id(path: String) -> String:
 
 
 func native_search_dirs() -> Array:
-	## Where a native file's `external_ref`s are looked for after its own folder: the project folder, then the models folders.
+	## Where a native file's `external_ref`s are looked for after its own folder: the project folder, then the models folders. For a server project the
+	## project folder is its mirror (the local project folder holds other files, and the moved-files index must not wander into it).
 	var dirs := []
-	if not _settings.project_folder.is_empty():
+	if cloud != null and cloud.active != null:
+		dirs.append(cloud.active.mirror_dir)
+	elif not _settings.project_folder.is_empty():
 		dirs.append(_settings.project_folder)
 	dirs.append_array(["res://models", "user://models"])
 	return dirs
@@ -1712,6 +1807,7 @@ func open_native_file(path: String) -> void:
 		return
 	if not _claim_load("Open"):
 		return
+	cloud.note_path(path) # a file of a server project's mirror makes that project the active one (saves go there, then sync); any other file ends it
 	await _open_native_file_impl(path)
 	_load_busy = false
 
@@ -2577,6 +2673,9 @@ func save_project(policy: String = "ask") -> Dictionary:
 		_preset_save_paths = {}
 	_set_status(ProjectSave.summary(result))
 	saved.emit(result)
+	if cloud.active != null and not (result["saved"] as Array).is_empty() and CloudPaths.relative(cloud.active.mirror_dir, root_file if root_file != "" else folder.path_join("x")) != "":
+		var report: Dictionary = await cloud.sync_active() # a server project: what was just written goes to the store as ONE commit (or waits, or clashes)
+		_set_status("%s %s" % [ProjectSave.summary(result), report["text"]])
 	return {"ok": ok, "result": result}
 
 

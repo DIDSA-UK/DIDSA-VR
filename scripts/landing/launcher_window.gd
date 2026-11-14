@@ -38,7 +38,10 @@ var _scan_last := "Nothing read yet." ## what the last QR code was, in words (ne
 var _scan_restore_scene := ""
 var launcher_panel_size := Vector2(0.88, 0.66) ## metres (the landing deck sets its own in _init)
 var launcher_viewport_size := Vector2i(880, 660)
-var _form := {"name": "", "url": "https://", "api_key": ""} ## the typed-server form: kept while the page redraws
+var _form := {"name": "", "url": "https://", "api_key": "", "store_url": "", "store_key": ""} ## the typed-server form: kept while the page redraws
+var _store_for := "" ## the saved server whose project store is being typed ("" = none): its form shows under the list
+var _store_form := {"store_url": "", "store_key": ""}
+var _store_note := "" ## what the last project store Save said
 var _relay_for := "" ## the saved server whose Browser relay is being typed ("" = none): its form shows under the list
 var _relay_form := {"relay_url": "", "relay_api_key": ""}
 var _storage_report := "" ## the last "Check storage" result (S0 spike), shown under the button while the page redraws
@@ -56,6 +59,7 @@ func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamer
 	open_lateral_offset = 0.0
 	super.setup(left, right, camera)
 	main.discard_prompt_changed.connect(_on_discard_prompt)
+	main.cloud.changed.connect(_on_cloud_changed)
 
 
 func _place_in_front_of_camera() -> void:
@@ -97,6 +101,10 @@ func _build_content() -> Control:
 	column.add_child(_status)
 	call_deferred("show_page", "home")
 	return column
+
+
+func _on_cloud_changed() -> void:
+	pass # (landing_monolith.gd redraws its home view when what is waiting to sync changes)
 
 
 func _on_closed() -> void:
@@ -194,6 +202,15 @@ func _build_home() -> void:
 	intro.theme_type_variation = &"LabelDim"
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_body.add_child(intro)
+	var waiting: Dictionary = main.cloud.waiting() # S3: saves not yet on the project store, and any clash (from the saved sync state, no network)
+	if int(waiting["to_send"]) > 0 or int(waiting["clash"]) > 0:
+		var alert := Button.new()
+		alert.name = "CloudWaiting"
+		alert.text = main.cloud.waiting_text()
+		alert.icon = UiIcons.texture("cloud_clash" if int(waiting["clash"]) > 0 else "cloud_up", 32)
+		alert.custom_minimum_size = Vector2(0, 56)
+		alert.pressed.connect(func() -> void: landing.open_server_projects())
+		_body.add_child(alert)
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 10)
@@ -283,13 +300,15 @@ func _build_servers() -> void:
 		_body.add_child(_server_row(entry))
 		if str(entry["id"]) == _relay_for and not entry.get("readonly", false):
 			_build_relay_form(entry)
+		if str(entry["id"]) == _store_for and not entry.get("readonly", false):
+			_build_store_form(entry)
 	if main.active_server_id != "":
 		_body.add_child(_action("Use no server (offline, demo models only)", func() -> void:
 			main.switch_server("")
 			show_page("servers"), 0))
 	_body.add_child(_hint("Add a server. Point the headset at the QR code DIDSA-CAD shows (Connect a VR headset), or type it."))
 	_body.add_child(_scan_button())
-	for field in [["name", "Name"], ["url", "Address"], ["api_key", "Key"]]:
+	for field in [["name", "Name"], ["url", "Address"], ["api_key", "Key"], ["store_url", "Project store address (optional)"], ["store_key", "Project store key"]]:
 		_body.add_child(_form_button(field[0], field[1]))
 	var check := ServerAddress.check(str(_form["url"])) if str(_form["url"]) not in ["", "https://"] else {}
 	if not check.is_empty():
@@ -308,6 +327,7 @@ func _build_servers() -> void:
 	save.disabled = test.disabled
 	row.add_child(save)
 	_body.add_child(_hint("The list is kept in %s on this headset. To load it without typing, see docs/servers.md." % OS.get_user_data_dir()))
+	_build_store_info()
 	# S0 spike (DIDSA-CAD docs/shared-storage-scope.md): where this app's own storage is and how much room it has, for the owner to read off
 	# the headset (docs/android-build.md, "Storage for server projects").
 	var storage := _action("Check storage", _check_storage, 0)
@@ -352,6 +372,15 @@ func _server_row(entry: Dictionary) -> Control:
 			show_page("servers"), 110)
 		relay.name = "Relay_" + str(entry["id"])
 		box.add_child(relay)
+		var store := _action("Store on" if str(entry.get("store_url", "")) != "" else "Store", func() -> void:
+			_store_for = "" if _store_for == str(entry["id"]) else str(entry["id"])
+			_store_form = {"store_url": str(entry.get("store_url", "")), "store_key": str(entry.get("store_key", ""))}
+			if _store_form["store_url"] == "":
+				_store_form["store_url"] = "https://"
+			_store_note = ""
+			show_page("servers"), 110)
+		store.name = "Store_" + str(entry["id"])
+		box.add_child(store)
 		box.add_child(_action("Forget", func() -> void:
 			if main.forget_server(str(entry["id"])):
 				show_page("servers"), 110))
@@ -404,6 +433,76 @@ func _build_relay_form(entry: Dictionary) -> void:
 		row.add_child(clear)
 
 
+func _build_store_form(entry: Dictionary) -> void:
+	## The project store for this server (DIDSA-CAD project-store/, S3): its address and its own key, not the CAD key. Server projects use it.
+	var box := VBoxContainer.new()
+	box.name = "StoreForm"
+	_body.add_child(box)
+	box.add_child(_hint("Project store for %s: the service that keeps your server projects (port 8200 by default), with its own key (PROJECT_STORE_API_KEY), not the CAD key." % entry["name"]))
+	for field in [["store_url", "Store address"], ["store_key", "Store key"]]:
+		var value := str(_store_form[field[0]])
+		var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field[0] == "store_key" else value
+		var f: String = field[0]
+		var title: String = field[1]
+		var button := _action("%s: %s" % [title, shown if shown not in ["", "https://"] else "tap to type"], func() -> void:
+			main.open_keyboard_for(str(_store_form[f]), func(text: String) -> void:
+				_store_form[f] = text.strip_edges()
+				show_page("servers"), {"mode": "full", "title": title}), 0)
+		button.name = "StoreForm_" + f
+		box.add_child(button)
+	var typed := str(_store_form["store_url"])
+	if typed not in ["", "https://"]:
+		box.add_child(_hint(str(ServerAddress.check(typed)["message"])))
+	if _store_note != "":
+		var note := _hint(_store_note)
+		note.name = "StoreNote"
+		box.add_child(note)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	var save := _action("Save store", func() -> void:
+		var url := str(_store_form["store_url"])
+		var answer: Dictionary = main.set_server_store(str(entry["id"]), "" if url == "https://" else url, str(_store_form["store_key"]))
+		_store_note = str(answer["message"])
+		if answer["ok"]:
+			_store_for = ""
+			main.say(_store_note)
+		show_page("servers"), 0)
+	save.name = "StoreSave"
+	row.add_child(save)
+	if str(entry.get("store_url", "")) != "":
+		var clear := _action("Remove store", func() -> void:
+			main.set_server_store(str(entry["id"]), "", "")
+			_store_for = ""
+			show_page("servers"), 0)
+		clear.name = "StoreClear"
+		row.add_child(clear)
+
+
+func _build_store_info() -> void:
+	## Server projects: where the local copy lives (and why not Documents, if so) and what this device calls itself to the store.
+	var cloud: Node = main.cloud
+	var lines: PackedStringArray = []
+	if cloud.is_configured():
+		lines.append("Project store: %s" % cloud.store_url)
+	else:
+		lines.append("No project store for the server in use: add one with Store (saved servers) or in the form above, or scan DIDSA-CAD's code.")
+	var root: Dictionary = cloud.root_info()
+	lines.append("Server projects are copied to %s" % (ProjectSettings.globalize_path(str(root["path"])) if str(root["path"]).begins_with("user://") else str(root["path"])))
+	if bool(root["fallback"]):
+		lines.append(str(root["note"]))
+	var info := _hint("\n".join(lines))
+	info.name = "StoreInfo"
+	_body.add_child(info)
+	var named := _action("This device is called: %s" % cloud.device_name(), func() -> void:
+		main.open_keyboard_for(cloud.device_name(), func(text: String) -> void:
+			main.set_device_name(text)
+			show_page("servers"), {"mode": "full", "title": "Name of this device"}), 0)
+	named.name = "DeviceName"
+	_body.add_child(named)
+	_body.add_child(_hint("Other devices see this name next to a change you made (\"changed by Quest 3\"). It is sent to the store and trusted for nothing else."))
+
+
 func _scan_button() -> Button:
 	var button := _action("Scan a QR code", func() -> void: show_page("scan"), 0)
 	button.name = "Scan"
@@ -411,10 +510,10 @@ func _scan_button() -> Button:
 
 
 func _form_button(field: String, title: String) -> Button:
-	var value := str(_form[field])
-	var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field == "api_key" else value
+	var value := str(_form.get(field, ""))
+	var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field in ["api_key", "store_key"] else value
 	var button := _action("%s: %s" % [title, shown if shown != "" else "tap to type"], func() -> void:
-		main.open_keyboard_for(str(_form[field]), func(text: String) -> void:
+		main.open_keyboard_for(str(_form.get(field, "")), func(text: String) -> void:
 			_form[field] = text.strip_edges()
 			if field == "url" and str(_form["name"]) == "":
 				_form["name"] = ServerAddress.default_name(text)
@@ -439,11 +538,19 @@ func _save_form() -> void:
 	var check := ServerAddress.check(str(_form["url"]))
 	if check["level"] == ServerAddress.Level.REFUSED:
 		return
-	var entry: Dictionary = main.add_server({"name": _form["name"], "url": check["url"], "api_key": _form["api_key"]}, true)
+	var store_check := ServerAddress.check(str(_form.get("store_url", ""))) if str(_form.get("store_url", "")) not in ["", "https://"] else {}
+	if not store_check.is_empty() and store_check["level"] == ServerAddress.Level.REFUSED:
+		main.say("The project store address is not allowed: %s" % store_check["message"])
+		return
+	if not store_check.is_empty() and str(_form.get("store_key", "")) == "":
+		main.say("The project store needs its key too (PROJECT_STORE_API_KEY).")
+		return
+	var entry: Dictionary = main.add_server({"name": _form["name"], "url": check["url"], "api_key": _form["api_key"],
+		"store_url": "" if store_check.is_empty() else store_check["url"], "store_key": "" if store_check.is_empty() else _form.get("store_key", "")}, true)
 	if entry.is_empty():
 		main.say("Couldn't save that server (is the list full?).")
 		return
-	_form = {"name": "", "url": "https://", "api_key": ""}
+	_form = {"name": "", "url": "https://", "api_key": "", "store_url": "", "store_key": ""}
 	show_page("servers")
 
 
@@ -572,6 +679,8 @@ func _refresh_card() -> void:
 	checks.add_child(_check_row(true, "API key received (%d characters, kept hidden)" % str(_pending["api_key"]).length()))
 	if str(_pending.get("document_session", "")) != "":
 		checks.add_child(_check_row(true, "Document session included"))
+	if str(_pending.get("store_url", "")) != "":
+		checks.add_child(_check_row(str(_pending.get("store_api_key", "")) != "", "Project store: %s" % _pending["store_url"] + ("" if str(_pending.get("store_api_key", "")) != "" else " (no key: server projects will not connect)")))
 	if str(_pending.get("relay_url", "")) != "":
 		checks.add_child(_check_row(str(_pending.get("relay_api_key", "")) != "", "Browser relay: %s" % _pending["relay_url"] + ("" if str(_pending.get("relay_api_key", "")) != "" else " (no key: the Browser will not connect)")))
 	_scan_card.add_child(checks)
@@ -626,7 +735,8 @@ func _connect_pending() -> void:
 			main.say("Pairing: the server did not answer. %s" % answer["message"])
 			return
 	var entry: Dictionary = main.add_server({"name": chosen["name"], "url": chosen["url"], "api_key": chosen["api_key"],
-		"document_session": chosen["document_session"], "relay_url": chosen["relay_url"], "relay_api_key": chosen["relay_api_key"]}, true)
+		"document_session": chosen["document_session"], "relay_url": chosen["relay_url"], "relay_api_key": chosen["relay_api_key"],
+		"store_url": chosen.get("store_url", ""), "store_key": chosen.get("store_api_key", "")}, true)
 	if entry.is_empty():
 		if result_label != null:
 			result_label.text = "Couldn't save that server (is the list full? Forget one under Servers)."

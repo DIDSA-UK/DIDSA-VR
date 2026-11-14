@@ -3,7 +3,7 @@ extends Control
 ## (mates, measurement results, model files, undo history). Pure 2D UI, no XR:
 ## it runs in a plain window (the UI Lab) exactly as it does on a SubViewport quad.
 ##
-## Rows are plain data (see tablet_registry.gd): {id, title, subtitle, state,
+## Rows are plain data (see tablet_registry.gd): {id, title, subtitle, state, icon (optional: a name from ui_icons.gd, drawn before the title and tinted by the state),
 ## actions: [{label, callback, danger, confirm}]}. set_list() rebuilds only when
 ## the visible content actually changed, so a provider can be polled cheaply
 ## without the list flickering or losing the scroll position. An action with
@@ -13,6 +13,7 @@ extends Control
 
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const FxOverlay := preload("res://scripts/ui/fx_overlay.gd")
+const UiIcons := preload("res://scripts/ui/ui_icons.gd")
 
 signal row_selected(id: String) ## a selectable row was tapped (its id), or the selected one was tapped again / the selection was cleared ("")
 
@@ -153,7 +154,7 @@ func _signature_of(title: String, rows: Array, empty_text: String) -> String:
 		var labels := []
 		for a in row.get("actions", []):
 			labels.append([str(a.get("label", "")), bool(a.get("danger", false))])
-		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), bool(row.get("broken", false)), bool(row.get("selectable", false)), labels])
+		plain.append([str(row.get("id", "")), str(row.get("title", "")), str(row.get("subtitle", "")), str(row.get("state", "")), str(row.get("icon", "")), bool(row.get("broken", false)), bool(row.get("selectable", false)), labels])
 	return JSON.stringify([title, empty_text, selected_id, plain])
 
 
@@ -167,9 +168,27 @@ func _build_row(row: Dictionary) -> Control:
 	var title := Label.new()
 	title.text = str(row.get("title", ""))
 	title.clip_text = true
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if bool(row.get("broken", false)): # a broken mate: the name itself in the error colour (a row's "error" state colours only its subtitle)
 		title.add_theme_color_override("font_color", tokens.danger)
-	inner.add_child(title)
+	if str(row.get("icon", "")) != "": # a symbol before the name (a server project's sync state): an icon from ui_icons.gd, tinted by the row's state
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", tokens.gap)
+		var symbol := TextureRect.new()
+		symbol.name = "RowIcon"
+		symbol.texture = UiIcons.texture(str(row["icon"]), 28)
+		symbol.custom_minimum_size = Vector2(28, 28)
+		symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		match str(row.get("state", "normal")):
+			"warn": symbol.modulate = tokens.warn
+			"error": symbol.modulate = tokens.danger
+			"ok": symbol.modulate = tokens.ok
+		line.add_child(symbol)
+		line.add_child(title)
+		inner.add_child(line)
+	else:
+		inner.add_child(title)
 	var subtitle := str(row.get("subtitle", ""))
 	if subtitle != "":
 		var sub := Label.new()
