@@ -607,7 +607,7 @@
         "subshape_ref": {
          "body_id": "b804fc71-ad15-4fb4-9439-20a812f9f67f",
          "shape_type": "face",
-         "index": 3
+         "index": 105
         },
         "plane_ref": null,
         "point_ref": null
@@ -640,7 +640,7 @@
         "subshape_ref": {
          "body_id": "b804fc71-ad15-4fb4-9439-20a812f9f67f",
          "shape_type": "face",
-         "index": 4
+         "index": 104
         },
         "plane_ref": null,
         "point_ref": null
@@ -673,7 +673,7 @@
         "subshape_ref": {
          "body_id": "fff785e3-a852-4fb5-8756-63f930a389e3",
          "shape_type": "face",
-         "index": 3
+         "index": 105
         },
         "plane_ref": null,
         "point_ref": null
@@ -706,7 +706,7 @@
         "subshape_ref": {
          "body_id": "fff785e3-a852-4fb5-8756-63f930a389e3",
          "shape_type": "face",
-         "index": 4
+         "index": 104
         },
         "plane_ref": null,
         "point_ref": null
@@ -749,7 +749,7 @@
         "subshape_ref": {
          "body_id": "b804fc71-ad15-4fb4-9439-20a812f9f67f",
          "shape_type": "face",
-         "index": 3
+         "index": 105
         },
         "plane_ref": null,
         "point_ref": null
@@ -772,7 +772,7 @@
         "subshape_ref": {
          "body_id": "b804fc71-ad15-4fb4-9439-20a812f9f67f",
          "shape_type": "face",
-         "index": 3
+         "index": 105
         },
         "plane_ref": null,
         "point_ref": null
@@ -782,7 +782,7 @@
         "subshape_ref": {
          "body_id": "fff785e3-a852-4fb5-8756-63f930a389e3",
          "shape_type": "face",
-         "index": 3
+         "index": 105
         },
         "plane_ref": null,
         "point_ref": null

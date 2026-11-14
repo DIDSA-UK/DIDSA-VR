@@ -8,6 +8,11 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 - **Launcher > Servers > Check storage**: where the app's own storage (`user://`) is, how much room it has (and Documents), and the time to write and read a 20 MB file, also logged for `adb logcat` (`DIDSA VR: storage:`). For the owner to read off the Quest before S3 keeps server projects as a mirror folder there (DIDSA-CAD `docs/shared-storage-scope.md`; the questions are in `docs/android-build.md`, "Storage for server projects").
 - Test: `tests/storage_probe.gd`; the button is in `tests/servers.gd`.
 
+## Gear train demo: bevel mates re-pointed at the current faces (14 Nov; checked headless and against a local backend built from DIDSA-CAD `main`, not on the headset)
+
+- `demo/assemblies/gear_train/Gear_train.didsa`: the seven bevel-gear face references in its mates (added 25 Oct) used face indices 3 (bore) and 4 (back plane) of the bevel bodies, which the backend no longer builds there: `mate-motion` answered 422 `unsupported_mate_geometry` for `bevel_a`, the bevel and bearing mates read as broken, and `e2e_gear_train`, `e2e_limit` and `user_session_train` were red (also on `main`'s e2e job). They now name the bore (face 105, radius 4 mm on the cone axis) and the back plane (face 104). Only those seven `index` values changed.
+- The three tests pass against that backend (12, 12 and 22 lines, none false). Regenerating the file with `tests/data/make_gear_train_demo.py` finds the faces by geometry and gives the same result; a hand-kept face index goes stale whenever the generator reorders faces (DIDSA-CAD's mate references carry no signature, unlike its feature and sketch references).
+
 ## M4.1 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
 
 - **A Distance starts where the parts are.** With nothing typed for the current picks, the Mates tool asks the backend to measure (`measure_value`) and previews the parts parallel at their current distance, on their current side; the value starts on that distance (before: 0, flush). A typed value wins; new picks are measured again. The wheel's keyboard starts on the measured distance (empty until it is known; empty keeps it); the tablet's value line says "measured". An older backend gets the old preview.
