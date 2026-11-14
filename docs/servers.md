@@ -20,6 +20,8 @@ api_key="the CAD_API_KEY"
 document_session=""
 relay_url=""
 relay_api_key=""
+store_url=""
+store_key=""
 
 [server.phone]
 name="Phone"
@@ -28,7 +30,7 @@ api_key="..."
 ```
 
 `name`, `url` and `api_key` are what matter (`url` and `api_key` are required; an entry without both is ignored). `current` is the id of the
-server used at start. `document_session`, `relay_url` and `relay_api_key` are optional (a fixed document session id; the Browser window's relay, a
+server used at start. `store_url` and `store_key` are the **project store** (below). `document_session`, `relay_url` and `relay_api_key` are optional (a fixed document session id; the Browser window's relay, a
 `ws://` or `wss://` address: see [Setting up the Browser](#setting-up-the-browser-the-browser-relay)).
 At most 12 servers.
 
@@ -64,6 +66,22 @@ The same rules as DIDSA-CAD's pairing checks (`client/lib/vr_pairing/headset_pai
 - **Plain `http://` to a LAN server on the Quest is untried.** Android's cleartext rule is enforced by its Java networking stack and Godot's
   `HTTPRequest` uses its own sockets, so it very likely works, but nobody has run it on a headset. If it is blocked, the Test button says so and
   [`landing-scope.md`](landing-scope.md#plain-http-on-the-quest) (step L0) has the fix.
+
+## The project store (server projects)
+
+Server projects (`docs/server-projects.md`) live on DIDSA-CAD's **project store** (`project-store/` there), a service with its own address (port 8200 by default)
+and its own key (`PROJECT_STORE_API_KEY`), not the CAD key. Give the headset both in any of these ways:
+
+- **Scan the QR code** DIDSA-CAD shows (Connect a VR headset) once it writes `p=<store address>` and `pk=<store key>`; the card then lists "Project store: ...". (`s` is
+  the document session; the store does not use it.) A code without them still pairs. The flat app's screen does not write them yet (`docs/server-projects.md`, "What
+  DIDSA-CAD needs").
+- **Type them** under Servers: the two optional fields in the add form, or **Store** on a saved server (like **Relay**): the address goes through the same rules as a
+  server's (plain `http://` only on a local network) and the store needs its key.
+- **`secrets.cfg`** `[project_store] url= api_key=` (developer override).
+- **Pre-load** `store_url` and `store_key` in `servers.cfg`.
+
+The Servers page also shows where server projects are copied (`Documents/DIDSA-Cloud`, or the app's own storage without All files access) and what **this device is
+called** to the store (a name you can change; default from the platform, e.g. the Quest's model): other devices see it as "changed by ...", and it is trusted for nothing else.
 
 ## Setting up the Browser (the browser relay)
 

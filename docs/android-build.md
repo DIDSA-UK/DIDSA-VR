@@ -162,10 +162,24 @@ D) is **not** built: it needs a native plugin, which `CLAUDE.md` does not allow.
    If Horizon OS shows no All files access page, it can be granted over USB: `adb shell appops set uk.didsa.vr MANAGE_EXTERNAL_STORAGE allow` (the package name from the preset), then restart the app. Not tried.
 4. Does *Allow opening files from other apps* open the system's All files access page for the app? Does Settings then say "allowed"? **Owner, 10 Nov (Quest 3): no page opened.** Cause: the app asked for `"MANAGE_EXTERNAL_STORAGE"`, and Godot's Android `PermissionsUtil` (read in the 4.5 source; the same file in 4.7 not checked) only opens the page for the full name `android.permission.MANAGE_EXTERNAL_STORAGE`; any other name fails its lookup and is skipped without a word. **Fixed 10 Nov:** the full name, and the app now asks **at every launch** (2 s after start) until it is allowed, as well as from the button. It is not a pop-up: Android opens a Settings page with a switch for the app; turn it on and come back. The permission must be in the APK: Export > Permissions > **Manage External Storage** ticked (the example preset has it; *Read/Write External Storage* is not the same thing), or the page has no switch for the app. Whether `OS.get_granted_permissions()` then reports it on Horizon OS (Godot checks `Environment.isExternalStorageManager()` for this one) is still to see. After the fixed build: ____
 
-## Storage for server projects (S0 spike, 13 Nov 2026)
+## Server projects: the mirror folder and its permission (S3, 14 Nov 2026)
 
-DIDSA-CAD's shared storage (`docs/shared-storage-scope.md` there) plans to keep a local copy of each server project in the app's own
-storage, `user://`, which needs no storage permission. Before that is built: where `user://` really is on the Quest, how much room it has,
+A project on DIDSA-CAD's project store is copied into a **mirror folder**: `Documents/DIDSA-Cloud/<server host>/<project>/` (a sibling of `Documents/DIDSA`, visible, so
+files can be dragged in by hand; `docs/server-projects.md`). That is a folder outside the app's own storage, so on the Quest it needs **All files access**, the
+same permission as the local project folder (the *Allow opening files from other apps* button and the launch-time ask above). **Without it** (or when the folder cannot be
+made or written) the mirror falls back to `user://DIDSA-Cloud` (on the Quest under `Android/data/<package>/files/`), and Files > Server projects and the Servers page say so.
+The sync state (versions, the queue of unsent saves, the cursor) is always private, in `user://didsa-cloud-state/`, so deleting the mirror cannot delete the queue. The
+mirror root is one setting (`[cloud] folder=` in `settings.cfg`, empty = the default) so it can move if the check below shows Documents too slow or small.
+
+**To check on the headset (write the answers here; nothing here has been run on one):**
+1. With All files access on, does `Documents/DIDSA-Cloud/<host>/<project>/` get made, and can the Files app or a PC over USB see it and put a file in it? ____
+2. Does a dropped file go to the store at the next sync, and a file edited by hand? ____ Is a file removed by hand left on the server (it must be)? ____
+3. With All files access off, does the fallback line appear and does the project still open and save? ____
+4. How long does opening a real project and its first sync take? ____
+
+### The storage check (S0 spike, 13 Nov 2026)
+
+Where `user://` really is on the Quest, how much room it has,
 and whether a file there can be seen from outside the app. **Launcher > Servers > Check storage** writes and reads back a 20 MB file and
 shows the folder, the free space and the times; the same line goes to `adb logcat` (filter `DIDSA VR: storage`).
 

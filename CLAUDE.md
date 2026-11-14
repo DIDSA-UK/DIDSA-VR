@@ -18,6 +18,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 - `scripts/room/`: Assembly Rooms (clipped sub-assembly workspaces): manager, registry, clip, handles, console, edit, world preview.
 - `scripts/design_table/`: the part-modelling console (sketch, constraints, features); `cad_api.gd` is its backend client.
 - `scripts/ui/`: wrist tablet (`tablet_registry.gd`, `tablet_pages.gd`), theming (`didsa_ui_theme.gd`), shader FX.
+- `scripts/cloud/`: server projects (S3): `cloud_project.gd` (scan, sync, conflict choices, opening) over a visible mirror folder in Documents, `cloud_manager.gd` (what main.gd and the screens use), the store client and transport, private sync state, remint twin (`docs/server-projects.md`).
 - `scripts/landing/`: the first screen (a state of `main.gd`'s world): logo, rocket garden, launcher, tips (`landing.gd` is the entry; scope in `docs/landing-scope.md`). `DIDSA_NO_LANDING=1` turns it off for tests.
 - `scripts/motion/`: constrained-drag projector and benchmarks. `shaders/`: clip, grid, glass-wall and effect shaders.
 - `demo/`: models and assemblies shipped in the APK (1:1 glb, `importer="keep"`; credits in `demo/CREDITS.md`, rules in `demo/README.md`).

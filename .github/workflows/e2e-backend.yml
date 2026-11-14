@@ -13,8 +13,11 @@ on:
   pull_request:
     paths:
       - "scripts/design_table/**"
+      - "scripts/cloud/**"
       - "scripts/mesh_identity.gd"
       - "tests/e2e_*.gd"
+      - "tests/fake_project_store.gd"
+      - "tests/cloud_rig.gd"
       - "tests/ci_e2e.sh"
       - "tests/e2e_ci_list.txt"
       - "tests/expected_false_e2e.txt"
@@ -93,9 +96,18 @@ jobs:
           sed -i 's/^ *//' secrets.cfg
           cat secrets.cfg | sed 's/api_key=.*/api_key=***/'
 
+      # DIDSA-CAD's project store (server projects, S3): tests/ci_e2e.sh starts a throwaway one from this checkout for tests/e2e_cloud_store.gd.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the project store's requirements
+        run: pip install -r didsa-cad/project-store/requirements.txt
+
       - name: E2E tests
         env:
           GODOT: ${{ env.GODOT_BIN }}
+          CAD_DIR: ${{ github.workspace }}/didsa-cad
         run: tests/ci_e2e.sh
 
       - name: Backend log

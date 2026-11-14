@@ -28,6 +28,7 @@ const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "
 var _home_root: Control
 var _page_view: Control
 var _home_pill: Button
+var _waiting_shown := "" ## the "waiting to sync" words the home view was built with
 var _home_status: Label
 var _ticker: Control
 var _ticker_kicker: Label
@@ -283,6 +284,16 @@ func _build_home() -> void:
 		row.custom_minimum_size = Vector2(0, 72)
 		row.pressed.connect(press_tile.bind(id))
 		rows.add_child(row)
+	var waiting: Dictionary = main.cloud.waiting() # S3: saves not yet on the project store and any clash, from the saved sync state (no network)
+	_waiting_shown = main.cloud.waiting_text()
+	if int(waiting["to_send"]) > 0 or int(waiting["clash"]) > 0:
+		var alert := DeckButton.new()
+		alert.name = "CloudWaiting"
+		alert.setup("row", "Waiting to sync" if int(waiting["clash"]) == 0 else "Clash to settle", _waiting_shown, "cloud_clash" if int(waiting["clash"]) > 0 else "cloud_up")
+		alert.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		alert.custom_minimum_size = Vector2(0, 72)
+		alert.pressed.connect(open_server_projects_page)
+		rows.add_child(alert)
 
 	# the status line, the tips ticker, and Settings / About at the foot
 	_home_status = Label.new()
@@ -311,6 +322,16 @@ func _build_home() -> void:
 	_shown_tip = -1
 	_refresh_ticker()
 	_refresh_pill()
+
+
+func open_server_projects_page() -> void:
+	landing.open_server_projects()
+
+
+func _on_cloud_changed() -> void:
+	## What is waiting to sync changed: the home view shows the line, so redraw it when the words differ (not on every sync).
+	if _home_root != null and is_instance_valid(_home_root) and page == "home" and main.cloud.waiting_text() != _waiting_shown:
+		_build_home()
 
 
 func _build_ticker() -> Control:

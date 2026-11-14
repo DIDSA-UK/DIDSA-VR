@@ -137,6 +137,12 @@ const _ICONS := {
 	"snap": '<path d="M10 8V26a14 14 0 0 0 28 0V8H28V26a4 4 0 0 1-8 0V8Z"/><path d="M10 14H20M28 14H38"/>',
 	"feat_plane": '<path d="M8 32L20 14H42L30 32Z"/><path d="M24 36V42"/>',
 	"plus": '<path d="M24 10V38M10 24H38"/>',
+	# server projects (S3): the sync state of a project, as symbols
+	"cloud": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/>',
+	"cloud_done": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/><path d="M18 27L22 31L30 22"/>',
+	"cloud_up": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/><path d="M24 33V22M19 26L24 21L29 26"/>',
+	"cloud_off": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/><path d="M8 42L40 6"/>',
+	"cloud_clash": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/><path d="M24 21V28"/><path d="M24 32V32.500"/>',
 	"recentre": '<circle cx="24" cy="24" r="9"/><circle cx="24" cy="24" r="2"/><path d="M24 5V13M24 35V43M5 24H13M35 24H43"/>',
 	"to_arena": '<path d="M24 31V8"/><path d="M15 17L24 8L33 17"/><path d="M8 34V40H40V34"/>',
 	"pin": '<path d="M18 8H30L28 22L35 28H13L20 22Z"/><path d="M24 28V42"/>',

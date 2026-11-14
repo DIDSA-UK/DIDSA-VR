@@ -3,6 +3,8 @@ extends RefCounted
 ##
 ##     didsa-vr:1?n=<name>&u=<base url>&k=<api key>          (each value percent-encoded; Dart's Uri.encodeQueryComponent, so a space is `+`)
 ##     optional: s=<document session>  r=<browser relay, ws:// or wss://>  rk=<relay key>
+##               p=<project store address>  pk=<project store key>     (S3, DIDSA-CAD docs/shared-storage-scope.md section 7: NOT s / sk, `s` is the document session above;
+##                an older headset ignores both keys, an older DIDSA-CAD never writes them)
 ##
 ## The headset refuses anything that does not start `didsa-vr:1?`, a version it does not know, a code with no address or key, an address
 ## server_address.gd refuses (so plain http:// only to a local network), and anything carrying control characters or an absurd length. Unknown extra
@@ -16,7 +18,7 @@ const MAX_LENGTH := 2048
 const MAX_VALUE := 512
 const MAX_NAME := 64
 static var _CONTROL_ESCAPE := RegEx.create_from_string("%(0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF])") ## a percent-escaped control character
-const KEYS: Array[String] = ["n", "u", "k", "s", "r", "rk"]
+const KEYS: Array[String] = ["n", "u", "k", "s", "r", "rk", "p", "pk"]
 
 
 static func looks_like_pairing(text: String) -> bool:
@@ -25,7 +27,7 @@ static func looks_like_pairing(text: String) -> bool:
 
 
 static func parse(raw: String) -> Dictionary:
-	## {ok: bool, error: String, name, url, api_key, document_session, relay_url, relay_api_key, warning: String}
+	## {ok: bool, error: String, name, url, api_key, document_session, relay_url, relay_api_key, store_url, store_api_key, warning: String}
 	var text := raw.strip_edges()
 	if text.length() > MAX_LENGTH:
 		return _fail("That code is too long to be a DIDSA pairing code.")
@@ -74,19 +76,29 @@ static func parse(raw: String) -> Dictionary:
 		if relay["level"] == ServerAddress.Level.REFUSED:
 			return _fail("The browser relay address in that code is not allowed: %s" % relay["message"])
 		relay_url = str(relay["url"])
+	var store_url := ServerAddress.normalise(str(values.get("p", "")))
+	if store_url != "":
+		var store := ServerAddress.check(store_url)
+		if store["level"] == ServerAddress.Level.REFUSED:
+			return _fail("The project store address in that code is not allowed: %s" % store["message"])
+		store_url = str(store["url"])
 	var name := str(values.get("n", "")).strip_edges().substr(0, MAX_NAME)
 	if name == "":
 		name = ServerAddress.default_name(url)
 	return {
 		"ok": true, "error": "", "name": name, "url": address["url"], "api_key": key_text,
 		"document_session": str(values.get("s", "")).strip_edges(), "relay_url": relay_url, "relay_api_key": str(values.get("rk", "")).strip_edges(),
+		"store_url": store_url, "store_api_key": str(values.get("pk", "")).strip_edges() if store_url != "" else "",
 		"warning": str(address["message"]) if address["level"] == ServerAddress.Level.WARN else "",
 	}
 
 
-static func build(name: String, url: String, api_key: String) -> String:
-	## A code the way DIDSA-CAD writes it (tests use this to round-trip; the headset itself never makes one).
-	return "%s:%d?n=%s&u=%s&k=%s" % [SCHEME, VERSION, _encode(name), _encode(ServerAddress.normalise(url)), _encode(api_key.strip_edges())]
+static func build(name: String, url: String, api_key: String, store_url: String = "", store_key: String = "") -> String:
+	## A code the way DIDSA-CAD writes it (tests use this to round-trip; the headset itself never makes one). With a store: `&p=<address>&pk=<key>`.
+	var code := "%s:%d?n=%s&u=%s&k=%s" % [SCHEME, VERSION, _encode(name), _encode(ServerAddress.normalise(url)), _encode(api_key.strip_edges())]
+	if store_url.strip_edges() != "":
+		code += "&p=%s&pk=%s" % [_encode(ServerAddress.normalise(store_url)), _encode(store_key.strip_edges())]
+	return code
 
 
 static func _encode(value: String) -> String:
@@ -106,4 +118,4 @@ static func _has_control(value: String) -> bool:
 
 
 static func _fail(message: String) -> Dictionary:
-	return {"ok": false, "error": message, "name": "", "url": "", "api_key": "", "document_session": "", "relay_url": "", "relay_api_key": "", "warning": ""}
+	return {"ok": false, "error": message, "name": "", "url": "", "api_key": "", "document_session": "", "relay_url": "", "relay_api_key": "", "store_url": "", "store_api_key": "", "warning": ""}
