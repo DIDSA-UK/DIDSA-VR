@@ -192,6 +192,14 @@ var _picks: Array[Dictionary] = []
 var _width_error := "" ## a Width pair whose two faces are not parallel (checked as soon as the pair is complete), else ""
 var _width_seq := 0
 var _ghosts: Array[Node3D] = [] ## the preview: a see-through copy of every part the mate would move (the driven one and any followers), where it would put it
+var preview_glide := true ## M3: the preview moves the REAL part (it glides to the mated pose, Cancel glides it back) instead of showing a see-through copy; false = the copy
+var preview_glide_s := 0.25 ## how long that glide takes (0: at once; tests). Feel: judged on the headset
+var _glide_start: Dictionary = {} ## node -> the STORED pose it glides away from (the pose the backend still has: a preview never changes the backend)
+var _glide_target: Dictionary = {} ## node -> the pose it glides to (what the latest preview says)
+var _glide_outlines: Array[Node3D] = [] ## a see-through copy at each moved part's start pose
+var _glide_tween: Tween
+var _commit_starts: Dictionary = {} ## node -> start pose of a glide that was just confirmed: `_adopt_backend_poses` takes the undo entry's "before" from here (the node is already there)
+var _edit_preview: Dictionary = {} ## M3: a pending EDIT of a stored mate being previewed: {owner, mate_id, fields, driven}; empty = none
 var _preview_seq := 0 ## bumped on every change so a slow answer for an older setting is ignored
 var _status := ""
 var _alignment_choice := ""
@@ -437,7 +445,7 @@ func clear_picks() -> void:
 
 
 func _exit_tree() -> void:
-	_clear_ghost()
+	_clear_preview()
 
 
 func is_width() -> bool:
@@ -542,10 +550,16 @@ func _status_text_core() -> String:
 					value_note = " (%s, from the teeth)" % coupler_value_text(mate_type, preview_coupler_value)
 				return "Turning one part will turn the other%s. Press Reverse if they should go the other way, then Create." % value_note
 			if preview_visible():
+				# M3: when the part has glided to the preview, say so (and where it was) after whichever hint applies.
+				var moved := ""
+				if not _glide_start.is_empty():
+					moved = " The part has moved to show the mate (an outline stays where it was; Clear picks puts it back)."
 				if mate_type == "distance" and not value_typed and measured_value != null:
-					return "Distance %s mm: where the parts are now. Set value to type the one you want; Flip if the side is wrong, then Create." % _trim_number(float(measured_value))
+					return "Distance %s mm: where the parts are now. Set value to type the one you want; Flip if the side is wrong, then Create.%s" % [_trim_number(float(measured_value)), moved]
 				if suggested_type != "" and suggested_type == mate_type:
-					return "%s, suggested from the picks (change the type if it is not what you want). Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create." % type_label(mate_type)
+					return "%s, suggested from the picks (change the type if it is not what you want). Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create.%s" % [type_label(mate_type), moved]
+				if not _glide_start.is_empty():
+					return "Preview: the part has moved to show the mate (an outline stays where it was). If it is the wrong way press Flip or Next solution, then Create; Clear picks puts it back."
 				return "Preview shown in blue. If it is the wrong way press Flip or Next solution, then Create."
 			if _preview_note != "":
 				return _preview_note
@@ -750,7 +764,7 @@ func preview_visible() -> bool:
 	for ghost in _ghosts:
 		if is_instance_valid(ghost):
 			return true
-	return false
+	return not _glide_start.is_empty()
 
 
 func movement_param() -> String:
@@ -765,9 +779,131 @@ func request_preview() -> void:
 		return # M4: the suggested type is being put in place and the answer in hand is its preview (the setters it runs must not ask again)
 	_preview_seq += 1
 	if not active or _picks.size() != pick_target() or _width_error != "" or backend_url == "" or not is_inside_tree():
-		_clear_ghost()
+		_clear_preview()
 		return
 	_run_preview(_preview_seq)
+
+
+# --- M3: previewing an EDIT of a stored mate (Flip, Lock rotation, Value ...): the part glides to where the edit would put it; Apply stores it, Cancel glides it back ---
+
+func can_preview_edit(mate_id: String, fields: Dictionary) -> bool:
+	## True for an edit that moves something: not a coupler / limit (they place nothing), not a suppress, a driven part that is free to move, outside a sandbox.
+	if fields.is_empty() or in_sandbox() or backend_url == "" or not is_inside_tree():
+		return false
+	for key in fields:
+		if not ["value", "alignment", "secondary_flip", "allow_rotation"].has(key):
+			return false
+	var mate := _mate_by_id(mate_id)
+	if mate.is_empty() or COUPLER_TYPES.has(str(mate.get("type", ""))) or LIMIT_TYPES.has(str(mate.get("type", ""))):
+		return false
+	var refs: Array = mate.get("references", [])
+	return refs.size() == 2 and not _edit_driven_fixed(mate_id)
+
+
+func _mate_by_id(mate_id: String) -> Dictionary:
+	for mate in mates:
+		if str(mate.get("id", "")) == mate_id:
+			return mate
+	return {}
+
+
+func _edit_driven(mate_id: String) -> String:
+	var refs: Array = _mate_by_id(mate_id).get("references", [])
+	return _choose_driven(str(refs[0].get("occurrence_id", "")), str(refs[1].get("occurrence_id", ""))) if refs.size() == 2 else ""
+
+
+func _edit_driven_fixed(mate_id: String) -> bool:
+	var driven := _edit_driven(mate_id)
+	return driven == "" or bool(occurrences.get(driven, {}).get("fixed", false))
+
+
+static func edit_payload(mate: Dictionary, fields: Dictionary) -> Dictionary:
+	## Pure: the preview request body for the stored `mate` with `fields` applied (the MateCreate shape the preview takes).
+	var payload := {"type": str(mate.get("type", "")), "references": mate.get("references", []), "allow_rotation": bool(fields.get("allow_rotation", mate.get("allow_rotation", true)))}
+	var alignment = fields.get("alignment", mate.get("alignment"))
+	if alignment != null:
+		payload["alignment"] = alignment
+	var flip = fields.get("secondary_flip", mate.get("secondary_flip"))
+	if flip != null:
+		payload["secondary_flip"] = flip
+	var value = fields.get("value", mate.get("value"))
+	if value != null:
+		payload["value"] = value
+	return payload
+
+
+func edit_preview_pending() -> bool:
+	return not _edit_preview.is_empty()
+
+
+func edit_preview_text() -> String:
+	## What the tablet says while an edit is previewed ("" = none).
+	if _edit_preview.is_empty():
+		return ""
+	var text := "Previewing the change: the part has moved to show it. Apply to keep it, or Cancel."
+	var notice: String = str(_edit_preview.get("notice", ""))
+	if notice != "":
+		text = "%s %s" % [notice, text]
+	if bool(_edit_preview.get("budget_exhausted", false)):
+		text += " " + BUDGET_NOTE
+	return text
+
+
+func preview_edit(owner_part_id: String, mate_id: String, fields: Dictionary) -> Dictionary:
+	## Asks the backend where `fields` would put the parts (preview-mate-solve with `replace_mate_id`: the stored mate is left out of the solve, nothing is stored) and glides
+	## the real parts there. {ok, error}: not ok = the edit cannot be met (the parts stay or go home; the reason is the backend's).
+	_clear_preview()
+	var mate := _mate_by_id(mate_id)
+	var driven := _edit_driven(mate_id)
+	if mate.is_empty() or driven == "":
+		return {"ok": false, "error": "That mate is not in the list."}
+	_preview_seq += 1
+	var seq := _preview_seq
+	var path := "/parts/%s/occurrences/%s/preview-mate-solve?movement=%s&replace_mate_id=%s" % [owner_part_id, driven, movement_param(), mate_id]
+	var result := await _api_request(HTTPClient.METHOD_POST, path, edit_payload(mate, fields))
+	if seq != _preview_seq:
+		return {"ok": true, "error": ""} # a newer preview (or Cancel) replaced this one
+	var json = result.get("json")
+	if not result["ok"] or not (json is Dictionary):
+		return {"ok": false, "error": _friendly_error(result)}
+	var members: Array = preview_members(json, driven)
+	if members.is_empty():
+		var changes = json.get("conflicting", [])
+		var why := str(json.get("reason", ""))
+		if json.get("blocked_by") is Array and not (json["blocked_by"] as Array).is_empty():
+			why = branch_notice([], json["blocked_by"], [], mates)
+		elif changes is Array and not (changes as Array).is_empty():
+			why = branch_notice([], [], changes, mates)
+		return {"ok": false, "error": why if why != "" else "the mates can't all be satisfied with that change"}
+	var changes_needed: Array = json.get("branch_changes", []) if json.get("branch_changes") is Array else []
+	var edit_key := "%s|%s" % [mate_id, JSON.stringify(fields)]
+	if not changes_needed.is_empty():
+		_pending_edit[edit_key] = changes_needed # Apply sends exactly these (update_mate's own confirmation)
+	_edit_preview = {"owner": owner_part_id, "mate_id": mate_id, "fields": fields, "driven": driven,
+		"notice": branch_notice(changes_needed, [], [], mates) if not changes_needed.is_empty() else "", "budget_exhausted": json.get("budget_exhausted", false) == true}
+	_glide_to(owner_part_id, members)
+	picks_changed.emit()
+	return {"ok": true, "error": ""}
+
+
+func confirm_edit_preview() -> Dictionary:
+	## Apply: stores the edit (update_mate: the stored pose is PATCHed, not the previewed one) and the parts stay where they glided to.
+	if _edit_preview.is_empty():
+		return {"ok": false, "error": "Nothing is being previewed."}
+	var edit := _edit_preview.duplicate()
+	_edit_preview = {}
+	var result: Dictionary = await update_mate(str(edit["owner"]), str(edit["mate_id"]), edit["fields"])
+	picks_changed.emit()
+	return result
+
+
+func cancel_edit_preview() -> void:
+	## Cancel: the part glides back; the stored mate is untouched.
+	if _edit_preview.is_empty():
+		return
+	_preview_seq += 1
+	_clear_preview()
+	picks_changed.emit()
 
 
 func _check_width_pair(first: Dictionary, second: Dictionary) -> void:
@@ -788,7 +924,7 @@ func _check_width_pair(first: Dictionary, second: Dictionary) -> void:
 	var json = result.get("json")
 	if result["ok"] and json is Dictionary and json.get("faces_parallel") == false:
 		_width_error = "These two faces are not parallel - a Width mate needs a pair of parallel faces. Press Undo pick and choose another."
-		_clear_ghost()
+		_clear_preview()
 		picks_changed.emit()
 		return
 	request_preview()
@@ -1175,14 +1311,18 @@ func _run_preview(seq: int) -> void:
 		_branch_notice = branch_notice(_branch_changes, json.get("blocked_by", []) if json.get("blocked_by") is Array else [], json.get("conflicting", []) if json.get("conflicting") is Array else [], mates)
 	_clear_ghost()
 	if is_coupler() or is_limit():
-		members = [] # a coupler / limit places nothing: no ghost (the preview only brings the default value and sense)
+		members = [] # a coupler / limit places nothing: no ghost, no glide (the preview only brings the default value and sense)
 	var missing: Array = []
-	for member in members:
-		var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
-		if part != null:
-			_show_ghost(part, json_to_pose(member["transform"]))
-		else:
-			missing.append(str(member["occurrence_id"]))
+	if preview_glide:
+		missing = _glide_to(owner_part_id, members) # M3: the real parts glide (members = [] sends any that moved back home)
+	else:
+		_glide_cancel()
+		for member in members:
+			var part := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
+			if part != null:
+				_show_ghost(part, json_to_pose(member["transform"]))
+			else:
+				missing.append(str(member["occurrence_id"]))
 	_note_preview(owner_part_id, driven_id, result, json, members, missing)
 	# "No ghost to show yet" (nothing added above): a value still to be typed, geometry this type can't use, or a grounded part.
 	picks_changed.emit()
@@ -1212,6 +1352,121 @@ func _note_preview(owner_part_id: String, driven_id: String, result: Dictionary,
 	_preview_note = "No preview: %s." % why if why != "" else ""
 	print("DIDSA VR: preview: type=%s driven=%s ok=%s converged=%s members=%d missing=%d ghost=%s note=%s" % [
 		mate_type, driven_id, str(result.get("ok", false)), str(json.get("converged")) if json is Dictionary else "-", members.size(), missing.size(), str(preview_visible()), _preview_note])
+
+
+# --- M3: the glide preview ----------------------------------------------------------------------------------------------------------------------------------
+# The real nodes move, from the STORED pose to what `preview-mate-solve` says (ease in-out), with a see-through copy left at the start pose. A new preview glides
+# from where the parts are to the new answer; Cancel glides them back; Confirm keeps them there (nothing jumps: `_glide_commit`). The backend is always asked from
+# the stored poses, which a preview never changes, so the picks stay valid. A preview that fails or moves nothing leaves every part at its start.
+
+func stored_pose(part: Node3D) -> Transform3D:
+	## The pose the backend has for `part`: where a glide started from, else where the node is. Create / edit PATCH THIS before solving, never the previewed pose.
+	return _glide_start.get(part, _local_pose(part))
+
+
+func gliding_parts() -> Array:
+	return _glide_start.keys().filter(func(n) -> bool: return is_instance_valid(n))
+
+
+func _glide_to(owner_part_id: String, members: Array) -> Array:
+	## Glides every member to its previewed pose; parts that were gliding but are not in `members` go back to their start. Returns the occurrence ids with no node on screen.
+	var wanted := {}
+	var missing: Array = []
+	for member in members:
+		var node := _find_loaded_part(owner_part_id, str(member["occurrence_id"]))
+		if node == null:
+			missing.append(str(member["occurrence_id"]))
+			continue
+		wanted[node] = json_to_pose(member["transform"])
+	var tween_targets := {}
+	for node in _glide_start.keys():
+		if not wanted.has(node):
+			if is_instance_valid(node):
+				tween_targets[node] = _glide_start[node]
+			_glide_start.erase(node)
+			_glide_target.erase(node)
+	for node in wanted:
+		if not _glide_start.has(node):
+			_glide_start[node] = _local_pose(node)
+		_glide_target[node] = wanted[node]
+		tween_targets[node] = wanted[node]
+	_rebuild_glide_outlines()
+	_run_glide(tween_targets)
+	return missing
+
+
+func _run_glide(targets: Dictionary) -> void:
+	if _glide_tween != null and _glide_tween.is_valid():
+		_glide_tween.kill()
+	_glide_tween = null
+	var live := {}
+	for node in targets:
+		if is_instance_valid(node):
+			live[node] = targets[node]
+	if live.is_empty():
+		return
+	if preview_glide_s <= 0.0 or not is_inside_tree():
+		for node in live:
+			(node as Node3D).transform = live[node]
+		return
+	_glide_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	for node in live:
+		_glide_tween.tween_property(node, "transform", live[node], preview_glide_s)
+	_glide_tween.finished.connect(func() -> void:
+		for node in live:
+			if is_instance_valid(node):
+				(node as Node3D).transform = live[node]) # exactly there, whatever the interpolation left
+
+
+func _rebuild_glide_outlines() -> void:
+	for outline in _glide_outlines:
+		if is_instance_valid(outline):
+			outline.queue_free()
+	_glide_outlines.clear()
+	for node in _glide_start:
+		if not is_instance_valid(node) or node.get_parent() == null:
+			continue
+		var before: Array[Node3D] = _ghosts.duplicate()
+		_show_ghost(node, _glide_start[node])
+		var added: Node3D = _ghosts.back() if _ghosts.size() > before.size() else null
+		if added != null:
+			_ghosts.erase(added) # it is an outline, kept apart from the preview copies
+			_glide_outlines.append(added)
+
+
+func _glide_cancel() -> void:
+	## Cancel: every moved part glides back to its start pose, the outlines go.
+	var back := {}
+	for node in _glide_start:
+		back[node] = _glide_start[node]
+	_glide_start.clear()
+	_glide_target.clear()
+	_rebuild_glide_outlines()
+	if not back.is_empty():
+		_run_glide(back)
+
+
+func _glide_commit() -> void:
+	## Confirm: the parts stay where the preview put them (exactly), the outlines go, and the start poses are kept for `_adopt_backend_poses`' undo entry.
+	if _glide_start.is_empty():
+		return
+	if _glide_tween != null and _glide_tween.is_valid():
+		_glide_tween.kill()
+	_glide_tween = null
+	for node in _glide_target:
+		if is_instance_valid(node):
+			(node as Node3D).transform = _glide_target[node]
+	_commit_starts = _glide_start.duplicate()
+	_glide_start.clear()
+	_glide_target.clear()
+	_rebuild_glide_outlines()
+
+
+func _clear_preview() -> void:
+	## The preview ends without Confirm (a pick changed, Clear, the answer says there is nothing to show): copies gone, parts home, a pending edit dropped.
+	_clear_ghost()
+	_glide_cancel()
+	_edit_preview = {}
 
 
 func _show_ghost(part: Node3D, pose: Transform3D) -> void:
@@ -1353,7 +1608,7 @@ func create_mate() -> Dictionary:
 	_busy = true
 	var part := _find_loaded_part(owner_part_id, driven_occurrence_id)
 	if atomic and part != null:
-		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_occurrence_id], {"transform": pose_to_json(_local_pose(part))})
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_occurrence_id], {"transform": pose_to_json(stored_pose(part))}) # (the stored pose, not a previewed one)
 		if not patched["ok"]:
 			_busy = false
 			return {"ok": false, "error": _friendly_error(patched)}
@@ -1364,12 +1619,17 @@ func create_mate() -> Dictionary:
 	_busy = false
 	if not result["ok"]:
 		return {"ok": false, "error": _friendly_error(result) if atomic else result["error"]}
+	if atomic:
+		_glide_commit() # M3: the parts are already where the mate put them: they stay, and the undo entry starts from where they were
+	else:
+		_glide_cancel() # relaxed (a sandbox) or a grounded part: the mate is stored, not solved, so nothing moves yet
 	clear_picks()
 	document_changed.emit()
 	if in_sandbox():
 		note_sandbox_mate(owner_part_id, driven_occurrence_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "mate %s" % (label_or(part, str(part.name)) if part != null else driven_occurrence_id))
+	_commit_starts.clear()
 	await refresh_mates(owner_part_id)
 	if not in_sandbox() and driven_fixed:
 		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
@@ -1427,7 +1687,7 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 	_busy = true
 	var part := _find_loaded_part(owner_part_id, driven_id) if atomic else null
 	if part != null:
-		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_id], {"transform": pose_to_json(_local_pose(part))})
+		var patched := await _api_request(HTTPClient.METHOD_PATCH, "/parts/%s/occurrences/%s" % [owner_part_id, driven_id], {"transform": pose_to_json(stored_pose(part))})
 		if not patched["ok"]:
 			_busy = false
 			return {"ok": false, "error": _friendly_error(patched)}
@@ -1448,12 +1708,19 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 		var detail = result["json"].get("detail") if result.get("json") is Dictionary else null
 		if detail is Dictionary and str(detail.get("type", "")) == "branch_change_needed" and detail.get("branch_changes") is Array:
 			_pending_edit[edit_key] = detail["branch_changes"]
+		_clear_preview() # the mate keeps its old values: a previewed part goes back
 		return {"ok": false, "error": _friendly_error(result)}
+	_edit_preview = {}
+	if atomic:
+		_glide_commit()
+	else:
+		_glide_cancel()
 	document_changed.emit()
 	if in_sandbox():
 		note_sandbox_mate(owner_part_id, driven_id)
 	if atomic:
 		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (label_or(part, str(part.name)) if part != null else driven_id))
+	_commit_starts.clear()
 	await refresh_mates(owner_part_id)
 	if not in_sandbox() and driven_fixed:
 		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
@@ -3264,12 +3531,13 @@ func _adopt_backend_poses(owner_part_id: String, label: String) -> bool:
 		var node := _find_loaded_part(owner_part_id, occ_id)
 		if node == null or not (occ.get("transform") is Dictionary):
 			continue
-		var before := _local_pose(node)
+		var before: Transform3D = _commit_starts.get(node, _local_pose(node)) # a confirmed glide: the node is already at `after`, it started from here
 		var after := json_to_pose(occ["transform"])
 		if before.is_equal_approx(after):
 			continue
 		node.transform = after
 		changes.append({"node": node, "before": before, "after": after})
+	_commit_starts.clear()
 	changes.append_array(await _copy_pose_changes(owner_part_id))
 	_push_group_move(label, changes)
 	return true

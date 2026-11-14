@@ -20,6 +20,13 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 - **Pick points.** The laser's hit point is sent with the preview and Create as `pick_points`, local to each occurrence in mm. The backend accepts them and does not use them: no pick-point tie-break passed the DIDSA-CAD M4 benchmark.
 - Test: `tests/mates_suggested_type.gd` (fake backend). Not run against a live backend in this repo (`ci_e2e.sh` not run for M4).
 
+## M3, the glide preview (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
+
+- **The preview moves the real part.** `mates_tool.gd`: a mate preview now glides the real node from its stored pose to the solved pose (0.25 s, cubic ease in-out, `preview_glide_s`) with a see-through outline left at the start pose; a new preview glides from where the part is; Clear picks / a changed pick / a failed preview glide it back; Create keeps it there (the glide is committed: nothing jumps) and PATCHes the STORED pose, never the previewed one, with the undo entry starting from the stored pose (`stored_pose`, `_commit_starts`). `preview_glide := false` keeps the old see-through copy. Couplers and limits place nothing: no glide. In a sandbox (relaxed) or with a grounded driven part the mate is stored, not solved, so the preview goes back.
+- **Editing a mate is previewed (new in VR).** Flip, Lock rotation, Value on a placing mate in the tablet's list now preview first (`preview_edit`: `preview-mate-solve` with `replace_mate_id` on the driven part), the part glides, and an **Apply change** / **Cancel** row appears on the Mates page; Apply stores (`confirm_edit_preview` -> `update_mate`), Cancel glides back. Couplers, limits and suppress apply at once as before.
+- The status line says "Preview: the part has moved to show the mate (an outline stays where it was)..." while gliding. Test: `tests/mate_glide.gd` (new); `mates_preview_note` adapted.
+- Not judged: the glide time and ease (0.25 s, cubic), how the outline reads, and whether an Apply / Cancel step on the tablet suits an edit. Owner, on the headset.
+
 ## M5 (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`; headless only, not checked on the headset)
 
 - **Rigid sets shown.** The Assembly Tree window reads the backend's `rigid_set` from `constraint-status`: the rows of a set share a font colour and read "moves with <lead>" (the lead: "moves with N other parts"). Grabbing a part of a set outlines every part that moves with it for `PULSE_SECONDS`, the same body outline the mate highlight uses (`MatesTool.pulse_rigid_set`; the status is read by `refresh_constraint_status`). Tests: `occurrence_tree_model`, `mate_highlight`.

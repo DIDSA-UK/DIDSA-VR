@@ -71,6 +71,8 @@ var _mates_value_label: Label
 var _mates_type_row: Control ## M4: the Mate type buttons, kept on the tool's type (a suggestion from the picks, or the wheel, changes it)
 var _mates_toggles_row: Control ## Allow rotation / Minimal movement: neither means anything for a coupler (nothing moves when one is made)
 var _mates_create_button: Button
+var _mates_edit_box: VBoxContainer ## M3: shown while an edit of a stored mate is previewed (the part has glided to show it): the sentence, Apply and Cancel
+var _mates_edit_label: Label
 var _mates_branch_label: Label ## which orientation / side the preview shows, and where Next solution is (MatesTool.branch_text)
 var _mates_alignment_button: Button
 var _mates_flip_button: Button
@@ -241,6 +243,9 @@ func refresh() -> void:
 		_mates_picks_label.text = "Picked: %s" % (", ".join(labels) if not labels.is_empty() else "none")
 		_mates_create_button.disabled = not _mates_tool.can_create()
 		_refresh_mates_branch_controls()
+		if _mates_edit_box != null:
+			_mates_edit_box.visible = _mates_tool.edit_preview_pending()
+			_mates_edit_label.text = _mates_tool.edit_preview_text()
 	if _new_assembly_button and _new_assembly_armed_until_ms > 0 and Time.get_ticks_msec() > _new_assembly_armed_until_ms:
 		_disarm_new_assembly()
 	_refresh_environment_status() # also picks up Passthrough turning on/off after the headset gains focus
@@ -744,6 +749,18 @@ func _build_mates_page() -> Control:
 	_mates_create_button.disabled = true
 	page.add_child(_mates_create_button)
 
+	_mates_edit_box = VBoxContainer.new()
+	_mates_edit_box.visible = false
+	page.add_child(_mates_edit_box)
+	_mates_edit_label = _hint("")
+	_mates_edit_box.add_child(_mates_edit_label)
+	var edit_buttons := _row()
+	_mates_edit_box.add_child(edit_buttons)
+	edit_buttons.add_child(_button("Apply change", _on_apply_mate_edit_pressed, &"ButtonAccent"))
+	edit_buttons.add_child(_button("Cancel", func() -> void:
+		if _mates_tool:
+			_mates_tool.cancel_edit_preview()))
+
 	var bulk := _row()
 	page.add_child(bulk)
 	_mates_relax_button = Button.new()
@@ -1020,7 +1037,21 @@ func _on_edit_mate(mate_id: String, fields: Dictionary) -> void:
 	## Flip / lock rotation / change the value of a mate that already exists (the backend's PATCH), and apply it.
 	if _mates_tool == null or _mates_last_owner_part_id == "" or mate_id == "":
 		return
+	if _mates_tool.can_preview_edit(mate_id, fields):
+		# M3: show it first - the part glides to where the change puts it and the Apply / Cancel row appears; nothing is stored yet
+		var preview: Dictionary = await _mates_tool.preview_edit(_mates_last_owner_part_id, mate_id, fields)
+		if not preview["ok"]:
+			toast.emit("That change can't be met: %s" % preview["error"], "error")
+		return
 	var result: Dictionary = await _mates_tool.update_mate(_mates_last_owner_part_id, mate_id, fields)
+	if not result["ok"]:
+		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
+
+
+func _on_apply_mate_edit_pressed() -> void:
+	if _mates_tool == null:
+		return
+	var result: Dictionary = await _mates_tool.confirm_edit_preview()
 	if not result["ok"]:
 		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
 
