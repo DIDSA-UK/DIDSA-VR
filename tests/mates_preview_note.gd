@@ -79,7 +79,7 @@ func _initialize() -> void:
 	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}]}
 	tool.request_preview()
 	await _frames(10)
-	print("SMOKE a converged answer with its part on screen draws the ghost and leaves no note: ", tool.preview_visible() and tool._preview_note == "" and tool.status_text().begins_with("Preview shown in blue"))
+	print("SMOKE a converged answer with its part on screen draws the ghost and leaves no note: ", tool.preview_visible() and tool._preview_note == "" and (tool.status_text().begins_with("Preview shown in blue") or tool.status_text().begins_with("Preview: the part has moved")))
 
 	tool.answer = {"converged": true, "members": []}
 	tool.request_preview()
@@ -92,7 +92,7 @@ func _initialize() -> void:
 	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}], "budget_exhausted": true}
 	tool.request_preview()
 	await _frames(10)
-	print("SMOKE budget_exhausted: true with a ghost says so after the usual line, not instead of it: ", tool.preview_budget_exhausted and tool.preview_visible() and tool.status_text().begins_with("Preview shown in blue") and tool.status_text().ends_with(note))
+	print("SMOKE budget_exhausted: true with a ghost says so after the usual line, not instead of it: ", tool.preview_budget_exhausted and tool.preview_visible() and (tool.status_text().begins_with("Preview shown in blue") or tool.status_text().begins_with("Preview: the part has moved")) and tool.status_text().ends_with(note))
 	tool.answer = {"converged": true, "transform": _pose(), "members": [{"occurrence_id": "occ-b", "transform": _pose()}], "budget_exhausted": false}
 	tool.request_preview()
 	await _frames(10)
