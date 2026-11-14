@@ -14,6 +14,10 @@ extends SceneTree
 const Rig := preload("res://tests/cloud_rig.gd")
 const CloudFiles := preload("res://scripts/cloud/cloud_files.gd")
 const CloudProject := preload("res://scripts/cloud/cloud_project.gd")
+const CloudManager := preload("res://scripts/cloud/cloud_manager.gd")
+const AppSettings := preload("res://scripts/app_settings.gd")
+const FakeStore := preload("res://tests/fake_project_store.gd")
+const Launcher := preload("res://scripts/landing/launcher_window.gd")
 
 var _n := 0
 
@@ -49,6 +53,7 @@ func _initialize() -> void:
 	await _old_store_and_tunnel()
 	await _two_devices_offline()
 	await _hash_cache()
+	await _cache_cleanup()
 	quit()
 
 
@@ -340,3 +345,76 @@ func _hash_cache() -> void:
 	r3.remove_local("A.didsa")
 	r3.project.scan()
 	_check(not r3.project.state.stat.has("A.didsa"), "a removed file's record is dropped")
+
+
+func _cache_cleanup() -> void:
+	# --- one project: what may go and what may never go
+	var r := _rig()
+	for name in ["Old", "Mid", "New", "Held", "Waiting", "Mine"]:
+		r.put_remote(name + ".didsa", name.repeat(100))
+	await r.project.sync()
+	for name in ["Old", "Mid", "New", "Held", "Waiting", "Mine"]:
+		await r.project.ensure_file(name + ".didsa")
+	r.project.state.used["Old.didsa"] = 1000
+	r.project.state.used["Mid.didsa"] = 2000
+	r.project.state.used["New.didsa"] = 3000
+	r.project.state.used["Held.didsa"] = 10
+	r.project.state.used["Waiting.didsa"] = 20
+	r.held = ["Held.didsa"]
+	r.write_local("Waiting.didsa", "edited, not sent yet")
+	r.write_local("Dragged.didsa", "dragged in by hand")
+	r.project.scan()
+	var order: Array = r.project.eviction_candidates().map(func(c: Dictionary) -> String: return c["path"])
+	_check(order.slice(0, 3) == ["Mine.didsa", "Old.didsa", "Mid.didsa"] or order.slice(0, 3) == ["Old.didsa", "Mid.didsa", "New.didsa"] or (order.has("Old.didsa") and order.find("Old.didsa") < order.find("Mid.didsa") and order.find("Mid.didsa") < order.find("New.didsa")), "the clean-up candidates are the least recently used first (%s)" % str(order))
+	_check(not order.has("Held.didsa") and not order.has("Waiting.didsa") and not order.has("Dragged.didsa"), "...and never a file the open session holds, one with a save waiting, or one that is only here")
+	_check(not r.project.evict("Waiting.didsa") and not r.project.evict("Held.didsa") and not r.project.evict("Dragged.didsa") and r.local_exists("Waiting.didsa") and r.local_exists("Held.didsa") and r.local_exists("Dragged.didsa"), "...evicting one of those directly is refused and the files stay")
+	_check(r.project.evict("Old.didsa") and not r.local_exists("Old.didsa") and r.project.file_state("Old.didsa") == "cloud" and r.project.state.queue.size() == 2, "an evicted file is 'in the cloud' (still listed, still on the store); nothing was queued or lost")
+	var got: Dictionary = await r.project.ensure_file("Old.didsa")
+	_check(got["ok"] and got["downloaded"] and r.read_local("Old.didsa") == "Old".repeat(100) and r.project.state.queue.size() == 2, "...and opening it downloads it again")
+	# a file edited by hand after the sync is not clean: not evicted
+	r.write_local("Mid.didsa", "changed on this headset")
+	_check(not r.project.evict("Mid.didsa") and r.local_exists("Mid.didsa"), "a file changed since its sync is not clean: it cannot be evicted (it is a save)")
+
+	# --- across projects, with the manager and the setting
+	var base := ProjectSettings.globalize_path("user://cloud_test/hard_manager")
+	Rig.wipe(base)
+	var fake := FakeStore.new()
+	for pname in ["Alpha", "Beta"]:
+		fake.add_project(pname)
+		for i in 3:
+			fake.put_direct(pname, "F%d.didsa" % i, ("%s%d" % [pname, i]).repeat(1000), "Desktop") # 6-7 KB each
+	var settings := AppSettings.new()
+	settings.cloud_folder = base + "/DIDSA-Cloud"
+	settings.cloud_cache_mb = 0
+	var m := CloudManager.new()
+	m.settings = settings
+	m.transport = fake
+	m.state_root = base + "/state"
+	root.add_child(m)
+	await process_frame
+	m.configure("http://store.test", fake.key)
+	await m.refresh_projects()
+	for pname in ["Alpha", "Beta"]:
+		await m.open_project(pname)
+		for i in 3:
+			await m.open_file(pname, "F%d.didsa" % i)
+	var total: int = m.cache_used_bytes()
+	_check(total > 30000 and m.cleanup_cache()["removed"].is_empty(), "with no limit (0) nothing is removed (%d bytes in use)" % total)
+	m.project("Alpha").state.used["F0.didsa"] = 1
+	m.project("Beta").state.used["F0.didsa"] = 2
+	m.project("Alpha").state.used["F1.didsa"] = 3
+	var limit := total - 12000
+	var result: Dictionary = m.cleanup_cache(limit)
+	var removed_names: Array = (result["removed"] as Array).map(func(x: Array) -> String: return "%s/%s" % [x[0], x[1]])
+	_check(result["used"] <= limit and not result["over"] and removed_names.slice(0, 3) == ["Alpha/F0.didsa", "Beta/F0.didsa", "Alpha/F1.didsa"], "a limit below the total removes the least recently used files of ALL projects until it fits (%s)" % str(removed_names))
+	_check(m.cache_used_bytes() == result["used"], "...and the sizes add up")
+	# nothing but protected files left: the limit is reported as exceeded, nothing else is touched
+	FileAccess.open(m.mirror_path("Beta") + "/F2.didsa", FileAccess.WRITE).store_string("edited, waiting")
+	m.project("Beta").scan()
+	var tiny: Dictionary = m.cleanup_cache(1)
+	_check(tiny["over"] and FileAccess.file_exists(m.mirror_path("Beta") + "/F2.didsa") and m.project("Beta").state.queue.has("F2.didsa"), "when only a save waiting is left over the limit, it stays: the limit is reported exceeded, never met by deleting a save")
+	# the setting and the page
+	_check(Launcher.cache_text(2048) == "2 GB" and Launcher.cache_text(0) == "no limit" and Launcher.cache_text(512) == "512 MB" and Launcher.next_cache_mb(2048) == 5120 and Launcher.next_cache_mb(0) == 1024 and Launcher.next_cache_mb(777) == 1024, "the Servers page's size choices cycle 1 GB, 2 GB, 5 GB, 10 GB, no limit")
+	settings.cloud_cache_mb = 3
+	_check(m.cache_limit_bytes() == 3 * 1048576, "the limit is the setting in MB")
+	m.queue_free()

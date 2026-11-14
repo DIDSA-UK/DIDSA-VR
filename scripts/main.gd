@@ -97,6 +97,7 @@ const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 const GroupIndex := preload("res://scripts/group_index.gd")
 const ProjectSave := preload("res://scripts/project_save.gd") ## V-9: one file per Part, saved in place ## the Assembly Tree selects by path (select_tree_row)
 const Landing := preload("res://scripts/landing/landing.gd") ## the first screen: a state of this world, see landing.gd
+const ThumbnailStore := preload("res://scripts/thumbnail_store.gd") ## S4: kept pictures of opened files (the Continue tile)
 const RecentFile := preload("res://scripts/landing/recent_file.gd") ## the last file opened, for the landing's Continue tile
 const ServerStore := preload("res://scripts/landing/server_store.gd") ## the servers this headset knows (user://servers.cfg)
 const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
@@ -1396,6 +1397,19 @@ func device_name() -> String:
 	return cloud.device_name()
 
 
+func set_cloud_folder(value: String) -> void:
+	## Where the local copies of server projects live ("" = Documents/DIDSA-Cloud). Takes effect at the next use; files already copied are not moved.
+	_settings.set_cloud_folder(value)
+	cloud.root_changed()
+
+
+func set_cloud_cache_mb(value: int) -> void:
+	## How much disk the local copies may take (0 = no limit); the clean-up runs at once.
+	_settings.set_cloud_cache_mb(value)
+	cloud.cleanup_cache()
+	cloud.changed.emit()
+
+
 func set_device_name(value: String) -> void:
 	## What this headset calls itself to the project store ("" = the platform's name). Sent as X-Device-Name; never identity.
 	_settings.set_device_name(value)
@@ -1867,7 +1881,21 @@ func _open_native_file_impl(path: String) -> void:
 		return
 	_note_references(path, composed)
 	RecentFile.remember(path)
+	_remember_thumbnail(path)
 	_set_status("Opened %s: %d part mesh(es).%s" % [path.get_file(), _part_count, NativeCompose.unresolved_note(composed)])
+
+
+func _remember_thumbnail(path: String) -> void:
+	## S4: a picture of what was just opened, kept for the landing's Continue tile. A few frames after the load, so the meshes are in place; not where nothing renders (headless).
+	if DisplayServer.get_name() == "headless" or room_manager == null or room_manager.thumbnails == null:
+		return
+	for i in 4:
+		await get_tree().process_frame
+	if str(RecentFile.last().get("path", "")) != path or not is_instance_valid(assembly_root):
+		return # something else was opened meanwhile
+	var image: Image = await room_manager.thumbnails.render_model(assembly_root)
+	if image != null:
+		ThumbnailStore.save(path, image)
 
 
 func add_component_file(path: String) -> void:
@@ -2006,6 +2034,7 @@ func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bo
 		return false
 	document_is_demo = path.begins_with("res://demo/")
 	RecentFile.remember(path)
+	_remember_thumbnail(path)
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
 	print("DIDSA VR: ", _load_summary)
 	_set_status("Loaded %s: %d part mesh(es)." % [path.get_file(), _part_count])

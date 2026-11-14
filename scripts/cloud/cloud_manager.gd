@@ -96,6 +96,60 @@ func root_info() -> Dictionary:
 	return CloudPaths.resolve_root("" if settings == null else str(settings.cloud_folder), bool(on_android.call()), bool(all_files_granted.call()))
 
 
+func root_changed() -> void:
+	## The folder setting changed: the open projects are re-made over the new folder at their next use (their private sync states stay). Files already in the old folder
+	## are NOT moved (they stay there, and the next sync downloads what the new folder lacks).
+	_projects.clear()
+	active = null
+	changed.emit()
+
+
+# --- the size of the local copies (S4) ----------------------------------------------------------------------------------------------------
+
+func cache_limit_bytes() -> int:
+	## 0 = no limit. AppSettings.cloud_cache_mb (default 2048).
+	return 0 if settings == null else maxi(0, int(settings.cloud_cache_mb)) * 1048576
+
+
+func cache_used_bytes() -> int:
+	var total := 0
+	for name in known_projects():
+		total += project(str(name)).local_bytes()
+	return total
+
+
+func cleanup_cache(limit_bytes: int = -1) -> Dictionary:
+	## Removes the least recently used CLEAN local copies (all projects together) until the total fits the limit. {used, limit, freed, removed: [[project, path]], over: bool}
+	## `over` is true when the limit is still exceeded because what is left is not allowed to go (a save waiting, a clash, an open file, a file only here). `limit_bytes` -1:
+	## the setting; 0: no limit, nothing removed. A synced file removed here is fetched again the next time it is opened.
+	var limit := cache_limit_bytes() if limit_bytes < 0 else limit_bytes
+	var used := cache_used_bytes()
+	var out := {"used": used, "limit": limit, "freed": 0, "removed": [], "over": false}
+	if limit <= 0 or used <= limit:
+		return out
+	var all: Array = []
+	for name in known_projects():
+		all.append_array(project(str(name)).eviction_candidates())
+	all.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["used_ms"]) < int(b["used_ms"]))
+	var touched := {}
+	for item in all:
+		if used <= limit:
+			break
+		var p: CloudProject = project(str(item["project"]))
+		if p.evict(str(item["path"])):
+			used -= int(item["bytes"])
+			out["freed"] += int(item["bytes"])
+			(out["removed"] as Array).append([item["project"], item["path"]])
+			touched[item["project"]] = true
+	for name in touched:
+		project(str(name)).state.save()
+	out["used"] = used
+	out["over"] = used > limit
+	if not (out["removed"] as Array).is_empty():
+		changed.emit()
+	return out
+
+
 func mirror_path(project_name: String) -> String:
 	return CloudPaths.mirror_dir(str(root_info()["path"]), store_url, project_name)
 
@@ -260,6 +314,7 @@ func project_for_path(full_path: String) -> CloudProject:
 func _on_timer() -> void:
 	if active != null and is_configured() and not active.syncing:
 		var report: Dictionary = await active.sync()
+		cleanup_cache() # (cheap when under the limit: it only sums file sizes)
 		var text := str(_with_text(report, active)["text"])
 		if report["sent"].size() > 0 or not report["conflicts"].is_empty() or not report["refreshed"].is_empty():
 			message.emit(text)

@@ -6,6 +6,7 @@ extends "res://scripts/diegetic_panel.gd"
 
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
 const RecentFile := preload("res://scripts/landing/recent_file.gd")
+const ThumbnailStore := preload("res://scripts/thumbnail_store.gd")
 const FolderChooser := preload("res://scripts/ui/folder_chooser.gd")
 const ProjectFolder := preload("res://scripts/project_folder.gd")
 const PairingPayload := preload("res://scripts/landing/pairing_payload.gd")
@@ -184,8 +185,13 @@ func tiles() -> Array[Dictionary]:
 		if not continue_ok:
 			continue_note = "%s: needs a server" % last["name"]
 	var needs := "Needs a server"
+	var continue_tile := {"id": "continue", "label": "Continue", "icon": "history", "note": continue_note, "enabled": continue_ok}
+	if not last.is_empty():
+		var picture: Texture2D = ThumbnailStore.load_texture(str(last["path"]), 96) # a picture of the last file, kept when it was opened (S4); none yet: the symbol
+		if picture != null:
+			continue_tile["thumb"] = picture
 	return [
-		{"id": "continue", "label": "Continue", "icon": "history", "note": continue_note, "enabled": continue_ok},
+		continue_tile,
 		{"id": "open", "label": "Open...", "icon": "files", "note": "Pick a file", "enabled": true},
 		{"id": "new", "label": "New assembly", "icon": "assembly", "note": "" if online else needs, "enabled": online},
 		{"id": "models", "label": "Demo models", "icon": "models", "note": "Rockets, craft", "enabled": true},
@@ -225,7 +231,7 @@ func _tile_button(tile: Dictionary) -> Button:
 	var button := Button.new()
 	button.name = "Tile_" + str(tile["id"])
 	button.text = str(tile["label"]) if tile["note"] == "" else "%s\n%s" % [tile["label"], tile["note"]]
-	button.icon = UiIcons.texture(str(tile["icon"]), 48)
+	button.icon = tile["thumb"] if tile.has("thumb") else UiIcons.texture(str(tile["icon"]), 48)
 	button.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.expand_icon = false
@@ -501,6 +507,47 @@ func _build_store_info() -> void:
 	named.name = "DeviceName"
 	_body.add_child(named)
 	_body.add_child(_hint("Other devices see this name next to a change you made (\"changed by Quest 3\"). It is sent to the store and trusted for nothing else."))
+	if cloud.is_configured():
+		_build_cloud_space(cloud)
+
+
+const CACHE_CHOICES_MB := [1024, 2048, 5120, 10240, 0] ## the sizes the button cycles through (0 = no limit)
+
+
+static func cache_text(mb: int) -> String:
+	return "no limit" if mb <= 0 else ("%d GB" % (mb / 1024) if mb % 1024 == 0 else "%d MB" % mb)
+
+
+static func next_cache_mb(current: int) -> int:
+	## The next size in CACHE_CHOICES_MB after `current`; a value that is not in the list (set by hand in settings.cfg) goes to the first.
+	var i: int = CACHE_CHOICES_MB.find(current)
+	return int(CACHE_CHOICES_MB[0]) if i < 0 else int(CACHE_CHOICES_MB[(i + 1) % CACHE_CHOICES_MB.size()])
+
+
+func _build_cloud_space(cloud: Node) -> void:
+	## S4: where the local copies are kept (the one folder setting) and how much room they may take.
+	var folder := _action("Local copy folder: %s" % (str(main._settings.cloud_folder) if str(main._settings.cloud_folder) != "" else "default (Documents/DIDSA-Cloud)"), func() -> void:
+		main.open_keyboard_for(str(main._settings.cloud_folder), func(text: String) -> void:
+			main.set_cloud_folder(text)
+			show_page("servers"), {"mode": "full", "title": "Folder for server projects (empty = the default)"}), 0)
+	folder.name = "CloudFolder"
+	_body.add_child(folder)
+	_body.add_child(_hint("Changing it does not move files already copied: the new folder starts empty and fills as you open projects. A folder outside the app needs All files access."))
+	var used_mb: float = float(cloud.cache_used_bytes()) / 1048576.0
+	var limit_mb := int(main._settings.cloud_cache_mb)
+	var cache := _action("Room for local copies: %s (using %d MB)" % [cache_text(limit_mb), int(round(used_mb))], func() -> void:
+		main.set_cloud_cache_mb(next_cache_mb(int(main._settings.cloud_cache_mb)))
+		show_page("servers"), 0)
+	cache.name = "CloudCache"
+	_body.add_child(cache)
+	var free := _action("Free up space now: remove copies that are safe on the server", func() -> void:
+		var result: Dictionary = cloud.cleanup_cache(1) # (a limit of one byte: everything that may go, goes)
+		var removed: int = (result["removed"] as Array).size()
+		main.say("Removed %d local cop%s (%d MB). They are still on the server." % [removed, "y" if removed == 1 else "ies", int(round(float(result["freed"]) / 1048576.0))] if removed > 0 else "Nothing to remove: every local copy is either waiting to send, open, or inside the limit.")
+		show_page("servers"), 0)
+	free.name = "CloudFree"
+	_body.add_child(free)
+	_body.add_child(_hint("Only copies that are exactly what the server has, not open and not waiting to send are ever removed, least recently used first; opening one downloads it again. A save waiting to send is never removed, however much room it takes."))
 
 
 func _scan_button() -> Button:

@@ -42,6 +42,11 @@ if [ -z "${DIDSA_STORE_URL:-}" ]; then
     export DIDSA_STORE_URL="http://127.0.0.1:$STORE_PORT" DIDSA_STORE_KEY="$STORE_KEY_VALUE"
   fi
 fi
+# tests/e2e_cloud_outage.gd starts (and kills, and restarts) a store of its own from this checkout; without one it prints SMOKE SKIPPED, which fails this script.
+CAD_DIR="${CAD_DIR:-$(cd .. && pwd)/DIDSA-CAD}"
+if [ -d "$CAD_DIR/project-store/app" ]; then
+  export DIDSA_STORE_PROJECT_DIR="$CAD_DIR/project-store" DIDSA_STORE_PYTHON="${STORE_PYTHON:-python3}"
+fi
 while read -r t; do
   case "$t" in ''|\#*) continue;; esac
   echo "== $t" | tee -a "$LOG"

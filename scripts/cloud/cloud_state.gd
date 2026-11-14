@@ -15,6 +15,7 @@ extends RefCounted
 ##   uploads  path -> {id, sha, size, at_ms}   a chunked upload that has begun (S4): kept so a closed app resumes it instead of starting a 150 MB file again
 ##   stat     path -> {size, mtime, sha, seen}  the last hash of each mirror file and when it was taken (S4): a restart does not re-hash a file whose size and modified time
 ##                                              are unchanged (and which was not modified within a second of being hashed)
+##   used     path -> ms          when a file was last opened or downloaded here (S4: the clean-up of the local copy removes the least recently used first)
 ##   cursor   String              where the store's change feed was last read ("" = never)
 ##
 ## Writes are atomic (temp file, then rename), so a kill mid-save leaves the last good file. A state file that can't be read starts clean (the mirror still has the
@@ -31,6 +32,7 @@ var ignored: Dictionary = {}
 var behind: Dictionary = {}
 var uploads: Dictionary = {}
 var stat: Dictionary = {}
+var used: Dictionary = {}
 var cursor := ""
 var last_synced_ms := 0
 var load_error := ""
@@ -58,6 +60,7 @@ func load_from_disk() -> void:
 	behind.clear()
 	uploads.clear()
 	stat.clear()
+	used.clear()
 	cursor = ""
 	last_synced_ms = 0
 	load_error = ""
@@ -107,6 +110,10 @@ func load_from_disk() -> void:
 			var h = seen_hashes[path]
 			if h is Dictionary and str(h.get("sha", "")) != "":
 				stat[str(path)] = {"size": int(h.get("size", -1)), "mtime": int(h.get("mtime", -1)), "sha": str(h["sha"]), "seen": int(h.get("seen", 0))}
+	var touched = parsed.get("used", {})
+	if touched is Dictionary:
+		for path in touched:
+			used[str(path)] = int(touched[path])
 	cursor = str(parsed.get("cursor", ""))
 	last_synced_ms = int(parsed.get("last_synced_ms", 0))
 	store_url = str(parsed.get("store_url", ""))
@@ -138,7 +145,7 @@ static func _clash(raw) -> Variant:
 
 
 func to_dictionary() -> Dictionary:
-	var out := {"store_url": store_url, "project": project, "cursor": cursor, "last_synced_ms": last_synced_ms, "files": [], "tree": [], "queue": [], "mine": mine, "ignored": ignored, "behind": behind, "uploads": uploads, "stat": stat}
+	var out := {"store_url": store_url, "project": project, "cursor": cursor, "last_synced_ms": last_synced_ms, "files": [], "tree": [], "queue": [], "mine": mine, "ignored": ignored, "behind": behind, "uploads": uploads, "stat": stat, "used": used}
 	for path in files:
 		out["files"].append(files[path])
 	for path in tree:

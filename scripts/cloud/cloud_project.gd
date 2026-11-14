@@ -357,6 +357,7 @@ func _download(path: String) -> Dictionary:
 		"modified_at": "" if listed == null else listed["modified_at"], "modified_by": "" if listed == null else listed["modified_by"],
 		"part_id": null if listed == null else listed["part_id"]}
 	_record(info)
+	state.used[path] = now_ms()
 	return {"ok": true, "kind": "ok", "message": "", "bytes": bytes}
 
 
@@ -913,6 +914,7 @@ func restore_kept_as_file(path: String) -> Dictionary:
 func ensure_file(path: String) -> Dictionary:
 	## The file in the mirror, downloaded if it is not there. {ok, downloaded, message}. A file already in the mirror is not fetched again (a re-read must not move its base).
 	if FileAccess.file_exists(abs_path(path)):
+		state.used[path] = now_ms()
 		return {"ok": true, "downloaded": false, "message": ""}
 	if online == false and state.tree.has(path) == false:
 		return {"ok": false, "downloaded": false, "message": "%s is not on this headset and the project store can't be reached." % path.get_file()}
@@ -1053,6 +1055,45 @@ func _locate_reference(root_dir: String, ref: String, ref_id: String) -> Array:
 
 
 # --- what the Files page shows -------------------------------------------------------------------------------------------------------------
+
+# --- the size of the local copy (S4) -----------------------------------------------------------------------------------------------------
+
+func local_bytes() -> int:
+	var total := 0
+	var found := CloudFiles.list_files(mirror_dir)
+	for rel in found:
+		total += maxi(0, CloudFiles.file_size(found[rel]))
+	return total
+
+
+func eviction_candidates() -> Array:
+	## The files the clean-up may remove, least recently used first: [{project, path, bytes, used_ms}]. ONLY a file that is exactly the store's version it was synced as (so
+	## nothing is lost: it can be fetched again), has no save waiting, is not kept local-only, is not one the open session holds, and is not newer than a sync that is running.
+	## Anything else (a save waiting, a clash, a dragged-in file the store has not seen, a held file) stays however much room it takes.
+	var out: Array = []
+	var held := _held()
+	var found := CloudFiles.list_files(mirror_dir)
+	for rel in found:
+		if state.queue.has(rel) or state.ignored.has(rel) or held.has(rel) or not state.files.has(rel) or not state.tree.has(rel):
+			continue
+		if not _mirror_clean(rel):
+			continue
+		var full: String = found[rel]
+		out.append({"project": project, "path": rel, "bytes": maxi(0, CloudFiles.file_size(full)),
+			"used_ms": int(state.used.get(rel, FileAccess.get_modified_time(full) * 1000))})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["used_ms"]) < int(b["used_ms"]))
+	return out
+
+
+func evict(path: String) -> bool:
+	## Removes one clean file's local copy (it becomes "in the cloud": opening it downloads it again). False when it is not allowed or not there.
+	if state.queue.has(path) or state.ignored.has(path) or _held().has(path) or not _mirror_clean(path):
+		return false
+	CloudFiles.remove_file(abs_path(path))
+	state.stat.erase(path)
+	state.used.erase(path)
+	return true
+
 
 func file_state(path: String) -> String:
 	## "clash" | "to_send" | "cloud" (in the store, not downloaded) | "local_only" (kept local) | "synced"

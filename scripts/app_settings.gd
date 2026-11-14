@@ -19,6 +19,7 @@ static func path() -> String:
 
 var project_folder: String = ""
 var folder_asked: bool = false ## the first-run "where should projects be saved" question has been answered (an empty project_folder alone never means "not asked": it can be the app's own storage, chosen)
+var cloud_cache_mb: int = 2048 ## S4: how much disk the local copies of server projects may take across all projects (0 = no limit); clean-up removes only files that are synced, closed and not waiting to send, least recently used first
 var cloud_folder: String = "" ## where the local copies of server projects live ("" = Documents/DIDSA-Cloud; scripts/cloud/cloud_paths.gd): ONE setting, so it can move
 var device_name: String = "" ## what this headset calls itself to the project store ("" = the platform's name): shown to other devices as "who changed it", never identity
 var last_scene: String = "Mid"
@@ -57,6 +58,7 @@ func load_from_disk() -> void:
 	project_folder = config.get_value("files", "project_folder", project_folder)
 	folder_asked = bool(config.get_value("files", "folder_asked", folder_asked or not project_folder.is_empty())) # an older settings file that already has a folder counts as asked
 	cloud_folder = str(config.get_value("cloud", "folder", cloud_folder))
+	cloud_cache_mb = maxi(0, int(config.get_value("cloud", "cache_mb", cloud_cache_mb)))
 	device_name = str(config.get_value("cloud", "device_name", device_name))
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
@@ -94,6 +96,7 @@ func save_to_disk() -> void:
 	config.set_value("files", "project_folder", project_folder)
 	config.set_value("files", "folder_asked", folder_asked)
 	config.set_value("cloud", "folder", cloud_folder)
+	config.set_value("cloud", "cache_mb", cloud_cache_mb)
 	config.set_value("cloud", "device_name", device_name)
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
@@ -126,6 +129,11 @@ func save_to_disk() -> void:
 	var err := config.save(path())
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [path(), err])
+
+
+func set_cloud_cache_mb(value: int) -> void:
+	cloud_cache_mb = maxi(0, value)
+	save_to_disk()
 
 
 func set_cloud_folder(path: String) -> void:
