@@ -3,6 +3,14 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## N1c, VR shows mate reference state (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "N1 plan" and "N1b results"; headless, Xvfb and a real backend, **not run on a headset**; details in `docs/backend-api-notes.md`, "Mate reference state")
+
+- **Tablet mate list and mate highlight** read the fields N1b added to every mate (`lost_references`, `moved_references`, `followed_references`, `reference_reasons`, `held`): an info line for a followed reference (kept until "Got it", because the backend says it once), an amber "Check this mate" with a **Confirm** action (`PATCH confirm_references`, solved with the mate like any edit) for a held mate, the reason for a lost one. New `scripts/mate_reference_state.gd` (pure).
+- **`mate_health.gd` defers to the server**: no local drift check for a reference the server reports (followed, held, lost); the baseline an earlier edit recorded is pruned after the listing that follows an edit. Enforce therefore suppresses nothing the server already fixed. An older backend (no fields) keeps the local check unchanged.
+- **Mates a solve left out** (`held_mate_ids`, `X-Held-Mates`): a drag, Enforce, create and edit say so on the status line; Enforce's outcome carries `held_mate_ids` only when one was left out.
+- Tests (new): `mate_health_server` (36), `e2e_mate_reference_follow` (20: a fillet renumbers a box's mated face and the backend follows it; a deleted hole holds a pin's mate, Enforce names it, Confirm takes the twin). `e2e_design_table_mates` scenario A rewritten (the old drift, suppress and remake path no longer happens against an N1b backend).
+- Not checked: anything on a headset; the held-mate highlight colour (text only); the old-backend path against a live backend.
+
 ## S4, sync hardening (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "S4. Hardening"; headless, Xvfb and against a real store that is killed and restarted, **not run on a headset**; details in `docs/server-projects.md`, "S4: hardening")
 
 - **Chunked upload with resume**: a file over 90 MB, or one a tunnel refuses, goes up in 32 MB chunks through the store's new chunk routes, read from disk a chunk at a time; the session is kept in the private state so a cut connection, a store switched off or a closed app resumes where the store says it got to. A single big file is a one-file commit with its base version.
