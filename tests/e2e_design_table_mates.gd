@@ -2,9 +2,12 @@ extends SceneTree
 ## Talks to a real backend, same caveat as the other e2e_*.gd tests (LOCAL ONLY). The stale-mates cycle against the real solver:
 ## two copies of a plate stacked by a real coincident mate (one grounded); one is edited on the design table (a boss on its top
 ## face); both instances are flagged and no longer steered by the mate; the second is knocked out of place; and "Enforce mates"
-## re-solves for real. Whether the mate's faces survive the edit is the backend's business (DIDSA-CAD names them by index and has
-## no persistent naming yet), so BOTH outcomes are accepted here — what is checked is that the cycle is consistent either way:
-## re-solved and flags cleared with the part back on the stack, or flags kept with a reason on the button.
+## re-solves for real.
+## N1c: since DIDSA-CAD N1b the backend signs a mate's faces and follows them through the edit (`followed_references`), and VR defers to it
+## (mate_health.gd). So scenario A now expects: the boss renumbers the mated faces, the backend FOLLOWS them (both references, status ok, not held),
+## VR shows no drift warning, and Enforce suppresses nothing: it re-solves the real mate and the knocked plate returns to the stack. (Before N1c VR's
+## own drift check flagged the mate, Enforce suppressed it and offered Remake; that path is still covered headless, tests/mate_health.gd, and for an
+## older backend by tests/mate_health_server.gd; the live follow/held/Confirm cases are in tests/e2e_mate_reference_follow.gd.)
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_design_table_mates.gd  (needs secrets.cfg and a running backend)
 
 const SketchSession := preload("res://scripts/design_table/sketch_session.gd")
@@ -128,9 +131,11 @@ func _initialize() -> void:
 	ed.options["depth"] = 5.0
 	await ed.apply_feature()
 	print("SMOKE A: a boss is added to the first plate's top; both instances are flagged and stop being steered by the mate: ", ed.feature_stack.size() == 1 and one.get_aabb().size.z > 14.9 and DirtyMates.is_dirty(one) and DirtyMates.is_dirty(two) and not main._mates_tool.is_constrained(two))
-	print("SMOKE A: the edit is seen to have renumbered the faces the mate was made on: ", table.mate_drift.size() == 1)
+	var mate_after_edit: Dictionary = main._mates_tool.mates[0]
+	print("SMOKE A: the backend followed both of the mate's faces through the edit (first listing after it): followed_references names both, nothing held or lost, status ok: ", (mate_after_edit["followed_references"] as Array).size() == 2 and not bool(mate_after_edit["held"]) and (mate_after_edit["lost_references"] as Array).is_empty() and str(mate_after_edit["status"]) == "ok", " ", mate_after_edit.get("followed_references"))
+	print("SMOKE A: so VR's own drift check stands aside: no mate is flagged as pointing at different faces: ", table.mate_drift.is_empty())
 	await ed.undo()
-	print("SMOKE A: taking the edit back brings the real faces back, and the warning goes with them: ", ed.feature_stack.is_empty() and table.mate_drift.is_empty() and one.get_aabb().size.z < 10.1)
+	print("SMOKE A: taking the edit back brings the real faces back, and no warning appears: ", ed.feature_stack.is_empty() and table.mate_drift.is_empty() and one.get_aabb().size.z < 10.1)
 	table.manager.activate("circle")
 	await ed.begin_sketch({"face": {"body_id": face["body_id"], "index": face["index"]}})
 	c = SketchMath.to_sheet(table.table_copy.get_aabb().get_center(), ed.session.plane)
@@ -138,7 +143,7 @@ func _initialize() -> void:
 	await ed.session.tap({"uv": c + Vector2(5, 0), "id": ""})
 	table.manager.activate("extrude")
 	await ed.apply_feature()
-	print("SMOKE A: making the edit again brings the warning back: ", table.mate_drift.size() == 1)
+	print("SMOKE A: making the edit again: still no drift warning (the backend follows it again): ", table.mate_drift.is_empty() and one.get_aabb().size.z > 14.9)
 	table.close()
 	two.transform = Transform3D(two.transform.basis, two.transform.origin + Vector3(30, 20, 40))
 	main._mates_tool.persist_pose(two)
@@ -146,18 +151,9 @@ func _initialize() -> void:
 	print("SMOKE A: closing the table hands the plate back with the Enforce button over it: ", table.enforce_button.is_showing() and table.enforce_button.target == one)
 	await table.enforce_mates()
 	var mates_now: Dictionary = await req(HTTPClient.METHOD_GET, "/document/parts/%s/mates" % asm_id)
-	print("SMOKE A: Enforce turns that mate OFF on the backend rather than solving it against the wrong faces: ", mates_now["ok"] and mates_now["json"].size() == 1 and bool(mates_now["json"][0]["suppressed"]))
-	print("SMOKE A: ...says so on the button, clears the stale flags, and leaves the plate where it was (not dragged somewhere wrong): ", table.enforce_button.message().contains("turned off") and DirtyMates.dirty_nodes(self).is_empty() and absf(two.transform.origin.z - 50.0) < 0.05)
-
-	var offered: bool = table.remake_plan.size() == 1 and table.enforce_button.button().text.begins_with("Remake")
-	print("SMOKE A: the turned-off mate is OFFERED for remaking (its top face is still there, just renumbered): ", offered)
-	var old_mate_id: String = str(mates_now["json"][0]["id"])
-	await table.remake_mates()
-	await create_timer(0.8).timeout
-	var after_remake: Dictionary = await req(HTTPClient.METHOD_GET, "/document/parts/%s/mates" % asm_id)
-	var fresh: Dictionary = after_remake["json"][0] if after_remake["ok"] and (after_remake["json"] as Array).size() == 1 else {}
-	print("SMOKE A: remaking makes ONE new live mate on the backend (the old one deleted), same type, not suppressed: ", not fresh.is_empty() and str(fresh["id"]) != old_mate_id and not bool(fresh["suppressed"]) and str(fresh["type"]) == str(mates_now["json"][0]["type"]))
-	print("SMOKE A: ...and the solver puts the knocked plate back on the stack (z back to 10): ", absf(two.transform.origin.z - 10.0) < 0.1, " ", two.transform.origin.z)
+	print("SMOKE A: Enforce suppresses nothing: the one mate is still live on the backend (not suppressed, status ok, not held): ", mates_now["ok"] and mates_now["json"].size() == 1 and not bool(mates_now["json"][0]["suppressed"]) and str(mates_now["json"][0]["status"]) == "ok" and not bool(mates_now["json"][0]["held"]))
+	print("SMOKE A: ...it says nothing was turned off, clears the stale flags and offers no Remake: ", not table.enforce_button.message().contains("turned off") and DirtyMates.dirty_nodes(self).is_empty() and table.remake_plan.is_empty())
+	print("SMOKE A: ...and the real solve puts the knocked plate back on the stack (z back to 10): ", absf(two.transform.origin.z - 10.0) < 0.1, " ", two.transform.origin.z)
 
 	# ===== B: an edit that leaves the mated faces alone (a fillet on a vertical edge)
 	var b := await build_stack()

@@ -657,6 +657,28 @@ the `#` starts a fragment (`mates_tool.gd` folds it with `mate_ref_top` and refu
   pattern's `scope: "pattern"` paint is split onto the source and each new occurrence, the pattern goes (422 for a suppressed pattern, 404 unknown). VR never calls it and does not
   notice another client's dissolve until it reloads.
 
+## Mate reference state: followed, held, lost (DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`, N1b; this client: N1c)
+
+A mate names its faces by index. Since N1b the backend signs each one when the mate is made, re-finds it after an edit renumbers the part, and says what it did. Every `MateResponse`
+(list, create, PATCH) has, all additive: `lost_references`, `moved_references`, `followed_references` (paths such as `references[0].subshape_ref`, `references[1].midplane.b.face_ref`),
+`reference_reasons` (path to reason) and `held: bool`. `status` keeps `ok` / `near` / `broken`. `SubShapeRefSchema` is unchanged: **never send or expect a signature**; `subshape_ref`
+dictionaries still compare equal for equal faces (the pick equality in `mates_tool.gd` needs no change). An older backend sends none of these.
+
+- **`followed_references` is told once.** The listing that follows the edit has it; the next one is clean (the new index is persisted). VR reads it from the listing it takes right after a
+  design-table edit (`table_editor.gd refresh_geometry`) and **keeps the note** in `MatesTool.reference_notes` (merged back into `mates` by `mate_reference_state.gd merge_followed`) until
+  "Got it" (`dismiss_followed`) or the mate goes: a listing taken for another reason between the edit and the tablet must not swallow the news. Do not poll for it.
+- **`held: true`** (a reference bound weakly, or an old file's reference nobody confirmed): the mate is out of every solve until `PATCH .../mates/{id} {"confirm_references": true}`.
+  VR's Confirm sends it through `MatesTool.update_mate` (so the driven part is solved with it, like any edit; refused: the mate stays held). The listed `index` of a `moved` reference is the face
+  it is bound to, which is the one the mate highlight lights. `status` is whatever the bound faces give (`broken` when the part still sits on the old face).
+- **`lost_references` non-empty**: `status` is `broken`, `held` is false, nothing to confirm (make the mate again or delete it); the reason is `no_match`, `ambiguous` or `body_missing`.
+- **Solves name what they left out** (N-6): `held_mate_ids` in the mate-motion and preview answers (**absent when none**) and `X-Held-Mates: id,id` on the solve, create and PATCH answers.
+  `MatesTool._api_request` returns the header as `held_mates`; `RefState.held_mate_ids(response)` joins both. A drag says it once (`_note_drag_left_out`); Enforce collects them and says so at the
+  end (`enforce_finished` has `held_mate_ids` only when a mate was left out).
+- **`mate_health.gd` defers to the server** for a reference the server reports (followed, held, lost): `capture` records nothing for it, `prune_baseline` forgets what an earlier edit recorded, and
+  Width mates' parallel check skips a held or lost mate. A reference the server says nothing about, and every reference from an older backend, keeps the local drift check.
+- **A mates listing does not mark the document dirty (N-7).** The re-found index is persisted in the backend's document, so the assembly file is rewritten at the next save (the
+  export is the backend's); VR's `refresh_mates` does not call `mark_dirty`, and N1c did not change that.
+
 ## Point Merge and restoring a sketch (DIDSA-CAD `docs/point-merge-and-vr-sketcher-plan.md`, M1)
 
 ```

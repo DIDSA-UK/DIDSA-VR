@@ -11,6 +11,12 @@ extends RefCounted
 ## Pure functions over the part nodes' mesh and face-identity metas; no network. Tests: tests/mate_health.gd.
 
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const RefState := preload("res://scripts/mate_reference_state.gd")
+
+## N1c: DIDSA-CAD (N1b) now signs a mate's faces itself, re-finds them after an edit and says so on the mate (followed / held / lost,
+## mate_reference_state.gd). Where it says anything about a reference, THIS file's drift check stands aside: capture() records nothing for it
+## and prune_baseline() forgets what an earlier edit recorded, so Enforce never suppresses a mate the server already put right. Where it says
+## nothing (an older backend, or a reference that simply stayed ok) the local check is unchanged.
 
 const NORMAL_COS := 0.9995 ## about 1.8 degrees
 const OFFSET_TOLERANCE := 0.05 ## mm along the normal
@@ -69,7 +75,8 @@ static func _is_plane(sig: Dictionary) -> bool:
 static func face_refs(ref: Dictionary) -> Array:
 	## Every face a mate reference names, as [{occurrence_id, sub}] where `sub` is the live SubShapeRef dictionary inside `ref` (so a remake can
 	## renumber it in place). One for an ordinary reference; the two faces of a Width (`midplane`) reference - the second on its own
-	## `b_occurrence_id` when it sits on another part.
+	## `b_occurrence_id` when it sits on another part. Each entry also has `path`: where the face sits inside the reference, the tail of the
+	## backend's `references[i].<path>` (mate_reference_state.gd).
 	var out: Array = []
 	var occurrence_id := str(ref.get("occurrence_id", ""))
 	var midplane = ref.get("midplane")
@@ -78,13 +85,13 @@ static func face_refs(ref: Dictionary) -> Array:
 		var b = (midplane.get("b", {}) as Dictionary).get("face_ref")
 		var b_occurrence = midplane.get("b_occurrence_id")
 		if a is Dictionary:
-			out.append({"occurrence_id": occurrence_id, "sub": a})
+			out.append({"occurrence_id": occurrence_id, "sub": a, "path": "midplane.a.face_ref"})
 		if b is Dictionary:
-			out.append({"occurrence_id": occurrence_id if b_occurrence == null else str(b_occurrence), "sub": b})
+			out.append({"occurrence_id": occurrence_id if b_occurrence == null else str(b_occurrence), "sub": b, "path": "midplane.b.face_ref"})
 		return out
 	var sub = ref.get("subshape_ref")
 	if sub is Dictionary:
-		out.append({"occurrence_id": occurrence_id, "sub": sub})
+		out.append({"occurrence_id": occurrence_id, "sub": sub, "path": "subshape_ref"})
 	return out
 
 
@@ -97,8 +104,8 @@ static func unparallel_pairs(mates: Array, nodes: Array) -> Array:
 		by_occurrence[str(node.get_meta("occurrence_id", ""))] = node
 	var out: Array = []
 	for mate in mates:
-		if bool(mate.get("suppressed", false)):
-			continue
+		if bool(mate.get("suppressed", false)) or RefState.is_held(mate) or RefState.is_lost(mate):
+			continue # (a held or lost mate is the server's to report, and its listed faces are not the ones it sits on)
 		var refs: Array = mate.get("references", [])
 		for r in refs.size():
 			var faces := face_refs(refs[r])
@@ -129,8 +136,12 @@ static func capture(nodes: Array, mates: Array) -> Array:
 	for mate in mates:
 		if bool(mate.get("suppressed", false)):
 			continue # it isn't doing anything
-		for ref in mate.get("references", []):
-			for face in face_refs(ref):
+		var refs: Array = mate.get("references", [])
+		for r in refs.size():
+			for face in face_refs(refs[r]):
+				var path := RefState.reference_path(r, str(face["path"]))
+				if RefState.reported(mate, path):
+					continue # the server followed, held or lost it: it is the server's to judge (and the listing's index is not what the OLD mesh shows)
 				var sub: Dictionary = face["sub"]
 				var node = by_occurrence.get(str(face["occurrence_id"]))
 				if node == null or str(sub.get("shape_type", "")) != "face":
@@ -138,7 +149,33 @@ static func capture(nodes: Array, mates: Array) -> Array:
 				var body_id := str(sub.get("body_id", ""))
 				var index := int(sub.get("index", -1))
 				out.append({"mate_id": str(mate.get("id", "")), "occurrence_id": str(face["occurrence_id"]), "body_id": body_id, "index": index,
-					"before": signature(node, body_id, index)})
+					"path": path, "before": signature(node, body_id, index)})
+	return out
+
+
+static func prune_baseline(baseline: Array, mates: Array) -> Array:
+	## The baseline an earlier edit recorded, without the references the server reports on now (followed: its index moved, so the entry's old
+	## index would be compared with a face the mate no longer uses; held or lost: the server owns the call). Returns a new array; entries
+	## without a `path` (recorded before N1c) and mates the listing no longer has are kept as they are.
+	var by_id := {}
+	for mate in mates:
+		by_id[str(mate.get("id", ""))] = mate
+	var out: Array = []
+	for entry in baseline:
+		var mate = by_id.get(str(entry.get("mate_id", "")))
+		if mate != null and entry.has("path") and RefState.reported(mate, str(entry["path"])):
+			continue
+		out.append(entry)
+	return out
+
+
+static func server_flagged(mates: Array) -> Array:
+	## The ids of the mates the server flagged (a reference followed, held or lost): what the design table lists beside its own drift warning.
+	## [] for an older backend.
+	var out: Array = []
+	for mate in mates:
+		if RefState.is_lost(mate) or RefState.is_held(mate) or RefState.is_followed(mate):
+			out.append(str(mate.get("id", "")))
 	return out
 
 

@@ -2966,6 +2966,7 @@ func refresh_geometry() -> bool:
 	var mates_tool = table._mates_tool
 	if mates_tool != null and table._main.current_root_part_id() != "":
 		await mates_tool.refresh_mates(table._main.current_root_part_id())
+		table.prune_mate_baseline(mates_tool.mates) # N1c: the listing after the edit says which references the backend followed, held or lost: those are not ours to judge
 		captured = MateHealth.capture(nodes, mates_tool.mates)
 		table.add_mate_baseline(captured)
 	var was_blank: bool = table.is_blank()
