@@ -26,6 +26,7 @@ const NativeCompose := preload("res://scripts/native_compose.gd") ## which file 
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const UiThemes := preload("res://scripts/ui/ui_themes.gd")
 const _MatesTool := preload("res://scripts/mates_tool.gd")
+const _RefState := preload("res://scripts/mate_reference_state.gd") ## N1c: followed / held / lost references of a mate
 const MATE_TYPE_LABELS: Array[String] = ["Coincident", "Concentric", "Peg in hole", "Parallel", "Distance", "Angle", "Width", "Symmetric", "Gear", "Rack and pinion", "Screw", "Limit distance", "Limit angle"]
 const AppearancePage := preload("res://scripts/ui/appearance_page.gd")
 const ScenesPage := preload("res://scripts/ui/scenes_page.gd")
@@ -1027,10 +1028,32 @@ func _mates_rows() -> Array:
 		var broken: bool = _MatesTool.is_broken(mate)
 		if broken:
 			notes.push_front("can't be satisfied")
+		# N1c: what the backend says about the mate's references. Held: amber "check this mate" and a Confirm (it is out of every move until then, so
+		# it comes first); lost: the reason, in the error colour (nothing to confirm: make the mate again or delete it); followed: an info line,
+		# told once, that stays until "Got it". An older backend sends nothing and none of this shows.
+		var note: Dictionary = _RefState.note_for(mate)
+		var note_kind := str(note["kind"])
+		var state := "error" if broken else "normal"
+		var title_suffix := " - Broken" if broken else ""
+		if note_kind == "held":
+			actions.push_front({"label": "Confirm", "accent": true, "callback": _on_confirm_mate_pressed.bind(mate_id)})
+			state = "warn"
+			title_suffix = " - Check this mate"
+			broken = false # (the amber state is the headline; its "can't be satisfied" stays in the line below)
+		elif note_kind == "lost":
+			state = "error"
+			title_suffix = " - Broken"
+			broken = true
+		elif note_kind == "followed":
+			actions.push_front({"label": "Got it", "callback": _on_dismiss_followed_pressed.bind(mate_id)})
+			if not broken:
+				state = "ok"
+		if note_kind != "":
+			notes.push_front(str(note["text"]))
 		rows.append({
 			"id": mate_id, "selectable": true,
-			"title": "%s%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else "", " - Broken" if broken else ""],
-			"subtitle": ", ".join(notes), "state": "error" if broken else "normal", "broken": broken,
+			"title": "%s%s%s" % [type_label, (" (%s)" % _trim_mate_value(mate.get("value"))) if has_value else "", title_suffix],
+			"subtitle": ", ".join(notes), "state": state, "broken": broken,
 			"actions": actions,
 		})
 	return rows
@@ -1049,6 +1072,20 @@ func _on_edit_mate(mate_id: String, fields: Dictionary) -> void:
 	var result: Dictionary = await _mates_tool.update_mate(_mates_last_owner_part_id, mate_id, fields)
 	if not result["ok"]:
 		toast.emit("Couldn't change the mate: %s" % result["error"], "error")
+
+
+func _on_confirm_mate_pressed(mate_id: String) -> void:
+	## N1c: Confirm on a held mate (PATCH confirm_references; the part is solved with it like any edit).
+	if _mates_tool == null or _mates_last_owner_part_id == "" or mate_id == "":
+		return
+	var result: Dictionary = await _mates_tool.confirm_references(_mates_last_owner_part_id, mate_id)
+	if not result["ok"]:
+		toast.emit("Couldn't confirm the mate: %s" % result["error"], "error")
+
+
+func _on_dismiss_followed_pressed(mate_id: String) -> void:
+	if _mates_tool != null:
+		_mates_tool.dismiss_followed(mate_id)
 
 
 func _on_apply_mate_edit_pressed() -> void:

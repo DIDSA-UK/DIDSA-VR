@@ -58,6 +58,7 @@ signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved,
 const API_PREFIX := "/document"
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
+const RefState := preload("res://scripts/mate_reference_state.gd") ## N1c: what the backend says about a mate's references (followed / held / lost) and the mates a solve left out
 const COPY_UNIT_SCALE := 1.0 ## pattern-copy nodes sit in the backend's millimetres like every placed part (assembly_root's scale is above them): the glb's own units, no spawn_scale (see _apply_solved_transform)
 const GroupIndex := preload("res://scripts/group_index.gd") ## base_segment: a pattern copy's segment folds to its source (mate_ref_top)
 const Se3 := preload("res://scripts/motion/se3.gd")
@@ -177,6 +178,9 @@ var sandbox_ghosts := false ## while relaxed, a see-through copy of each moved p
 var sandbox_lines := false ## while relaxed, a thin line from each moved part to its home (Settings > Assemble)
 
 var mates: Array = [] ## last-fetched list for _current_owner_part_id, for the tablet's list UI
+var reference_notes: Dictionary = {} ## N1c: mate id -> {followed: [paths], reasons: {path: reason}} kept from earlier listings (the backend reports a followed reference ONCE)
+var left_out_mate_ids: Array = [] ## N1c: the mates the latest solve / drag / Enforce left out (held_mate_ids, X-Held-Mates); [] when it left none out
+var _enforcing := false
 var occurrences: Dictionary = {} ## occurrence_id -> {"fixed": bool}, top-level occurrences of _current_owner_part_id (refresh_state())
 
 var _labels: Dictionary = {} ## "owner|occurrence" -> a short readable name (part_label)
@@ -361,7 +365,11 @@ func highlight_mate(mate_id: String, camera: Camera3D = null) -> bool:
 		highlight_changed.emit()
 		return false
 	var nodes: Array = get_tree().get_nodes_in_group("grabbable_parts") if is_inside_tree() else []
-	var result := highlight_for(found, nodes)
+	var result := highlight_for(found, nodes) # (a held mate's listed index is the face it is bound to: that is the one lit)
+	var note := RefState.note_for(found) # N1c: followed / held / lost says so on the status line (a part out of view, below, takes the line first)
+	if str(note["kind"]) != "":
+		_status = str(note["text"])
+		picks_changed.emit()
 	highlight_id = mate_id
 	_highlight_entries = result["entries"]
 	highlight_changed.emit()
@@ -1631,6 +1639,7 @@ func create_mate() -> Dictionary:
 		await _adopt_backend_poses(owner_part_id, "mate %s" % (label_or(part, str(part.name)) if part != null else driven_occurrence_id))
 	_commit_starts.clear()
 	await refresh_mates(owner_part_id)
+	_note_left_out(result)
 	if not in_sandbox() and driven_fixed:
 		_report("Mate created, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it")
 	return {"ok": true, "error": ""}
@@ -1652,6 +1661,7 @@ func refresh_mates(owner_part_id: String) -> void:
 	var result := await _api_request(HTTPClient.METHOD_GET, "/parts/%s/mates" % owner_part_id, null)
 	if result["ok"]:
 		mates = result["json"]
+		RefState.merge_followed(mates, reference_notes) # N1c: a followed reference is reported once; keep the news until it is shown
 		_rebuild_mated_ids()
 		if highlight_id != "" and not mates.any(func(m) -> bool: return str(m.get("id", "")) == highlight_id):
 			clear_highlight() # the selected mate was deleted
@@ -1666,6 +1676,53 @@ func delete_mate(owner_part_id: String, mate_id: String) -> bool:
 		document_changed.emit()
 	await refresh_mates(owner_part_id)
 	return result["ok"]
+
+
+func _note_left_out(response: Dictionary) -> Array:
+	## N1c (N-6): the mates a solve left out, from `held_mate_ids` / `X-Held-Mates`. Says so on the status line (a solve alone; Enforce collects
+	## them and says it once at the end). Returns the ids. [] and nothing said for a backend that sends none.
+	var ids := RefState.held_mate_ids(response)
+	if _enforcing:
+		for id in ids:
+			if id not in left_out_mate_ids:
+				left_out_mate_ids.append(id)
+		return ids
+	var changed := ids != left_out_mate_ids
+	left_out_mate_ids = ids
+	if changed and not ids.is_empty():
+		_report(RefState.left_out_text(ids, mates))
+	return ids
+
+
+func _note_drag_left_out(state: Dictionary, response: Dictionary) -> void:
+	## The same for a drag: a mate-motion answer names the held / lost mates it left out of the group (absent when none). Said once per drag
+	## (and again if the set changes), not on every answer.
+	var ids := RefState.held_mate_ids(response)
+	if ids.is_empty() or ids == state.get("left_out", []):
+		return
+	state["left_out"] = ids
+	left_out_mate_ids = ids
+	_report(RefState.left_out_text(ids, mates))
+
+
+func dismiss_followed(mate_id: String) -> void:
+	## N1c: the "followed the edit" line of a mate is read: take it off (the backend will not say it again either).
+	reference_notes.erase(mate_id)
+	for mate in mates:
+		if str(mate.get("id", "")) == mate_id:
+			mate.erase("followed_references")
+	mates_changed.emit()
+
+
+func confirm_references(owner_part_id: String, mate_id: String) -> Dictionary:
+	## N1c: Confirm on a held mate: PATCH {"confirm_references": true}. The backend takes the faces it showed as right, re-stamps them and lifts the
+	## hold; as for any edit the driven part is then solved with the mate (update_mate: atomic unless mates are relaxed or the part is grounded), so
+	## it can move to the face the mate now names. Refused (a solve that cannot be met): the mate stays held. {ok, error}.
+	var result := await update_mate(owner_part_id, mate_id, {"confirm_references": true})
+	if result["ok"]:
+		reference_notes.erase(mate_id)
+		_report("Mate confirmed.")
+	return result
 
 
 func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> Dictionary:
@@ -1722,6 +1779,7 @@ func update_mate(owner_part_id: String, mate_id: String, fields: Dictionary) -> 
 		await _adopt_backend_poses(owner_part_id, "edit mate %s" % (label_or(part, str(part.name)) if part != null else driven_id))
 	_commit_starts.clear()
 	await refresh_mates(owner_part_id)
+	_note_left_out(result)
 	if not in_sandbox() and driven_fixed:
 		return {"ok": false, "error": "Mate changed, but couldn't be applied: that part is grounded (fixed) — Float it first, or mate the other part to it"}
 	return {"ok": true, "error": ""}
@@ -1755,6 +1813,7 @@ func solve_occurrence(owner_part_id: String, occurrence_id: String) -> Dictionar
 	if not result["ok"]:
 		await refresh_mates(owner_part_id)
 		return {"ok": false, "error": _friendly_error(result)}
+	_note_left_out(result) # N1c: a held or lost mate the solve left out
 	# /solve now moves the WHOLE mate-graph component (followers included) and stores it: adopt every
 	# moved occurrence's stored pose, one undo entry for the lot.
 	var adopted := await _adopt_backend_poses(owner_part_id, "solve %s" % (label_or(part, str(part.name)) if part != null else occurrence_id))
@@ -1776,6 +1835,8 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 	if in_sandbox():
 		await return_parts()
 	await refresh_state(owner_part_id)
+	_enforcing = true # N1c: the solves below name the mates they left out; collected here, said once at the end
+	left_out_mate_ids = []
 	var solved := 0
 	var problems: Array[String] = []
 	for pid in _nested_order:
@@ -1788,6 +1849,7 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 			_busy = false
 			if result["ok"]:
 				solved += 1
+				_note_left_out(result)
 			else:
 				problems.append("in sub-assembly %s: %s" % [await _part_label(pid), _friendly_error(result)])
 	for occ_id in _mated_ids:
@@ -1802,11 +1864,15 @@ func enforce_all(owner_part_id: String) -> Dictionary:
 	var copy_changes := await _copy_pose_changes(owner_part_id) # sub-assembly solves above moved parts whose copies stand elsewhere in the scope
 	if not copy_changes.is_empty():
 		_push_group_move("enforce mates (copies)", copy_changes)
+	_enforcing = false
+	var left_out_text := RefState.left_out_text(left_out_mate_ids, mates)
 	if problems.is_empty():
-		_report("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.")
+		_report(("Enforced mates on %d part(s)." % solved if solved > 0 else "Nothing to enforce: every mated part is grounded, or there are no mates yet.") + ("" if left_out_text == "" else " " + left_out_text))
 	else:
-		_report("Couldn't satisfy every mate: %s" % "; ".join(problems))
+		_report("Couldn't satisfy every mate: %s" % "; ".join(problems) + ("" if left_out_text == "" else " " + left_out_text))
 	var outcome := {"ok": problems.is_empty(), "solved": solved, "problems": problems}
+	if not left_out_mate_ids.is_empty():
+		outcome["held_mate_ids"] = left_out_mate_ids.duplicate() # N1c: only when a mate was left out (an answer from an older backend, or a clean one, has no key)
 	enforce_finished.emit(outcome)
 	return outcome
 
@@ -3241,6 +3307,7 @@ func _request_anchor(part: Node3D, state: Dictionary) -> void:
 	if not bool(state["active"]):
 		sched.invalidate() # released while in flight: the answer is ignored, the commit follows
 		return
+	_note_drag_left_out(state, response) # N1c
 	handle_anchor_response(state, response, wish_sent)
 
 
@@ -3366,6 +3433,7 @@ func _finish_drag(part: Node3D, state: Dictionary) -> void:
 		_drag.erase(part)
 		return
 	var json = result["json"]
+	_note_drag_left_out(state, result) # N1c: a mate the stored move left out
 	var committed: bool = result["ok"] and json is Dictionary and bool(json.get("converged", false)) and bool(json.get("committed", false))
 	var starts: Dictionary = state["starts"]
 	starts[state["occ"]] = state["start"]
@@ -3618,4 +3686,14 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 		return {"ok": false, "code": response_code, "json": null, "error": "network error (result %d)" % result_code}
 	var parsed = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
 	var ok: bool = response_code >= 200 and response_code < 300
-	return {"ok": ok, "code": response_code, "json": parsed, "error": ("" if ok else str(parsed))}
+	return {"ok": ok, "code": response_code, "json": parsed, "error": ("" if ok else str(parsed)), "held_mates": held_header(result[2])}
+
+
+static func held_header(response_headers) -> Array:
+	## N1c: the ids in the answer's `X-Held-Mates` header (N-6: the mates the solve left out); [] when it has none or an older backend sends none.
+	if response_headers is PackedStringArray or response_headers is Array:
+		for line in response_headers:
+			var text := str(line)
+			if text.to_lower().begins_with("x-held-mates:"):
+				return RefState.parse_held_header(text.substr(text.find(":") + 1))
+	return []

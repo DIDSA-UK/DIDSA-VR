@@ -63,6 +63,7 @@ const VisibilityWindow := preload("res://scripts/design_table/table_visibility_w
 const DirtyMates := preload("res://scripts/design_table/dirty_mates.gd")
 const EnforceButton := preload("res://scripts/design_table/enforce_button.gd")
 const MateHealth := preload("res://scripts/design_table/mate_health.gd")
+const MateRefState := preload("res://scripts/mate_reference_state.gd") ## N1c: what the backend says about a mate's references
 const LaserSurface := preload("res://scripts/ui/laser_surface.gd")
 const PanelHandle := preload("res://scripts/ui/panel_handle.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
@@ -1390,6 +1391,12 @@ func add_mate_baseline(captured: Array) -> void:
 			mate_baseline.append(entry)
 
 
+func prune_mate_baseline(mates: Array) -> void:
+	## N1c: after the mate list was re-read following an edit: forget the baseline of every reference the backend reports (followed, held, lost).
+	## Its index moved or the server owns the call; comparing the old index with the new shape would flag a mate the server already put right.
+	mate_baseline = MateHealth.prune_baseline(mate_baseline, mates)
+
+
 func update_mate_drift() -> void:
 	## After the part's mesh changed: which mates now name a different face than when they were made. Replaces the last answer, so
 	## undoing an edit that brings the faces back also clears the warning.
@@ -1402,10 +1409,13 @@ func update_mate_drift() -> void:
 		mate_drift[str(d["mate_id"])] = list
 	# A Width mate's two faces that an edit left not parallel are a state of their own (the backend would only say so when it next solves).
 	mate_unparallel = MateHealth.unparallel_pairs(_mates_tool.mates, arena) if _mates_tool != null else []
+	var server_text: String = MateRefState.summary_text(_mates_tool.mates) if _mates_tool != null else "" # N1c: "" from an older backend
 	if not mate_drift.is_empty():
 		set_status("%d mate(s) now point at different faces than before the edit." % mate_drift.size())
 	elif not mate_unparallel.is_empty():
 		set_status("%d Width mate(s) have faces that are no longer parallel after the edit." % MateHealth.mate_ids(mate_unparallel).size())
+	elif server_text != "":
+		set_status(server_text)
 
 
 func enforce_mates() -> void:
@@ -1472,17 +1482,25 @@ func _on_enforce_finished(result: Dictionary) -> void:
 	enforce_button.set_busy(false)
 	var suppressed := _last_suppressed
 	_last_suppressed = 0
+	# N1c: the mates the solves left out (held, or a face lost): the backend names them (held_mate_ids), so Enforce says so instead of "enforced".
+	var left_out: String = MateRefState.left_out_text(result.get("held_mate_ids", []), _mates_tool.mates if _mates_tool != null else [])
+	var left_out_suffix := "" if left_out == "" else " " + left_out
 	if bool(result.get("ok", false)):
 		var cleared := DirtyMates.clear_all(get_tree())
 		if suppressed > 0 and not remake_plan.is_empty():
-			var offer_text := "%d mate(s) turned off: the edit changed the face they were made on. %d can be remade on the face that is now the same one." % [suppressed, remake_plan.size()]
+			var offer_text := "%d mate(s) turned off: the edit changed the face they were made on. %d can be remade on the face that is now the same one.%s" % [suppressed, remake_plan.size(), left_out_suffix]
 			enforce_button.offer("Remake %d mate(s)" % remake_plan.size(), offer_text)
 			set_status(offer_text)
 		elif suppressed > 0:
-			var text := "%d mate(s) turned off: the edit changed the face they were made on. Remake them from Assembly > Mates." % suppressed
+			var text := "%d mate(s) turned off: the edit changed the face they were made on. Remake them from Assembly > Mates.%s" % [suppressed, left_out_suffix]
 			enforce_button.set_message(text)
 			enforce_button.hide_after(8.0) # long enough to read; the badges are gone, so this is the only place it's said
 			set_status(text)
+		elif left_out != "":
+			var text2 := "Mates enforced.%s%s" % ["" if cleared == 0 else " %d part(s) up to date." % cleared, left_out_suffix]
+			enforce_button.set_message(text2)
+			enforce_button.hide_after(8.0)
+			set_status(text2)
 		else:
 			enforce_button.hide_button()
 			set_status("Mates enforced.%s" % ("" if cleared == 0 else " %d part(s) up to date." % cleared))
