@@ -22,6 +22,7 @@ var folder_asked: bool = false ## the first-run "where should projects be saved"
 var cloud_cache_mb: int = 2048 ## S4: how much disk the local copies of server projects may take across all projects (0 = no limit); clean-up removes only files that are synced, closed and not waiting to send, least recently used first
 var cloud_folder: String = "" ## where the local copies of server projects live ("" = Documents/DIDSA-Cloud; scripts/cloud/cloud_paths.gd): ONE setting, so it can move
 var device_name: String = "" ## what this headset calls itself to the project store ("" = the platform's name): shown to other devices as "who changed it", never identity
+var last_session_hub: String = "" ## P2: the hub address a join last used (a join code that carries none, or a typed code, starts from it)
 var last_scene: String = "Mid"
 var reduce_motion: bool = false
 var ui_theme: String = "Navy" ## one of ui_themes.gd's ORDER
@@ -60,6 +61,7 @@ func load_from_disk() -> void:
 	cloud_folder = str(config.get_value("cloud", "folder", cloud_folder))
 	cloud_cache_mb = maxi(0, int(config.get_value("cloud", "cache_mb", cloud_cache_mb)))
 	device_name = str(config.get_value("cloud", "device_name", device_name))
+	last_session_hub = str(config.get_value("session", "last_hub", last_session_hub))
 	last_scene = config.get_value("environment", "last_scene", last_scene)
 	reduce_motion = bool(config.get_value("comfort", "reduce_motion", reduce_motion))
 	haptics_level = int(config.get_value("comfort", "haptics_level", haptics_level))
@@ -98,6 +100,7 @@ func save_to_disk() -> void:
 	config.set_value("cloud", "folder", cloud_folder)
 	config.set_value("cloud", "cache_mb", cloud_cache_mb)
 	config.set_value("cloud", "device_name", device_name)
+	config.set_value("session", "last_hub", last_session_hub)
 	config.set_value("environment", "last_scene", last_scene)
 	config.set_value("comfort", "reduce_motion", reduce_motion)
 	config.set_value("comfort", "haptics_level", haptics_level)
@@ -138,6 +141,11 @@ func set_cloud_cache_mb(value: int) -> void:
 
 func set_cloud_folder(path: String) -> void:
 	cloud_folder = path.strip_edges()
+	save_to_disk()
+
+
+func set_last_session_hub(value: String) -> void:
+	last_session_hub = value.strip_edges().substr(0, 256)
 	save_to_disk()
 
 

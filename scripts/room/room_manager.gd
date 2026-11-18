@@ -1130,6 +1130,14 @@ func _hide_seed(room: Node) -> void:
 	_seed_hidden[room.get_instance_id()] = hidden
 
 
+func seed_hidden_parts() -> Array:
+	## The world parts hidden because a room opened on them (their copies are in the room): not something an observer of the world should copy.
+	var out: Array = []
+	for hidden in _seed_hidden.values():
+		out.append_array(hidden)
+	return out
+
+
 func _restore_seed(room: Node) -> void:
 	for node in _seed_hidden.get(room.get_instance_id(), []):
 		if is_instance_valid(node):

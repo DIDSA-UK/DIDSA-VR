@@ -1,5 +1,5 @@
 extends RefCounted
-## The servers this headset knows: user://servers.cfg, a list of {id, name, url, api_key, document_session, relay_url, relay_api_key, store_url, store_key} and which one
+## The servers this headset knows: user://servers.cfg, a list of {id, name, url, api_key, document_session, relay_url, relay_api_key, store_url, store_key, hub_url, hub_key} and which one
 ## is current. `user://` is writable on the Quest and survives reinstalling over the top. res://secrets.cfg stays a developer override: main.gd reads it
 ## first and lists it as "From secrets.cfg"; it is never written here. docs/landing-scope.md, "Where servers are kept".
 ##
@@ -9,7 +9,7 @@ extends RefCounted
 const PATH := "user://servers.cfg"
 const PATH_ENV := "DIDSA_SERVERS_PATH" ## set to read and write a different file (tests/run_all.sh does, so a test run never touches the real one)
 const MAX_SERVERS := 12
-const FIELDS: Array[String] = ["name", "url", "api_key", "document_session", "relay_url", "relay_api_key", "store_url", "store_key"] ## store_*: the project store (DIDSA-CAD project-store/, S3): its address and its own key, not the backend's
+const FIELDS: Array[String] = ["name", "url", "api_key", "document_session", "relay_url", "relay_api_key", "store_url", "store_key", "hub_url", "hub_key"] ## store_*: the project store (DIDSA-CAD project-store/, S3): its address and its own key, not the backend's. hub_*: the session hub (session-hub/, P2): ws:// or wss://, and its own key
 
 var servers: Array[Dictionary] = []
 var current_id := ""
@@ -117,6 +117,17 @@ func set_store(id: String, store_url: String, store_key: String) -> Dictionary:
 		return {}
 	entry["store_url"] = normalise_url(store_url)
 	entry["store_key"] = store_key.strip_edges()
+	save_to_disk()
+	return entry
+
+
+func set_hub(id: String, hub_url: String, hub_key: String) -> Dictionary:
+	## Sets (or, with "", clears) a saved server's session hub. Returns the updated entry, or {} if there is no such server. Saves.
+	var entry := find(id)
+	if entry.is_empty():
+		return {}
+	entry["hub_url"] = normalise_url(hub_url)
+	entry["hub_key"] = hub_key.strip_edges()
 	save_to_disk()
 	return entry
 

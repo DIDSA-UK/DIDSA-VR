@@ -98,6 +98,14 @@ func _on_server_changed() -> void:
 		launcher.show_page(launcher.page)
 
 
+func on_session_changed() -> void:
+	## A live session started, changed or ended: the menu redraws (Host / Join, or the Session line).
+	if launcher != null:
+		launcher.on_session_changed()
+	if reel != null:
+		reel.set_connected(main.has_backend())
+
+
 func is_active() -> bool:
 	return active
 

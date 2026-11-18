@@ -56,6 +56,7 @@ signal highlight_changed() ## a mate was selected on the tablet (or the selectio
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
 
 const API_PREFIX := "/document"
+const DocumentRevision := preload("res://scripts/session/document_revision.gd") ## P2: the X-Document-Revision of every answer
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
 const TopologyPick := preload("res://scripts/topology_pick.gd")
 const RefState := preload("res://scripts/mate_reference_state.gd") ## N1c: what the backend says about a mate's references (followed / held / lost) and the mates a solve left out
@@ -1413,6 +1414,8 @@ func _run_glide(targets: Dictionary) -> void:
 			live[node] = targets[node]
 	if live.is_empty():
 		return
+	if is_inside_tree():
+		get_tree().call_group("session_listeners", "on_parts_moving", live.keys()) # P2: a hosting presenter reads these parts at the fast rate while they glide
 	if preview_glide_s <= 0.0 or not is_inside_tree():
 		for node in live:
 			(node as Node3D).transform = live[node]
@@ -2213,6 +2216,8 @@ func _glide_home(nodes: Array, homes: Dictionary) -> void:
 	var live := nodes.filter(func(n) -> bool: return is_instance_valid(n))
 	if live.is_empty():
 		return
+	if is_inside_tree():
+		get_tree().call_group("session_listeners", "on_parts_moving", live)
 	if return_glide_s <= 0.0 or not is_inside_tree():
 		for node in live:
 			(node as Node3D).transform = homes[node]
@@ -3682,6 +3687,7 @@ func _api_request(method: int, path: String, body_dict) -> Dictionary:
 	var result_code: int = result[0]
 	var response_code: int = result[1]
 	var raw: PackedByteArray = result[3]
+	DocumentRevision.note(result[2]) # P2: the revision the backend is at, for a hosting session's doc_changed
 	if result_code != HTTPRequest.RESULT_SUCCESS:
 		return {"ok": false, "code": response_code, "json": null, "error": "network error (result %d)" % result_code}
 	var parsed = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null

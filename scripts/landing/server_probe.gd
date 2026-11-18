@@ -17,7 +17,19 @@ func check(url: String, api_key: String) -> Dictionary:
 		return describe(HTTPRequest.RESULT_CANT_CONNECT, 0)
 	var answer: Array = await request.request_completed
 	request.queue_free()
-	return describe(int(answer[0]), int(answer[1]))
+	var out := describe(int(answer[0]), int(answer[1]))
+	if out["ok"]:
+		out["session_hub"] = hub_in_health(answer[3]) # P2: where this backend says its session hub is ("" for an older one, or none set)
+	return out
+
+
+static func hub_in_health(body: PackedByteArray) -> String:
+	## `session_hub` from DIDSA-CAD's /health: the hub's public wss:// address when the backend was told SESSION_HUB_URL (never a key). "" when it says none.
+	var json := JSON.new()
+	if body.is_empty() or json.parse(body.get_string_from_utf8()) != OK or not (json.data is Dictionary):
+		return ""
+	var value = (json.data as Dictionary).get("session_hub", "")
+	return str(value).strip_edges() if value is String else ""
 
 
 const NO_INTERNET_HINT := " If every server fails like this, this build may lack Android's Internet permission: Permissions > Internet in the export preset, then rebuild."

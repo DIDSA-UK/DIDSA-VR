@@ -12,12 +12,14 @@ const ProjectFolder := preload("res://scripts/project_folder.gd")
 const PairingPayload := preload("res://scripts/landing/pairing_payload.gd")
 const ServerAddress := preload("res://scripts/landing/server_address.gd")
 const StorageProbe := preload("res://scripts/storage_probe.gd")
+const SessionProtocol := preload("res://scripts/session/session_protocol.gd")
+const QrEncoder := preload("res://scripts/session/qr_encoder.gd")
 
 const LOWER_BY := 0.28 ## metres below where a window opens (10 cm under the eyes)
 
 signal page_changed(page: String)
 
-var page := "home" ## home | models | assemblies | servers | settings | about | folder | graphics | scan | open | discard
+var page := "home" ## home | models | assemblies | servers | settings | about | folder | graphics | scan | open | discard | host | join | session
 var _choosing_folder := false ## the folder page is showing the chooser instead of the first-run card
 var landing: Node ## landing.gd
 var main: Node ## main.gd
@@ -45,6 +47,13 @@ var _store_form := {"store_url": "", "store_key": ""}
 var _store_note := "" ## what the last project store Save said
 var _relay_for := "" ## the saved server whose Browser relay is being typed ("" = none): its form shows under the list
 var _relay_form := {"relay_url": "", "relay_api_key": ""}
+var _join_form := {"code": "", "hub": ""} ## the Join page's typed code and hub address: kept while the page redraws
+var _pending_join: Dictionary = {} ## a join code that was scanned and waits for Join / Cancel (SessionProtocol.parse_join's result)
+var _host_result: Label
+var _join_result: Label
+var _hub_for := "" ## the saved server whose session hub is being typed ("" = none): its form shows under the list
+var _hub_form := {"hub_url": "", "hub_key": ""}
+var _hub_note := "" ## what the last hub Save said
 var _storage_report := "" ## the last "Check storage" result (S0 spike), shown under the button while the page redraws
 var _relay_note := "" ## what the last relay Save said
 var _page_before_discard := "" ## the page the "Unsaved changes" choice replaced, to go back to once it is decided
@@ -61,6 +70,7 @@ func setup_launcher(left: XRController3D, right: XRController3D, camera: XRCamer
 	super.setup(left, right, camera)
 	main.discard_prompt_changed.connect(_on_discard_prompt)
 	main.cloud.changed.connect(_on_cloud_changed)
+	main.session.changed.connect(on_session_changed)
 
 
 func _place_in_front_of_camera() -> void:
@@ -124,6 +134,8 @@ func set_status(text: String) -> void:
 
 
 func show_page(name: String) -> void:
+	if main.is_observer() and name in ["servers", "open", "assemblies", "models", "folder", "scan"]:
+		name = "session" # an observer has no files, servers or models of its own (scope section 3): the pill and every such page lead to the session
 	if page == "scan" and name != "scan":
 		_leave_scan()
 	page = name
@@ -156,11 +168,18 @@ func show_page(name: String) -> void:
 			_build_open()
 		"folder":
 			_build_folder()
+		"host":
+			_build_host()
+		"join":
+			_build_join()
+		"session":
+			_build_session()
 		_:
 			page = "home"
 			_build_home()
 	set_title({"home": "DIDSA Design Tools VR", "models": "Demo models", "assemblies": "Demo assemblies", "servers": "Servers", "scan": "Scan a QR code",
-		"settings": "Settings", "about": "About", "graphics": "Graphics check", "discard": "Unsaved changes", "open": "Open a file", "folder": "Where to save your projects"}.get(page, "DIDSA Design Tools VR"))
+		"settings": "Settings", "about": "About", "graphics": "Graphics check", "discard": "Unsaved changes", "open": "Open a file", "folder": "Where to save your projects",
+		"host": "Host a session", "join": "Join a session", "session": "Live session"}.get(page, "DIDSA Design Tools VR"))
 	page_changed.emit(page)
 
 
@@ -185,18 +204,27 @@ func tiles() -> Array[Dictionary]:
 		if not continue_ok:
 			continue_note = "%s: needs a server" % last["name"]
 	var needs := "Needs a server"
+	var watching: bool = main.is_observer()
+	var in_session: bool = main.session.is_active()
 	var continue_tile := {"id": "continue", "label": "Continue", "icon": "history", "note": continue_note, "enabled": continue_ok}
 	if not last.is_empty():
 		var picture: Texture2D = ThumbnailStore.load_texture(str(last["path"]), 96) # a picture of the last file, kept when it was opened (S4); none yet: the symbol
 		if picture != null:
 			continue_tile["thumb"] = picture
+	var watching_note := "Not while watching"
+	if watching:
+		continue_tile["enabled"] = false
+		continue_tile["note"] = watching_note
 	return [
 		continue_tile,
-		{"id": "open", "label": "Open...", "icon": "files", "note": "Pick a file", "enabled": true},
-		{"id": "new", "label": "New assembly", "icon": "assembly", "note": "" if online else needs, "enabled": online},
-		{"id": "models", "label": "Demo models", "icon": "models", "note": "Rockets, craft", "enabled": true},
-		{"id": "assemblies", "label": "Demo assemblies", "icon": "tree", "note": "" if online else needs, "enabled": online},
-		{"id": "servers", "label": "Servers", "icon": "browser", "note": main.server_note(), "enabled": true},
+		{"id": "open", "label": "Open...", "icon": "files", "note": watching_note if watching else "Pick a file", "enabled": not watching},
+		{"id": "new", "label": "New assembly", "icon": "assembly", "note": watching_note if watching else ("" if online else needs), "enabled": online and not watching},
+		{"id": "models", "label": "Demo models", "icon": "models", "note": watching_note if watching else "Rockets, craft", "enabled": not watching},
+		{"id": "assemblies", "label": "Demo assemblies", "icon": "tree", "note": watching_note if watching else ("" if online else needs), "enabled": online and not watching},
+		{"id": "servers", "label": "Servers", "icon": "browser", "note": watching_note if watching else main.server_note(), "enabled": not watching},
+		{"id": "host", "label": "Host Session", "icon": "windows", "note": "Show this to others", "enabled": not in_session},
+		{"id": "join", "label": "Join Session", "icon": "view", "note": "With a code or a QR", "enabled": not in_session},
+		{"id": "session", "label": "Session", "icon": "navigate", "note": main.session.status_line(), "enabled": true},
 		{"id": "settings", "label": "Settings", "icon": "settings", "note": "Tips, comfort", "enabled": true},
 		{"id": "about", "label": "About", "icon": "help", "note": "Credits", "enabled": true},
 	]
@@ -252,7 +280,7 @@ func press_tile(id: String) -> void:
 			show_page("open") # the file list is on the monolith itself (Quest 3 report: Open used to throw you onto the wrist tablet)
 		"new":
 			landing.new_assembly()
-		"models", "assemblies", "servers", "settings", "about":
+		"models", "assemblies", "servers", "settings", "about", "host", "join", "session":
 			show_page(id)
 
 
@@ -308,6 +336,8 @@ func _build_servers() -> void:
 			_build_relay_form(entry)
 		if str(entry["id"]) == _store_for and not entry.get("readonly", false):
 			_build_store_form(entry)
+		if str(entry["id"]) == _hub_for and not entry.get("readonly", false):
+			_build_hub_form(entry)
 	if main.active_server_id != "":
 		_body.add_child(_action("Use no server (offline, demo models only)", func() -> void:
 			main.switch_server("")
@@ -378,6 +408,15 @@ func _server_row(entry: Dictionary) -> Control:
 			show_page("servers"), 110)
 		relay.name = "Relay_" + str(entry["id"])
 		box.add_child(relay)
+		var hub := _action("Hub on" if str(entry.get("hub_url", "")) != "" else "Hub", func() -> void:
+			_hub_for = "" if _hub_for == str(entry["id"]) else str(entry["id"])
+			_hub_form = {"hub_url": str(entry.get("hub_url", "")), "hub_key": str(entry.get("hub_key", ""))}
+			if _hub_form["hub_url"] == "":
+				_hub_form["hub_url"] = "wss://"
+			_hub_note = ""
+			show_page("servers"), 90)
+		hub.name = "Hub_" + str(entry["id"])
+		box.add_child(hub)
 		var store := _action("Store on" if str(entry.get("store_url", "")) != "" else "Store", func() -> void:
 			_store_for = "" if _store_for == str(entry["id"]) else str(entry["id"])
 			_store_form = {"store_url": str(entry.get("store_url", "")), "store_key": str(entry.get("store_key", ""))}
@@ -436,6 +475,52 @@ func _build_relay_form(entry: Dictionary) -> void:
 			_relay_for = ""
 			show_page("servers"), 0)
 		clear.name = "RelayClear"
+		row.add_child(clear)
+
+
+func _build_hub_form(entry: Dictionary) -> void:
+	## The session hub for this server (DIDSA-CAD session-hub/, P2): its ws:// or wss:// address and its own key, not the CAD key. Host Session uses it; Join Session needs neither.
+	var box := VBoxContainer.new()
+	box.name = "HubForm"
+	_body.add_child(box)
+	box.add_child(_hint("Session hub for %s: the service that runs live sessions (port 8300 by default), with its own key (SESSION_HUB_API_KEY), not the CAD key. Only needed to HOST a session." % entry["name"]))
+	for field in [["hub_url", "Hub address"], ["hub_key", "Hub key"]]:
+		var value := str(_hub_form[field[0]])
+		var shown := ("set, %d characters (hidden)" % value.length() if value != "" else "") if field[0] == "hub_key" else value
+		var f: String = field[0]
+		var title: String = field[1]
+		var button := _action("%s: %s" % [title, shown if shown not in ["", "wss://"] else "tap to type"], func() -> void:
+			main.open_keyboard_for(str(_hub_form[f]), func(text: String) -> void:
+				_hub_form[f] = text.strip_edges()
+				show_page("servers"), {"mode": "full", "title": title}), 0)
+		button.name = "HubForm_" + f
+		box.add_child(button)
+	var typed := str(_hub_form["hub_url"])
+	if typed not in ["", "wss://"]:
+		box.add_child(_hint(str(ServerAddress.check_relay(typed)["message"])))
+	if _hub_note != "":
+		var note := _hint(_hub_note)
+		note.name = "HubNote"
+		box.add_child(note)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	var save := _action("Save hub", func() -> void:
+		var url := str(_hub_form["hub_url"])
+		var answer: Dictionary = main.set_server_hub(str(entry["id"]), "" if url == "wss://" else url, str(_hub_form["hub_key"]))
+		_hub_note = str(answer["message"])
+		if answer["ok"]:
+			_hub_for = ""
+			main.say(_hub_note)
+		show_page("servers"), 0)
+	save.name = "HubSave"
+	row.add_child(save)
+	if str(entry.get("hub_url", "")) != "":
+		var clear := _action("Remove hub", func() -> void:
+			main.set_server_hub(str(entry["id"]), "", "")
+			_hub_for = ""
+			show_page("servers"), 0)
+		clear.name = "HubClear"
 		row.add_child(clear)
 
 
@@ -689,11 +774,25 @@ static func scan_step_text(passthrough_on: bool, code_read: bool, codes_in_view:
 func _on_code_seen(text: String) -> void:
 	## A QR code was read. What it is, in words: the code carries the API key, so it is never shown.
 	_scan_last = describe_code(text)
-	if PairingPayload.looks_like_pairing(text):
+	if SessionProtocol.looks_like_join(text):
+		var join := SessionProtocol.parse_join(text)
+		if join["ok"]:
+			var fresh_join: bool = _pending_join.is_empty() or _pending_join["code"] != join["code"]
+			_pending_join = join
+			_pending = {}
+			_refresh_card()
+			if fresh_join:
+				UiFeedback.haptic(_right, "confirm")
+				UiFeedback.play("confirm", self)
+				main.say("QR code read: a live session, code %s. Check the card and press Join." % SessionProtocol.code_for_display(str(join["code"])))
+		else:
+			UiFeedback.haptic(_right, "error")
+	elif PairingPayload.looks_like_pairing(text):
 		var parsed := PairingPayload.parse(text)
 		if parsed["ok"]:
 			var fresh: bool = _pending.is_empty() or _pending["url"] != parsed["url"] or _pending["api_key"] != parsed["api_key"]
 			_pending = parsed # waits for Connect: nothing is saved or switched until then
+			_pending_join = {} # (a join code scanned earlier is replaced by this card)
 			_card_test_failed = false
 			_refresh_card()
 			if fresh: # the tracker reports the same code many times a second: one tick and one status line per new code
@@ -713,6 +812,9 @@ func _refresh_card() -> void:
 	for child in _scan_card.get_children():
 		_scan_card.remove_child(child)
 		child.queue_free()
+	if not _pending_join.is_empty():
+		_build_join_card()
+		return
 	if _pending.is_empty():
 		return
 	var title := _info("Connect to %s?" % _pending["name"])
@@ -728,6 +830,8 @@ func _refresh_card() -> void:
 		checks.add_child(_check_row(true, "Document session included"))
 	if str(_pending.get("store_url", "")) != "":
 		checks.add_child(_check_row(str(_pending.get("store_api_key", "")) != "", "Project store: %s" % _pending["store_url"] + ("" if str(_pending.get("store_api_key", "")) != "" else " (no key: server projects will not connect)")))
+	if str(_pending.get("hub_url", "")) != "":
+		checks.add_child(_check_row(str(_pending.get("hub_api_key", "")) != "", "Session hub: %s" % _pending["hub_url"] + ("" if str(_pending.get("hub_api_key", "")) != "" else " (no key: Host Session will not connect)")))
 	if str(_pending.get("relay_url", "")) != "":
 		checks.add_child(_check_row(str(_pending.get("relay_api_key", "")) != "", "Browser relay: %s" % _pending["relay_url"] + ("" if str(_pending.get("relay_api_key", "")) != "" else " (no key: the Browser will not connect)")))
 	_scan_card.add_child(checks)
@@ -753,6 +857,7 @@ func _refresh_card() -> void:
 
 func _cancel_pending() -> void:
 	_pending = {}
+	_pending_join = {}
 	_card_test_failed = false
 	_scan_last = "Cancelled. Nothing was saved."
 	_refresh_card()
@@ -783,7 +888,8 @@ func _connect_pending() -> void:
 			return
 	var entry: Dictionary = main.add_server({"name": chosen["name"], "url": chosen["url"], "api_key": chosen["api_key"],
 		"document_session": chosen["document_session"], "relay_url": chosen["relay_url"], "relay_api_key": chosen["relay_api_key"],
-		"store_url": chosen.get("store_url", ""), "store_key": chosen.get("store_api_key", "")}, true)
+		"store_url": chosen.get("store_url", ""), "store_key": chosen.get("store_api_key", ""),
+		"hub_url": chosen.get("hub_url", ""), "hub_key": chosen.get("hub_api_key", "")}, true)
 	if entry.is_empty():
 		if result_label != null:
 			result_label.text = "Couldn't save that server (is the list full? Forget one under Servers)."
@@ -800,12 +906,226 @@ func _connect_pending() -> void:
 
 
 static func describe_code(text: String) -> String:
+	if SessionProtocol.looks_like_join(text):
+		var join := SessionProtocol.parse_join(text)
+		return "Read a DIDSA join code for session %s." % SessionProtocol.code_for_display(str(join["code"])) if join["ok"] else "Read a DIDSA join code, but it was refused: %s" % join["error"]
 	if not PairingPayload.looks_like_pairing(text):
 		return "Read a QR code that is not a DIDSA pairing code (%d characters). Ignored." % text.length()
 	var parsed := PairingPayload.parse(text)
 	if not parsed["ok"]:
 		return "Read a DIDSA pairing code, but it was refused: %s" % parsed["error"]
 	return "Read a DIDSA pairing code for %s (%s)." % [parsed["name"], ServerAddress.default_name(parsed["url"])]
+
+
+# --- Live sessions: Host, Join, the session itself (P2; scripts/session/) --------------------------------------------------------------
+
+func on_session_changed() -> void:
+	## The session started, changed or ended: the home view and the session pages redraw.
+	if page == "session" and not main.session.is_active():
+		show_page("home")
+	elif page in ["home", "host", "join", "session"]:
+		show_page(page)
+
+
+func _build_host() -> void:
+	var session: Node = main.session
+	_body.add_child(_info("Host a live session"))
+	_body.add_child(_hint("Others join with a short code or a QR code and watch what you show: the model, its parts as you move them, the cut, where you put it. They cannot change anything. They are given a read-only link that stops working when you end the session; your keys are never shared."))
+	var offered: Dictionary = session.hostable_model()
+	var what := _hint(("Sharing: %s" % ("the model on your server" if offered["source"]["kind"] == "backend" else "the demo model %s" % offered["title"])) if offered["ok"] else str(offered["error"]))
+	what.name = "HostWhat"
+	_body.add_child(what)
+	var hub_text := "No hub is set for this server."
+	if str(main.hub_url) != "":
+		hub_text = "Hub: %s" % main.hub_url
+	elif main.has_backend():
+		hub_text = "Hub: the one your server advertises, if it has one (its key is needed, under Servers > Hub)."
+	var hub := _hint(hub_text)
+	hub.name = "HostHub"
+	_body.add_child(hub)
+	_body.add_child(_hint("You appear as %s (Servers > This device is called)." % session.display_name()))
+	var start := _action("Start session", _start_host, 0)
+	start.name = "HostStart"
+	start.disabled = not offered["ok"]
+	_body.add_child(start)
+	_host_result = Label.new()
+	_host_result.name = "HostResult"
+	_host_result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_host_result.text = str(session.last_error)
+	_body.add_child(_host_result)
+	_body.add_child(_action("Set up the hub (Servers)", func() -> void: show_page("servers"), 0))
+
+
+func _start_host() -> void:
+	_host_result.text = "Starting ..."
+	var answer: Dictionary = await main.session.host_session()
+	if not is_instance_valid(self):
+		return
+	if answer["ok"]:
+		show_page("session")
+	elif _host_result != null and is_instance_valid(_host_result):
+		_host_result.text = str(answer["error"])
+
+
+func _build_join() -> void:
+	_body.add_child(_info("Join a live session"))
+	_body.add_child(_hint("Type the code the presenter shows, or scan their QR code. You will see what they show. You cannot change it, and what you have open here is put away while you watch."))
+	if str(_join_form["hub"]) == "":
+		_join_form["hub"] = main.last_session_hub() if main.last_session_hub() != "" else str(main.hub_url)
+	for field in [["code", "Session code"], ["hub", "Hub address"]]:
+		var f: String = field[0]
+		var title: String = field[1]
+		var value := str(_join_form[f])
+		var shown := SessionProtocol.code_for_display(value) if f == "code" else value
+		var button := _action("%s: %s" % [title, shown if shown != "" else "tap to type"], func() -> void:
+			main.open_keyboard_for(str(_join_form[f]), func(text: String) -> void:
+				_join_form[f] = SessionProtocol.normalise_code(text) if f == "code" else text.strip_edges()
+				show_page("join"), {"mode": "full", "title": title}), 0)
+		button.name = "Join_" + f
+		_body.add_child(button)
+	var hub_check := SessionProtocol.hub_address(str(_join_form["hub"]), main.session.allow_loopback) if str(_join_form["hub"]) != "" else {}
+	if not hub_check.is_empty():
+		var note := _hint(str(hub_check["message"]) if not hub_check["ok"] else str(hub_check["warning"]))
+		note.name = "JoinHubNote"
+		_body.add_child(note)
+	_body.add_child(_hint("A scanned join code carries the hub address, so you need only that."))
+	_body.add_child(_scan_button())
+	var join := _action("Join", _start_join, 0)
+	join.name = "JoinStart"
+	join.disabled = not SessionProtocol.code_is_valid(str(_join_form["code"])) or hub_check.is_empty() or not hub_check["ok"]
+	_body.add_child(join)
+	_join_result = Label.new()
+	_join_result.name = "JoinResult"
+	_join_result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_join_result.text = str(main.session.last_error)
+	_body.add_child(_join_result)
+
+
+func _start_join() -> void:
+	_join_result.text = "Joining ..."
+	var answer: Dictionary = await main.session.join_session(str(_join_form["hub"]), str(_join_form["code"]))
+	if not is_instance_valid(self):
+		return
+	if answer["ok"]:
+		show_page("session")
+	elif _join_result != null and is_instance_valid(_join_result):
+		_join_result.text = str(answer["error"])
+
+
+func _build_join_card() -> void:
+	## "Join session K7X Q4M?" for a scanned join code: where, and the two choices.
+	var title := _info("Join session %s?" % SessionProtocol.code_for_display(str(_pending_join["code"])))
+	title.name = "CardTitle"
+	_scan_card.add_child(title)
+	var hub: String = str(_pending_join["hub_url"]) if str(_pending_join["hub_url"]) != "" else str(main.last_session_hub())
+	if hub == "":
+		hub = str(main.hub_url)
+	var detail := _hint("Hub: %s" % hub if hub != "" else "This code has no hub address and none is known here: type it on the Join page.")
+	detail.name = "CardDetail"
+	_scan_card.add_child(detail)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_scan_card.add_child(row)
+	var join := _action("Join", func() -> void: _connect_join(hub), 0)
+	join.name = "CardConnect"
+	join.disabled = hub == ""
+	row.add_child(join)
+	var cancel := _action("Cancel", _cancel_pending, 0)
+	cancel.name = "CardCancel"
+	row.add_child(cancel)
+	var result := Label.new()
+	result.name = "CardResult"
+	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_scan_card.add_child(result)
+
+
+func _connect_join(hub: String) -> void:
+	var chosen := _pending_join
+	var answer: Dictionary = await main.session.join_session(hub, str(chosen["code"]))
+	if not is_instance_valid(self):
+		return
+	if answer["ok"]:
+		_pending_join = {}
+		show_page("session")
+	else:
+		var result_label: Label = _scan_card.find_child("CardResult", true, false) if _scan_card != null and is_instance_valid(_scan_card) else null
+		if result_label != null:
+			result_label.text = str(answer["error"])
+
+
+func _build_session() -> void:
+	var session: Node = main.session
+	if not session.is_active():
+		_body.add_child(_info("No session is running."))
+		return
+	var presenting: bool = session.is_presenter()
+	_body.add_child(_info(session.status_line()))
+	if presenting:
+		var code: String = session.code()
+		var big := Label.new()
+		big.name = "SessionCode"
+		big.text = SessionProtocol.code_for_display(code)
+		big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		big.add_theme_font_size_override("font_size", 84)
+		big.add_theme_color_override("font_color", CYAN_TEXT)
+		_body.add_child(big)
+		var uri: String = session.join_uri
+		if not uri.contains("h=") and str(session.hub_in_use) != "":
+			uri = SessionProtocol.build_join_uri(str(session.hub_in_use), code) # the hub did not know its public address: this app adds the one it used
+		var qr := QrEncoder.encode(uri)
+		if qr["ok"]:
+			var picture := TextureRect.new()
+			picture.name = "SessionQr"
+			picture.set_meta("text", uri) # what the code says (a test reads it back)
+			picture.texture = ImageTexture.create_from_image(QrEncoder.to_image(qr, 10))
+			picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			picture.custom_minimum_size = Vector2(440, 440)
+			_body.add_child(picture)
+		_body.add_child(_hint("Others: Join Session on the landing, then type the code or scan this. People near you can scan it with the headset's camera."))
+	else:
+		var status := _hint(str(main.session.observer.status_text) if str(main.session.observer.status_text) != "" else "You see what the presenter shows. You cannot change it.")
+		status.name = "SessionStatus"
+		_body.add_child(status)
+	_body.add_child(_info("In the session"))
+	for person in session.client.participants.values():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		var label := Label.new()
+		var note := "" if bool(person.get("connected", true)) else " (reconnecting)"
+		label.text = "%s%s%s%s" % [person["name"], " (presenter)" if person["role"] == "presenter" else "", " (you)" if int(person["id"]) == int(session.client.me.get("id", -1)) else "", note + (" ✋" if bool(person.get("hand", false)) else "")]
+		label.add_theme_color_override("font_color", SessionProtocol.colour_of(str(person["colour"]), Color.WHITE))
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		if presenting and person["role"] != "presenter":
+			var who: int = int(person["id"])
+			var remove := _action("Remove", func() -> void: session.client.send({"t": "remove", "id": who}), 0)
+			remove.name = "Remove_%d" % who
+			row.add_child(remove)
+		row.name = "Person_%d" % int(person["id"])
+		_body.add_child(row)
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	_body.add_child(buttons)
+	if presenting:
+		var locked := bool(session.client.room.get("locked", false))
+		var lock := _action("Unlock the session" if locked else "Lock the session (no new people)", func() -> void:
+			session.client.send({"t": "lock", "locked": not locked})
+			session.client.room["locked"] = not locked
+			show_page("session"), 0)
+		lock.name = "SessionLock"
+		buttons.add_child(lock)
+		var end := _action("End the session", func() -> void: session.end_session(), 0)
+		end.name = "SessionEnd"
+		buttons.add_child(end)
+	else:
+		var leave := _action("Leave the session", func() -> void: session.leave_session(), 0)
+		leave.name = "SessionLeave"
+		buttons.add_child(leave)
+
+
+const CYAN_TEXT := Color(0.30, 0.88, 1.0)
 
 
 # --- Open a file: the same list as the tablet's Files page, on the monolith -----------------------------------------------------

@@ -52,6 +52,8 @@ static func tag_scene(gltf_state: GLTFState, scene: Node) -> void:
 
 		scene_node.set_meta("occurrence_id", extras.get("occurrence_id", ""))
 		scene_node.set_meta("owner_part_id", extras.get("owner_part_id", ""))
+		if extras.has("name"): # the occurrence's display name (DIDSA-CAD P1, LS-12): for the live session's status line and, later, the observer's breadcrumb
+			scene_node.set_meta("display_name", str(extras["name"]))
 		if extras.has("instance_path"): # the full occurrence path from the glb's root (#pattern: copies included; "" = root content). Absent from an older backend.
 			scene_node.set_meta("instance_path", str(extras["instance_path"]))
 

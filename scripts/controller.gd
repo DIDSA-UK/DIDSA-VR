@@ -82,6 +82,7 @@ var drive_tool_active := false ## the Drive tool (tablet / wheel): trigger picks
 var drive_tool = null ## set by main.gd; the shared drive_tool.gd instance
 var paint_active := false ## the Appearance tool (tool wheel / tablet): a trigger click paints the body under the laser, a hold opens the paint breadcrumb
 var appearance_tool = null ## set by main.gd; the shared appearance_tool.gd instance (what to paint with, where it goes)
+var view_only := false ## P2: this app is watching someone else's session (main.gd apply_session_role): no grabbing, selecting or tools with this hand; the tablet and menus still take the laser
 var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
 var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
@@ -358,6 +359,8 @@ func cancel_for_wheel() -> void:
 
 
 func _on_button_pressed(action_name: String) -> void:
+	if view_only:
+		return # (the wrist tablet and the monolith listen for the buttons themselves)
 	if wheel_is_open() or bool(get_meta("room_placing", false)):
 		return # (placing an Assembly Room: this hand's laser and trigger are the room's - room_manager.gd)
 	if _wheel_chord_completed_by(action_name):
@@ -1037,6 +1040,8 @@ func _push_move_command(part: Node3D, before: Transform3D) -> void:
 
 
 func _sync_pose(part: Node3D) -> void:
+	if is_instance_valid(part) and is_inside_tree():
+		get_tree().call_group("session_listeners", "on_parts_moving", [part]) # P2: the pose just became final; a hosting presenter sends it
 	if mates_tool and is_instance_valid(part):
 		mates_tool.persist_pose(part)
 

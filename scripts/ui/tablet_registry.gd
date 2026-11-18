@@ -83,6 +83,7 @@ class CategoryDef extends RefCounted:
 
 
 var _categories: Array[CategoryDef] = []
+var _allowed: Array = [] ## category ids the tablet shows; empty = all (an observer in a live session sees only a few: main.gd apply_session_role)
 var _tools := {} ## tool id -> ToolDef (ids are unique across the whole registry)
 
 
@@ -148,8 +149,20 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	return def
 
 
+func set_allowed(ids: Array) -> void:
+	## Show only these categories on the home grid ([] = all). Tools and categories stay registered: this is a view, so the tablet cannot reach a hidden one.
+	_allowed = ids.duplicate()
+	changed.emit()
+
+
 func categories() -> Array[CategoryDef]:
-	return _categories
+	if _allowed.is_empty():
+		return _categories
+	var shown: Array[CategoryDef] = []
+	for c in _categories:
+		if _allowed.has(c.id):
+			shown.append(c)
+	return shown
 
 
 func category(id: String) -> CategoryDef:
