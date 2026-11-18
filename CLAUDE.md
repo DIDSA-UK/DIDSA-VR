@@ -25,6 +25,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 - `demo/`: models and assemblies shipped in the APK (1:1 glb, `importer="keep"`; credits in `demo/CREDITS.md`, rules in `demo/README.md`).
 - `ui/logo/`: the DIDSA logo traced from the artwork (SVG, 3D glb; how to redo it in `ui/logo/source/`). `icon.svg` is its emblem.
 - `tools/`: `setup_test_env.sh` (Godot, Xvfb/Mesa, the backend's conda env, Flutter: everything the test suites need) and `start_backend.sh` (a throwaway local backend for e2e), `install_vendors_plugin.sh` (the pinned OpenXR Vendors plugin) and `android/` (the Quest export preset example, the optional cleartext overlay). The Quest APK: `docs/android-build.md`.
+- `spikes/`: throwaway measurements for the owner's devices (`spikes/README.md`); the voice spike is its own Godot project using TwoVoip from `tools/install_voip_plugin.sh` (fetched, never committed; not used by the app). The Cardboard spike's scene is `scenes/spikes/` with `.phone` overrides in `project.godot`.
 - `ui/themes/`: theme presets. `lab/ui_lab.tscn`: UI sandbox (F6, no headset). `tests/`: headless, render and live-backend tests.
 
 ## Commands

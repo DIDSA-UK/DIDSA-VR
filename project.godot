@@ -18,6 +18,7 @@ config/name="DIDSA Design Tools VR"
 config/description="Build, assemble and model parametric CAD in VR: a Godot 4 OpenXR client for DIDSA-CAD."
 config/version="0.1.0"
 run/main_scene="res://scenes/main.tscn"
+run/main_scene.phone="res://scenes/spikes/cardboard_spike.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 
@@ -61,3 +62,8 @@ openxr/extensions/meta/passthrough.editor_hint=true
 openxr/extensions/spatial_entity/enabled.editor_hint=true
 openxr/extensions/spatial_entity/enable_marker_tracking.editor_hint=true
 openxr/extensions/spatial_entity/enable_builtin_marker_tracking.editor_hint=true
+openxr/enabled.phone=false
+openxr/extensions/meta/passthrough.phone=false
+openxr/extensions/spatial_entity/enabled.phone=false
+openxr/extensions/spatial_entity/enable_marker_tracking.phone=false
+openxr/extensions/spatial_entity/enable_builtin_marker_tracking.phone=false

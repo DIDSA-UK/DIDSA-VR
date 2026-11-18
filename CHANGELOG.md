@@ -3,6 +3,13 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## P0 spike apps, voice and Cardboard (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, P0; **built and run headless only, not run on a headset or phone**; `docs/live-sessions-spikes.md`)
+
+- **Voice spike**: `spikes/voice/`, its own small Godot project (the app's project ignores `spikes/`), with TwoVoip (Opus) fetched and SHA-256-checked by the new `tools/install_voip_plugin.sh` (pinned v6.6.2, never committed), a screen with Hold to talk / Open mic / an encode benchmark / a live report, `echo_relay.py` and an Android preset example.
+- **Cardboard spike**: `scenes/spikes/cardboard_spike.tscn` + `scripts/spikes/` in the app's project (Godot's built-in `MobileVRInterface`, the app's environment, view modes, section clip and glb path; guided steps C2 to C8 with results listed on screen; lens tuning on the gamepad). `project.godot` gains `.phone` overrides (OpenXR, passthrough and spatial entities off, the spike as main scene) that apply only to an export with the `phone` feature tag; `tools/android/phone_export_preset.cfg.example`.
+- `tools/save_assembly_glb.gd`: any native assembly (multi-file too, through `native_compose.gd`) to the glb the headset loads, via a backend.
+- Tests (new): `cardboard_spike` (15). Checked here: the spike scene loads real assembly glbs over HTTP and walks its steps headless; the voice spike's script without the add-on; the relay. Not checked: TwoVoip loading at all (running the downloaded library was not allowed here), anything on a device.
+
 ## P0, live sessions scope (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "P0. Scope and three spikes"; **docs only, no code changed, nothing run on a headset or phone**)
 
 - `docs/main-gd-split-audit.md`: `main.gd` (2,865 lines, not the plan's 2,457) by category: viewing 587, Quest input and the XR rig 368, editing tools 326, files / import / storage / servers 1,322, app shell 252. The viewing functions call into the tools (`_show_model` alone touches a dozen), so they cannot be lifted out as they are; the list of what a view-only build must not load, and the split it points to.

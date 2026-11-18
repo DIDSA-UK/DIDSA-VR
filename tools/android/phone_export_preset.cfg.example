@@ -1,0 +1,52 @@
+; The PHONE preset for the P0 Cardboard spike (docs/live-sessions-spikes.md, "Spike C"): the same project as the Quest build, a second
+; Android export with OpenXR off (D8). Append it to your export_presets.cfg (git-ignored; never commit it) after the Quest preset, as
+; preset.1 (renumber if you have more), or make the same choices in Project > Export > Add... > Android. Godot fills in every option
+; not listed here with its default: open the preset in the editor once and check it. Written without a phone or an Android SDK: not yet
+; used to build an APK.
+;
+; The custom feature tag `phone` is what switches OpenXR off: project.godot has `xr/openxr/enabled.phone=false` and turns the Meta
+; passthrough / spatial-entity settings back off with `.phone`. Whether Godot honours a custom-tag override of xr/openxr/enabled
+; (and whether the Android exporter accepts XR Mode Regular while the editor reads OpenXR as on) is the spike's first check, C1.
+
+[preset.1]
+
+name="Phone observer spike (debug APK)"
+platform="Android"
+runnable=false
+dedicated_server=false
+advanced_options=false
+custom_features="phone"
+export_filter="all_resources"
+include_filter="demo/*"
+exclude_filter="demo/tools/*, tests/*"
+export_path="build/didsa-phone-spike-debug.apk"
+patches=PackedStringArray()
+encryption_include_filters=""
+encryption_exclude_filters=""
+seed=0
+encrypt_pck=false
+encrypt_directory=false
+script_export_mode=2
+
+[preset.1.options]
+
+gradle_build/use_gradle_build=true
+gradle_build/export_format=0
+architectures/arm64-v8a=true
+architectures/armeabi-v7a=false
+architectures/x86=false
+architectures/x86_64=false
+; a different package from the Quest app, so both can be installed side by side
+package/unique_name="uk.didsa.phonespike"
+package/name="DIDSA Phone Spike"
+package/signed=true
+version/code=1
+version/name="0.0.1"
+; to download the glbs the owner serves from the PC (plain http on the local Wi-Fi: see docs/android-build.md, "If plain http is blocked")
+permissions/internet=true
+; XR Mode: 0 = Regular (no OpenXR loader in the APK)
+xr_features/xr_mode=0
+; never the Meta plugin on a phone
+xr_features/enable_meta_plugin=false
+; landscape, like a viewer
+screen/orientation=0

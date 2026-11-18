@@ -1,0 +1,24 @@
+; The P0 voice spike (docs/live-sessions-spikes.md, "Spike V"): its OWN small Godot project, so the app's project.godot (audio input,
+; permissions) is untouched. Open spikes/voice/ in Godot 4.7, after tools/install_voip_plugin.sh has put TwoVoip in addons/.
+; The app's project ignores this folder (spikes/.gdignore).
+
+config_version=5
+
+[application]
+
+config/name="DIDSA Voice Spike"
+run/main_scene="res://voice_spike.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+
+[audio]
+
+driver/enable_input=true
+driver/mix_rate=48000
+
+[display]
+
+window/handheld/orientation=0
+
+[rendering]
+
+renderer/rendering_method="mobile"

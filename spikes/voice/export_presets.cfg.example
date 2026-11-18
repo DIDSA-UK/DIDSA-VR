@@ -1,0 +1,44 @@
+; The P0 voice spike's Android preset (docs/live-sessions-spikes.md, "Spike V"). One preset for both devices: the Quest 3 runs it as
+; a flat 2D panel app (no OpenXR), the phone as an ordinary app. Copy this file to spikes/voice/export_presets.cfg (git-ignored; never
+; commit it) or make the same choices in Project > Export. Godot fills in every option not listed here with its default: open the
+; preset in the editor once and check it. Written without a device or an Android SDK: not yet used to build an APK.
+
+[preset.0]
+
+name="Voice spike (debug APK)"
+platform="Android"
+runnable=true
+dedicated_server=false
+advanced_options=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/didsa-voice-spike-debug.apk"
+patches=PackedStringArray()
+encryption_include_filters=""
+encryption_exclude_filters=""
+seed=0
+encrypt_pck=false
+encrypt_directory=false
+script_export_mode=2
+
+[preset.0.options]
+
+gradle_build/use_gradle_build=false
+architectures/arm64-v8a=true
+architectures/armeabi-v7a=false
+architectures/x86=false
+architectures/x86_64=false
+package/unique_name="uk.didsa.voicespike"
+package/name="DIDSA Voice Spike"
+package/signed=true
+version/code=1
+version/name="0.0.1"
+; the relay (plain ws:// on the local Wi-Fi; wss:// through the tunnel)
+permissions/internet=true
+; the microphone: the app asks at run time as well (TwoVoip's helper calls OS.request_permission)
+permissions/record_audio=true
+; XR Mode: 0 = Regular
+xr_features/xr_mode=0
+screen/orientation=1
