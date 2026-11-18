@@ -129,6 +129,18 @@ func _initialize() -> void:
 	hands[1].hide_tool_active = false
 	_check(not bolt.visible and nut.visible and mount.visible, "the Hide tool's trigger hid the bolt the laser touched, for this person")
 	bolt.visible = true
+	# --- the Appearance tool's gun: a click paints the body under the laser, in this person's view only
+	var brush_colour := Color.html(str(main._appearance_tool.brush["colour"]))
+	await _point_hand(hands[1], Vector3(0.0, BENCH + 0.6, 1.0)) # at the nut
+	hands[1].paint_active = true
+	hands[1]._on_button_pressed("trigger_click")
+	hands[1]._on_button_released("trigger_click")
+	await _wait(0.3)
+	hands[1].paint_active = false
+	_check(_colour_of(nut).is_equal_approx(brush_colour) and nut.material_override != null and _colour_of(bolt).is_equal_approx(_colour_of(mount)), "the Appearance gun: a click paints the part the laser touched with the brush, here only (the nut is %s)" % brush_colour.to_html(false))
+	for hand in hands:
+		hand.paint_active = false
+	main._appearance_tool.clear_local(main.session_world_parts())
 	# --- the cursor picks; hide and isolate; the presenter's hide list is applied as changes
 	await _aim_cursor(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
 	_check(cursor.selection().get("node") == bolt, "the cursor has the bolt")
@@ -152,7 +164,7 @@ func _initialize() -> void:
 	var base_nut := _colour_of(nut)
 	await _aim_cursor(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
 	var painted: Dictionary = await own.paint_selection({"colour": "#FF0000"}, cursor.selection())
-	_check(painted.get("ok", false) and _colour_of(bolt).is_equal_approx(Color.html("#FF0000")) and _colour_of(nut).is_equal_approx(base_nut) and nut.material_override == null, "Colour: the bolt is red; the nut keeps the glb's own look, untouched (not even restyled)")
+	_check(painted.get("ok", false) and _colour_of(bolt).is_equal_approx(Color.html("#FF0000")) and _colour_of(nut).is_equal_approx(base_nut) and mount.material_override == null, "Colour: the bolt is red; the nut keeps the glb's own look, and the mount, which nothing was painted on, is not even restyled")
 	var see: Dictionary = await own.paint_selection({"opacity": 0.25}, cursor.selection())
 	var bolt_look := _colour_of(bolt)
 	_check(see.get("ok", false) and is_equal_approx(bolt_look.a, 0.25) and is_equal_approx(bolt_look.r, 1.0) and (bolt.material_override as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED, "See-through: the same bolt is now 25% opaque, and still red")
@@ -232,6 +244,13 @@ func _initialize() -> void:
 	await _point_hand(hands[1], Vector3(0.9, BENCH + 0.05, 0.0))
 	hands[1]._on_button_released("grip_click")
 	_check(own.differs()["moved"] == 1 and own.put_pulled_back() == 1 and _model_mm(bolt).distance_to(Vector3(30, 5, 0)) < 0.01 and own.differs()["moved"] == 0, "Put pulled parts back: just the pulled parts go back to the presenter's poses")
+	# --- a dropped connection that resumes keeps this person's own view
+	bolt.visible = false
+	hub.drop(me)
+	await _wait(2.8)
+	_check(main.session.client.is_live() and not bolt.visible and own.differs()["hidden"] == 1, "the connection drops and resumes: what this person hid is still hidden (the resume's snapshot is applied as changes)")
+	own.reset_my_view()
+	_check(bolt.visible and own.summary() == "Your view is the presenter's.", "...and Reset my view brings it back")
 	# --- none of it reached the hub's presenter-only messages, the presenter, or the backend
 	var kinds: Array = (hub.sent_by[me] as Array).map(func(m: Dictionary) -> String: return str(m["t"]))
 	var odd: Array = kinds.filter(func(k: String) -> bool: return k != "presence")

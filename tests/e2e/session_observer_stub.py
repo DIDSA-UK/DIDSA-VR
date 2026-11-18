@@ -8,6 +8,7 @@ import asyncio
 import json
 import sys
 import time
+from pathlib import Path
 
 import httpx
 from websockets.asyncio.client import connect
@@ -66,12 +67,32 @@ async def main() -> int:
             result["presence_first"] = None
             result["gathers"] = []
             my_head = [100.0, 1500.0, 200.0, 0.0, 0.0, 0.0, 1.0]
+            marks_go, clear_go = Path(args.out + ".marks"), Path(args.out + ".clear")
+            sent_marks = sent_clear = False
+            result["marks_sent"] = []
             await ws.send(json.dumps({"t": "presence", "head": my_head, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
             last_presence = time.time()
             while time.time() < deadline and not ended:
                 if time.time() - last_presence > 0.5:
                     await ws.send(json.dumps({"t": "presence", "head": my_head, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
                     last_presence = time.time()
+                if not sent_marks and marks_go.exists():
+                    # P4: this observer raises a hand, shares a part, pings a point and asks the presenter to look (the test creates <out>.marks)
+                    sent_marks = True
+                    share_path = next((p for p in result["snapshot_pose_paths"] if p), "")
+                    for message in (
+                        {"t": "hand", "up": True},
+                        {"t": "mark", "id": "share", "kind": "share", "target": {"path": share_path}, "colour": "#000000", "ttl_s": 0},
+                        {"t": "mark", "id": "p1", "kind": "ping", "target": {"point": [10.0, 0.0, 5.0]}, "ttl_s": 3},
+                        {"t": "mark", "id": "look", "kind": "look_here", "target": {"path": share_path, "point": [10.0, 0.0, 5.0]}, "ttl_s": 10},
+                    ):
+                        await ws.send(json.dumps(message))
+                        result["marks_sent"].append(message["t"] + ":" + message.get("kind", ""))
+                if sent_marks and not sent_clear and clear_go.exists():
+                    # an observer's own `marks_clear`: the hub must drop it (the presenter alone clears marks)
+                    sent_clear = True
+                    await ws.send(json.dumps({"t": "marks_clear"}))
+                    result["marks_clear_tried"] = True
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
                 except asyncio.TimeoutError:

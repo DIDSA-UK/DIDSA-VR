@@ -46,7 +46,7 @@ func stop() -> void:
 
 func on_parts_moving(parts: Array) -> void:
 	## A grab, a release or a glide: these parts are this person's now (see is_pulled).
-	if not active or not pull_out:
+	if not active:
 		return
 	for part in parts:
 		if is_instance_valid(part):

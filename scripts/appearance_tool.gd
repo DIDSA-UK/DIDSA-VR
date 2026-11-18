@@ -206,8 +206,8 @@ func clear_local(nodes: Array) -> void:
 
 func ensure_loaded(root_part_id: String) -> void:
 	## Reads every Part under `root_part_id` into the model (a coroutine; parts already read are not read again).
-	if api == null or root_part_id == "":
-		return
+	if api == null or root_part_id == "" or local_only:
+		return # (an observer's model is built from the glb, not read from a server)
 	var queue: Array = [root_part_id]
 	var seen := {}
 	while not queue.is_empty():

@@ -48,7 +48,6 @@ var _position := Vector3.ZERO ## the marker, world
 var _direction := Vector3.FORWARD
 var _have_position := false
 var _since_select := 1.0
-var _last_select_position := Vector3.INF
 var _marker: Node3D
 var _tag: Label3D
 var _material: StandardMaterial3D
@@ -139,10 +138,9 @@ func _physics_process(delta: float) -> void:
 	_position = (a["origin"] as Vector3) + _direction * distance
 	_have_position = true
 	_since_select += delta
-	if _since_select >= 1.0 / SELECT_HZ or _position.distance_to(_last_select_position) > 0.003:
-		if _since_select >= 1.0 / SELECT_HZ:
-			_since_select = 0.0
-			refresh()
+	if _since_select >= 1.0 / SELECT_HZ:
+		_since_select = 0.0
+		refresh()
 	_draw()
 
 
@@ -155,7 +153,6 @@ func refresh() -> void:
 	## Works out what the cursor is on now (what the frame does at 15 Hz; a test calls it after placing the cursor).
 	if not enabled or main == null or not _have_position:
 		return
-	_last_select_position = _position
 	var hit := find_hit(_position, _direction)
 	var same: bool = is_instance_valid(_hit.get("part")) and hit.get("part") == _hit.get("part") and int(hit.get("face_index", -1)) == int(_hit.get("face_index", -1))
 	_hit = hit
