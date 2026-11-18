@@ -1,0 +1,56 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/spikes/cardboard_spike.gd" id="1"]
+[ext_resource type="Shader" path="res://shaders/infinite_grid.gdshader" id="2"]
+[ext_resource type="Script" path="res://scripts/environment_manager.gd" id="3"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_grid"]
+shader = ExtResource("2")
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_1"]
+size = Vector2(300, 300)
+material = SubResource("ShaderMaterial_grid")
+
+[node name="CardboardSpike" type="Node3D"]
+script = ExtResource("1")
+
+[node name="AssemblyRoot" type="Node3D" parent="."]
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+
+[node name="Hud" type="Label3D" parent="XROrigin3D/XRCamera3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.35, -1.5)
+pixel_size = 0.0015
+font_size = 28
+outline_size = 6
+visible = false
+text = "DIDSA Cardboard spike"
+
+[node name="WindowCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+current = true
+
+[node name="Ground" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("PlaneMesh_1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.8, -0.4, 0.45, 0, 0.75, 0.66, -0.6, -0.53, 0.6, 0, 3, 0)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+script = ExtResource("3")
+
+[node name="SetupLayer" type="CanvasLayer" parent="."]
+
+[node name="Setup" type="Control" parent="SetupLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2

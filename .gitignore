@@ -35,3 +35,8 @@ models/*
 
 # The OpenXR Vendors plugin (tools/install_vendors_plugin.sh): native libraries and AARs, fetched and checked, not committed
 /addons/godotopenxrvendors/
+
+# TwoVoip (tools/install_voip_plugin.sh): the Opus voice GDExtension for the P0 voice spike, fetched and checked, not committed
+/spikes/voice/addons/
+/spikes/voice/.godot/
+/addons/twovoip/
