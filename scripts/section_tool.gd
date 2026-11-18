@@ -130,6 +130,31 @@ func reset() -> void:
 	_unclipped_override.clear()
 
 
+func world_plane() -> Dictionary:
+	## {on, origin, normal} in world space: the clip as it is now (the live session publishes it; an observer applies it with set_remote_plane).
+	if not active or _gizmo == null:
+		return {"on": false, "origin": Vector3.ZERO, "normal": Vector3.UP}
+	return {"on": true, "origin": _gizmo.global_position, "normal": effective_normal()}
+
+
+func set_remote_plane(on: bool, origin: Vector3, normal: Vector3, camera: Node3D) -> void:
+	## An observer shows the presenter's cut: the same clip, placed from a message. The gizmo is the plane's own handle, so it is put there too (a view-only app cannot grab it).
+	if not on:
+		if active:
+			set_active(false)
+		return
+	if not active:
+		set_active(true, camera)
+	if _gizmo == null:
+		return
+	var n := normal.normalized()
+	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
+	flipped = false
+	_gizmo.global_transform = Transform3D(Basis.looking_at(n, up), origin)
+	_update_global_plane()
+	changed.emit()
+
+
 func gizmo() -> Node3D:
 	return _gizmo
 

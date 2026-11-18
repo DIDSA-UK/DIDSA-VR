@@ -24,6 +24,8 @@ const BackendSession := preload("res://scripts/backend_session.gd") ## the API k
 @export var relay_api_key: String = "" ## Matches the relay's BROWSER_RELAY_API_KEY.
 @export var store_url: String = "" ## The project store (DIDSA-CAD project-store/, S3): its address, from the server entry or secrets.cfg's [project_store] section.
 @export var store_key: String = "" ## ...and its own key (not the backend's).
+@export var hub_url: String = "" ## The session hub (DIDSA-CAD session-hub/, P2): its ws:// or wss:// address, from the server entry or secrets.cfg's [session_hub] section.
+@export var hub_key: String = "" ## ...and its own key (SESSION_HUB_API_KEY, not the backend's): what lets this headset HOST a session. Joining needs neither.
 @export var native_file_path: String = "res://assembly.didsa" ## The exported native file to import before loading (only when the landing is off).
 @export var landing_enabled: bool = OS.get_environment("DIDSA_NO_LANDING") == "" ## false: no landing at start, the old start-up import (the tests set DIDSA_NO_LANDING; see tests/README.md)
 @export var landing_wait_seconds: float = 3.0 ## on a headset: how long to wait for tracking before placing the landing (a flat preview doesn't wait)
@@ -103,6 +105,9 @@ const ServerStore := preload("res://scripts/landing/server_store.gd") ## the ser
 const ServerProbe := preload("res://scripts/landing/server_probe.gd") ## the Servers page's Test button
 const ServerAddress := preload("res://scripts/landing/server_address.gd") ## the Servers page's address rules (a Browser relay's too)
 const GraphicsOverrides := preload("res://scripts/graphics_overrides.gd") ## user://graphics.cfg: switches for finding a headset rendering fault without a rebuild
+const SessionManager := preload("res://scripts/session/session_manager.gd") ## P2: live sessions (host, join, the presenter's publisher, the observer's applier)
+const SessionProtocol := preload("res://scripts/session/session_protocol.gd")
+const DocumentRevision := preload("res://scripts/session/document_revision.gd") ## the backend's X-Document-Revision, noted from the answers this app already gets (a hosting session's doc_changed)
 const NativeCompose := preload("res://scripts/native_compose.gd") ## multi-file assemblies: the files an occurrence references, folded in before import
 const MeshIdentity := preload("res://scripts/mesh_identity.gd") ## occurrence/face identity tagging for mates/measure — see mesh_identity.gd
 
@@ -139,6 +144,10 @@ var server_store := ServerStore.new() ## the servers this headset knows; secrets
 var active_server_id := "" ## "secrets" (res://secrets.cfg), a server_store id, or "" (offline)
 var _secrets_server: Dictionary = {} ## what secrets.cfg gave, kept so it can be switched back to
 var landing: Node ## landing.gd: logo, rocket garden, launcher and tips; enter()ed at start and by go_home()
+var session: Node ## session_manager.gd: live sessions (P2). Role "" / "presenter" / "observer"; made in _ready()
+var shown_demo_path := "" ## the res://demo/ glb on show ("" = none): what Host Session shares by path
+signal session_doc_changed(parts: Array, all: bool) ## the backend document changed under the world (a part's mesh was swapped, the world was refetched, a paint landed): the presenter's publisher tells the observers
+signal session_model_changed(reloading: bool) ## _show_model put a model in (reloading = the same document re-read)
 
 # All endpoints below live under the backend's "/document" router prefix —
 # see backend/app/document/router.py's `router = APIRouter(prefix="/document", ...)`.
@@ -179,6 +188,7 @@ func _ready() -> void:
 	command_stack.changed.connect(mark_dirty) # only entries that change the document (a part's pose) fire it, not hide / navigate
 	_mates_tool.document_changed.connect(mark_dirty)
 	_appearance_tool.document_changed.connect(mark_dirty)
+	_appearance_tool.document_changed.connect(func() -> void: session_doc_changed.emit([], true)) # a real paint is a document change: observers refetch the glb
 	_appearance_tool.configure(design_table.api, _settings) # the design table's own backend client: one request at a time, the app's document session
 	scenes_tool.api = design_table.api
 	$XROrigin3D/LeftController.command_stack = command_stack
@@ -210,6 +220,7 @@ func _ready() -> void:
 	# Never start in Passthrough: if it misbehaves on a headset (Quest 3, 21 Oct: a flicker in both eyes from the first frame) you would start blind,
 	# with no way to see the menu that turns it off. Turn it on again from View > Environment or the landing's Scan / Graphics check pages.
 	_world_environment.apply_saved_scene(startup_scene(_settings.last_scene))
+	_add_session()
 	_add_landing()
 	_apply_graphics_overrides()
 	if landing_enabled and _settings.show_landing:
@@ -644,11 +655,13 @@ func set_show_tips(on: bool) -> void:
 
 
 func has_backend() -> bool:
-	return not backend_url.is_empty() and not api_key.is_empty()
+	return not is_observer() and not backend_url.is_empty() and not api_key.is_empty() ## (an observer has no backend: the view token is all it has)
 
 
 func connection_text() -> String:
 	## The landing's connection pill. A server is "set", not "checked": nothing has called it yet.
+	if is_observer():
+		return session.status_line()
 	if not has_backend():
 		return "Offline: demo models only"
 	return "Server: %s" % _backend_host()
@@ -1260,13 +1273,15 @@ func _load_secrets() -> void:
 	relay_api_key = config.get_value("browser_relay", "api_key", relay_api_key)
 	store_url = str(config.get_value("project_store", "url", store_url))
 	store_key = str(config.get_value("project_store", "api_key", store_key))
+	hub_url = str(config.get_value("session_hub", "url", hub_url))
+	hub_key = str(config.get_value("session_hub", "api_key", hub_key))
 
 
 func _load_servers() -> void:
 	## Which server to start on: res://secrets.cfg when it names one (the developer override), else the one chosen last in servers.cfg, else none.
 	if has_backend():
 		_secrets_server = {"id": "secrets", "name": "From secrets.cfg", "url": backend_url, "api_key": api_key, "document_session": "",
-			"relay_url": relay_url, "relay_api_key": relay_api_key, "store_url": store_url, "store_key": store_key, "readonly": true}
+			"relay_url": relay_url, "relay_api_key": relay_api_key, "store_url": store_url, "store_key": store_key, "hub_url": hub_url, "hub_key": hub_key, "readonly": true}
 		active_server_id = "secrets"
 	server_store.load_from_disk()
 	if active_server_id == "":
@@ -1283,18 +1298,23 @@ func _set_backend_from(entry: Dictionary) -> void:
 	relay_api_key = str(entry.get("relay_api_key", ""))
 	store_url = str(entry.get("store_url", ""))
 	store_key = str(entry.get("store_key", ""))
+	hub_url = str(entry.get("hub_url", ""))
+	hub_key = str(entry.get("hub_key", ""))
 	BackendSession.set_session_id(str(entry.get("document_session", "")))
 
 
 func _apply_backend() -> void:
 	## Tells everything that talks to the backend where it is now. Called at start and again whenever the server changes, so no restart is needed.
-	_mates_tool.configure_backend(backend_url, api_key)
-	_measure_tool.configure_backend(backend_url, api_key)
-	_assembly_tree_window.configure_backend(backend_url, api_key)
-	room_manager.configure_backend(backend_url, api_key)
-	design_table.configure_backend(backend_url, api_key)
-	_browser_window.configure_relay(relay_url, relay_api_key)
-	cloud.configure(store_url, store_key)
+	var watching := is_observer() # an observer has no server at all (the view token is its only way to the model): every tool is configured with none
+	var url := "" if watching else backend_url
+	var key := "" if watching else api_key
+	_mates_tool.configure_backend(url, key)
+	_measure_tool.configure_backend(url, key)
+	_assembly_tree_window.configure_backend(url, key)
+	room_manager.configure_backend(url, key)
+	design_table.configure_backend(url, key)
+	_browser_window.configure_relay("" if watching else relay_url, "" if watching else relay_api_key)
+	cloud.configure("" if watching else store_url, "" if watching else store_key)
 
 
 func server_entries() -> Array[Dictionary]:
@@ -1314,6 +1334,9 @@ func server_entries() -> Array[Dictionary]:
 func switch_server(id: String) -> bool:
 	## Use another server ("" = go offline) without a restart. What is loaded from the old server (a native file, a new assembly) is unloaded first,
 	## since its part ids mean nothing to the new one; unsaved changes ask first, like any replace. True if it switched.
+	if session != null and session.is_active():
+		_set_status("End or leave the session before switching server.")
+		return false
 	var entry: Dictionary = {}
 	if id == "secrets":
 		entry = _secrets_server
@@ -1338,6 +1361,8 @@ func switch_server(id: String) -> bool:
 		relay_api_key = ""
 		store_url = ""
 		store_key = ""
+		hub_url = ""
+		hub_key = ""
 	else:
 		_set_backend_from(entry)
 	active_server_id = id
@@ -1436,6 +1461,26 @@ func set_server_store(id: String, url: String, key: String) -> Dictionary:
 		_set_backend_from(entry)
 		_apply_backend()
 	return {"ok": true, "message": "Project store saved: %s" % clean if clean != "" else "Project store cleared."}
+
+
+func set_server_hub(id: String, url: String, key: String) -> Dictionary:
+	## The Servers page's session hub for a saved server: {ok, message}. The address goes through the same rules as a relay's (ws:// or wss://, plain ws://
+	## only on a local network); "" clears it. Applied at once if that server is in use.
+	var clean := ""
+	if url.strip_edges() != "":
+		var check := ServerAddress.check_relay(url)
+		if check["level"] == ServerAddress.Level.REFUSED:
+			return {"ok": false, "message": str(check["message"])}
+		clean = str(check["url"])
+		if key.strip_edges() == "":
+			return {"ok": false, "message": "The hub needs its key (SESSION_HUB_API_KEY on the hub's machine)."}
+	var entry := server_store.set_hub(id, clean, key if clean != "" else "")
+	if entry.is_empty():
+		return {"ok": false, "message": "That server is not in the list any more."}
+	if active_server_id == id:
+		_set_backend_from(entry)
+		_apply_backend()
+	return {"ok": true, "message": "Session hub saved: %s" % clean if clean != "" else "Session hub cleared."}
 
 
 var test_server_override: Callable = Callable() ## tests only: (url, key) -> {ok, message, code} in place of the real request (a pairing code cannot name localhost, where a stub server would be)
@@ -1554,7 +1599,8 @@ func _begin_import() -> void:
 		_set_status("Import request failed to start (error %d)" % error)
 
 
-func _on_import_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_import_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	DocumentRevision.note(headers)
 	# First completion this session is always the import call; disconnect
 	# and hook up the mesh-fetch handler for the second call so the same
 	# HTTPRequest node can be reused sequentially.
@@ -1584,8 +1630,9 @@ func _fetch_mesh() -> void:
 		_set_status("Mesh request failed to start (error %d)" % error)
 
 
-func _on_mesh_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_mesh_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	_load_busy = false
+	DocumentRevision.note(headers)
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		_set_status("Mesh load failed: %s" % _http_error_text(response_code, result, body))
 		push_error("DIDSA VR: assembly-mesh.glb fetch failed: result=%d code=%d" % [result, response_code])
@@ -1638,6 +1685,8 @@ func list_model_files() -> PackedStringArray:
 
 
 func open_cloud_file(project_name: String, path: String) -> void:
+	if observer_blocked("Server projects"):
+		return
 	## A file of a server project: it and everything it places are brought into the mirror (the part index finds a moved Part), then it opens like any file.
 	_set_status("Opening %s from the server project %s..." % [path.get_file(), project_name])
 	var result: Dictionary = await cloud.open_file(project_name, path)
@@ -1650,6 +1699,8 @@ func open_cloud_file(project_name: String, path: String) -> void:
 
 
 func add_cloud_component(project_name: String, path: String) -> void:
+	if observer_blocked("Server projects"):
+		return
 	var result: Dictionary = await cloud.open_file(project_name, path)
 	if not result["ok"]:
 		_set_status(str(result["error"]))
@@ -1658,6 +1709,8 @@ func add_cloud_component(project_name: String, path: String) -> void:
 
 
 func load_model_file(path: String) -> void:
+	if observer_blocked("Opening a file"):
+		return
 	## Dispatches on extension: a bare .glb/.gltf loads straight from disk;
 	## .didsa/.DIDSAprt is a full-replace open of a different native file at
 	## runtime (open_native_file()); .step/.stp/.stl/.obj need the backend's
@@ -1817,6 +1870,8 @@ func reference_files() -> Array:
 
 
 func open_native_file(path: String) -> void:
+	if observer_blocked("Opening a file"):
+		return
 	if not confirm_discard("Open " + path.get_file(), open_native_file.bind(path)):
 		return
 	if not _claim_load("Open"):
@@ -1899,6 +1954,8 @@ func _remember_thumbnail(path: String) -> void:
 
 
 func add_component_file(path: String) -> void:
+	if observer_blocked("Adding a file"):
+		return
 	var room: Node = room_manager.focus_room()
 	if room != null:
 		await room_manager.add_file_to_room(room, path) # standing in an Assembly Room: the file is added to THAT room's assembly
@@ -1910,6 +1967,8 @@ func add_component_file(path: String) -> void:
 
 
 func add_component_to_world(path: String) -> bool:
+	if observer_blocked("Adding a file"):
+		return false
 	## The design table's "Open part...": Add into the loaded assembly's root, never a room (the table is not a room). True if the file was added.
 	if not _claim_load("Add"):
 		return false
@@ -2011,6 +2070,7 @@ func reload_world_model(dirty: bool = true) -> bool:
 		if shown:
 			assembly_root.transform = pose
 			room_manager.reseed_rooms()
+			session_doc_changed.emit([], true) # the world was refetched: observers refetch too
 	else:
 		_set_status("Couldn't refresh the world after the change: %s" % _http_error_text(int(result[1]), int(result[0]), result[3]))
 	_load_busy = false
@@ -2020,6 +2080,8 @@ func reload_world_model(dirty: bool = true) -> bool:
 
 
 func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bool:
+	if observer_blocked("Opening a file"):
+		return false
 	## Load a bare .glb/.gltf straight from disk — no backend round trip. True if it is now what is shown. `run_after_discard` is what
 	## "Discard and continue" runs if unsaved changes stop it (default: this load again); the landing passes its own demo placing, so the demo
 	## is still placed full size or on the desk after a discard.
@@ -2033,6 +2095,7 @@ func load_glb_file(path: String, run_after_discard: Callable = Callable()) -> bo
 	if not _show_model(bytes, path.get_base_dir(), local_glb_scale, true):
 		return false
 	document_is_demo = path.begins_with("res://demo/")
+	shown_demo_path = path if document_is_demo else ""
 	RecentFile.remember(path)
 	_remember_thumbnail(path)
 	_load_summary = "load: %s, %d KB, %d ms" % [path.get_file(), int(bytes.size() / 1024.0), Time.get_ticks_msec() - started_ms]
@@ -2262,6 +2325,7 @@ func _get_mesh_result(req: HTTPRequest, url: String) -> Array:
 	for attempt in 2:
 		req.request(url, BackendSession.headers(api_key), HTTPClient.METHOD_GET)
 		result = await req.request_completed
+		DocumentRevision.note(result[2])
 		if attempt == 0 and result[0] == HTTPRequest.RESULT_SUCCESS and int(result[1]) >= 500:
 			push_error("DIDSA VR: assembly-mesh.glb fetch got HTTP %d, retrying once: %s" % [result[1], (result[3] as PackedByteArray).get_string_from_utf8().left(300)])
 			await get_tree().create_timer(0.6).timeout
@@ -2291,6 +2355,7 @@ func _parse_import_response(result: Array, step_description: String, req: HTTPRe
 	var result_code: int = result[0]
 	var response_code: int = result[1]
 	var body: PackedByteArray = result[3]
+	DocumentRevision.note(result[2])
 	if result_code != HTTPRequest.RESULT_SUCCESS or (response_code != 200 and response_code != 201):
 		_set_status("Couldn't %s: %s" % [step_description, _http_error_text(response_code, result_code, body)])
 		push_error("DIDSA VR: %s failed: result=%d code=%d body=%s" % [step_description, result_code, response_code, body.get_string_from_utf8()])
@@ -2320,6 +2385,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 		_set_status("glTF parsed but produced no scene.")
 		return false
 	document_is_demo = false # the old model is going; load_glb_file() sets this again for a demo
+	shown_demo_path = ""
 	MeshIdentity.tag_scene(gltf_state, scene) # occurrence/face identity for the mates/measure tools - see mesh_identity.gd
 	_appearance_tool.forget() # the glb's materials are the looks now; the tool reads the lists again when it is next used
 	scenes_tool.forget() # a shown scene's nodes are about to go
@@ -2369,6 +2435,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	view_modes.apply_all() # the saved view mode (edges / wireframe) for the parts that were just loaded
 	mark_clean() # what is loaded is the baseline: nothing to lose yet
 	restore_stale_mates()
+	session_model_changed.emit(_reloading_world) # P2: a hosting presenter tells its observers (after the caller has set what it knows about the model)
 	return true
 
 
@@ -2461,6 +2528,8 @@ func _clear_pending_discard() -> void:
 # --- New assembly / new part -----------------------------------------------------------
 
 func new_assembly(confirmed: bool = false) -> bool:
+	if observer_blocked("A new assembly"):
+		return false
 	## Files tab "New assembly": throws away what is loaded and starts an empty assembly (a fresh backend document with one empty
 	## root part, so the design table's New part has somewhere to put parts). Needs the backend: a bare local file has no document
 	## to start. True if it worked.
@@ -2613,6 +2682,8 @@ static func append_to_json_object(text: String, extras: Dictionary) -> String:
 
 
 func save_native_snapshot(path: String = "") -> String:
+	if observer_blocked("Saving"):
+		return ""
 	## Writes the whole session (GET /document/export/native, no part_id) to a .didsa file. Returns the path written, or "" with
 	## the reason in the status line. Coroutine.
 	if backend_url.is_empty() or api_key.is_empty():
@@ -2663,6 +2734,8 @@ func _fetch_text(path: String) -> String:
 
 
 func save_project(policy: String = "ask") -> Dictionary:
+	if observer_blocked("Saving"):
+		return {"ok": false, "result": {}}
 	## V-9: Save like the flat app: ONE FILE PER PART, in place (project_save.gd). Each Part's own native text is written to the file it came from (a new Part gets
 	## `<name>.didsa` beside the root file, the demos and a session with no file save to the project folder), unchanged Parts are skipped, a file changed on disk
 	## meanwhile is not overwritten unless `policy` says "overwrite" or "copy". Returns {ok, result}; `saved` is emitted. A coroutine.
@@ -2753,7 +2826,10 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 	if not parsed["ok"]:
 		return 0
 	if parsed["mesh"] == null:
-		return _blank_out(nodes) # no geometry: a new part with nothing drawn yet, or any part whose last feature was deleted
+		var blanked := _blank_out(nodes) # no geometry: a new part with nothing drawn yet, or any part whose last feature was deleted
+		if blanked > 0:
+			_emit_parts_changed(nodes)
+		return blanked
 	var updated := 0
 	for node in nodes:
 		if not is_instance_valid(node) or not (node is MeshInstance3D):
@@ -2780,6 +2856,7 @@ func swap_part_mesh(nodes: Array, glb_bytes: PackedByteArray) -> int:
 		_appearance_tool.forget() # a painted face may have moved: its current index is read again
 		_mates_tool.clear_picks() # face identities changed: a picked face may not exist any more
 		_measure_tool.clear_picks()
+		_emit_parts_changed(nodes)
 	return updated
 
 
@@ -2857,6 +2934,161 @@ func _all_descendants(root: Node) -> Array[Node]:
 		found.append(child)
 		found.append_array(_all_descendants(child))
 	return found
+
+
+
+# --- Live sessions (P2; DIDSA-CAD docs/live-sessions-scope.md; scripts/session/) ----------------------------------------------------
+# The hooks the session scripts use. They read the world; the only thing that changes it is the observer's applier, through session_show_* and session_apply_*.
+
+func _add_session() -> void:
+	session = SessionManager.new()
+	session.name = "Session"
+	add_child(session)
+	session.setup(self)
+
+
+func _emit_parts_changed(nodes: Array) -> void:
+	var owners := {}
+	for node in nodes:
+		if is_instance_valid(node) and (node as Node).has_meta("owner_part_id"):
+			owners[str((node as Node).get_meta("owner_part_id"))] = true
+	session_doc_changed.emit(owners.keys(), false) # observers refetch just these parts' meshes
+
+
+func is_observer() -> bool:
+	return session != null and session.is_observer()
+
+
+func observer_blocked(what: String) -> bool:
+	## True (and says so) while this app is watching someone else's session: an observer has no mates, design table, save, files, rooms or servers (scope section 3).
+	if not is_observer():
+		return false
+	_set_status("%s is not available while you are watching a session. Leave the session first." % what)
+	return true
+
+
+func apply_session_role(role: String) -> void:
+	## The role decides which tools exist. An observer: no grabbing or tool use with the hands, no whole-model moving (the presenter's place is the shared place), no tool wheel,
+	## no design table, and the tablet shows only Settings, Home and the plain windows. Back to "" or a presenter: everything as it was.
+	var watching := role == "observer"
+	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
+		hand.reset_interaction()
+		hand.view_only = watching
+	_two_hand.enabled = not watching
+	_tool_wheel.set_enabled(_settings.wheel_enabled and not watching)
+	if watching and design_table.is_open():
+		design_table.close()
+	_tablet.registry.set_allowed(OBSERVER_CATEGORIES if watching else [])
+	_apply_backend()
+	if landing != null:
+		landing.on_session_changed()
+
+
+const OBSERVER_CATEGORIES := ["settings", "home", "calculator", "images"] ## what the wrist tablet offers an observer (view tools and own-view tools come in P4)
+
+
+func session_current_source() -> Dictionary:
+	## What Host Session would share of the model on show: {kind: backend, root_part_id, rev, quality, tier} or {kind: demo, path}; {} when it cannot be shared (a bare file).
+	if document_is_demo and shown_demo_path != "":
+		return {"kind": "demo", "path": shown_demo_path}
+	if not is_observer() and has_backend() and _resolved_part_id != "":
+		return {"kind": "backend", "root_part_id": _resolved_part_id, "rev": SessionManager.DocumentRevision.latest, "quality": quality, "tier": "full" if tier == "" else tier}
+	return {}
+
+
+func session_unit_mm() -> float:
+	## Model-space millimetres per unit of the glb: 1 for a backend model (its own units are mm), 1000 for a demo (a glb in metres).
+	return 1000.0 if shown_demo_path != "" else 1.0
+
+
+func session_rig() -> XROrigin3D:
+	return $XROrigin3D
+
+
+func session_camera() -> XRCamera3D:
+	return $XROrigin3D/XRCamera3D
+
+
+func session_scene_root() -> Node3D:
+	## The glb's root under AssemblyRoot (every part's pose is relative to it).
+	return assembly_root.get_child(0) as Node3D if assembly_root.get_child_count() > 0 else null
+
+
+func session_world_parts() -> Array:
+	return RoomRegistry.world_parts(get_tree()).filter(func(p: Node) -> bool: return p is MeshInstance3D)
+
+
+func session_hands() -> Array:
+	return [$XROrigin3D/LeftController, $XROrigin3D/RightController]
+
+
+func session_hidden_exclusions() -> Array:
+	## Parts hidden for a reason of the presenter's own that observers should not copy: seated on the design table, or a room's seed.
+	var out: Array = []
+	if design_table.seated != null:
+		out.append(design_table.seated)
+	out.append_array(room_manager.seed_hidden_parts())
+	return out
+
+
+func session_section_plane() -> Dictionary:
+	return _section_tool.world_plane()
+
+
+func session_activity() -> Dictionary:
+	## What the presenter is doing, for the observers' status line.
+	if design_table.is_open():
+		var name := ""
+		if design_table.seated != null:
+			name = str(design_table.seated.get_meta("display_name", ""))
+		return {"activity": "design_table", "detail": name}
+	if not room_manager.rooms.is_empty():
+		return {"activity": "room", "detail": ""}
+	return {"activity": "model", "detail": ""}
+
+
+func session_show_model(glb_bytes: PackedByteArray) -> bool:
+	## An observer shows the presenter's model (a glb fetched with the view token).
+	var shown := _show_model(glb_bytes, "", spawn_scale)
+	if shown:
+		document_is_demo = true # not this person's document: replacing it never asks about unsaved changes
+	return shown
+
+
+func session_show_demo(path: String) -> bool:
+	## An observer shows a demo model by the same path the presenter used (the file is in every build).
+	var shown := _show_model(FileAccess.get_file_as_bytes(path), path.get_base_dir(), local_glb_scale, true)
+	if shown:
+		document_is_demo = true
+		shown_demo_path = path
+	return shown
+
+
+func session_apply_place(xf: Transform3D) -> void:
+	## The presenter's model place and scale (metres, scale in the basis): the shared place (LS-6).
+	assembly_root.transform = xf
+	_two_hand.set_real_life_scale(xf.basis.get_scale().x)
+
+
+func session_apply_section(on: bool, origin: Vector3, normal: Vector3) -> void:
+	_section_tool.set_remote_plane(on, origin, normal, $XROrigin3D/XRCamera3D)
+
+
+func session_unload_shared_model() -> void:
+	## An observer's model is not theirs to keep: it goes when the session does.
+	if not _load_busy:
+		unload_model()
+	document_is_demo = false
+	shown_demo_path = ""
+	_section_tool.set_remote_plane(false, Vector3.ZERO, Vector3.UP, null)
+
+
+func remember_session_hub(url: String) -> void:
+	_settings.set_last_session_hub(url)
+
+
+func last_session_hub() -> String:
+	return _settings.last_session_hub
 
 
 func _set_status(text: String) -> void:

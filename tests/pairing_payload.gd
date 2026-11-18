@@ -37,6 +37,18 @@ func _initialize() -> void:
 	check("a ws:// relay on your own network is accepted (it was refused as 'not http(s)' before 10 Nov 2026)", ws_relay["ok"] and ws_relay["relay_url"] == "ws://192.168.1.9:8100")
 	var wss_relay := Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&r=wss%3A%2F%2Frelay.example.net%2Fws&rk=rk")
 	check("a wss:// relay is accepted, its /ws dropped (the Browser adds it)", wss_relay["ok"] and wss_relay["relay_url"] == "wss://relay.example.net")
+	# --- the session hub (P2, LS-11): h / hk ---------------------------------------------------------------------------------
+	var with_hub := Payload.parse("didsa-vr:1?n=Pi&u=https%3A%2F%2Fa.example.net&k=k&h=wss%3A%2F%2Fsessions.example.net%3A8300&hk=hub+key%26")
+	check("the session hub and its key are read (h / hk): wss address kept as written, the key decoded", with_hub["ok"] and with_hub["hub_url"] == "wss://sessions.example.net:8300" and with_hub["hub_api_key"] == "hub key&")
+	check("a hub address with /ws has it dropped (the client adds it); an https one is taken as wss", Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&h=wss%3A%2F%2Fs.example.net%2Fws&hk=x")["hub_url"] == "wss://s.example.net" and Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&h=https%3A%2F%2Fs.example.net&hk=x")["hub_url"] == "wss://s.example.net")
+	check("a ws:// hub on your own network is accepted", Payload.parse("didsa-vr:1?u=http%3A%2F%2F192.168.1.9%3A8000&k=k&h=ws%3A%2F%2F192.168.1.9%3A8300&hk=x")["hub_url"] == "ws://192.168.1.9:8300")
+	check("a code with no hub has none, and a key with no address is dropped", Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k")["hub_url"] == "" and Payload.parse("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&hk=orphan")["hub_api_key"] == "")
+	check("a hub the headset would refuse (plain ws:// to the internet, localhost) refuses the whole code, like a relay", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&h=ws%3A%2F%2Fs.example.net&hk=x", "session hub") and refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&h=wss%3A%2F%2Flocalhost&hk=x", "session hub"))
+	check("h named twice is ambiguous and refused", refused("didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k&h=wss%3A%2F%2Fa.example.net&h=wss%3A%2F%2Fb.example.net&hk=x", "twice"))
+	check("a code from before the hub (an older DIDSA-CAD) parses as it did, with the hub fields empty", Payload.parse("didsa-vr:1?n=Pi&u=https%3A%2F%2Fa.example.net&k=k&p=https%3A%2F%2Fstore.example.net&pk=sk")["ok"] and Payload.parse("didsa-vr:1?n=Pi&u=https%3A%2F%2Fa.example.net&k=k&p=https%3A%2F%2Fstore.example.net&pk=sk")["hub_url"] == "")
+	var built := Payload.build("Pi", "https://a.example.net", "k", "https://store.example.net", "sk", "wss://sessions.example.net", "hk 1")
+	var round := Payload.parse(built)
+	check("build() round-trips the hub with the store and relay-free keys (what DIDSA-CAD's Dart test pins from its side)", round["ok"] and round["hub_url"] == "wss://sessions.example.net" and round["hub_api_key"] == "hk 1" and round["store_url"] == "https://store.example.net" and round["store_api_key"] == "sk")
 	check("surrounding spaces and a newline from a scanner are tolerated", Payload.parse("  didsa-vr:1?u=https%3A%2F%2Fa.example.net&k=k\n")["ok"])
 
 	# --- the round trip ------------------------------------------------------------------------------------------------------

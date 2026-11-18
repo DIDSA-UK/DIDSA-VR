@@ -253,6 +253,15 @@ func _initialize() -> void:
 			forget = child
 	forget.pressed.emit()
 	await frames(3)
+	var hub_store := ServerStore.new()
+	var hub_entry := hub_store.add({"name": "Hubbed", "url": "https://hub-test.example.net", "api_key": "k", "hub_url": "wss://sessions.example.net", "hub_key": "hk"}, false)
+	check("a server is saved with its session hub address and key (P2)", hub_entry["hub_url"] == "wss://sessions.example.net" and hub_entry["hub_key"] == "hk")
+	var hub_reload := ServerStore.new()
+	hub_reload.load_from_disk()
+	check("...and they come back after a restart", hub_reload.find(str(hub_entry["id"]))["hub_url"] == "wss://sessions.example.net" and hub_reload.find(str(hub_entry["id"]))["hub_key"] == "hk")
+	check("set_hub changes and clears them; an unknown server gives {}", hub_store.set_hub(str(hub_entry["id"]), "wss://other.example.net/", " k2 ")["hub_url"] == "wss://other.example.net" and hub_store.find(str(hub_entry["id"]))["hub_key"] == "k2" and hub_store.set_hub(str(hub_entry["id"]), "", "")["hub_url"] == "" and hub_store.set_hub("nope", "wss://x.example.net", "k").is_empty())
+	check("a server file written before the hub existed loads with the hub empty", ServerStore.new().find("zzz").is_empty())
+	hub_store.remove(str(hub_entry["id"]))
 	check("Forget removes it from the list and the file", main.server_entries().is_empty() and ServerStore.new().servers.is_empty())
 
 	await close_main()

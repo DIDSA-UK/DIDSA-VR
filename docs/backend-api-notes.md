@@ -713,6 +713,23 @@ PATCH /document/parts/{id}/features/{feature_id}/sketch-origin    {"origin": <re
 - 422 `{"detail": {"type": "origin_reference_not_upstream"}}`: a Sketch Point of the Sketch itself or of a later Sketch. 422 `not_a_circular_edge`, `missing_reference`: a reference that does not resolve now.
 - **This client:** `SketchSession.open_sketch` on a **face** sends `"origin": "auto"` (there is no orientation step here, so it is worked out once, at creation) and starts `plane["origin"]` at the response's `resolved_origin`; on a reference or made plane it sends nothing. `table_editor.gd`'s `reopen_sketch` and `_plane_for_row` (the plane a Loft / Sweep / Pattern curve pick places a finished sketch on) apply the row's `resolved_origin`. Picking an origin by hand in VR is not built (see `status.md`). The `.didsa` file: a sketch feature's `origin` is written only when set, and `scripts/native_compose.gd` carries it through untouched (the refs are Part-local, so nothing is renamed).
 
+## View tokens and the document revision (DIDSA-CAD `docs/live-sessions-scope.md` section 5; backend P1; this client: P2)
+
+For live sessions the backend mints a **read-only view token** that lets an observer fetch the presenter's glb without the CAD key. Built in DIDSA-CAD `backend/app/view_tokens.py`, `document/view_routes.py`, `auth.verify_access`, `session_hooks.py`.
+
+| Call | Who | Does |
+|---|---|---|
+| `POST /document/view-tokens` `{root_part_id, ttl_s?}` | the presenter (CAD key + `X-Document-Session`) | `201 {token, root_part_id, expires_at (epoch s), rev}`; bound to the caller's document session; at most 4 live per session (the oldest is revoked); 12 h at most. `session_manager.gd` `_mint_token` |
+| `DELETE /document/view-tokens/{token}` | the presenter | `204`, or `404` for one it does not know. End and a failed start revoke every token this app minted |
+| `GET /document/view-state` | a token (no key) | `200 {rev, root_part_id, expires_at}`, or `401 {"detail": "view_token_invalid"}`. With the key and no token: `404`, but the answer still carries `X-Document-Revision` (the presenter uses that as a cheap revision probe, `session_publisher.gd` `current_revision`) |
+| `GET /document/parts/{id}/assembly-mesh.glb` | the key OR a token | the observer's model. With a token: `ETag: "<rev>-<hash of the query>"`, and `If-None-Match` with it gives `304`. Every other route, and any non-GET, with a token and no key is `401` |
+
+**An observer sends `X-View-Token` only**: never `X-API-Key`, and no `X-Document-Session` (the token is bound to the presenter's session; a request carrying both a key and a token is treated as the key's). The observer's query is the presenter's: `quality` and `include_hidden=false` (and `tier` when not `full`), the same as VR's own fetch. VR's arena ignores the design table's hide list, so `doc_changed` sends none.
+
+**`X-Document-Revision`** is on every `/document` and `/sketch` response (404s included): an integer per document session, bumped by every non-GET that answers 2xx (preview, measure, import probe, validate, cancel and view-token routes excepted). VR keeps the highest it has seen (`scripts/session/document_revision.gd`), read off the responses it already gets (`cad_api.gd` `_send`, `mates_tool.gd` `_api_request`, `main.gd`'s mesh and import fetches), so a hosting presenter's `doc_changed.rev` needs no extra call; when a change was announced that no response carried, one probe is made. Not noted yet: the room editor's, the assembly tree's, the measure tool's and the scenes tool's own requests (the probe covers them).
+
+**Display names**: each glb node's `extras.name` (the occurrence's display name) is stored as the part's `display_name` meta (`mesh_identity.gd`) and used for the status line ("Alex is at the design table: Shaft").
+
 ## Files worth reading directly, if extending any of this
 
 - `backend/app/document/router.py` — every endpoint above, with docstrings.

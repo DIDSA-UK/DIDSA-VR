@@ -23,7 +23,7 @@ const THICKNESS := 0.14
 const REACH := 5.0 ## metres: how far a laser can press the menu from (a step or two back still works)
 const LOGO_STANDOFF := 0.0 ## metres the logo floats in front of the slab's plane (it is above the slab, so it can sway freely)
 const ROW_IDS: Array[String] = ["continue", "open", "new", "assemblies", "servers"]
-const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "assemblies": "tree", "servers": "browser"}
+const ROW_ICONS := {"continue": "history", "open": "files", "new": "assembly", "assemblies": "tree", "servers": "browser", "host": "windows", "join": "view", "session": "navigate"}
 
 var _home_root: Control
 var _page_view: Control
@@ -273,7 +273,7 @@ func _build_home() -> void:
 	rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	rows.size_flags_stretch_ratio = 3.0
 	column.add_child(rows)
-	for id in ROW_IDS:
+	for id in _row_ids():
 		var tile: Dictionary = tile_by_id[id]
 		var row := DeckButton.new()
 		row.name = "Tile_" + id
@@ -322,6 +322,16 @@ func _build_home() -> void:
 	_shown_tip = -1
 	_refresh_ticker()
 	_refresh_pill()
+
+
+func _row_ids() -> Array[String]:
+	## The menu lines: the files and servers, then Host Session and Join Session, or, while a session runs, the one Session line that opens it.
+	var ids: Array[String] = ROW_IDS.duplicate()
+	if main.session.is_active():
+		ids.append("session")
+	else:
+		ids.append_array(["host", "join"])
+	return ids
 
 
 func open_server_projects_page() -> void:

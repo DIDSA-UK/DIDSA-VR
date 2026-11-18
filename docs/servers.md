@@ -83,6 +83,14 @@ and its own key (`PROJECT_STORE_API_KEY`), not the CAD key. Give the headset bot
 The Servers page also shows where server projects are copied (`Documents/DIDSA-Cloud`, or the app's own storage without All files access) and what **this device is
 called** to the store (a name you can change; default from the platform, e.g. the Quest's model): other devices see it as "changed by ...", and it is trusted for nothing else.
 
+## The session hub (live sessions)
+
+Only **hosting** a live session needs it (`docs/live-sessions.md`); joining needs nothing, the join code carries the hub. **Hub** on a saved server's row opens a form: the hub's address
+(`wss://` anywhere, plain `ws://` only to a local-network address; `/ws` is added for you and a trailing one dropped) and its own key (`SESSION_HUB_API_KEY`, not the CAD key); **Save hub** (the
+row then reads **Hub on**; **Remove hub** clears it). It is kept with the server in `servers.cfg` (`hub_url`, `hub_key`). The same two values come from a pairing code (`h`, `hk`, written by
+DIDSA-CAD's Connect a VR headset when the flat app has the hub set) and from `secrets.cfg`'s `[session_hub]` (`url`, `api_key`). If none is saved the backend's `/health` may advertise an address
+(`session_hub`); the key still has to be set. `DIDSA_SESSION_ALLOW_LOOPBACK=1` lets a desktop preview use a hub on the same PC.
+
 ## Setting up the Browser (the browser relay)
 
 The Browser window (wrist tablet > Windows > Browser) does not talk to the CAD backend. It shows a real Chromium tab running in a second service,

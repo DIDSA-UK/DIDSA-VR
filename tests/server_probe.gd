@@ -56,6 +56,8 @@ func _initialize() -> void:
 	check("on Android a connect or resolve failure names the Internet permission (Godot's export leaves it off)", "Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_CONNECT, 0, true)["message"] and "Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_RESOLVE, 0, true)["message"])
 	check("...not on a PC, and not for a timeout", not ("Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_CANT_CONNECT, 0, false)["message"]) and not ("Internet permission" in ServerProbe.describe(HTTPRequest.RESULT_TIMEOUT, 0, true)["message"]))
 	check("a name that does not resolve says so", "did not resolve" in ServerProbe.describe(HTTPRequest.RESULT_CANT_RESOLVE, 0, false)["message"])
+	check("/health's session_hub is read (P2): the address, trimmed", ServerProbe.hub_in_health('{"status":"ok","session_hub":" wss://s.example.net "}'.to_utf8_buffer()) == "wss://s.example.net")
+	check("...none from an older backend, a non-string, junk or an empty body", ServerProbe.hub_in_health('{"status":"ok"}'.to_utf8_buffer()) == "" and ServerProbe.hub_in_health('{"session_hub":5}'.to_utf8_buffer()) == "" and ServerProbe.hub_in_health("not json".to_utf8_buffer()) == "" and ServerProbe.hub_in_health(PackedByteArray()) == "")
 	check("any 2xx is fine", ServerProbe.describe(HTTPRequest.RESULT_SUCCESS, 204)["ok"])
 	_finish()
 

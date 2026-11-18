@@ -13,7 +13,8 @@ extends Node
 ## request() returns {ok, code, json, error}; fetch_bytes() returns {ok, code, bytes, error}. Both are
 ## coroutines. Tests give the sketch logic a fake Callable with the same shape instead of this node.
 
-const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
+const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session
+const DocumentRevision := preload("res://scripts/session/document_revision.gd") ## P2: the backend's X-Document-Revision on every answer, kept for a hosting session's doc_changed on every call
 signal _turn
 
 var backend_url := ""
@@ -100,6 +101,7 @@ func _send(method: int, path: String, body_dict, want_bytes: bool = false) -> Di
 	var result_code: int = result[0]
 	var response_code: int = result[1]
 	var raw: PackedByteArray = result[3]
+	DocumentRevision.note(result[2])
 	if result_code != HTTPRequest.RESULT_SUCCESS:
 		return {"ok": false, "code": response_code, "json": null, "bytes": PackedByteArray(), "error": "network error (result %d)" % result_code}
 	var ok: bool = response_code >= 200 and response_code < 300

@@ -71,7 +71,7 @@ func _initialize() -> void:
 	var ids: Array = []
 	for t in landing.launcher.tiles():
 		ids.append(t["id"])
-	check("the tiles are Continue, Open, New, Demo models, Demo assemblies, Servers, Settings, About", ids == ["continue", "open", "new", "models", "assemblies", "servers", "settings", "about"])
+	check("the tiles are Continue, Open, New, Demo models, Demo assemblies, Servers, Host Session, Join Session, Session, Settings, About (P2 added the three session ones)", ids == ["continue", "open", "new", "models", "assemblies", "servers", "host", "join", "session", "settings", "about"])
 	check("offline: New assembly and Demo assemblies are greyed and say why", tile("new").disabled and tile("assemblies").disabled and "Needs a server" in tile("new").note and "Needs a server" in tile("assemblies").note)
 	check("offline: Continue is greyed with nothing opened yet", tile("continue").disabled and "Nothing yet" in tile("continue").note)
 	check("Open, Demo models, Servers, Settings and About work offline", not tile("open").disabled and not tile("models").disabled and not tile("servers").disabled and not tile("settings").disabled and not tile("about").disabled)

@@ -5,6 +5,8 @@ extends RefCounted
 ##     optional: s=<document session>  r=<browser relay, ws:// or wss://>  rk=<relay key>
 ##               p=<project store address>  pk=<project store key>     (S3, DIDSA-CAD docs/shared-storage-scope.md section 7: NOT s / sk, `s` is the document session above;
 ##                an older headset ignores both keys, an older DIDSA-CAD never writes them)
+##               h=<session hub, ws:// or wss://>  hk=<hub key>        (P2, DIDSA-CAD docs/live-sessions-scope.md LS-11: lets this headset HOST a live session; an observer needs neither,
+##                the join code carries the hub)
 ##
 ## The headset refuses anything that does not start `didsa-vr:1?`, a version it does not know, a code with no address or key, an address
 ## server_address.gd refuses (so plain http:// only to a local network), and anything carrying control characters or an absurd length. Unknown extra
@@ -18,7 +20,7 @@ const MAX_LENGTH := 2048
 const MAX_VALUE := 512
 const MAX_NAME := 64
 static var _CONTROL_ESCAPE := RegEx.create_from_string("%(0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF])") ## a percent-escaped control character
-const KEYS: Array[String] = ["n", "u", "k", "s", "r", "rk", "p", "pk"]
+const KEYS: Array[String] = ["n", "u", "k", "s", "r", "rk", "p", "pk", "h", "hk"]
 
 
 static func looks_like_pairing(text: String) -> bool:
@@ -27,7 +29,7 @@ static func looks_like_pairing(text: String) -> bool:
 
 
 static func parse(raw: String) -> Dictionary:
-	## {ok: bool, error: String, name, url, api_key, document_session, relay_url, relay_api_key, store_url, store_api_key, warning: String}
+	## {ok: bool, error: String, name, url, api_key, document_session, relay_url, relay_api_key, store_url, store_api_key, hub_url, hub_api_key, warning: String}
 	var text := raw.strip_edges()
 	if text.length() > MAX_LENGTH:
 		return _fail("That code is too long to be a DIDSA pairing code.")
@@ -82,6 +84,12 @@ static func parse(raw: String) -> Dictionary:
 		if store["level"] == ServerAddress.Level.REFUSED:
 			return _fail("The project store address in that code is not allowed: %s" % store["message"])
 		store_url = str(store["url"])
+	var hub_url := ServerAddress.normalise(str(values.get("h", "")))
+	if hub_url != "":
+		var hub := ServerAddress.check_relay(hub_url) # a hub is a WebSocket address like the relay's: ws:// only on a local network
+		if hub["level"] == ServerAddress.Level.REFUSED:
+			return _fail("The session hub address in that code is not allowed: %s" % hub["message"])
+		hub_url = str(hub["url"])
 	var name := str(values.get("n", "")).strip_edges().substr(0, MAX_NAME)
 	if name == "":
 		name = ServerAddress.default_name(url)
@@ -89,15 +97,18 @@ static func parse(raw: String) -> Dictionary:
 		"ok": true, "error": "", "name": name, "url": address["url"], "api_key": key_text,
 		"document_session": str(values.get("s", "")).strip_edges(), "relay_url": relay_url, "relay_api_key": str(values.get("rk", "")).strip_edges(),
 		"store_url": store_url, "store_api_key": str(values.get("pk", "")).strip_edges() if store_url != "" else "",
+		"hub_url": hub_url, "hub_api_key": str(values.get("hk", "")).strip_edges() if hub_url != "" else "",
 		"warning": str(address["message"]) if address["level"] == ServerAddress.Level.WARN else "",
 	}
 
 
-static func build(name: String, url: String, api_key: String, store_url: String = "", store_key: String = "") -> String:
-	## A code the way DIDSA-CAD writes it (tests use this to round-trip; the headset itself never makes one). With a store: `&p=<address>&pk=<key>`.
+static func build(name: String, url: String, api_key: String, store_url: String = "", store_key: String = "", hub_url: String = "", hub_key: String = "") -> String:
+	## A code the way DIDSA-CAD writes it (tests use this to round-trip; the headset itself never makes one). With a store: `&p=<address>&pk=<key>`; with a hub: `&h=<address>&hk=<key>`.
 	var code := "%s:%d?n=%s&u=%s&k=%s" % [SCHEME, VERSION, _encode(name), _encode(ServerAddress.normalise(url)), _encode(api_key.strip_edges())]
 	if store_url.strip_edges() != "":
 		code += "&p=%s&pk=%s" % [_encode(ServerAddress.normalise(store_url)), _encode(store_key.strip_edges())]
+	if hub_url.strip_edges() != "":
+		code += "&h=%s&hk=%s" % [_encode(ServerAddress.normalise(hub_url)), _encode(hub_key.strip_edges())]
 	return code
 
 
@@ -118,4 +129,4 @@ static func _has_control(value: String) -> bool:
 
 
 static func _fail(message: String) -> Dictionary:
-	return {"ok": false, "error": message, "name": "", "url": "", "api_key": "", "document_session": "", "relay_url": "", "relay_api_key": "", "store_url": "", "store_api_key": "", "warning": ""}
+	return {"ok": false, "error": message, "name": "", "url": "", "api_key": "", "document_session": "", "relay_url": "", "relay_api_key": "", "store_url": "", "store_api_key": "", "hub_url": "", "hub_api_key": "", "warning": ""}

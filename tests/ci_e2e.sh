@@ -42,6 +42,34 @@ if [ -z "${DIDSA_STORE_URL:-}" ]; then
     export DIDSA_STORE_URL="http://127.0.0.1:$STORE_PORT" DIDSA_STORE_KEY="$STORE_KEY_VALUE"
   fi
 fi
+# The session hub (DIDSA-CAD session-hub/, P2: live sessions) is a third service. tests/e2e_session_*.gd need DIDSA_HUB_URL and DIDSA_HUB_KEY; when they are not set, a throwaway hub
+# is started from DIDSA-CAD's checkout (HUB_PYTHON, default STORE_PYTHON, then python3, must have session-hub/requirements.txt installed), on its own port with a throwaway key and ONE
+# worker (rooms live in its memory), and stopped at the end. The tests also run small Python stand-ins for the other end of a session (tests/e2e/session_*_stub.py, which need
+# httpx and websockets: DIDSA_SESSION_PYTHON, default the same python) and, since the hub is on localhost, DIDSA_SESSION_ALLOW_LOOPBACK is set for the app. With no checkout the tests print
+# SMOKE SKIPPED, which fails this script like a missing backend does.
+HUB_PID=""
+cleanup_hub() {
+  [ -n "$HUB_PID" ] && kill "$HUB_PID" 2>/dev/null
+}
+trap 'cleanup_store; cleanup_hub' EXIT
+if [ -z "${DIDSA_HUB_URL:-}" ]; then
+  CAD_DIR="${CAD_DIR:-$(cd .. && pwd)/DIDSA-CAD}"
+  if [ -d "$CAD_DIR/session-hub/app" ]; then
+    HUB_PORT="${HUB_PORT:-8300}"
+    HUB_KEY_VALUE="ci-hub-throwaway-key"
+    (cd "$CAD_DIR/session-hub" && exec env SESSION_HUB_API_KEY="$HUB_KEY_VALUE" \
+      "${HUB_PYTHON:-${STORE_PYTHON:-python3}}" -m uvicorn app.main:app --host 127.0.0.1 --port "$HUB_PORT" --workers 1) > logs/session-hub.log 2>&1 &
+    HUB_PID=$!
+    for i in $(seq 1 30); do
+      if curl -sf -o /dev/null -H "X-API-Key: $HUB_KEY_VALUE" "http://127.0.0.1:$HUB_PORT/health"; then echo "session hub up after ${i}s" | tee -a "$LOG"; break; fi
+      sleep 1
+      [ "$i" = 30 ] && echo "session hub did not come up (logs/session-hub.log); e2e_session_* will be skipped" | tee -a "$LOG"
+    done
+    export DIDSA_HUB_URL="ws://127.0.0.1:$HUB_PORT" DIDSA_HUB_KEY="$HUB_KEY_VALUE"
+  fi
+fi
+export DIDSA_SESSION_PYTHON="${DIDSA_SESSION_PYTHON:-${HUB_PYTHON:-${STORE_PYTHON:-python3}}}"
+export DIDSA_SESSION_ALLOW_LOOPBACK=1
 # tests/e2e_cloud_outage.gd starts (and kills, and restarts) a store of its own from this checkout; without one it prints SMOKE SKIPPED, which fails this script.
 CAD_DIR="${CAD_DIR:-$(cd .. && pwd)/DIDSA-CAD}"
 if [ -d "$CAD_DIR/project-store/app" ]; then
