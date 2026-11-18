@@ -17,6 +17,7 @@ const Presence := preload("res://scripts/session/session_presence.gd")
 const Publisher := preload("res://scripts/session/session_publisher.gd")
 const LaserPick := preload("res://scripts/laser_pick.gd")
 const GroupIndex := preload("res://scripts/group_index.gd")
+const GroupCues := preload("res://scripts/group_cues.gd")
 const RoomRegistry := preload("res://scripts/room/room_registry.gd")
 
 const MIN_DISTANCE := 0.15
@@ -52,6 +53,8 @@ var _marker: Node3D
 var _tag: Label3D
 var _material: StandardMaterial3D
 var _hand: Node = null
+var _brackets: MeshInstance3D = null ## corner brackets round what the cursor has picked (in the cursor's colour), so the picker sees what a Share or a colour would take
+var _brackets_box := AABB()
 var _active := false
 
 
@@ -79,6 +82,7 @@ func stop() -> void:
 		_marker.queue_free()
 	_marker = null
 	_tag = null
+	_clear_brackets()
 
 
 func set_enabled(on: bool) -> void:
@@ -95,6 +99,7 @@ func set_enabled(on: bool) -> void:
 	else:
 		_forget_target()
 		_have_position = false
+		_clear_brackets()
 		if _marker != null:
 			_marker.visible = false
 	enabled_changed.emit(on)
@@ -396,5 +401,19 @@ func _draw() -> void:
 	var s := selection()
 	if not s.is_empty():
 		text += "\n" + str(s["label"])
+		var box := GroupIndex.union_aabb(s["members"])
+		if _brackets == null or not is_instance_valid(_brackets) or not _brackets_box.is_equal_approx(box):
+			_clear_brackets()
+			_brackets = GroupCues.brackets(box.grow(0.004), colour)
+			add_child(_brackets)
+			_brackets_box = box
+	else:
+		_clear_brackets()
 	if _tag.text != text:
 		_tag.text = text
+
+
+func _clear_brackets() -> void:
+	if _brackets != null and is_instance_valid(_brackets):
+		GroupCues.clear([_brackets])
+	_brackets = null

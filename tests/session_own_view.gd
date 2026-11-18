@@ -11,6 +11,8 @@ extends SceneTree
 const Hub := preload("res://tests/fake_session_hub.gd")
 const Backend := preload("res://tests/fake_session_backend.gd")
 const Client := preload("res://scripts/session/session_client.gd")
+const Look := preload("res://scripts/appearance/appearance_look.gd")
+const Appearance := preload("res://scripts/appearance_tool.gd")
 const BENCH := 1.2
 
 var hub: RefCounted
@@ -72,6 +74,30 @@ func _xf(x: float, y: float, z: float) -> Array:
 
 
 func _initialize() -> void:
+	# --- the pure part: a part with two coloured surfaces keeps both looks in the stand-in model (painting one face must not flatten the other)
+	var two := MeshInstance3D.new()
+	var mesh := ArrayMesh.new()
+	for i in 2:
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(0, 0, i), Vector3(1, 0, i), Vector3(0, 1, i)])
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color.html("#FF0000") if i == 0 else Color.html("#0000FF")
+		mesh.surface_set_material(i, m)
+	two.mesh = mesh
+	two.set_meta("instance_path", "occ-two")
+	two.set_meta("face_ids", [7, 8])
+	two.set_meta("body_ids", ["b1", "b1"])
+	var looks: Array = Look.surface_looks(two)
+	_check(looks.size() == 2 and looks[0]["triangles"] == 1 and looks[0]["appearance"]["colour"] == "#FF0000" and looks[1]["appearance"]["colour"] == "#0000FF", "the looks of a part's surfaces are read from its materials, by triangle count")
+	var scratch: Node = Appearance.new()
+	scratch.seed_local_model([two], "own")
+	var leaf: Dictionary = scratch.model()["parts"]["own:occ-two"]
+	var faces: Array = leaf.get("face_appearances", [])
+	_check(faces.size() == 2 and faces[0]["face"] == {"body_id": "b1", "index": 7} and faces[0]["appearance"]["colour"] == "#FF0000" and faces[1]["face"]["index"] == 8 and faces[1]["appearance"]["colour"] == "#0000FF", "...and become each face's own look in the stand-in model")
+	scratch.free()
+	two.free()
 	hub = Hub.new()
 	backend = Backend.new()
 	main = load("res://scenes/main.tscn").instantiate()

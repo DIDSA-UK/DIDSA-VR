@@ -54,10 +54,8 @@ static func surface_looks(part: MeshInstance3D) -> Array:
 			m = part.get_surface_override_material(s)
 		if m == null:
 			m = part.mesh.surface_get_material(s)
-		var arrays := part.mesh.surface_get_arrays(s)
-		var idx = arrays[Mesh.ARRAY_INDEX]
-		var verts = arrays[Mesh.ARRAY_VERTEX]
-		var count := (idx as PackedInt32Array).size() if idx != null and not (idx as PackedInt32Array).is_empty() else ((verts as PackedVector3Array).size() if verts != null else 0)
+		var index_count: int = part.mesh.surface_get_array_index_len(s) # (counts only: no copy of the arrays, this runs for every part of a big model)
+		var count: int = index_count if index_count > 0 else part.mesh.surface_get_array_len(s)
 		out.append({"appearance": appearance_of(m) if m != null else {}, "triangles": count / 3})
 	return out
 

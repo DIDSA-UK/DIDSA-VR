@@ -108,8 +108,13 @@ func _initialize() -> void:
 	_check(cursor.last_how == "touching" and cursor.selection().get("node") == bolt, "within 4 cm of a surface it touches it (%s)" % cursor.last_how)
 	await _aim(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 1.0) # the middle of the cube: no surface within reach
 	_check(cursor.last_how == "inside" and cursor.selection().get("node") == bolt and cursor.selection()["face_index"] == -1, "flown inside a part, it is inside it (no face is known)")
+	for i in 2:
+		await physics_frame # (the marker is drawn each frame)
+	_check(cursor._brackets != null and is_instance_valid(cursor._brackets) and cursor._brackets_box.is_equal_approx(bolt.global_transform * bolt.get_aabb()), "what it has picked is outlined with brackets, so the picker sees what Share or a colour would take")
 	await _aim(Vector3(5.0, 5.0, 5.0), Vector3(0, 1, 0), 1.0)
-	_check(cursor.selection().is_empty() and cursor.last_how == "", "away from everything it has nothing selected")
+	for i in 2:
+		await physics_frame
+	_check(cursor.selection().is_empty() and cursor.last_how == "" and cursor._brackets == null, "away from everything it has nothing selected, and no brackets")
 	bolt.visible = false
 	await _aim(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
 	_check(cursor.selection().is_empty(), "a hidden part is never picked")
