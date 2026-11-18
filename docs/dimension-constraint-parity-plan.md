@@ -1,5 +1,7 @@
 # Plan: dimensions and constraints at parity with the flat app (sessions)
 
+**Status: final (2026-11-18), not started.** Waits for its gate (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
+
 The build plan for [`dimension-constraint-parity-scope.md`](dimension-constraint-parity-scope.md) (the gap tables, the workflow and the owner's
 decisions of 2026-11-18). Written for **coding sessions**: each session below is one repo, one branch, one PR. Line numbers drift: search for
 the named symbol. Status of every session: the tracker (section 7).
