@@ -369,6 +369,24 @@ func _initialize() -> void:
 	_check(lend.size() == 1 and lend[0][0] == "ended" and str(lend[0][1]).contains("ended") and hub.open_count == lopens, "End (close code 1000, the message lost): the observer knows the session ended and does NOT reconnect in a loop")
 	hub = Hub.new()
 	hub.lose_final = true
+	hub.send_reason = true
+	_clients.clear()
+	var sh := _hosted()
+	var scode: String = sh[2]
+	var swrong := _client()
+	var swrong_rec := _record(swrong)
+	swrong.join("wss://hub.test", "ZZZZZZ", {"name": "X", "device": "quest", "client": "t"})
+	_pump([], 1.0)
+	_check(swrong_rec["closed"].size() == 1 and swrong_rec["closed"][0][2] == "bad_code" and str(swrong_rec["closed"][0][1]).contains("No session has that code"), "with the code in the close frame's reason (a hub from DIDSA-CAD P2), a lost refusal still gets its exact words")
+	var sobs: Array = _joined(scode, "Oz")
+	var send_text: Array = []
+	sobs[0].closed.connect(func(kind: String, text: String) -> void: send_text.append([kind, text, sobs[0].last_code]))
+	sh[0].end_session()
+	_pump([], 1.0)
+	_check(send_text.size() == 1 and send_text[0][2] == "ended" and send_text[0][1] == "The presenter ended the session.", "...and a lost end gets 'The presenter ended the session.'")
+	hub.end_by_timeout("NONE00")
+	hub = Hub.new()
+	hub.lose_final = true
 	_clients.clear()
 	var rh := _hosted()
 	var rcode: String = rh[2]

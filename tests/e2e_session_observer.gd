@@ -88,6 +88,9 @@ func _initialize() -> void:
 		return
 	var paths: Array = state["paths"]
 	var bolt: String = state["bolt_path"]
+	# --- a wrong code on the real hub: the hub's own words arrive (the hub waits a moment before it closes, so Godot's WebSocketPeer does not lose the message)
+	var wrong: Dictionary = await main.session.join_session(hub_url, "ZZZZZZ")
+	_check(not wrong["ok"] and str(wrong["error"]).contains("No session has that code") and main.session.client.last_code == "bad_code", "a wrong code on the real hub: 'No session has that code' (%s)" % str(wrong["error"]))
 	# --- join
 	var joined: Dictionary = await main.session.join_session(hub_url, str(state["code"]))
 	_check(joined["ok"] and main.is_observer(), "Join through the real WebSocketPeer to the real hub (%s)" % str(joined["error"]))

@@ -26,6 +26,7 @@ var sent_by: Dictionary = {} ## participant id -> Array of the messages it sent 
 var received_by: Dictionary = {} ## participant id -> Array of the messages the hub sent it
 var ignored: Dictionary = {} ## participant id -> count of messages dropped (not allowed for the role)
 var connect_failures := 0 ## the next this-many transports never open (an unreachable hub)
+var send_reason := false ## like the hub from DIDSA-CAD P2: the error code / end reason also goes in the close frame's reason
 var lose_final := false ## like Godot's WebSocketPeer: what the hub sent in the same moment as it closed is never delivered (only the close code is)
 var transports: Array = []
 var open_count := 0
@@ -46,6 +47,7 @@ class Transport:
 	var first_seen := false
 	var closed_by_hub := false
 	var code := 1000
+	var reason := ""
 	var dead := false
 
 	func open(_url: String, p_headers: PackedStringArray) -> int:
@@ -93,6 +95,9 @@ class Transport:
 
 	func close_code() -> int:
 		return code
+
+	func close_reason() -> String:
+		return reason
 
 	func deliver(message: Dictionary) -> void:
 		if dead:
@@ -191,7 +196,7 @@ func on_text(t: Transport, text: String) -> void:
 				var tt: Transport = target.get("transport")
 				if tt != null:
 					tt.deliver({"t": "error", "code": "removed", "message": "removed"})
-					_close_from_hub(tt, 4003)
+					_close_from_hub(tt, 4003, "removed")
 				room["participants"].erase(int(target["id"]))
 				resume_map.erase(target["resume"])
 				_broadcast(room, {"t": "left", "id": int(target["id"]), "reason": "removed"})
@@ -432,7 +437,7 @@ func _end_room(room: Dictionary, reason: String) -> void:
 		var tt: Transport = p.get("transport")
 		if tt != null:
 			tt.deliver({"t": "end", "reason": reason})
-			_close_from_hub(tt, 1000)
+			_close_from_hub(tt, 1000, reason)
 		resume_map.erase(p["resume"])
 	rooms.erase(room["code"])
 
@@ -451,12 +456,13 @@ func forget_resume_tokens() -> void:
 
 func _fail(t: Transport, code: String, message: String) -> void:
 	t.deliver({"t": "error", "code": code, "message": message})
-	_close_from_hub(t, 4000)
+	_close_from_hub(t, 4000, code)
 
 
-func _close_from_hub(t: Transport, code: int) -> void:
+func _close_from_hub(t: Transport, code: int, reason: String = "") -> void:
 	t.closed_by_hub = true
 	t.code = code
+	t.reason = reason if send_reason else ""
 	t.state = WebSocketPeer.STATE_CLOSED
 	if lose_final:
 		t.inbox.clear() # (unread packets die with the close: what Godot's WebSocketPeer does)

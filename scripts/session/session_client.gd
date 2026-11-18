@@ -362,15 +362,24 @@ func _on_socket_closed() -> void:
 	if _final or state == State.CLOSED or state == State.IDLE:
 		return
 	var close_code: int = _transport.close_code() if _transport != null else -1
-	if _closed_by_hub(close_code):
+	var close_reason: String = _transport.close_reason() if _transport != null and _transport.has_method("close_reason") else ""
+	if _closed_by_hub(close_code, close_reason):
 		return
 	_transport_lost("The connection to the hub closed.")
 
 
-func _closed_by_hub(close_code: int) -> bool:
+func _closed_by_hub(close_code: int, close_reason: String = "") -> bool:
 	## Godot's WebSocketPeer gives NO packets once the close frame has been processed, and the hub sends its last message (`error`, `end`) and closes at once: the message is
 	## usually lost and only the close code is left. The hub's codes are distinct (session-hub/app/hub.py, `_fail`, `_on_remove`, `_end_room`), so when no message came they say what
-	## happened: 4003 removed, 4000 refused (which error is not known; what was being asked narrows it), 1000 while live the room ended. (If the message DID arrive it was handled first.)
+	## happened (and a hub from DIDSA-CAD P2 on also puts the error code or end reason in the close frame's reason, which is used first, and waits a moment before closing so the message itself usually arrives): 4003 removed, 4000 refused (which error is not known; what was being asked narrows it), 1000 while live the room ended. (If the message DID arrive it was handled first.)
+	if close_code == 4000 and Protocol.ERROR_WORDS.has(close_reason):
+		last_code = close_reason
+		_fail("resume_failed" if close_reason == "resume_expired" else "error", Protocol.error_text(close_reason))
+		return true
+	if close_code == 1000 and state == State.LIVE and Protocol.END_WORDS.has(close_reason):
+		last_code = close_reason
+		_fail("ended", Protocol.end_text(close_reason))
+		return true
 	match close_code:
 		4003:
 			last_code = "removed"

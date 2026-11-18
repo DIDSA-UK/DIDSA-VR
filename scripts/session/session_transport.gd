@@ -65,3 +65,8 @@ func close(code: int = 1000, reason: String = "") -> void:
 
 func close_code() -> int:
 	return _peer.get_close_code()
+
+
+func close_reason() -> String:
+	## The reason in the hub's close frame: its error code or end reason (a hub from P2 on; older ones send none).
+	return _peer.get_close_reason()

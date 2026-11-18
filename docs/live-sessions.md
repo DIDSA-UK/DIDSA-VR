@@ -44,15 +44,13 @@ A presenter needs the hub's address and its own key (`SESSION_HUB_API_KEY`, not 
 Plain `ws://` is accepted only for a local-network address; everything else must be `wss://` (the same rule as the browser relay). `localhost` is refused (the headset is not the hub) unless
 `DIDSA_SESSION_ALLOW_LOOPBACK` is set (tests, and a desktop preview with the hub on the same PC).
 
-## A finding: Godot loses the hub's last message
+## A finding: Godot loses the hub's last message (fixed on the hub's side)
 
-Found by the end-to-end run against the real hub. **Godot's `WebSocketPeer` returns no packets once the close frame has been processed**, and the hub sends its final message (`error ...`,
-`end`) and closes at once, so the app usually receives only the close code. Probed directly: a join with a wrong code gives states `[connecting, open, closed]`, close code 4000, **zero** packets.
-The protocol is unchanged and the client handles both cases: a message that does arrive is used; when it does not, the hub's distinct close codes say what happened (`session_client.gd`
-`_closed_by_hub`): **4003** the presenter removed you, **4000** the hub refused something (a refused join says "no session has that code, it is locked, or it is full": which one is not
-knowable; a refused resume means the session is gone; a refused host says the key may be wrong), **1000 while live** the session ended (the presenter's own words, "ended" versus "did not come
-back", are lost). Without this an observer whose session ended sat reconnecting forever. A one-line change on the hub's side (pause a moment between the last message and the close, or put the
-code in the close frame's reason, which Godot does expose as `get_close_reason()`) would give the specific words back; that is a hub change and was not made.
+Found by the end-to-end run against the real hub. **Godot's `WebSocketPeer` returns no packets once the close frame has been processed**, and the hub used to send its final message (`error ...`,
+`end`) and close at once, so the app received only the close code (probed: a wrong join code gave states `[connecting, open, closed]`, close code 4000, **zero** packets). Two changes, neither a protocol
+change: **the hub** (`session-hub/app/api.py`) now waits 150 ms between its last message and the close frame and puts the error code or end reason in the close frame's reason; re-probed against the
+real hub, the error arrives and `get_close_reason()` says `bad_code`. **The client** (`session_client.gd` `_closed_by_hub`) still copes with a hub that has not been updated: it uses a message that
+arrives, then the close reason, then the close code (**4003** removed, **4000** refused: for a join, "no such code, locked or full"; **1000 while live**: the session ended).
 
 ## What an observer cannot do
 
