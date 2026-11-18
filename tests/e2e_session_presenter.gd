@@ -69,6 +69,11 @@ func _initialize() -> void:
 	var roster: Array = main.session.client.others()
 	_check(roster.size() == 1 and str(roster[0]["name"]) == "Python observer" and str(roster[0]["role"]) == "observer", "the observer joined by the code and is on the presenter's roster")
 	await _wait(2.5) # (it fetches the glb, checks what a token may not do)
+	var initial_head: Array = main.session.presence.build()["head"]
+	var python_id: int = int(roster[0]["id"])
+	var avatar_ok: bool = await _wait_for(func() -> bool: return main.session.avatars.heads.has(python_id), 15000)
+	var expect_avatar: Vector3 = main.session_scene_root().global_transform * Vector3(100.0, 1500.0, 200.0)
+	_check(avatar_ok and (main.session.avatars.heads[python_id] as Transform3D).origin.distance_to(expect_avatar) < 0.01 and (main.session.avatars.avatar_of(python_id)["tag"] as Label3D).text == "Python observer", "the Python observer's presence became an avatar in the headset's world, named, at its model-space spot")
 	# the parts to play with: a placed instance (it has an instance path)
 	var world: Array = main.session_world_parts()
 	var moving: Node3D = null
@@ -105,6 +110,9 @@ func _initialize() -> void:
 	var revision_seen_by_reload: int = DocumentRevision.latest
 	_check(revision_seen_by_reload > 0 and revision_seen_by_reload >= revision_after_edit, "the presenter learned the revision from the responses it already got (%d)" % revision_seen_by_reload)
 	await _wait(2.5)
+	# Gather everyone
+	_check(main.session.navigation.gather_everyone(), "Gather everyone, through the real hub")
+	await _wait(1.5)
 	# End
 	await main.session.end_session()
 	await _wait_for(func() -> bool: return not OS.is_process_running(pid) or FileAccess.file_exists(result_path), 30000)
@@ -134,6 +142,10 @@ func _initialize() -> void:
 		refused_all = refused_all and int(seen["forbidden"][route]) == 401
 	_check(refused_all and seen["forbidden"].size() == 4, "the token is refused every other route: the part, export/native, occurrences, a PATCH (401 each)")
 	_check(seen["view_state"]["status"] == 200 and int(seen["view_state"]["rev"]) == int(seen["view_state"]["header_rev"]), "view-state answers the observer with a revision equal to the header's")
+	_check(int(seen["presence_seen"]) >= 4 and int(seen["presence_first"]["from"]) == 1, "the observer was sent the presenter's presence (%d messages)" % int(seen["presence_seen"]))
+	var first_head: Array = seen["presence_first"]["head"]
+	_check(Vector3(first_head[0], first_head[1], first_head[2]).distance_to(Vector3(initial_head[0], initial_head[1], initial_head[2])) < 0.5 and seen["presence_first"]["mode"] == "free" and seen["presence_first"]["hands"] == [null, null], "...with the head in model-space millimetres, as the headset computed it")
+	_check(seen["gathers"].size() == 1 and seen["gathers"][0]["pose"].size() == 7 and int(seen["gathers"][0]["from"]) == 1, "the real hub relayed the presenter's Gather everyone to the observer (with the head pose)")
 	var kinds := {}
 	for message in seen["messages"]:
 		kinds[message["t"]] = int(kinds.get(message["t"], 0)) + 1

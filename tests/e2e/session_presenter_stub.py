@@ -4,7 +4,7 @@ the hub key, then plays a script the Godot test steps through by creating files 
     step 1  a part moved (a 30 Hz run of partial poses), the observer sees it arrive smoothed
     step 2  a part hidden (the full hidden list)
     step 3  a REAL document change (the bolt hidden in the backend) and a doc_changed with the revision the backend answered: the observer refetches with the token
-    step 4  doc_changed for a newer revision the backend has nothing new for: the observer's refetch is a 304
+    step 4  doc_changed for a newer revision the backend has nothing new for: the observer's refetch is a 304, and a Gather everyone
     step 5  the presenter drops its socket and resumes (a new connection, the full state again)
     step 6  End: the token is revoked at the backend and the hub told
 Writes <out> (JSON) at the start (the code, the root, the real paths) and at the end (what the backend answered). Usage:
@@ -20,6 +20,8 @@ from websockets.asyncio.client import connect
 
 from session_common import build_assembly, cad_client, glb_instance_paths, until, wait_for_file, write_json
 
+PRESENTER_HEAD = [1000.0, 1500.0, 500.0, 0.0, 0.0, 0.0, 1.0]  # model-space mm; faces -Z
+GATHER_HEAD = [0.0, 1600.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 XF = lambda x, y, z: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, x, y, z]  # noqa: E731
 
 
@@ -62,6 +64,22 @@ async def main() -> int:
             await send(ws, {"t": "section", "on": True, "point": [10.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0]})
             await send(ws, {"t": "status", "activity": "design_table", "detail": "Mount"})
 
+        seen_presence: list = state.setdefault("presence_seen", [])
+
+        async def read_presence() -> None:
+            # the observer's presence (head in model space) as the hub relays it; everything else is skipped
+            try:
+                while True:
+                    raw = await ws.recv()
+                    if not isinstance(raw, bytes) and json.loads(raw)["t"] == "presence":
+                        seen_presence.append(json.loads(raw))
+                        del seen_presence[:-3]
+                        state["presence_count"] = state.get("presence_count", 0) + 1
+            except Exception:
+                return
+
+        reader = asyncio.create_task(read_presence())
+        await ws.send(json.dumps({"t": "presence", "head": PRESENTER_HEAD, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
         await publish_all()
         # step 1: a part moves
         assert await wait_for_file(args.out + ".step1"), "step1 never came"
@@ -86,6 +104,7 @@ async def main() -> int:
         assert await wait_for_file(args.out + ".step4"), "step4 never came"
         await send(ws, {"t": "doc_changed", "rev": new_rev + 3, "all": True})
         state["spare_rev"] = new_rev + 3
+        await send(ws, {"t": "gather", "pose": GATHER_HEAD})
         write_json(args.out, state)
         # step 5: drop and resume
         assert await wait_for_file(args.out + ".step5"), "step5 never came"
@@ -95,6 +114,7 @@ async def main() -> int:
         resumed = await until(ws, "welcome")
         state["resumed_as"] = resumed["you"]
         seq = 0
+        await ws.send(json.dumps({"t": "presence", "head": PRESENTER_HEAD, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
         await publish_all()
         # step 6: end
         assert await wait_for_file(args.out + ".step6"), "step6 never came"

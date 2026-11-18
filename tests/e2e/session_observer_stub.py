@@ -62,7 +62,16 @@ async def main() -> int:
             result["ready_at"] = time.time()
             deadline = time.time() + args.seconds
             ended = False
+            result["presence_seen"] = 0
+            result["presence_first"] = None
+            result["gathers"] = []
+            my_head = [100.0, 1500.0, 200.0, 0.0, 0.0, 0.0, 1.0]
+            await ws.send(json.dumps({"t": "presence", "head": my_head, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
+            last_presence = time.time()
             while time.time() < deadline and not ended:
+                if time.time() - last_presence > 0.5:
+                    await ws.send(json.dumps({"t": "presence", "head": my_head, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
+                    last_presence = time.time()
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
                 except asyncio.TimeoutError:
@@ -76,6 +85,13 @@ async def main() -> int:
                 if message["t"] == "ping":
                     await ws.send(json.dumps({"t": "pong", "n": message.get("n")}))
                     continue
+                if message["t"] == "presence":
+                    result["presence_seen"] += 1
+                    if result["presence_first"] is None:
+                        result["presence_first"] = message
+                    continue  # (15 Hz of it: counted, not stored)
+                if message["t"] == "gather":
+                    result["gathers"].append(message)
                 result["messages"].append({"at": time.time(), **trim(message)})
                 if message["t"] == "token":
                     token = message["view_token"]

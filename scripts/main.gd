@@ -2996,6 +2996,19 @@ func session_current_source() -> Dictionary:
 	return {}
 
 
+func session_unit_mm() -> float:
+	## Model-space millimetres per unit of the glb: 1 for a backend model (its own units are mm), 1000 for a demo (a glb in metres).
+	return 1000.0 if shown_demo_path != "" else 1.0
+
+
+func session_rig() -> XROrigin3D:
+	return $XROrigin3D
+
+
+func session_camera() -> XRCamera3D:
+	return $XROrigin3D/XRCamera3D
+
+
 func session_scene_root() -> Node3D:
 	## The glb's root under AssemblyRoot (every part's pose is relative to it).
 	return assembly_root.get_child(0) as Node3D if assembly_root.get_child_count() > 0 else null

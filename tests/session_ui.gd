@@ -126,6 +126,13 @@ func _initialize() -> void:
 	(launcher._body.find_child("Remove_2", true, false) as Button).pressed.emit()
 	await _wait(0.4)
 	_check(guest_closed == [["error", "removed"]] and launcher._body.find_child("Person_2", true, false) == null, "Remove: the person is out and gone from the list")
+	var table_page: Control = main._tablet.pages._build_settings_session()
+	var gather_button: Button = null
+	for button in table_page.find_children("*", "Button", true, false):
+		if (button as Button).text == "Gather everyone":
+			gather_button = button
+	_check(gather_button != null and table_page.find_children("*", "Button", true, false).any(func(b: Button) -> bool: return b.text == "End the session"), "the wrist tablet's Settings > Session has Gather everyone and End for a presenter")
+	table_page.free()
 	launcher._body.find_child("SessionEnd", true, false).pressed.emit()
 	await _wait(0.5)
 	_check(not main.session.is_active() and launcher.page == "home" and _row("host") != null and _row("session") == null, "End: the session is over and the menu is Host and Join again")
@@ -156,6 +163,12 @@ func _initialize() -> void:
 	launcher._start_join()
 	await _wait(1.5)
 	_check(main.session.is_observer() and launcher.page == "session" and _page_text().contains("Watching Alex") and launcher._body.find_child("SessionLeave", true, false) != null and launcher._body.find_child("SessionCode", true, false) == null, "Join: an observer, on the Session page with Leave (no code or QR: that is the presenter's)")
+	var watch_page: Control = main._tablet.pages._build_settings_session()
+	var labels: Array = watch_page.find_children("*", "Button", true, false).map(func(b: Button) -> String: return b.text)
+	_check(labels.has("Go to the presenter") and labels.has("Leave the session") and labels.any(func(t: String) -> bool: return t.begins_with("Follow the presenter")) and not labels.has("Gather everyone"), "...and Go to the presenter, Follow and Leave for an observer (no Gather)")
+	watch_page.free()
+	var ids: Array = main._tablet.registry.categories().map(func(c) -> String: return c.id)
+	_check(ids.has("settings"), "...which an observer's tablet still has (Settings is one of its tiles)")
 	# --- an observer's pages
 	for page_name in ["servers", "open", "assemblies", "models", "folder", "scan"]:
 		launcher.show_page(page_name)

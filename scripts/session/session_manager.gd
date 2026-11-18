@@ -16,6 +16,9 @@ const Client := preload("res://scripts/session/session_client.gd")
 const Http := preload("res://scripts/session/session_http.gd")
 const Publisher := preload("res://scripts/session/session_publisher.gd")
 const Observer := preload("res://scripts/session/session_observer.gd")
+const Presence := preload("res://scripts/session/session_presence.gd")
+const Avatars := preload("res://scripts/session/session_avatars.gd")
+const Navigation := preload("res://scripts/session/session_navigation.gd")
 const DocumentRevision := preload("res://scripts/session/document_revision.gd")
 const BackendSession := preload("res://scripts/backend_session.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
@@ -33,6 +36,9 @@ var client: Node ## session_client.gd
 var http: Node ## session_http.gd
 var publisher: Node
 var observer: Node
+var presence: Node ## what this person sends the others (head, hands, laser): session_presence.gd
+var avatars: Node3D ## the others, drawn: session_avatars.gd
+var navigation: Node ## Go to presenter, Follow presenter, Gather everyone: session_navigation.gd
 var role := ""
 var starting := false ## host_session() / join_session() is mid-flight
 var model: Dictionary = {} ## what is being shown to the session: {kind, ...} as in the hub's `host` message (with `title`)
@@ -71,6 +77,15 @@ func setup(p_main: Node) -> void:
 	observer = Observer.new()
 	observer.name = "Observer"
 	add_child(observer)
+	presence = Presence.new()
+	presence.name = "Presence"
+	add_child(presence)
+	avatars = Avatars.new()
+	avatars.name = "Avatars"
+	add_child(avatars)
+	navigation = Navigation.new()
+	navigation.name = "Navigation"
+	add_child(navigation)
 
 
 func use_transport(factory: Callable) -> void:
@@ -323,6 +338,9 @@ func _on_welcomed(welcome: Dictionary, resumed: bool) -> void:
 	join_uri = str((welcome.get("room", {}) as Dictionary).get("join_uri", ""))
 	var new_role := str((welcome.get("you", {}) as Dictionary).get("role", ""))
 	_become(new_role)
+	avatars.start(main, client)
+	navigation.start(main, client, avatars)
+	presence.start(main, client, navigation)
 	if new_role == "presenter":
 		publisher.start(main, client, model if not model.is_empty() else hostable_model()["source"], http)
 	else:
@@ -352,6 +370,9 @@ func _on_closed(kind: String, text: String) -> void:
 func _become(new_role: String) -> void:
 	role = new_role
 	if new_role == "":
+		presence.stop()
+		navigation.stop()
+		avatars.stop()
 		join_uri = ""
 		model = {}
 		hub_in_use = ""

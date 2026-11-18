@@ -1521,6 +1521,13 @@ func _add_laser() -> void:
 	_set_laser_length(laser_length)
 
 
+func laser_tip() -> Variant:
+	## Where this hand's laser ends in the world (the live session sends it so others see what you point at), or null when no laser is drawn.
+	if _laser == null or not _laser.visible or _laser_mesh == null:
+		return null
+	return global_position - global_transform.basis.z.normalized() * _laser_mesh.height
+
+
 func _set_laser_length(length: float) -> void:
 	_laser_mesh.height = length
 	_laser.position.z = -length / 2.0 # shift out by half its length so the near end always stays at the hand regardless of how long it currently is

@@ -223,6 +223,8 @@ func register(reg) -> void:
 		"caption": "motion · sound · haptics", "help": "Reduce motion, sound and its volume, and how strongly the controllers buzz."})
 	reg.add_tool("settings", "set_folder", "Project folder", "files", _build_settings_folder, {
 		"caption": "where models live", "help": "An extra folder the Files tool scans for models."})
+	reg.add_tool("settings", "set_session", "Session", "navigate", _build_settings_session, {
+		"caption": "go to · follow · gather", "help": "A live session: go to the presenter, ride their view (Follow), or, as the presenter, call everyone to where you stand."})
 	reg.add_tool("settings", "set_table", "Design table", "table", _build_settings_table, {
 		"caption": "turn · zoom limits", "help": "How the design table treats a part sent back to the arena, and how far you can zoom a part on it."})
 
@@ -1936,6 +1938,32 @@ func _build_settings_comfort() -> Control:
 	))
 	page.add_child(_mode_toggle("Tool wheel (right trigger + grip)", func(on: bool) -> void: _main.set_wheel_enabled(on), _main.wheel_enabled()))
 	page.add_child(_choice_row("Wheel size", ["Small", "Normal", "Large"], _main.wheel_size(), func(i: int) -> void: _main.set_wheel_size(i)))
+	return page
+
+
+func _build_settings_session() -> Control:
+	## P2b: a live session's movement tools, on the tablet so an observer has them while looking at the model (the monolith's Session page has the code, the people and End / Leave).
+	var page := _page(14)
+	var session = _main.session if _main != null else null
+	if session == null or not session.is_active():
+		page.add_child(_hint("No live session is running. Host Session and Join Session are on the landing (Home)."))
+		return page
+	page.add_child(_hint(session.status_line()))
+	var navigation = session.navigation
+	if session.is_observer():
+		page.add_child(_button("Go to the presenter", func() -> void: navigation.go_to_presenter()))
+		page.add_child(_mode_toggle("Follow the presenter (push the left stick to stop)", func(on: bool) -> void: navigation.set_following(on), navigation.following))
+		page.add_child(_hint("Go to puts you beside them, facing the way they face. Follow carries your view with theirs; the edges of the view darken while it moves. Reduce motion (Comfort) makes it step instead of glide.", true))
+		page.add_child(_button("Leave the session", func() -> void: session.leave_session()))
+	else:
+		page.add_child(_button("Gather everyone", func() -> void: navigation.gather_everyone()))
+		page.add_child(_hint("Calls everyone to stand in an arc in front of you, facing you. They are moved when you press it.", true))
+		page.add_child(_button("End the session", func() -> void: session.end_session()))
+	for person in session.client.participants.values():
+		var line := Label.new()
+		line.text = "%s%s" % [person["name"], " (presenter)" if person["role"] == "presenter" else ""]
+		line.add_theme_color_override("font_color", preload("res://scripts/session/session_protocol.gd").colour_of(str(person["colour"]), Color.WHITE))
+		page.add_child(line)
 	return page
 
 

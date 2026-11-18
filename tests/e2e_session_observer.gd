@@ -8,6 +8,8 @@ extends SceneTree
 ## NOT covered: a Cloudflare tunnel, a Quest, more than one observer, voice.
 
 const P := preload("res://scripts/session/session_protocol.gd")
+const Nav := preload("res://scripts/session/session_navigation.gd")
+const Avatars := preload("res://scripts/session/session_avatars.gd")
 
 var main: Node
 var failures := 0
@@ -106,6 +108,10 @@ func _initialize() -> void:
 	_check(is_equal_approx(main.assembly_root.transform.basis.get_scale().x, 0.002) and main.assembly_root.transform.origin.is_equal_approx(Vector3(1, 1, -2)), "the presenter's place and scale were applied")
 	_check(main._section_tool.active, "the presenter's section is on here")
 	_check(observer.status_text == "Python presenter is at the design table: Mount", "the status line: '%s'" % observer.status_text)
+	var presenter_id: int = int(main.session.client.presenter().get("id", 0))
+	var drawn: bool = await _wait_for(func() -> bool: return main.session.avatars.heads.has(presenter_id), 15000)
+	var expect_head: Vector3 = main.session_scene_root().global_transform * Vector3(1000.0, 1500.0, 500.0)
+	_check(drawn and (main.session.avatars.heads[presenter_id] as Transform3D).origin.distance_to(expect_head) < 0.01 and (main.session.avatars.avatar_of(presenter_id)["tag"] as Label3D).text == "★ Python presenter", "the presenter is an avatar at its model-space spot, with the star")
 	var bolt_node := _part(bolt)
 	_check(bolt_node != null and _mm(bolt_node).distance_to(Vector3(15.0, 0.0, 10.0)) < 0.05, "the bolt is where the presenter said (15, 0, 10 mm)")
 	# --- a part moves
@@ -142,6 +148,10 @@ func _initialize() -> void:
 	_step(out, 4)
 	await _wait_for(func() -> bool: return observer.not_modified_count > not_modified, 30000)
 	_check(observer.not_modified_count == not_modified + 1 and main.session_world_parts().size() == parts_before - 1, "a doc_changed with nothing new behind it: a real 304, nothing changed")
+	var gathered: bool = await _wait_for(func() -> bool: return main.session.navigation.jumps >= 1, 20000)
+	var gather_head := Transform3D(Basis.IDENTITY, main.session_scene_root().global_transform * Vector3(0.0, 1600.0, 0.0))
+	var arc: Dictionary = Nav.gather_spot(gather_head, 0, 1)
+	_check(gathered and main.session_camera().global_position.distance_to(arc["position"]) < 0.01, "Gather everyone: the observer was moved in front of the presenter, through the real hub")
 	# --- the presenter drops and comes back
 	var saw_drop := [false]
 	main.session.client.roster_changed.connect(func() -> void: saw_drop[0] = saw_drop[0] or not main.session.client.presenter_connected())
@@ -152,6 +162,8 @@ func _initialize() -> void:
 	await _wait(1.5)
 	_check(main.session.client.presenter_connected() and main.session.status_line() == "Watching Python presenter", "the presenter resumed")
 	_check(is_equal_approx(main.assembly_root.transform.basis.get_scale().x, 0.002) and main._section_tool.active, "...and its state (place, section) was sent again and is still applied")
+	var sent_head: Array = main.session.presence.build()["head"]
+	await _wait(1.3)
 	# --- end
 	var ended_text: Array = []
 	main.session.ended_for_me.connect(func(t: String) -> void: ended_text.append(t))
@@ -160,6 +172,8 @@ func _initialize() -> void:
 	_check(not ended_text.is_empty() and ended_text[0] == "The presenter ended the session." and not main.is_observer() and main.session_world_parts().is_empty(), "End: told in words, the shared model put away (%s, observer=%s, parts=%d)" % [str(ended_text), str(main.is_observer()), main.session_world_parts().size()])
 	await _wait_for(func() -> bool: return _state(out).has("finished_at"), 30000)
 	state = _state(out)
+	var presence_seen: Array = state.get("presence_seen", [])
+	_check(int(state.get("presence_count", 0)) >= 4 and not presence_seen.is_empty() and Vector3(presence_seen[-1]["head"][0], presence_seen[-1]["head"][1], presence_seen[-1]["head"][2]).distance_to(Vector3(sent_head[0], sent_head[1], sent_head[2])) < 0.5, "the presenter was sent this headset's presence (%d messages), the head where the headset computed it" % int(state.get("presence_count", 0)))
 	_check(int(state.get("revoke_status", 0)) == 204 and int(state.get("after_end_glb_status", 0)) == 401, "the presenter revoked the token at the real backend (204) and it reads nothing now (401)")
 	if OS.is_process_running(pid):
 		OS.kill(pid)

@@ -1,8 +1,8 @@
-# Live sessions: Host Session and Join Session (P2a)
+# Live sessions: Host Session and Join Session (P2a and P2b)
 
 Phase P2 of DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`; the protocol is DIDSA-CAD `docs/live-sessions-scope.md` (decisions LS-1 to LS-13), the hub is DIDSA-CAD
 `session-hub/`. **Built and tested headless and against a real backend and a real hub; nothing here has been run on a headset or a phone.** What is verified and what is not is listed in the
-plan's "P2 results" and at the foot of this page. This is **P2a (sessions working end to end)**; avatars, Go to presenter, Follow presenter and Gather everyone are **P2b, not built**.
+plan's "P2 results" and at the foot of this page. This is **P2a (sessions working end to end)** and **P2b (people: avatars, Go to presenter, Follow presenter, Gather everyone)**.
 
 ## What it does
 
@@ -27,6 +27,7 @@ ends with the session). A demo model shipped in the APK is shared by its path in
 | `session_manager.gd` | what the pages call: hostable model, hub discovery, minting and revoking the view token, host / join / end / leave, renewing the token before it expires and when the backend lost it |
 | `session_publisher.gd` | the presenter: poses, visibility, section, place, status, `doc_changed`, `model` |
 | `session_observer.gd` | an observer: fetches the glb with the token only, applies the snapshot and the stream, smooths poses, refetches on `doc_changed` |
+| `session_presence.gd`, `session_avatars.gd`, `session_navigation.gd`, `comfort_vignette.gd` | P2b: what this person sends (head, hands, laser, in model space, 15 Hz), the others drawn (head, two controllers, laser, name tag, one colour each, one interval behind), Go to / Follow / Gather and the comfort vignette |
 | `qr_encoder.gd` | the join QR code (the headset had a reader and nothing that made one); `tools/qr_roundtrip/` checks it with an independent decoder |
 | `document_revision.gd`, `session_http.gd` | the backend's `X-Document-Revision`; the few HTTP calls a session makes (fakeable) |
 | `main.gd` (block "Live sessions") | the hooks: `session_doc_changed`, `session_model_changed`, `apply_session_role`, `session_show_*`, `session_apply_*`, `observer_blocked` |
@@ -105,7 +106,34 @@ it comes back and carries on); the observer's **Leave**; **End the session** (th
 **What to write down if something is wrong:** which of the above; the line on the monolith; `adb logcat | grep "DIDSA VR"` on a Quest (or the console of the PC preview); the hub's log (it logs room
 created and ended, joins, leaves and refusals by participant, never message contents).
 
-## Not in P2a
+## People (P2b)
 
-Avatars, Go to presenter, Follow presenter, Gather everyone (P2b). Voice (P3). Observer tools and marks (P4). The phone build (P5). Sandbox paint, scene looks, Assembly Rooms and the sketch are not mirrored
-(LS-4, LS-5): the observer sees the world assembly and a status line. A wrist-tablet page for the session (the code is on the monolith, which the presenter has to open) is not built.
+**Avatars.** Everyone else is drawn: a head with a dark face band (so you can see which way they look), two controllers, the laser from the right hand to where it ends, a name tag that always faces you
+(the presenter's has a star; someone riding the presenter's view says "(following)"), in the colour the hub gave them. They are sent in **model space** and drawn through your own view of the model, so
+they stand where they stand relative to the model whatever scale or place the model has for you, and they stay a person's size (a model at 1:50 on a desk does not shrink them). A hand that is not tracked
+is not drawn (a phone has none). Presence goes out at 15 Hz while you move (over 2 mm or 1 degree), once a second otherwise, and is shown one interval behind.
+
+**Settings > Session** on the wrist tablet (an observer's tablet has Settings): *observer*: **Go to the presenter** (you are put 0.9 m to their right at their eye height facing the way they face, with a short
+dark pulse), **Follow the presenter** (your view is eased towards that spot at no more than 3 m/s and 70 degrees a second; the **comfort vignette** darkens the edges while it moves and opens when it has caught
+up; **push the left stick to stop**; with **Reduce motion** on it steps instead of gliding; a long way is a jump), **Leave**. *Presenter*: **Gather everyone** (everyone is moved into an arc in front of you, 1.4 m
+out and 28 degrees apart, looking at you, with the same pulse; they cannot refuse) and **End**.
+
+**More things to try by hand (two devices):**
+
+| Do | Expect |
+|---|---|
+| Both look at each other | a head and two controllers with a name over it, in the other's colour |
+| Presenter points the laser at a part | a thin line from their right controller to the spot |
+| Presenter scales the model to 1:50 and puts it on a desk | their avatar is still person-sized; where it stands relative to the model is unchanged |
+| Observer: Settings > Session > Go to the presenter | beside them, same height, same way round, a brief dark pulse |
+| Observer: Follow, presenter walks about | the view follows smoothly, edges darken while it moves, the presenter sees "(following)" on the tag; left stick stops it |
+| Observer with Reduce motion on: Follow | steps, not a glide |
+| Presenter: Gather everyone (two or more observers) | each is placed in the arc in front of them, facing them |
+
+**Whether it is comfortable** (the vignette's strength, 3 m/s, 70 degrees a second, the 0.9 m offset, the 1.4 m arc) is the owner's to judge: nothing here has been on a headset. Please write down what feels wrong and
+at what speed. The vignette's shader renders correctly in a software render (`tests/session_vignette_render.gd`) but has not been seen in two eyes.
+
+## Not built
+
+Voice (P3). Observer tools and marks (P4). The phone build (P5). Sandbox paint, scene looks, Assembly Rooms and the sketch are not mirrored (LS-4, LS-5): the observer sees the world assembly and a status line.
+A persistent in-world indicator for the presenter while hosting (the code is on the monolith, reached with Home) is not built. A phone's head orientation (gyro) is P5.
