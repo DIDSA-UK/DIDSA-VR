@@ -20,6 +20,7 @@ Start with [`status.md`](status.md) (what is built, what is verified, what is op
 | [`assembly-rooms-plan.md`](assembly-rooms-plan.md) | Assembly Rooms: build plan R0-R4 and what each phase found. |
 | [`scope-modelling-depth.md`](scope-modelling-depth.md) | Design table modelling depth (scoping pass, 2026-10-08). |
 | [`scope-references-and-dimensioning.md`](scope-references-and-dimensioning.md) | Design table references and dimensioning (scoping pass). |
+| [`dimension-constraint-parity-scope.md`](dimension-constraint-parity-scope.md) | Design table dimensions and constraints at parity with the flat app (scoping pass, 2026-11-18): the gap tables, a shared option catalogue, the controller (and later hand) workflow, pieces P0-P7 and the owner's decisions. Not built. |
 | [`design-table-brief.md`](design-table-brief.md) | The original design-table requirements brief (not live-synced). |
 | [`android-build.md`](android-build.md) | Building the standalone Quest APK (step L0): the OpenXR Vendors plugin, the export preset, passthrough, the first-run checklist for the headset. |
 | [`test-report-30-oct-plan.md`](test-report-30-oct-plan.md) | The owner's test of the 30 Oct 2026 build (4 Nov): storage folder, empty room / table start buttons, mate highlight, sketch sheet at the front edge, selectable sketch dimensions and constraints with hover everywhere, and selection-first contextual options with breadcrumbs on the design table. A plan, not built. |
