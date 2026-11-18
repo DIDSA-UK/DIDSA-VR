@@ -158,6 +158,16 @@ func register(reg) -> void:
 		"help": "A scene is a named arrangement of the assembly (parts moved, hidden or painted, and where you look from) that changes nothing in the model. Show relaxes the mates and arranges the parts as the scene says; anything you move or paint then is temporary. Update scene keeps what is on screen in the shown scene; Save as new names a new one (from the default too: relax, move, paint, save). Back to default puts every part back, and asks first if the scene has unsaved changes. View on Show turns and places the model to the scene's viewpoint at the scale you have."})
 
 	reg.add_category("view", "View", "view", ACCENT_VIEW, {"subtitle": "scale · hide · display", "hub": true})
+	# P4, an observer's own-view tools (a presenter never sees these three: observer_only; main.gd OBSERVER_TOOLS says which View and Inspect tools an observer keeps)
+	reg.add_tool("view", "cursor", "Cursor", "tool_select", _build_cursor_page, {
+		"observer_only": true, "caption": "fly · select · colour · hide",
+		"help": "A small cursor in your colour with your name, flown along your right laser. The right stick lets it out and in; it picks what it touches or points at. A makes the choice one level wider (face, body, part, sub-assembly), B one level narrower. Colour, see-through, hide and isolate act on what it has picked, in your own view only."})
+	reg.add_tool("view", "share", "Share", "scenes", _build_share_page, {
+		"observer_only": true, "caption": "show · ping · hand",
+		"help": "Share shows what the cursor has picked to everyone, with your name, until you stop (or the presenter clears marks). Ping is a pulse at the cursor, Look here asks the presenter to come and see, Raise hand puts your hand up on your name tag."})
+	reg.add_tool("view", "my_view", "My view", "history", _build_my_view_page, {
+		"observer_only": true, "caption": "pull out · reset",
+		"help": "Your own view is yours: nothing you do here is sent to the presenter or saved. Pull a part out lets your grip take a part and leave it somewhere. Reset my view puts everything back to exactly what the presenter shows."})
 	reg.add_tool("view", "navigate", "Navigate", "navigate", _build_navigate_page, {
 		"caption": "hands · speed",
 		"help": "Switch model movement, user movement and part manipulation on or off. Travel speed sets how fast the left stick walks you."})
@@ -1954,16 +1964,101 @@ func _build_settings_session() -> Control:
 		page.add_child(_button("Go to the presenter", func() -> void: navigation.go_to_presenter()))
 		page.add_child(_mode_toggle("Follow the presenter (push the left stick to stop)", func(on: bool) -> void: navigation.set_following(on), navigation.following))
 		page.add_child(_hint("Go to puts you beside them, facing the way they face. Follow carries your view with theirs; the edges of the view darken while it moves. Reduce motion (Comfort) makes it step instead of glide.", true))
+		page.add_child(_button("Reset my view", func() -> void: session.own_view.reset_my_view()))
 		page.add_child(_button("Leave the session", func() -> void: session.leave_session()))
 	else:
 		page.add_child(_button("Gather everyone", func() -> void: navigation.gather_everyone()))
 		page.add_child(_hint("Calls everyone to stand in an arc in front of you, facing you. They are moved when you press it.", true))
+		page.add_child(_button("Clear marks (%d showing)" % session.marks.marks.size(), func() -> void: session.marks.clear_marks()))
+		page.add_child(_button("Go to the spot someone asked you to look at", func() -> void: session.marks.go_to_look_here()))
+		var hands: Array = session.marks.raised_hands()
+		if not hands.is_empty():
+			page.add_child(_hint("Hand up: %s" % ", ".join(PackedStringArray(hands)), true))
 		page.add_child(_button("End the session", func() -> void: session.end_session()))
 	for person in session.client.participants.values():
 		var line := Label.new()
 		line.text = "%s%s" % [person["name"], " (presenter)" if person["role"] == "presenter" else ""]
 		line.add_theme_color_override("font_color", preload("res://scripts/session/session_protocol.gd").colour_of(str(person["colour"]), Color.WHITE))
 		page.add_child(line)
+	return page
+
+
+# --- P4: an observer's own-view pages (scripts/session/session_cursor.gd, session_marks.gd, session_own_view.gd) ---------------
+
+func _session_part(name: String) -> Node:
+	var session = _main.session if _main != null else null
+	return session.get(name) if session != null and session.is_observer() else null
+
+
+func _build_cursor_page() -> Control:
+	var page := _page(10)
+	var cursor := _session_part("cursor")
+	var own := _session_part("own_view")
+	if cursor == null or own == null:
+		page.add_child(_hint("The cursor is for watching a live session."))
+		return page
+	var line := _hint(_cursor_line(cursor), true)
+	line.name = "CursorLine"
+	page.add_child(_mode_toggle("Drone cursor", func(on: bool) -> void: cursor.set_enabled(on), cursor.enabled))
+	page.add_child(line)
+	cursor.selection_changed.connect(func() -> void:
+		if is_instance_valid(line): # (the tablet rebuilds its pages: a label of an old page is gone)
+			line.text = _cursor_line(cursor))
+	var steps := _row()
+	steps.add_child(_button("Narrower (B)", func() -> void: cursor.step_level(-1)))
+	steps.add_child(_button("Wider (A)", func() -> void: cursor.step_level(1)))
+	page.add_child(steps)
+	page.add_child(_hint("Colour, see-through, hide and isolate act on what the cursor has picked. They are yours alone: nothing is sent.", true))
+	var tell := func(result: Dictionary) -> void:
+		if not result.get("ok", true):
+			_main.say(str(result.get("error", "")))
+	page.add_child(_button("Paint it with the Appearance brush", func() -> void: tell.call(await own.paint_selection(_appearance_tool.brush.duplicate(), cursor.selection()))))
+	page.add_child(_button("Make it see-through", func() -> void: tell.call(await own.paint_selection({"opacity": own.see_through_opacity}, cursor.selection()))))
+	page.add_child(_button("Clear its paint", func() -> void: tell.call(await own.paint_selection({}, cursor.selection()))))
+	page.add_child(_button("Hide it", func() -> void: own.hide_selection(cursor.selection())))
+	page.add_child(_button("Isolate it (hide the rest)", func() -> void: own.isolate_selection(cursor.selection())))
+	page.add_child(_button("Show everything", func() -> void: own.show_all()))
+	return page
+
+
+func _cursor_line(cursor: Node) -> String:
+	if not cursor.enabled:
+		return "Cursor off."
+	var s: Dictionary = cursor.selection()
+	return "Picked: %s (%s)" % [str(s["label"]), str(s["how"])] if not s.is_empty() else "Nothing under the cursor: fly it to a part."
+
+
+func _build_share_page() -> Control:
+	var page := _page(10)
+	var marks := _session_part("marks")
+	if marks == null:
+		page.add_child(_hint("Sharing is for watching a live session."))
+		return page
+	page.add_child(_hint("Everyone sees these, with your name. Nothing is saved.", true))
+	page.add_child(_button("Share what the cursor picked", func() -> void: marks.share_selection()))
+	page.add_child(_button("Stop sharing", func() -> void: marks.stop_sharing()))
+	page.add_child(_button("Ping (a pulse at the cursor)", func() -> void: marks.ping()))
+	page.add_child(_button("Look here (asks the presenter to come)", func() -> void: marks.look_here()))
+	page.add_child(_mode_toggle("Raise hand", func(on: bool) -> void: marks.set_hand(on), marks.hand_up))
+	return page
+
+
+func _build_my_view_page() -> Control:
+	var page := _page(10)
+	var own := _session_part("own_view")
+	if own == null:
+		page.add_child(_hint("Your own view is for watching a live session."))
+		return page
+	var summary := _hint(own.summary(), true)
+	summary.name = "MyViewSummary"
+	page.add_child(summary)
+	own.changed.connect(func() -> void:
+		if is_instance_valid(summary):
+			summary.text = own.summary())
+	page.add_child(_mode_toggle("Pull a part out (grip takes it)", func(on: bool) -> void: own.set_pull_out(on), own.pull_out))
+	page.add_child(_button("Put pulled parts back", func() -> void: own.put_pulled_back()))
+	page.add_child(_button("Reset my view", func() -> void: own.reset_my_view(), &"ButtonAccent"))
+	page.add_child(_hint("Reset puts colours, hidden parts, pulled parts, your cut and your measurement back to exactly what the presenter shows.", true))
 	return page
 
 

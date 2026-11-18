@@ -6,6 +6,8 @@ the hub key, then plays a script the Godot test steps through by creating files 
     step 3  a REAL document change (the bolt hidden in the backend) and a doc_changed with the revision the backend answered: the observer refetches with the token
     step 4  doc_changed for a newer revision the backend has nothing new for: the observer's refetch is a 304, and a Gather everyone
     step 5  the presenter drops its socket and resumes (a new connection, the full state again)
+    step 7  (P4) the stand-in reports what the hub relayed of the headset's marks (a share, a ping, a look-here, a raised hand), then sends its own share and ping
+    step 8  (P4) the stand-in clears marks (`marks_clear`)
     step 6  End: the token is revoked at the backend and the hub told
 Writes <out> (JSON) at the start (the code, the root, the real paths) and at the end (what the backend answered). Usage:
     python session_presenter_stub.py --cad http://127.0.0.1:8001 --cad-key K --hub ws://127.0.0.1:8300 --hub-key H --out state.json"""
@@ -116,6 +118,44 @@ async def main() -> int:
         seq = 0
         await ws.send(json.dumps({"t": "presence", "head": PRESENTER_HEAD, "hands": [None, None], "laser": None, "cursor": None, "mode": "free"}))
         await publish_all()
+        # P4 marks. What the hub relays from the headset is collected from here on; the test creates .step7 once the headset has sent its marks
+        seen_marks: list = state.setdefault("marks_seen", [])
+        roster_hands: dict = state.setdefault("roster_hands", {})
+        seen_clears: list = state.setdefault("clears_seen", [])
+
+        async def read_marks() -> None:
+            try:
+                while True:
+                    raw = await ws.recv()
+                    if isinstance(raw, bytes):
+                        continue
+                    message = json.loads(raw)
+                    if message["t"] == "mark":
+                        seen_marks.append(message)
+                    elif message["t"] == "mark_clear":
+                        seen_clears.append(message)
+                    elif message["t"] == "roster":
+                        for person in message["participants"]:
+                            roster_hands[str(person["id"])] = {"name": person["name"], "hand": person["hand"]}
+                    elif message["t"] == "ping":
+                        await ws.send(json.dumps({"t": "pong", "n": message.get("n")}))
+            except Exception:
+                return
+
+        marks_reader = asyncio.create_task(read_marks())
+        assert await wait_for_file(args.out + ".step7"), "step7 never came"
+        await asyncio.sleep(0.3)
+        state["marks_reported_at"] = time.time()
+        share_path = next((p for p in paths if p and p != bolt_path), "")
+        await ws.send(json.dumps({"t": "mark", "id": "share", "kind": "share", "target": {"path": share_path}, "ttl_s": 0}))
+        await ws.send(json.dumps({"t": "mark", "id": "p1", "kind": "ping", "target": {"point": [10.0, 0.0, 5.0]}, "ttl_s": 3}))
+        state["presenter_share_path"] = share_path
+        write_json(args.out, state)
+        # step 8: the presenter clears marks
+        assert await wait_for_file(args.out + ".step8"), "step8 never came"
+        await ws.send(json.dumps({"t": "marks_clear"}))
+        write_json(args.out, state)
+        marks_reader.cancel()
         # step 6: end
         assert await wait_for_file(args.out + ".step6"), "step6 never came"
         await ws.send(json.dumps({"t": "end"}))

@@ -3,7 +3,9 @@ extends SceneTree
 ## a PYTHON presenter (tests/e2e/session_presenter_stub.py, started by this test) builds a small assembly in the real backend, mints a real view token and hosts on the real hub. The real
 ## main.tscn, with NO server of its own, joins by the code through the real WebSocketPeer and shows the model fetched from the real backend with the token only. The Python presenter then plays a
 ## script the test steps through (files, no timing): the place, section, hidden parts and status of the snapshot, a part moving, a part hidden, a REAL document change (a refetch of the changed glb),
-## a doc_changed for a revision with nothing new (a real 304), the presenter dropping its socket and resuming, and End (the token revoked).
+## a doc_changed for a revision with nothing new (a real 304), the presenter dropping its socket and resuming, then P4's marks (the headset shares what its drone cursor picked, pings, asks the presenter
+## to look and raises a hand, all through the real hub: the Python presenter reports what it was relayed; it sends its own share and ping and then clears marks, which the headset draws and drops),
+## and End (the token revoked).
 ## Run by hand: as e2e_session_presenter.gd, and DIDSA_NO_LANDING=1; secrets.cfg is read only for the backend's address and key, which the PYTHON side uses.
 ## NOT covered: a Cloudflare tunnel, a Quest, more than one observer, voice.
 
@@ -77,7 +79,7 @@ func _initialize() -> void:
 	main.session.allow_loopback = true
 	_check(not main.has_backend() and main.api_key == "" and main.backend_url == "", "the headset app has no server of its own")
 	var out := ProjectSettings.globalize_path("user://e2e_session_observer_state.json")
-	for suffix in ["", ".step1", ".step2", ".step3", ".step4", ".step5", ".step6"]:
+	for suffix in ["", ".step1", ".step2", ".step3", ".step4", ".step5", ".step6", ".step7", ".step8"]:
 		DirAccess.remove_absolute(out + suffix)
 	var stub := ProjectSettings.globalize_path("res://tests/e2e/session_presenter_stub.py")
 	var pid := OS.create_process(python, [stub, "--cad", cad_url, "--cad-key", cad_key, "--hub", hub_url, "--hub-key", hub_key, "--out", out])
@@ -164,6 +166,39 @@ func _initialize() -> void:
 	_check(is_equal_approx(main.assembly_root.transform.basis.get_scale().x, 0.002) and main._section_tool.active, "...and its state (place, section) was sent again and is still applied")
 	var sent_head: Array = main.session.presence.build()["head"]
 	await _wait(1.3)
+	# --- P4: marks through the real hub
+	var marks: Node3D = main.session.marks
+	var cursor: Node3D = main.session.cursor
+	var me: int = int(main.session.client.me["id"])
+	var target_node: Node3D = main.session_world_parts()[0]
+	var centre: Vector3 = (target_node.global_transform * target_node.get_aabb()).get_center()
+	cursor.aim = func() -> Dictionary: return {"origin": centre + Vector3(0.0, 0.0, 0.3), "direction": Vector3(0, 0, -1)}
+	cursor.stick = func() -> Vector2: return Vector2.ZERO
+	cursor.distance = 0.3
+	cursor.set_enabled(true)
+	var picked: bool = await _wait_for(func() -> bool: return not cursor.selection().is_empty(), 10000)
+	var picked_target: Dictionary = cursor.selection().get("target", {})
+	_check(picked and picked_target.has("path"), "the drone cursor picked a part of the real model (%s)" % str(picked_target))
+	_check(marks.share_selection() and marks.ping() and marks.look_here() and marks.set_hand(true), "Share, Ping, Look here and Raise hand were sent")
+	await _wait(1.5)
+	_step(out, 7)
+	await _wait_for(func() -> bool: return _state(out).has("presenter_share_path"), 30000)
+	state = _state(out)
+	var seen_marks: Array = state.get("marks_seen", [])
+	var by_kind := {}
+	for m in seen_marks:
+		if int(m.get("from", 0)) == me:
+			by_kind[str(m["kind"])] = m
+	_check(by_kind.has("share") and by_kind.has("ping") and by_kind.has("look_here") and by_kind["share"]["target"] == picked_target and not by_kind["share"].has("seq"), "the Python presenter was relayed the headset's share (the same target), ping and look-here, none of them state (no seq)")
+	_check(str(by_kind["share"]["colour"]) == str(main.session.client.me["colour"]) and float(by_kind["ping"]["ttl_s"]) == 3.0 and float(by_kind["look_here"]["ttl_s"]) == 10.0 and by_kind["ping"]["target"].has("point"), "...in the colour the real hub gave the headset, with a ping's point and the times (3 s, 10 s)")
+	_check(bool(state.get("roster_hands", {}).get(str(me), {}).get("hand", false)), "the real hub's roster told the presenter the headset's hand is up")
+	var presenter_mark: bool = await _wait_for(func() -> bool: return not marks.shared_by(presenter_id).is_empty() and not marks.marks_of("ping").filter(func(k: Dictionary) -> bool: return int(k["from"]) == presenter_id).is_empty(), 15000)
+	marks.refresh()
+	var theirs: Dictionary = marks.shared_by(presenter_id)
+	_check(presenter_mark and _part(str(state["presenter_share_path"])) != null and theirs["visuals"].get("brackets") != null and theirs["name"] == "Python presenter", "the presenter's share and ping, sent through the real hub, are drawn here (brackets round the named part, their name)")
+	_step(out, 8)
+	await _wait_for(func() -> bool: return marks.marks.is_empty(), 15000)
+	_check(marks.marks.is_empty() and main.status_text.contains("cleared the marks"), "the presenter's `marks_clear` through the real hub cleared every mark here, the headset's own included")
 	# --- end
 	var ended_text: Array = []
 	main.session.ended_for_me.connect(func(t: String) -> void: ended_text.append(t))

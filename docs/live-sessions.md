@@ -1,14 +1,15 @@
-# Live sessions: Host Session and Join Session (P2a and P2b)
+# Live sessions: Host Session and Join Session (P2a, P2b) and observer tools (P4)
 
-Phase P2 of DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`; the protocol is DIDSA-CAD `docs/live-sessions-scope.md` (decisions LS-1 to LS-13), the hub is DIDSA-CAD
+Phases P2 and P4 of DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`; the protocol is DIDSA-CAD `docs/live-sessions-scope.md` (decisions LS-1 to LS-13), the hub is DIDSA-CAD
 `session-hub/`. **Built and tested headless and against a real backend and a real hub; nothing here has been run on a headset or a phone.** What is verified and what is not is listed in the
-plan's "P2 results" and at the foot of this page. This is **P2a (sessions working end to end)** and **P2b (people: avatars, Go to presenter, Follow presenter, Gather everyone)**.
+plan's "P2 results", "P4 results" and at the foot of this page. This is **P2a (sessions working end to end)**, **P2b (people: avatars, Go to presenter, Follow presenter, Gather everyone)** and
+**P4 (observer tools: a drone cursor, own-view edits, Share / Ping / Look here / Raise hand, Reset my view)**.
 
 ## What it does
 
 One person (the **presenter**, a Quest or the PCVR desktop preview) works exactly as before and presses **Host Session** on the landing's monolith. Up to six people (**observers**) press
 **Join Session**, type or scan a six-character code, and see what the presenter shows: the model, every part as the presenter moves it, hidden parts, the cut, where the model stands and how
-big it is, and a line saying what the presenter is doing. Observers cannot change anything.
+big it is, and a line saying what the presenter is doing. Observers cannot change the model: what they can do is look at it their own way and point things out (the section "Observer tools (P4)" below).
 
 ```
 presenter ── REST + CAD key ──> CAD backend <── glb + read-only view token ── observer
@@ -30,6 +31,7 @@ ends with the session). A demo model shipped in the APK is shared by its path in
 | `session_presence.gd`, `session_avatars.gd`, `session_navigation.gd`, `comfort_vignette.gd` | P2b: what this person sends (head, hands, laser, in model space, 15 Hz), the others drawn (head, two controllers, laser, name tag, one colour each, one interval behind), Go to / Follow / Gather and the comfort vignette |
 | `qr_encoder.gd` | the join QR code (the headset had a reader and nothing that made one); `tools/qr_roundtrip/` checks it with an independent decoder |
 | `document_revision.gd`, `session_http.gd` | the backend's `X-Document-Revision`; the few HTTP calls a session makes (fakeable) |
+| `session_cursor.gd`, `session_own_view.gd`, `session_marks.gd` | P4: the drone cursor (what it touches or points at, the level, the pose in presence's `cursor`); an observer's own-view layer and Reset my view; Share, Ping, Look here, Raise hand and Clear marks |
 | `main.gd` (block "Live sessions") | the hooks: `session_doc_changed`, `session_model_changed`, `apply_session_role`, `session_show_*`, `session_apply_*`, `observer_blocked` |
 | `landing/launcher_window.gd`, `landing_monolith.gd` | the Host, Join and Session pages, the rows, the scanner reading join codes, the Servers page's Hub form |
 
@@ -55,10 +57,11 @@ arrives, then the close reason, then the close code (**4003** removed, **4000** 
 
 ## What an observer cannot do
 
-Role gating (`main.apply_session_role`): while watching, the hands do not grab, select or use tools; the whole-model move and scale is off (the presenter's place is shared, LS-6); the tool wheel is
-off; the wrist tablet shows only Settings, Home, Calculator and Images; the design table closes; no backend is configured for any tool (the app's own server is not used and `has_backend()` is
-false); Open, New, Save, Add, server projects and switching server are refused with a line saying why; the landing's file, server and model rows are off and the pill says whose session it is. Leaving
-or the end of the session puts all of it back and puts the shared model away. Own-view tools (colour, hide, section, measure) are P4.
+Role gating (`main.apply_session_role`): while watching, the hands do not grab, select or use tools (`view_only`, with the one narrow exception for the own-view tools below: the controller's
+`own_view_input`); the whole-model move and scale is off (the presenter's place is shared, LS-6); the tool wheel is off; the wrist tablet shows only View and Inspect (the own-view tools, without
+Scale and Navigate), Settings, Home, Calculator and Images; the design table closes; no backend is configured for any tool (the app's own server is not used and `has_backend()` is false); Open, New,
+Save, Add, server projects and switching server are refused with a line saying why; the landing's file, server and model rows are off and the pill says whose session it is. Leaving or the end of the
+session puts all of it back and puts the shared model away.
 
 ## Two-device steps (to check it by hand)
 
@@ -133,7 +136,64 @@ out and 28 degrees apart, looking at you, with the same pulse; they cannot refus
 **Whether it is comfortable** (the vignette's strength, 3 m/s, 70 degrees a second, the 0.9 m offset, the 1.4 m arc) is the owner's to judge: nothing here has been on a headset. Please write down what feels wrong and
 at what speed. The vignette's shader renders correctly in a software render (`tests/session_vignette_render.gd`) but has not been seen in two eyes.
 
+## Observer tools (P4)
+
+What an observer can now do, and what nothing here ever does: **nothing in this section changes the presenter's state, the document, or any backend.** An observer's own view is its own; the only
+things an observer sends the hub are presence (now with its cursor), marks (`mark` / `mark_clear`) and a raised hand (`hand`). No protocol change: the messages are the scope's (4.4, 4.5).
+
+On the wrist tablet an observer's **View** hub has **Cursor**, **Share** and **My view** (new, observers only; a presenter never sees them) beside Visibility, Hide tool, Display, Appearance and
+Environment; **Inspect** has Measure and Sections. Scale and Navigate are not offered (the model's place and size are the presenter's, LS-6).
+
+**Drone cursor** (View > Cursor). A small marker in your colour with your name, flown along your right laser (`distance` metres out). The right stick, up and down, lets it out and in (that stick is the
+cursor's while it is on, so there is no snap turn or teleport meanwhile); it passes through surfaces. It picks, in this order: a surface within 4 cm of it (touching), a part whose bounds hold it
+(inside), the first surface beyond it along your aim (pointing). A **level** is chosen with the paint breadcrumb's levels: Face, Body, Part, then each sub-assembly the part sits in; **A** takes the pick one
+level wider, **B** one narrower (or the Wider / Narrower buttons). Everyone sees your cursor with your name (it travels in presence's `cursor` field). What it has picked is what Share shows and what the
+cursor page's buttons act on.
+
+**Own view** (nothing is sent, nothing is saved; all of it is undone by Reset my view):
+
+| Edit | How, and how it never reaches anyone |
+|---|---|
+| Colour, see-through | The cursor page's *Paint it with the Appearance brush* / *Make it see-through* / *Clear its paint* act on the picked level; or the Appearance tool (View > Appearance) with the laser: a click paints the body, a hold opens the breadcrumb. It is the Appearance tool in `local_only` mode: the sandbox's temporary layer for good (records by path, never sent), over a model built from the glb's own paths, and only parts the paint is on are restyled (the others keep the glb's materials). It survives a refetch of the presenter's model. |
+| Hide, isolate | The cursor page's *Hide it*, *Isolate it*, *Show everything*; or the Visibility page; or the Hide tool (trigger). The presenter's hide list is applied to you as **changes** (a part you hid stays hidden until the presenter shows that very part, or Reset). |
+| Cut | Inspect > Sections: your own plane, the grip moves it. While your own cut is on, the presenter's is held back (kept, not applied); Reset gives you theirs. |
+| Measure | Inspect > Measure in `local_only` mode: pick two spots with the laser; the distance and the offset along each axis are worked out here in model mm. There is no backend, so no edge, circle or face measures. |
+| Pull a part out | My view > *Pull a part out*: the grip takes the part the hand is in (nothing else; no laser grab, no sub-assembly choice) and it stays where you leave it, on your screen only. The presenter's pose for that part is **kept but not applied** until Reset / *Put pulled parts back*. It uses the Relax sandbox's hand grab with no backend behind it; it does not use the sandbox's own snapshot and glide home, because those would put back what the presenter moved meanwhile. |
+
+**Share (D7)** (View > Share): *Share what the cursor picked* shows the pick to everyone as brackets with your name, in your hub colour, until *Stop sharing*, the presenter's *Clear marks*, or you leave (the hub keeps it
+in the snapshot so a late joiner sees it); one live share each. *Ping* is a pulse at the cursor (or where the right laser ends), 3 s. *Look here* is an arrow with your name at that spot, 10 s, and says to the
+presenter "Name asks you to look here." (Settings > Session > *Go to the spot someone asked you to look at* puts the presenter 1 m short of it, facing it). *Raise hand* puts "(hand up)" on your name tag
+and tells the presenter in a line. All of these are `client.send` messages: no `seq`, never state, never written anywhere. A mark names a part by the glb's `instance_path`, the same key the poses use (a face or
+body pick outlines the whole part). **Clear marks** is the presenter's (Settings > Session); an observer's `marks_clear` is dropped by the hub.
+
+**Reset my view** (My view, and Settings > Session): colours and see-through, hidden and isolated parts, pulled parts, your own cut and your measurement go back to exactly what the presenter shows now.
+
+### Two-device steps for P4 (to check it by hand)
+
+You need the setup in "Two-device steps" above (a presenter on one device, an observer on the other; the model on show on both). Please write down what is awkward, not only what fails.
+
+1. **Cursor.** Observer: wrist tablet > View > **Cursor**, switch **Drone cursor** on. A small marker in your colour with your name appears at the end of your right laser. Presenter: you should see it too, with the name.
+   Push the right stick up and down: the marker goes out and in. Aim at a part (the marker rests on it): the cursor page says *Picked: Part · <name> (touching)*. Press **A**: *Sub-assembly...* or the part's
+   body; **B** goes back. Fly it inside a part: *(inside)*. Switch the cursor off: the marker goes from both views and the right stick turns and teleports you again.
+2. **Colour and see-through.** Pick a part with the cursor, press *Paint it with the Appearance brush* (set a colour first in View > Appearance), then *Make it see-through*. Only your view changes: ask the presenter
+   to confirm their part is untouched. Press *Clear its paint*.
+3. **Hide, isolate.** *Hide it*, then *Isolate it*, then *Show everything*. Then ask the presenter to hide another part: it goes for you too, and the part you hid stays hidden.
+4. **Cut.** Inspect > Sections: grip the plane. The presenter's cut (if any) is held back. Reset my view: you see theirs.
+5. **Measure.** Inspect > Measure: trigger on two spots. The tablet shows Distance and the three offsets; nothing is sent (the presenter sees no change).
+6. **Pull a part out.** View > My view > **Pull a part out**, put a hand in a part and grip, move, let go: it stays. The presenter moves that part: yours does not follow. **Put pulled parts back**: just those go back.
+7. **Share.** Pick a part, View > Share > **Share what the cursor picked**: the presenter (and a third device) see brackets round it with your name, in your colour. Share something else: it replaces the first.
+   *Stop sharing* clears it. The presenter: Settings > Session > **Clear marks** clears every mark; an observer has no such button.
+8. **Ping.** Share page > **Ping**: a pulse with your name at the cursor for 3 s, on every device, wherever the model is placed or scaled for them.
+9. **Look here.** Share page > **Look here**: an arrow with your name for 10 s. The presenter's status line says "Name asks you to look here."; presenter Settings > Session > *Go to the spot someone asked you to look at*.
+10. **Raise hand.** Share page > **Raise hand**: your name tag on the other devices says "(hand up)" and the presenter's line says "Name raised a hand."; switch it off: both go.
+11. **Reset my view.** After a few of the above: My view > **Reset my view** (or Settings > Session). The page says "Your view is the presenter's." and the model looks as the presenter's does.
+12. **Leave** and **join again**: a share the presenter or another observer still has up is shown at once.
+
+**What to write down if something is wrong:** which step; what the cursor page said; `adb logcat | grep "DIDSA VR"`. **Not verified:** how any of this feels (the cursor's reach, the stick's speed `FLY_SPEED` 1.5 m/s, the 4 cm
+touch radius, the A / B level keys, whether the right stick should be the cursor's), the marks' size and legibility, and that a Quest's right stick and A / B buttons reach the code the way the headless tests assume.
+
 ## Not built
 
-Voice (P3). Observer tools and marks (P4). The phone build (P5). Sandbox paint, scene looks, Assembly Rooms and the sketch are not mirrored (LS-4, LS-5): the observer sees the world assembly and a status line.
+Voice (P3). The phone build (P5). A face-level or body-level mark outlines the whole part, not the face. An observer's measure cannot measure an edge, a circle or a face's area (no backend).
+A phone's controls for the cursor are P5. Sandbox paint, scene looks, Assembly Rooms and the sketch are not mirrored (LS-4, LS-5): the observer sees the world assembly and a status line.
 A persistent in-world indicator for the presenter while hosting (the code is on the monolith, reached with Home) is not built. A phone's head orientation (gyro) is P5.

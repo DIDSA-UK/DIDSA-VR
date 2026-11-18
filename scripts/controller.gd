@@ -83,6 +83,8 @@ var drive_tool = null ## set by main.gd; the shared drive_tool.gd instance
 var paint_active := false ## the Appearance tool (tool wheel / tablet): a trigger click paints the body under the laser, a hold opens the paint breadcrumb
 var appearance_tool = null ## set by main.gd; the shared appearance_tool.gd instance (what to paint with, where it goes)
 var view_only := false ## P2: this app is watching someone else's session (main.gd apply_session_role): no grabbing, selecting or tools with this hand; the tablet and menus still take the laser
+var own_view_input := false ## P4: with view_only, the NARROW set of input an observer keeps for their own view (the cut's handle, pulling a part out when that is on, the trigger for the Measure, Hide and Appearance tools); everything else stays off
+var own_view_ref: Node = null ## session_own_view.gd (set by session_manager.gd while this app is an observer): `pull_out` says whether a grip takes a part
 var wheel_enabled := false ## set on the RIGHT hand only (main.gd): trigger + grip pressed within wheel_window_ms of each other open the tool wheel instead of grabbing / selecting
 var wheel_window_ms := 250 ## how close together the two presses must be to count as the wheel chord
 var section_tool = null ## set by main.gd; a shared section_tool.gd instance — GRIP grabs its plane gizmo instead of a part when in reach (see that script's own docstring for why this isn't just another grabbable_parts member)
@@ -314,7 +316,7 @@ func is_manipulating() -> bool:
 	## Lets locomotion.gd know this hand's thumbstick is busy rotating a
 	## selected part (or the part on the design table) right now, so it doesn't
 	## also drive movement/turning.
-	return selected_node != null or _table_owns_input() or wheel_is_open() or (drive_tool_active and drive_tool != null and wheel_enabled and drive_tool.owns_stick())
+	return selected_node != null or _table_owns_input() or wheel_is_open() or bool(get_meta("cursor_owns_stick", false)) or (drive_tool_active and drive_tool != null and wheel_enabled and drive_tool.owns_stick())
 
 
 func set_parts_enabled(on: bool) -> void:
@@ -360,6 +362,8 @@ func cancel_for_wheel() -> void:
 
 func _on_button_pressed(action_name: String) -> void:
 	if view_only:
+		if own_view_input:
+			_on_observer_button_pressed(action_name)
 		return # (the wrist tablet and the monolith listen for the buttons themselves)
 	if wheel_is_open() or bool(get_meta("room_placing", false)):
 		return # (placing an Assembly Room: this hand's laser and trigger are the room's - room_manager.gd)
@@ -400,6 +404,42 @@ func _on_button_pressed(action_name: String) -> void:
 		elif parts_enabled and laser_select_enabled:
 			_try_select()
 			_arm_crumb()
+
+
+func _on_observer_button_pressed(action_name: String) -> void:
+	## P4: what an observer's hand does (view_only is on and own_view_input says this much is allowed). Nothing here reaches the presenter or a backend:
+	##   grip     the section plane's handle when it is in reach; otherwise, only while "Pull a part out" is on, takes the part (on screen only, like the Relax sandbox: an observer's mates tool has no backend)
+	##   trigger  the Measure, Hide or Appearance tool, whichever is on, at what the laser touches (an observer has no laser-select: the drone cursor chooses)
+	if wheel_is_open() or bool(get_meta("room_placing", false)):
+		return
+	if action_name == grab_action:
+		var pull: bool = own_view_ref != null and is_instance_valid(own_view_ref) and bool(own_view_ref.pull_out)
+		if (section_tool and section_tool.active) or pull:
+			_try_grab_observer(pull)
+	elif action_name == select_action:
+		if has_meta("ui_hover") and get_meta("ui_hover"):
+			return
+		_select_down = true
+		if measure_tool_active:
+			_try_pick_measure_entity()
+		elif hide_tool_active:
+			_try_shoot_hide()
+		elif paint_active:
+			_arm_paint()
+
+
+func _try_grab_observer(pull: bool) -> void:
+	if held_node != null:
+		return
+	if section_tool and section_tool.try_grab(self, grab_reach):
+		return # the cut's handle (the cut is the observer's own: session_own_view.gd)
+	if not pull:
+		return
+	var target := _find_grab_target()
+	if target == null:
+		return
+	_set_grab_hover(null)
+	_begin_part_hold(target) # (a grip on a part inside a sub-assembly takes just that part: the observer chooses nothing wider)
 
 
 func _on_button_released(action_name: String) -> void:

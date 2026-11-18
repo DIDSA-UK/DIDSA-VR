@@ -45,6 +45,7 @@ var settings: RefCounted = null ## app_settings.gd (recent colours, saved appear
 var mates_tool: Node = null ## for the sandbox (relaxed / sandbox_changed); null = never temporary
 var face_highlight: Node = null ## told when a part's mesh is rebuilt
 var command_stack: RefCounted = null
+var local_only := false ## P4: an observer's own view (live session): there is no backend, and paint is only ever the temporary layer below (nothing is sent, nothing is saved)
 
 ## The brush: the fields a paint sets (only these; the rest show through from below). Empty = Clear.
 var brush: Dictionary = {"colour": "#D94A3B"}
@@ -54,6 +55,7 @@ var _model: Dictionary = {"parts": {}}
 var _patterns: Dictionary = {} ## Part id -> its component pattern rows (for the Pattern (all N) row)
 var _names: Dictionary = {} ## Part id -> name
 var _loaded: Dictionary = {} ## Part id -> true once its lists are in the model
+var _local_touched: Dictionary = {} ## local_only: nodes restyled by an own paint (put back to their base look when it goes)
 var _temporary: Dictionary = {} ## scope root Part id -> [override records]: the sandbox's paint (never sent)
 var _preview: Dictionary = {} ## the row being previewed: {root, record, appearance (or CLEAR)}; empty = none
 var _busy := false
@@ -82,11 +84,15 @@ func is_saving() -> bool:
 
 
 func is_temporary() -> bool:
-	## Painting now goes into the sandbox's temporary layer (mates relaxed), not the document.
+	## Painting now goes into the sandbox's temporary layer (mates relaxed), not the document. An observer's own view (`local_only`) is that same layer for good.
+	if local_only:
+		return true
 	return mates_tool != null and (mates_tool.get("relaxed") == true or mates_tool.get("relaxed_fixed") == true) # (Relax fix too: moves and paint are temporary, V-6)
 
 
 func panel_title() -> String:
+	if local_only:
+		return "Painting · only in your view"
 	return "Painting · temporary (mates relaxed)" if is_temporary() else "Painting"
 
 
@@ -103,14 +109,105 @@ func forget() -> void:
 	_names.clear()
 	_loaded.clear()
 	_versions.clear()
+	if not local_only:
+		_temporary.clear() # (an observer's own paint is records by path, not by node: it survives the presenter's refetch and is put back on the new nodes, session_own_view.gd)
+	_preview.clear()
+
+
+func seed_local_model(nodes: Array, root: String) -> void:
+	## An observer has no backend to read the occurrence lists from, so the model the rules need (Part ids, occurrences) is built from what the glb itself says: each
+	## node's `instance_path` (a node without one, a demo's, gets a path of its own), one stand-in Part per occurrence on the way down. Each part's own Part carries the look its
+	## glb materials show now (so painting one face leaves the others as the glb painted them). The rows of the paint breadcrumb and the temporary layer then work exactly as they do
+	## for the sandbox; nothing is read from or sent to any server. Called for freshly loaded nodes only (a restyled node would be read as its own base).
+	var parts := {root: {"occurrences": {}}}
+	var index := 0
+	_local_touched.clear()
+	for node in nodes:
+		index += 1
+		if not is_instance_valid(node):
+			continue
+		if not (node as Node).has_meta("instance_path") and not (node as Node).has_meta("group_path"):
+			(node as Node).set_meta("group_path", ["n%d" % index])
+		var owner := root
+		var prefix := ""
+		for segment in path_of(node):
+			var base := Rule.base_segment(str(segment))
+			prefix = base if prefix == "" else prefix + "/" + base
+			var child := "own:" + prefix
+			var occurrences: Dictionary = parts[owner]["occurrences"]
+			if not occurrences.has(base):
+				occurrences[base] = {"part_id": child}
+			if not parts.has(child):
+				parts[child] = {"occurrences": {}}
+			owner = child
+		if node is MeshInstance3D and owner != root:
+			_seed_base_look(parts[owner], node)
+	_model = {"parts": parts}
+	_loaded[root] = true
+	world_root = root
+
+
+func _seed_base_look(leaf: Dictionary, node: MeshInstance3D) -> void:
+	## The part's own look = what its glb materials show: one look for the part, or (with face identity and more than one surface) one per face.
+	var looks := Look.surface_looks(node)
+	if looks.is_empty():
+		return
+	var first: Dictionary = looks[0]["appearance"]
+	var triangle_keys := Look.triangle_keys(node)
+	if looks.size() == 1 or triangle_keys.is_empty():
+		if not first.is_empty():
+			leaf["appearance"] = first
+		return
+	var face_appearances: Array = []
+	var seen := {}
+	var at := 0
+	for look in looks:
+		var count := int(look["triangles"])
+		for t in range(at, mini(at + count, triangle_keys.size())):
+			var key: String = triangle_keys[t]
+			if seen.has(key) or (look["appearance"] as Dictionary).is_empty():
+				continue
+			seen[key] = true
+			var parts_of_key := key.rsplit(":", true, 1)
+			face_appearances.append({"face": {"body_id": parts_of_key[0], "index": int(parts_of_key[1])}, "appearance": look["appearance"]})
+		at += count
+	leaf["face_appearances"] = face_appearances
+	if not first.is_empty():
+		leaf["appearance"] = first
+
+
+func _local_touches(node: Node, layer: Array) -> bool:
+	## Whether any temporary paint record is on this node (its path is at or under the record's), or it was restyled before and so has to be restyled back.
+	if _local_touched.has(node):
+		return true
+	var path := path_of(node)
+	for record in layer:
+		var record_path := Rule.split_path(str((record as Dictionary).get("path", "")))
+		if record_path.size() <= path.size() and path.slice(0, record_path.size()) == record_path:
+			return true
+	return false
+
+
+func temporary_count() -> int:
+	## How many temporary paint records there are (the sandbox's, or an observer's own).
+	var n := 0
+	for layer in _temporary.values():
+		n += (layer as Array).size()
+	return n
+
+
+func clear_local(nodes: Array) -> void:
+	## Reset my view: every temporary paint goes, and the parts show what the glb painted.
 	_temporary.clear()
 	_preview.clear()
+	repaint(nodes, world_root)
+	_local_touched.clear()
 
 
 func ensure_loaded(root_part_id: String) -> void:
 	## Reads every Part under `root_part_id` into the model (a coroutine; parts already read are not read again).
-	if api == null or root_part_id == "":
-		return
+	if api == null or root_part_id == "" or local_only:
+		return # (an observer's model is built from the glb, not read from a server)
 	var queue: Array = [root_part_id]
 	var seen := {}
 	while not queue.is_empty():
@@ -293,8 +390,12 @@ func repaint(nodes: Array, world_root: String) -> int:
 		var layer := layer_for(root)
 		if Rule.instance_chain(m, root, path) == null:
 			continue # not in the model (yet): keep what the glb painted
+		if local_only and not _local_touches(node, layer):
+			continue # an observer's view: only a part the own paint is on is restyled; every other part keeps its glb materials as they are
 		var whole := Rule.resolve_appearance(m, root, path, null, null, layer)
 		var by_face := Rule.resolve_faces(m, root, path, Look.faces_of(node), layer)
+		if local_only:
+			_local_touched[node] = true
 		if Look.restyle(node, by_face, whole):
 			rebuilt += 1
 			if face_highlight != null and face_highlight.has_method("invalidate"):
@@ -432,7 +533,11 @@ func apply(row: Dictionary, root: String, nodes: Array, world_root: String) -> D
 			func() -> void: _store(root, record, before, nodes, world_root),
 			func() -> void: _store(root, record, after, nodes, world_root),
 			not temporary)
-	message.emit(("%s %s (temporary: mates relaxed)." if temporary else "%s %s.") % ["Cleared" if after == null else "Painted", str(row.get("label", ""))])
+	var verb := "Cleared" if after == null else "Painted"
+	var where := ""
+	if temporary:
+		where = " (only in your view)" if local_only else " (temporary: mates relaxed)"
+	message.emit("%s %s%s." % [verb, str(row.get("label", "")), where])
 	return result
 
 

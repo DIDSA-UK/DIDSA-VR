@@ -29,6 +29,37 @@ static func colour_of(hex: String, alpha: float = 1.0) -> Color:
 	return c
 
 
+static func appearance_of(material: Material) -> Dictionary:
+	## The appearance a glb material shows (the inverse of material_for): colour, opacity, metallic, roughness, glow. {} for a material this cannot read (a clip shader).
+	if not (material is BaseMaterial3D):
+		return {}
+	var b := material as BaseMaterial3D
+	var out := {"colour": "#" + b.albedo_color.to_html(false).to_upper(), "metallic": clampf(b.metallic, 0.0, 1.0), "roughness": clampf(b.roughness, 0.0, 1.0)}
+	if b.albedo_color.a < 0.999:
+		out["opacity"] = b.albedo_color.a
+	if b.emission_enabled:
+		out["emission"] = "#" + b.emission.to_html(false).to_upper()
+		out["emission_strength"] = clampf(b.emission_energy_multiplier, 0.0, Rule.EMISSION_STRENGTH_MAX)
+	return out
+
+
+static func surface_looks(part: MeshInstance3D) -> Array:
+	## [{appearance, triangles}] for each surface of the part as it shows now (the override over everything, else each surface's own material).
+	var out: Array = []
+	if part.mesh == null:
+		return out
+	for s in part.mesh.get_surface_count():
+		var m: Material = part.material_override
+		if m == null:
+			m = part.get_surface_override_material(s)
+		if m == null:
+			m = part.mesh.surface_get_material(s)
+		var index_count: int = part.mesh.surface_get_array_index_len(s) # (counts only: no copy of the arrays, this runs for every part of a big model)
+		var count: int = index_count if index_count > 0 else part.mesh.surface_get_array_len(s)
+		out.append({"appearance": appearance_of(m) if m != null else {}, "triangles": count / 3})
+	return out
+
+
 static var _plain: StandardMaterial3D = null
 
 

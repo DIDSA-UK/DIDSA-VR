@@ -128,7 +128,7 @@ func _initialize() -> void:
 	_check(not main._two_hand.enabled, "the whole-model move and scale is off (the presenter's place is the shared place)")
 	_check(not main.has_backend() and main._mates_tool.backend_url == "" and main.design_table.api.backend_url == "" and main.room_manager.has_method("configure_backend"), "an observer has no backend: every tool is configured with none")
 	var ids: Array = main._tablet.registry.categories().map(func(c) -> String: return c.id)
-	_check(ids == ["calculator", "images", "settings", "home"] or ids.size() == 4 and ids.all(func(i: String) -> bool: return Array(main.OBSERVER_CATEGORIES).has(i)), "the wrist tablet shows only Settings, Home and the plain windows (%s)" % str(ids))
+	_check(ids.size() == 6 and ids.all(func(i: String) -> bool: return Array(main.OBSERVER_CATEGORIES).has(i)) and not ids.has("assemble") and not ids.has("files") and not ids.has("design"), "the wrist tablet shows only View and Inspect (own-view tools, P4), Settings, Home and the plain windows (%s)" % str(ids))
 	_check(not main.design_table.is_open(), "the design table is closed")
 	var save: Dictionary = await main.save_project()
 	_check(not save["ok"] and main.status_text.contains("not available while you are watching"), "Save is refused, in words")

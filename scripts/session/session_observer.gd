@@ -23,6 +23,8 @@ signal status_changed(text: String)
 var main: Node
 var client: Node
 var http: Node
+var own_view: Node ## session_own_view.gd (P4): what this person has changed in their own view, which the presenter's messages must not undo
+var remote_section_on := false ## the section tool is showing the PRESENTER's cut (a cut the tool shows with this false is this person's own)
 var active := false
 var model_source: Dictionary = {}
 var title := ""
@@ -47,6 +49,8 @@ var _queue_all := false
 var _queue_parts: Dictionary = {}
 var _queue_rev := 0
 var _hidden: Array = []
+var _presenter_hidden: Dictionary = {} ## key -> true: what the presenter's list last said (so a new list is applied as CHANGES: what this person hid or showed stays)
+var _initial: Dictionary = {} ## key -> the part's pose in the glb as loaded (where Reset puts a part the presenter never moved)
 var _section: Dictionary = {"on": false}
 var _loading := false ## a model is being fetched and put in: state that arrives meanwhile has no nodes to go to (and the load resets the place), so it is held and replayed
 var _held_messages: Array = []
@@ -54,10 +58,14 @@ var _place := Transform3D.IDENTITY ## the presenter's latest place (re-applied a
 var _have_place := false
 
 
-func start(p_main: Node, p_client: Node, p_http: Node) -> void:
+func start(p_main: Node, p_client: Node, p_http: Node, p_own_view: Node = null) -> void:
 	main = p_main
 	client = p_client
 	http = p_http
+	own_view = p_own_view
+	remote_section_on = false
+	_presenter_hidden = {}
+	_initial = {}
 	active = true
 	last_error = ""
 	_etags.clear()
@@ -83,6 +91,9 @@ func stop() -> void:
 	_tracks.clear()
 	_latest.clear()
 	_nodes.clear()
+	_initial.clear()
+	_presenter_hidden = {}
+	remote_section_on = false
 	_scene_root = null
 	model_source = {}
 	loaded_rev = 0
@@ -98,7 +109,7 @@ func _on_welcomed(_welcome: Dictionary, resumed: bool) -> void:
 	if model is Dictionary and _model_differs(model):
 		_load_from_snapshot(snapshot) # the presenter opened something else while this connection was down
 		return
-	_apply_snapshot(snapshot)
+	_apply_snapshot(snapshot, false) # (a resume: what this person changed in their own view is kept)
 	if int(snapshot.get("rev", 0) if snapshot.get("rev") != null else 0) > loaded_rev:
 		_queue_doc(int(snapshot["rev"]), [], true)
 
@@ -158,11 +169,17 @@ func _show(model: Dictionary) -> bool:
 
 func _index() -> void:
 	_nodes.clear()
+	_initial.clear()
 	_scene_root = main.session_scene_root()
 	if _scene_root == null:
 		return
+	var inverse := _scene_root.global_transform.affine_inverse()
 	for node in main.session_world_parts():
-		_nodes[Publisher.part_key(node, _scene_root)] = node
+		var key := Publisher.part_key(node, _scene_root)
+		_nodes[key] = node
+		_initial[key] = inverse * (node as Node3D).global_transform
+	if own_view != null:
+		own_view.on_model_indexed()
 
 
 func _fail(text: String) -> bool:
@@ -266,7 +283,7 @@ func _on_message(message: Dictionary) -> void:
 			_on_poses(message)
 		"visibility":
 			_hidden = message.get("hidden", [])
-			_apply_visibility()
+			_apply_visibility(false)
 		"section":
 			_section = message
 			_apply_section()
@@ -280,13 +297,13 @@ func _on_message(message: Dictionary) -> void:
 			_on_model(message)
 
 
-func _apply_snapshot(snapshot: Dictionary) -> void:
+func _apply_snapshot(snapshot: Dictionary, full: bool = true) -> void:
 	var place = snapshot.get("place")
 	if place is Dictionary:
 		_apply_place((place as Dictionary).get("xf", []))
 	var visibility = snapshot.get("visibility")
 	_hidden = (visibility as Dictionary).get("hidden", []) if visibility is Dictionary else []
-	_apply_visibility()
+	_apply_visibility(full)
 	var section = snapshot.get("section")
 	_section = section if section is Dictionary else {"on": false}
 	_apply_section()
@@ -334,6 +351,8 @@ func _set_pose(key: String, xf_array, at: float, snap: bool) -> void:
 
 
 func _place_node(node: Node3D, xf: Transform3D) -> void:
+	if own_view != null and own_view.is_pulled(node):
+		return # this person's hand has this part: the presenter's pose for it is kept (_latest) and shown again after Reset my view
 	if _scene_root != null and is_instance_valid(_scene_root):
 		node.global_transform = _scene_root.global_transform * xf
 
@@ -377,20 +396,58 @@ static func interpolated(track: Dictionary, render_at: float) -> Transform3D:
 	return Transform3D(Basis(rotation).scaled(scale_a.lerp(scale_b, t)), origin)
 
 
-func _apply_visibility() -> void:
+func _apply_visibility(full: bool = true) -> void:
+	## The presenter's hide list. Applied whole (`full`: a load, a refetch, Reset my view) or as CHANGES since the last list, so a part this person hid, isolated or showed on their own stays
+	## as they left it until the presenter changes that very part.
 	var hidden := {}
 	for key in _hidden:
 		hidden[str(key)] = true
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
-		if is_instance_valid(node):
+		if is_instance_valid(node) and (full or hidden.has(key) != _presenter_hidden.has(key)):
 			node.visible = not hidden.has(key)
+	_presenter_hidden = hidden
+
+
+func own_visibility_changes() -> int:
+	## How many parts this person shows or hides differently from the presenter.
+	var n := 0
+	for key in _nodes:
+		var node: Node3D = _nodes[key]
+		if is_instance_valid(node) and node.visible == _presenter_hidden.has(key):
+			n += 1
+	return n
+
+
+func restore_poses(nodes: Array = []) -> void:
+	## Puts parts at the presenter's pose for them (or where the file put them, if the presenter never moved one): all of them, or just `nodes`. The caller has already let go of them
+	## (session_own_view.gd forgets a part it pulled before this).
+	_tracks.clear()
+	for key in _nodes:
+		var node: Node3D = _nodes[key]
+		if is_instance_valid(node) and (nodes.is_empty() or nodes.has(node)):
+			var xf: Variant = _latest.get(key, _initial.get(key))
+			if xf != null:
+				_place_node(node, xf)
+
+
+func reset_to_presenter() -> void:
+	## Reset my view: every part hidden or shown as the presenter has it, at the presenter's pose for it (or where the file put it, if the presenter never moved it), the cut theirs.
+	_apply_visibility(true)
+	restore_poses()
+	if own_view != null and own_view.own_section_active():
+		main.session_apply_section(false, Vector3.ZERO, Vector3.UP)
+		remote_section_on = false
+	_apply_section()
 
 
 func _apply_section() -> void:
 	if _scene_root == null:
 		return
+	if own_view != null and own_view.own_section_active():
+		return # this person has a cut of their own on: the presenter's is held back (it is kept in _section) until Reset my view
 	if not bool(_section.get("on", false)):
+		remote_section_on = false
 		main.session_apply_section(false, Vector3.ZERO, Vector3.UP)
 		return
 	var point: Array = _section.get("point", [0, 0, 0])
@@ -399,6 +456,7 @@ func _apply_section() -> void:
 		return
 	var world_point := _scene_root.global_transform * (Vector3(point[0], point[1], point[2]) / _unit_mm)
 	var world_normal := (_scene_root.global_transform.basis * Vector3(normal[0], normal[1], normal[2])).normalized()
+	remote_section_on = true
 	main.session_apply_section(true, world_point, world_normal)
 
 
