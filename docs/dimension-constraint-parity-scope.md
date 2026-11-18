@@ -1,6 +1,7 @@
 # Scope: dimensions and constraints at parity with the flat app (design table)
 
-Scoping pass, 2026-11-18; the owner's decisions are recorded below (same day). Nothing here is built. The owner's goal: VR dimensions and constraints should match the flat app in **workflow,
+Scoping pass, 2026-11-18; the owner's decisions are recorded below (same day). Nothing here is built. **The sessions that build it:
+[`dimension-constraint-parity-plan.md`](dimension-constraint-parity-plan.md)** (gated on DIDSA-CAD's 2026-11-18 bug-report plan being complete and merged). The owner's goal: VR dimensions and constraints should match the flat app in **workflow,
 capability and completeness**, so that from now on the two move together. It has to work with the Quest controllers now and leave room for
 hand tracking later.
 
