@@ -185,8 +185,35 @@ func on_text(t: Transport, text: String) -> void:
 		"visibility", "section", "place", "status", "scene":
 			room["state"][kind] = _stamp(p, msg)
 			_relay(room, p, msg)
-		"gather", "marks_clear":
+		"gather":
 			_relay(room, p, msg)
+		"marks_clear":
+			var ids = msg.get("ids")
+			if ids is Array:
+				for k in room["marks"].keys():
+					if (ids as Array).has(str(room["marks"][k]["id"])) or (ids as Array).has("%d:%s" % [int(room["marks"][k]["from"]), str(room["marks"][k]["id"])]):
+						room["marks"].erase(k)
+			else:
+				room["marks"].clear()
+			_relay(room, p, msg)
+		"mark":
+			var mark_id := str(msg.get("id", "")).substr(0, 64)
+			if mark_id == "" or str(msg.get("kind", "")) not in ["share", "ping", "look_here"] or not (msg.get("target") is Dictionary):
+				return # (the real hub drops a malformed mark)
+			var body := msg.duplicate()
+			body["id"] = mark_id
+			body["colour"] = p["colour"]
+			var stamped := _stamp(p, body)
+			if str(msg["kind"]) == "share":
+				room["marks"]["%d:%s" % [id, mark_id]] = stamped # (the snapshot keeps a share until it is cleared or its sender leaves; a ping is never kept)
+			for other in _connected(room):
+				if int(other["id"]) != id:
+					other["transport"].deliver(stamped)
+		"mark_clear":
+			var own_id := str(msg.get("id", "")).substr(0, 64)
+			if room["marks"].has("%d:%s" % [id, own_id]):
+				room["marks"].erase("%d:%s" % [id, own_id])
+				_relay(room, p, {"t": "mark_clear", "id": own_id})
 		"lock":
 			room["locked"] = bool(msg.get("locked", false))
 			_relay(room, p, {"t": "lock", "locked": room["locked"]})
@@ -198,6 +225,7 @@ func on_text(t: Transport, text: String) -> void:
 					tt.deliver({"t": "error", "code": "removed", "message": "removed"})
 					_close_from_hub(tt, 4003, "removed")
 				room["participants"].erase(int(target["id"]))
+				_forget_marks(room, int(target["id"]))
 				resume_map.erase(target["resume"])
 				_broadcast(room, {"t": "left", "id": int(target["id"]), "reason": "removed"})
 		"token":
@@ -220,6 +248,7 @@ func on_text(t: Transport, text: String) -> void:
 			else:
 				_close_from_hub(t, 1000)
 				room["participants"].erase(id)
+				_forget_marks(room, id)
 				resume_map.erase(p["resume"])
 				_broadcast(room, {"t": "left", "id": id, "reason": "left"})
 		"ping":
@@ -307,7 +336,7 @@ func _host(t: Transport, msg: Dictionary) -> void:
 	_next_room += 1
 	var code := _code_for(_next_room)
 	var room := {"code": code, "backend_url": str(msg.get("backend_url", "")), "view_token": str(msg.get("view_token", "")), "view_expires_at": msg.get("view_expires_at"),
-		"locked": false, "next_id": 1, "participants": {}, "presenter_id": 0, "model": model, "rev": model.get("rev"), "poses": {}, "state": {}, "presence": {}}
+		"locked": false, "next_id": 1, "participants": {}, "presenter_id": 0, "model": model, "rev": model.get("rev"), "poses": {}, "state": {}, "presence": {}, "marks": {}}
 	rooms[code] = room
 	var p := _add(t, room, msg, "presenter")
 	room["presenter_id"] = int(p["id"])
@@ -390,7 +419,7 @@ func _snapshot(room: Dictionary) -> Dictionary:
 	var poses: Array = []
 	for path in room["poses"]:
 		poses.append({"path": path, "xf": room["poses"][path]})
-	var out := {"model": room["model"], "rev": room["rev"], "hidden_feature_ids": null, "poses": poses, "marks": [], "presence": {}}
+	var out := {"model": room["model"], "rev": room["rev"], "hidden_feature_ids": null, "poses": poses, "marks": room["marks"].values(), "presence": {}}
 	for k in STATE_KEYS:
 		out[k] = room["state"].get(k)
 	for pid in room["presence"]:
@@ -399,6 +428,12 @@ func _snapshot(room: Dictionary) -> Dictionary:
 
 
 # --- Helpers ------------------------------------------------------------------------------------------------------------------
+
+func _forget_marks(room: Dictionary, id: int) -> void:
+	for k in room["marks"].keys():
+		if int(room["marks"][k]["from"]) == id:
+			room["marks"].erase(k) # (the real hub forgets a participant's shared marks when they leave or are removed)
+
 
 func _public(p: Dictionary) -> Dictionary:
 	return {"id": p["id"], "name": p["name"], "colour": p["colour"], "role": p["role"], "device": p["device"], "hand": p["hand"], "muted": p["muted"], "talking": p["talking"],

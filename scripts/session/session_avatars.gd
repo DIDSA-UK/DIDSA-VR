@@ -69,7 +69,7 @@ func _on_presence(message: Dictionary) -> void:
 	var id := int(message.get("from", 0))
 	if id == 0 or id == int(client.me.get("id", -1)):
 		return
-	var sample := {"at": float(message.get("at", 0)), "head": message.get("head"), "hands": message.get("hands", [null, null]), "laser": message.get("laser"), "mode": str(message.get("mode", "free"))}
+	var sample := {"at": float(message.get("at", 0)), "head": message.get("head"), "hands": message.get("hands", [null, null]), "laser": message.get("laser"), "cursor": message.get("cursor"), "mode": str(message.get("mode", "free"))}
 	var track: Dictionary = _tracks.get(id, {"a": null, "b": null, "offset": 0.0, "have": false})
 	var offset_sample: float = sample["at"] - float(Time.get_ticks_msec())
 	if not bool(track["have"]) or absf(offset_sample - float(track["offset"])) > 2000.0:
@@ -136,7 +136,10 @@ static func sample_at(track: Dictionary, render_at: float) -> Dictionary:
 	var laser = b["laser"]
 	if a["laser"] != null and b["laser"] != null and Protocol.is_numbers(a["laser"], 3) and Protocol.is_numbers(b["laser"], 3):
 		laser = [lerpf(a["laser"][0], b["laser"][0], t), lerpf(a["laser"][1], b["laser"][1], t), lerpf(a["laser"][2], b["laser"][2], t)]
-	return {"at": render_at, "head": lerp_pose(a["head"], b["head"], t), "hands": hands, "laser": laser, "mode": b["mode"]}
+	var cursor = b.get("cursor")
+	if a.get("cursor") != null and cursor != null and Protocol.is_numbers(a["cursor"], 7) and Protocol.is_numbers(cursor, 7):
+		cursor = lerp_pose(a["cursor"], cursor, t)
+	return {"at": render_at, "head": lerp_pose(a["head"], b["head"], t), "hands": hands, "laser": laser, "cursor": cursor, "mode": b["mode"]}
 
 
 static func lerp_pose(a: Array, b: Array, t: float) -> Array:
@@ -170,6 +173,7 @@ func _pose_avatar(avatar: Dictionary, shown: Dictionary, frame: Transform3D, uni
 	var text := tag_text(person, str(shown["mode"]))
 	if tag.text != text:
 		tag.text = text
+	_pose_cursor(avatar, shown, frame, unit, person)
 	var hand_world: Array = []
 	for i in 2:
 		var hand = world_of(shown["hands"][i], frame, unit) if shown["hands"].size() > i else null
@@ -195,13 +199,30 @@ func _pose_avatar(avatar: Dictionary, shown: Dictionary, frame: Transform3D, uni
 
 
 static func tag_text(person: Dictionary, mode: String) -> String:
-	## The name over the head: the presenter with a star, a person riding the presenter's viewpoint with a note.
+	## The name over the head: the presenter with a star, a person riding the presenter's viewpoint with a note, a raised hand said in words (P4).
 	var text := str(person.get("name", "?"))
 	if str(person.get("role", "")) == "presenter":
 		text = "★ " + text
 	if mode == "following":
 		text += " (following)"
+	if bool(person.get("hand", false)):
+		text += " (hand up)"
 	return text
+
+
+func _pose_cursor(avatar: Dictionary, shown: Dictionary, frame: Transform3D, unit: float, person: Dictionary) -> void:
+	## P4: the drone cursor of this person, a small marker of their colour with their name, where their presence says it is (model space, through this person's view of the model).
+	## Nothing is drawn while they have none out.
+	var node: Node3D = avatar["cursor"]
+	var world = world_of(shown.get("cursor"), frame, unit)
+	node.visible = world != null
+	if world == null:
+		return
+	node.global_position = (world as Transform3D).origin
+	var label: Label3D = avatar["cursor_tag"]
+	var text := str(person.get("name", "?"))
+	if label.text != text:
+		label.text = text
 
 
 func _make(id: int, person: Dictionary) -> Dictionary:
@@ -267,7 +288,42 @@ func _make(id: int, person: Dictionary) -> Dictionary:
 	tag.double_sided = true
 	tag.text = tag_text(person, "free")
 	root.add_child(tag)
-	var avatar := {"root": root, "head": head, "left": hands[0], "right": hands[1], "laser": laser, "laser_mesh": cylinder, "tag": tag, "material": material, "colour": colour}
+	var cursor := Node3D.new() # P4: the drone cursor (a dot and a ring, a small name): drawn only while their presence carries one
+	cursor.name = "Cursor"
+	cursor.visible = false
+	root.add_child(cursor)
+	var dot := MeshInstance3D.new()
+	var dot_mesh := SphereMesh.new()
+	dot_mesh.radius = 0.014
+	dot_mesh.height = 0.028
+	dot_mesh.radial_segments = 12
+	dot_mesh.rings = 6
+	dot_mesh.material = material
+	dot.mesh = dot_mesh
+	cursor.add_child(dot)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.024
+	torus.outer_radius = 0.028
+	torus.rings = 16
+	torus.ring_segments = 6
+	torus.material = material
+	ring.mesh = torus
+	ring.rotation_degrees.x = 90.0
+	cursor.add_child(ring)
+	var cursor_tag := Label3D.new()
+	cursor_tag.name = "CursorTag"
+	cursor_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	cursor_tag.pixel_size = 0.0014
+	cursor_tag.font_size = 44
+	cursor_tag.outline_size = 10
+	cursor_tag.modulate = colour
+	cursor_tag.outline_modulate = Color(0.02, 0.03, 0.06)
+	cursor_tag.shaded = false
+	cursor_tag.no_depth_test = true
+	cursor_tag.position = Vector3(0.0, 0.05, 0.0)
+	cursor.add_child(cursor_tag)
+	var avatar := {"root": root, "head": head, "left": hands[0], "right": hands[1], "laser": laser, "laser_mesh": cylinder, "tag": tag, "material": material, "colour": colour, "cursor": cursor, "cursor_tag": cursor_tag}
 	_avatars[id] = avatar
 	return avatar
 

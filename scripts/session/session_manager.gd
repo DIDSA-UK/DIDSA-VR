@@ -19,6 +19,9 @@ const Observer := preload("res://scripts/session/session_observer.gd")
 const Presence := preload("res://scripts/session/session_presence.gd")
 const Avatars := preload("res://scripts/session/session_avatars.gd")
 const Navigation := preload("res://scripts/session/session_navigation.gd")
+const Cursor := preload("res://scripts/session/session_cursor.gd")
+const Marks := preload("res://scripts/session/session_marks.gd")
+const OwnView := preload("res://scripts/session/session_own_view.gd")
 const DocumentRevision := preload("res://scripts/session/document_revision.gd")
 const BackendSession := preload("res://scripts/backend_session.gd")
 const DemoCatalog := preload("res://scripts/landing/demo_catalog.gd")
@@ -39,6 +42,9 @@ var observer: Node
 var presence: Node ## what this person sends the others (head, hands, laser): session_presence.gd
 var avatars: Node3D ## the others, drawn: session_avatars.gd
 var navigation: Node ## Go to presenter, Follow presenter, Gather everyone: session_navigation.gd
+var cursor: Node3D ## P4: an observer's drone cursor: session_cursor.gd
+var marks: Node3D ## P4: Share, Ping, Look here, Raise hand and what others showed: session_marks.gd
+var own_view: Node ## P4: what an observer changed in their own view, and Reset my view: session_own_view.gd
 var role := ""
 var starting := false ## host_session() / join_session() is mid-flight
 var model: Dictionary = {} ## what is being shown to the session: {kind, ...} as in the hub's `host` message (with `title`)
@@ -86,6 +92,15 @@ func setup(p_main: Node) -> void:
 	navigation = Navigation.new()
 	navigation.name = "Navigation"
 	add_child(navigation)
+	cursor = Cursor.new()
+	cursor.name = "Cursor"
+	add_child(cursor)
+	marks = Marks.new()
+	marks.name = "Marks"
+	add_child(marks)
+	own_view = OwnView.new()
+	own_view.name = "OwnView"
+	add_child(own_view)
 
 
 func use_transport(factory: Callable) -> void:
@@ -340,11 +355,16 @@ func _on_welcomed(welcome: Dictionary, resumed: bool) -> void:
 	_become(new_role)
 	avatars.start(main, client)
 	navigation.start(main, client, avatars)
-	presence.start(main, client, navigation)
+	cursor.start(main, client)
+	presence.start(main, client, navigation, cursor)
+	marks.start(main, client, cursor, navigation)
 	if new_role == "presenter":
 		publisher.start(main, client, model if not model.is_empty() else hostable_model()["source"], http)
 	else:
-		observer.start(main, client, http)
+		own_view.start(main, client, observer)
+		for hand in main.session_hands():
+			hand.own_view_ref = own_view
+		observer.start(main, client, http, own_view)
 	changed.emit()
 
 
@@ -370,7 +390,12 @@ func _on_closed(kind: String, text: String) -> void:
 func _become(new_role: String) -> void:
 	role = new_role
 	if new_role == "":
+		marks.stop()
 		presence.stop()
+		cursor.stop()
+		own_view.stop()
+		for hand in main.session_hands():
+			hand.own_view_ref = null
 		navigation.stop()
 		avatars.stop()
 		join_uri = ""

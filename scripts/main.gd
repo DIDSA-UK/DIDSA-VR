@@ -2974,17 +2974,25 @@ func apply_session_role(role: String) -> void:
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
 		hand.view_only = watching
+		hand.own_view_input = watching # (P4: the narrow set of hand input an observer keeps: the own-view tools; see controller.gd _on_observer_button_pressed)
+	_appearance_tool.local_only = watching # (P4: an observer's paint is the temporary layer for good, nothing is sent: appearance_tool.gd)
+	_measure_tool.local_only = watching # (P4: client-side measure, no backend)
+	_measure_tool.mm_per_world_metre = session_mm_per_metre
 	_two_hand.enabled = not watching
 	_tool_wheel.set_enabled(_settings.wheel_enabled and not watching)
 	if watching and design_table.is_open():
 		design_table.close()
-	_tablet.registry.set_allowed(OBSERVER_CATEGORIES if watching else [])
+	_tablet.registry.set_allowed(OBSERVER_CATEGORIES if watching else [], OBSERVER_TOOLS if watching else {})
 	_apply_backend()
 	if landing != null:
 		landing.on_session_changed()
 
 
-const OBSERVER_CATEGORIES := ["settings", "home", "calculator", "images"] ## what the wrist tablet offers an observer (view tools and own-view tools come in P4)
+const OBSERVER_CATEGORIES := ["view", "inspect", "settings", "home", "calculator", "images"] ## what the wrist tablet offers an observer: the own-view tools (P4) and the plain windows
+const OBSERVER_TOOLS := { ## within a category listed here an observer sees only these tools: the View hub without Scale and Navigate (the model's place and size are the presenter's, LS-6), plus P4's own
+	"view": ["cursor", "share", "my_view", "visibility", "shoot_hide", "display", "paint", "environment"],
+	"inspect": ["measure", "sections"],
+}
 
 
 func session_current_source() -> Dictionary:
@@ -3033,6 +3041,30 @@ func session_hidden_exclusions() -> Array:
 
 func session_section_plane() -> Dictionary:
 	return _section_tool.world_plane()
+
+
+func session_appearance_tool() -> Node:
+	return _appearance_tool
+
+
+func session_section_tool() -> Node:
+	return _section_tool
+
+
+func session_measure_tool() -> Node:
+	return _measure_tool
+
+
+func session_level_rows(node: Node, face_index: int) -> Array:
+	## The paint breadcrumb's levels for a part (Face, Body, Part, each sub-assembly, Whole assembly), for the drone cursor: client-side only, from the glb's own paths.
+	return _appearance_tool.rows_for(node, face_index, session_world_parts(), _appearance_tool.world_root)
+
+
+func session_mm_per_metre() -> float:
+	## Millimetres of the model for each metre of this person's world (the model may be scaled), for a client-side measurement.
+	var root := session_scene_root()
+	var scale := root.global_transform.basis.get_scale().x if root != null else 1.0
+	return session_unit_mm() / maxf(scale, 1e-9)
 
 
 func session_activity() -> Dictionary:

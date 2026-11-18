@@ -374,7 +374,7 @@ func rebuild() -> void:
 	_home_grid.columns = clampi(cats.size(), 1, registry.GRID_COLUMNS)
 	for cat in cats:
 		_home_grid.add_child(_make_tile(cat.label, cat.subtitle, cat.icon, cat.accent, _on_home_tile.bind(cat.id), cat.id))
-		for t in cat.tools:
+		for t in registry.tools_of(cat):
 			var page: Control = t.build.call() if t.build.is_valid() else Control.new()
 			page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			page.size_flags_vertical = Control.SIZE_SHRINK_BEGIN # a BoxContainer would otherwise balloon the one visible page to the whole pane (the old tablet's "buttons below the clip" bug)
@@ -403,8 +403,9 @@ func _rebuild_hub(cat) -> void:
 	for child in _hub_grid.get_children():
 		_hub_grid.remove_child(child); child.queue_free()
 	_tiles = _tiles.filter(func(e) -> bool: return e["category_id"] != "") # the previous hub's tiles go; home tiles carry a category id
-	_hub_grid.columns = clampi(ceili(cat.tools.size() / 2.0), 3, 5)
-	for t in cat.tools:
+	var shown: Array = registry.tools_of(cat)
+	_hub_grid.columns = clampi(ceili(shown.size() / 2.0), 3, 5)
+	for t in shown:
 		_hub_grid.add_child(_make_tile(t.label, t.caption, t.icon, cat.accent, _on_hub_tile.bind(t.id), "", t.id))
 
 
@@ -420,7 +421,7 @@ func _rebuild_strip() -> void:
 	var cat = registry.category(selected_category_id)
 	if cat == null:
 		return
-	for t in cat.tools:
+	for t in registry.tools_of(cat):
 		var b := Button.new()
 		b.text = t.label
 		b.icon = UiIcons.texture(t.icon, 28)
@@ -584,8 +585,9 @@ func select_category(category_id: String) -> void:
 		return
 	hub_open = false
 	var pick: String = _last_tool.get(category_id, "")
-	if registry.tool_def(pick) == null and not cat.tools.is_empty():
-		pick = cat.tools[0].id
+	var offered: Array = registry.tools_of(cat)
+	if (registry.tool_def(pick) == null or not offered.any(func(t) -> bool: return t.id == pick)) and not offered.is_empty():
+		pick = offered[0].id
 	_show_tool(pick)
 
 
@@ -668,7 +670,7 @@ func _apply_view() -> void:
 		_cat_title.add_theme_color_override("font_color", cat.accent)
 	for id in _pages:
 		(_pages[id] as Control).visible = _tool_view.visible and id == selected_tool_id
-	_strip_scroll.visible = _tool_view.visible and cat != null and not cat.hub and cat.tools.size() > 1
+	_strip_scroll.visible = _tool_view.visible and cat != null and not cat.hub and registry.tools_of(cat).size() > 1
 	_settings_button.set_pressed_no_signal(selected_category_id == SETTINGS_CATEGORY)
 	_refresh_strip_visuals()
 	selection_changed.emit()

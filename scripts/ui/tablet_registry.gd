@@ -58,6 +58,7 @@ class ToolDef extends RefCounted:
 	var list_empty: String = "Nothing here yet." ## side-panel text when list_provider returns no rows
 	var row_select: Callable = Callable() ## (row_id: String) -> void: a selectable row of the list was tapped ("" = the selection was cleared)
 	var group: String = "" ## id of a CategoryDef group the design table's deck draws this tool under ("" = ungrouped)
+	var observer_only := false ## P4: an observer's own-view tool (the drone cursor, Share, My view): left out of a category's tools unless the narrowing names it (a presenter never sees it)
 
 	func has_list() -> bool:
 		return list_provider.is_valid()
@@ -84,6 +85,7 @@ class CategoryDef extends RefCounted:
 
 var _categories: Array[CategoryDef] = []
 var _allowed: Array = [] ## category ids the tablet shows; empty = all (an observer in a live session sees only a few: main.gd apply_session_role)
+var _allowed_tools: Dictionary = {} ## category id -> the tool ids it shows (a category not listed shows all its tools); empty = no narrowing
 var _tools := {} ## tool id -> ToolDef (ids are unique across the whole registry)
 
 
@@ -143,16 +145,32 @@ func add_tool(category_id: String, id: String, label: String, icon: String, buil
 	def.list_empty = str(options.get("list_empty", "Nothing here yet."))
 	def.row_select = options.get("row_select", Callable())
 	def.group = str(options.get("group", ""))
+	def.observer_only = bool(options.get("observer_only", false))
 	cat.tools.append(def)
 	_tools[id] = def
 	changed.emit()
 	return def
 
 
-func set_allowed(ids: Array) -> void:
-	## Show only these categories on the home grid ([] = all). Tools and categories stay registered: this is a view, so the tablet cannot reach a hidden one.
+func set_allowed(ids: Array, tools_by_category: Dictionary = {}) -> void:
+	## Show only these categories on the home grid ([] = all). Tools and categories stay registered: this is a view, so the tablet cannot reach a hidden one. `tools_by_category`
+	## narrows what a listed category offers (an observer's View hub has no Scale or Navigate).
 	_allowed = ids.duplicate()
+	_allowed_tools = tools_by_category.duplicate(true)
 	changed.emit()
+
+
+func tools_of(cat: CategoryDef) -> Array[ToolDef]:
+	## The tools of a category as the tablet offers them: all of them, bar the observer-only ones, or just the ones the narrowing names.
+	var shown: Array[ToolDef] = []
+	var names = _allowed_tools.get(cat.id)
+	for t in cat.tools:
+		if names is Array:
+			if (names as Array).has(t.id):
+				shown.append(t)
+		elif not t.observer_only:
+			shown.append(t)
+	return shown
 
 
 func categories() -> Array[CategoryDef]:

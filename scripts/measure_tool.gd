@@ -37,6 +37,8 @@ var backend_url := ""
 var api_key := ""
 
 var result: Dictionary = {} ## last MeasurementResultSchema response, or {} (no result / cleared / failed)
+var local_only := false ## P4: an observer's own view (live session): no backend, so a measurement is the straight line between the two spots the laser touched, worked out here
+var mm_per_world_metre: Callable = func() -> float: return 1000.0 ## local_only: millimetres of the model per metre of the world (the model may be scaled; main.gd session_world_to_mm)
 
 var _picks: Array[Dictionary] = []
 var _status := ""
@@ -134,6 +136,9 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}, hit_point:
 		return
 	if _picks.size() >= 2:
 		clear_picks()
+	if local_only:
+		_try_pick_local(part, face_index, hit_point)
+		return
 	var occ_ref := MeshIdentity.occurrence_ref_for(part)
 	var subshape := MeshIdentity.subshape_ref_for_hit(part, face_index)
 	var kind := "face"
@@ -159,6 +164,33 @@ func try_pick(part: Node3D, face_index: int, entity: Dictionary = {}, hit_point:
 	_status = ""
 	picks_changed.emit()
 	await _run_measure()
+
+
+func _try_pick_local(part: Node3D, face_index: int, hit_point: Vector3) -> void:
+	## P4, an observer's own view: the pick is where the laser touched. No identity is needed (there is no server to name a face to), only the spot; the second pick gives the
+	## straight-line distance and the offset along each world axis, in millimetres of the model. Nothing is sent anywhere.
+	if not hit_point.is_finite() or not is_instance_valid(part) or not part.is_inside_tree():
+		_status = "Point at the model and pull the trigger."
+		picks_changed.emit()
+		return
+	_picks.append({"part": part, "face_index": face_index, "entity": {}, "label": str(part.name), "hit_local": part.to_local(hit_point)})
+	_status = ""
+	picks_changed.emit()
+	_run_measure_local()
+
+
+func _run_measure_local() -> void:
+	var points := picked_points()
+	if points.size() < 2:
+		result = {}
+		result_changed.emit()
+		return
+	var a: Vector3 = points[0]
+	var b: Vector3 = points[1]
+	var k := float(mm_per_world_metre.call())
+	var delta := (b - a) * k
+	result = {"distance": delta.length(), "delta": [delta.x, delta.y, delta.z], "local": true}
+	result_changed.emit()
 
 
 func _validate_pick(occ_ref: Dictionary, subshape: Dictionary) -> String:

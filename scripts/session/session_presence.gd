@@ -14,6 +14,7 @@ const TURN_DEG := 1.0
 var main: Node
 var client: Node
 var navigation: Node ## session_navigation.gd: its `following` says the mode
+var cursor: Node ## session_cursor.gd (P4): the drone cursor's pose goes in `cursor`; null while it is off
 var sent_count := 0
 var hand_tracked: Callable = func(hand: Node) -> bool: return hand.get_has_tracking_data() ## tests replace it (there is no tracking headless)
 var last_message: Dictionary = {}
@@ -23,10 +24,11 @@ var _since_send := 0.0
 var _last_pose: Array = [] ## the head and hands as last sent, to see whether anything moved
 
 
-func start(p_main: Node, p_client: Node, p_navigation: Node = null) -> void:
+func start(p_main: Node, p_client: Node, p_navigation: Node = null, p_cursor: Node = null) -> void:
 	main = p_main
 	client = p_client
 	navigation = p_navigation
+	cursor = p_cursor
 	_active = true
 	_since_send = IDLE_S
 	_last_pose = []
@@ -74,7 +76,9 @@ func build() -> Dictionary:
 			var m: Vector3 = (inverse * (tip as Vector3)) * unit
 			laser = [snappedf(m.x, Protocol.POSITION_STEP), snappedf(m.y, Protocol.POSITION_STEP), snappedf(m.z, Protocol.POSITION_STEP)]
 	var mode := "following" if navigation != null and navigation.following else "free"
-	return {"t": "presence", "head": pose_of(camera.global_transform, inverse, unit), "hands": hands, "laser": laser, "cursor": null, "mode": mode}
+	var drone = cursor.pose() if cursor != null and cursor.has_method("pose") else null
+	return {"t": "presence", "head": pose_of(camera.global_transform, inverse, unit), "hands": hands, "laser": laser, "cursor": drone, "mode": mode}
+
 
 
 static func pose_of(world: Transform3D, inverse_model: Transform3D, unit_mm: float) -> Array:
@@ -107,4 +111,5 @@ static func moved(a: Array, b: Array) -> bool:
 static func _poses_of(message: Dictionary) -> Array:
 	var out: Array = [message["head"]]
 	out.append_array(message["hands"])
+	out.append(message.get("cursor")) # (a cursor appearing, flying or going away counts as movement)
 	return out
