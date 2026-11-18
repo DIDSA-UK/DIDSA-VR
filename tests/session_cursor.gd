@@ -119,6 +119,11 @@ func _initialize() -> void:
 	await _aim(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
 	_check(cursor.selection().is_empty(), "a hidden part is never picked")
 	bolt.visible = true
+	# --- the root's own content has no path of its own: a Part level that cannot be coloured by itself, and a wire target with an empty path
+	var mount := _part("")
+	await _aim(Vector3(0.0, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
+	var root_pick: Dictionary = cursor.selection()
+	_check(root_pick.get("node") == mount and root_pick["row"]["id"] == "part" and root_pick["row"]["record"] == null and root_pick["target"] == {"path": ""}, "the root's own content: a Part level with no record (it cannot be coloured by itself), target path \"\" (%s)" % str(root_pick.get("target")))
 	# --- the levels
 	var face_ids: Array = []
 	var body_ids: Array = []

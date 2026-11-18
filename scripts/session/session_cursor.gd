@@ -297,7 +297,7 @@ func selection() -> Dictionary:
 	if not is_instance_valid(part):
 		return {}
 	var scene_root: Node3D = main.session_scene_root()
-	var record: Dictionary = row.get("record", {})
+	var record: Dictionary = row["record"] if row.get("record") is Dictionary else {} # (null for a part that cannot be coloured by itself)
 	var id := str(row["id"])
 	var target := {"path": Publisher.part_key(part, scene_root)}
 	if id.begins_with("sub_"):

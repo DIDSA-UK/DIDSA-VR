@@ -79,7 +79,7 @@ async def main() -> int:
                 if not sent_marks and marks_go.exists():
                     # P4: this observer raises a hand, shares a part, pings a point and asks the presenter to look (the test creates <out>.marks)
                     sent_marks = True
-                    share_path = next((p for p in result["snapshot_pose_paths"] if p), "")
+                    share_path = marks_go.read_text().strip()  # the part to share: the test writes the wire key of one that is still in the model
                     for message in (
                         {"t": "hand", "up": True},
                         {"t": "mark", "id": "share", "kind": "share", "target": {"path": share_path}, "colour": "#000000", "ttl_s": 0},
