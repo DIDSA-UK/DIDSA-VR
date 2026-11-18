@@ -3,6 +3,12 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## P0, live sessions scope (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "P0. Scope and three spikes"; **docs only, no code changed, nothing run on a headset or phone**)
+
+- `docs/main-gd-split-audit.md`: `main.gd` (2,865 lines, not the plan's 2,457) by category: viewing 587, Quest input and the XR rig 368, editing tools 326, files / import / storage / servers 1,322, app shell 252. The viewing functions call into the tools (`_show_model` alone touches a dozen), so they cannot be lifted out as they are; the list of what a view-only build must not load, and the split it points to.
+- `docs/live-sessions-spikes.md`: the voice spike (TwoVoip recommended for D9; must build for Android arm64, Linux and Windows) and the Cardboard spike (Godot's built-in `MobileVRInterface` first), each with what to build, pass / fail numbers and the owner's steps. Not built, not run.
+- Checked on the Godot 4.7.2 desktop build only: `MobileVRInterface`, `AudioServer.get_input_frames` and `WebSocketPeer.set_handshake_headers` exist.
+
 ## N1c, VR shows mate reference state (DIDSA-CAD plan `mates-storage-sessions-plan-2026-11-12.md`, "N1 plan" and "N1b results"; headless, Xvfb and a real backend, **not run on a headset**; details in `docs/backend-api-notes.md`, "Mate reference state")
 
 - **Tablet mate list and mate highlight** read the fields N1b added to every mate (`lost_references`, `moved_references`, `followed_references`, `reference_reasons`, `held`): an info line for a followed reference (kept until "Got it", because the backend says it once), an amber "Check this mate" with a **Confirm** action (`PATCH confirm_references`, solved with the mate like any edit) for a held mate, the reason for a lost one. New `scripts/mate_reference_state.gd` (pure).
