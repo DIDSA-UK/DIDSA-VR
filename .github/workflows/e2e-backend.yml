@@ -101,8 +101,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install the project store's requirements
-        run: pip install -r didsa-cad/project-store/requirements.txt
+      - name: Install the project store's and the session hub's requirements
+        # The session hub (live sessions, P2) is a third throwaway service; its requirements also give the Python stand-ins (httpx, websockets) that tests/e2e_session_*.gd start.
+        run: |
+          pip install -r didsa-cad/project-store/requirements.txt
+          if [ -f didsa-cad/session-hub/requirements.txt ]; then pip install -r didsa-cad/session-hub/requirements.txt; fi
 
       - name: E2E tests
         env:
