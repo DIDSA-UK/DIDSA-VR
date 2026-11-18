@@ -1,6 +1,6 @@
 # Scope: dimensions and constraints at parity with the flat app (design table)
 
-Scoping pass, 2026-11-18. Nothing here is built. The owner's goal: VR dimensions and constraints should match the flat app in **workflow,
+Scoping pass, 2026-11-18; the owner's decisions are recorded below (same day). Nothing here is built. The owner's goal: VR dimensions and constraints should match the flat app in **workflow,
 capability and completeness**, so that from now on the two move together. It has to work with the Quest controllers now and leave room for
 hand tracking later.
 
@@ -95,7 +95,9 @@ previous, adjust, drag), not a button, so hand tracking can map onto it later.
 Rules for hand readiness (cheap now, expensive to retrofit): every stick action also has a button on the options row or deck; no
 two-button chords in the sketcher; hit areas for labels and glyphs sized for a ray that shakes more than a controller's (the existing
 `GHOST_RADIUS`, `GLYPH_HIT_MM` become per-input constants); the intent layer lives in one place in `table_editor.gd` so a hand source plugs in
-beside the controller. Hand tracking itself (OpenXR hand interaction profile, pinch as select) is its own piece; it needs a headset to tune.
+beside the controller. Hand tracking itself is **not part of this scope**: the owner put it on the DIDSA-CAD roadmap as a roll-out for the
+whole VR client (`docs/roadmap.md`, "DIDSA-VR: next-work candidates"), since every tool needs it, not only the sketcher. The hands column above
+is what that roll-out should find already in place here.
 
 ## Pieces
 
@@ -104,15 +106,18 @@ Sizes as in the other scopes (S = a session or less, M = a few sessions, L = a p
 | ID | Piece | Repo | Size | Needs |
 |---|---|---|---|---|
 | P0 | **Catalogue.** `sketch-dimension-catalogue.json` from the flat app's table as built; a test in each client that its options match it (VR's will fail until P2: mark the known gaps expected-fail with a reason, and tick them off) | CAD + flat + VR | S | |
-| P1 | **See and touch everything.** Draw every constraint and dimension type the backend can send (the six D types; honour a saved label placement and an angle's quadrant), make each selectable, editable (value; quadrant where it has one) and deletable; reference dimensions of every kind drawn correctly; constraint-state colours (fully / under / over) and the DOF on the status line; a haptic tick when the sketch becomes fully constrained (as mates do). Flat side: the D kinds in its reference-dimension bar | VR (+ flat, small) | M | |
+| P1 | **See and touch everything.** Draw every constraint and dimension type the backend can send (the six D types; honour a saved label placement and an angle's quadrant), make each selectable, editable (value; quadrant where it has one) and deletable; reference dimensions of every kind drawn correctly; constraint-state colours (fully / under / over) and the DOF on the status line; a haptic tick when the sketch becomes fully constrained (as mates do). Flat side: the D kinds in its reference-dimension bar, and a reference dimension offered where a driving one cannot be made (decision 4) | VR (+ flat, small) | M | |
 | P2 | **Options parity.** Every row of the table above, in the catalogue's order and defaults, including the third Point pick and the D types; create through the routes the flat app uses | VR | M | P0 |
-| P3 | **Workflow.** Preview at the laser, kind choice on the options row and the stick, drop with the trigger, placement and side frozen, saved with the dimension; label drag for existing dimensions; B steps back; radius / diameter switch | VR | M-L | P1, P2 |
-| P4 | **Relations and state.** Unfix; every glyph type listed and lighting what it holds; one conflict policy in both apps (decision 1) | VR (+ flat if the policy moves there) | S-M | decision 1 |
+| P3 | **Workflow.** Preview at the laser (the default; every-candidate-at-once kept as an option, decision 3), kind choice on the options row and the stick, drop with the trigger, placement and side frozen, saved with the dimension; label drag for existing dimensions; B steps back; radius / diameter switch | VR | M-L | P1, P2 |
+| P4 | **Relations and state.** Unfix; every glyph type listed and lighting what it holds; the one conflict rule of decision 1 (the flat app takes a refused constraint back out; VR shows later conflicts red) | VR + flat | S-M | |
 | P5 | **Hand readiness.** The intent layer; every stick action mirrored by a button; per-input hit sizes. No hand tracking yet | VR | S-M | P3 |
-| P6 | **Constrained sketch drag** in VR (decision 2) | VR | L | |
-| P7 | Hand tracking proper (pinch, poke, aim from the hand) | VR | M | P5, a headset |
+| P6 | **Constrained sketch drag** in VR: a GDScript port of the flat app's projector (decision 2), re-written from its maths and the drag contract, not copied, the way the mates projector (`scripts/motion/`) was; a residual for every constraint type the flat projector models; golden cases shared with the flat app's `sketch_projector_test.dart` as data | VR | L | P1 |
 
-Suggested order: P0, P1, P2, P3, P4, P5; P6 and P7 as separate decisions. P1 alone removes the "invisible dimension" problem from part D.
+Order: P0, P1, P2, P3, P4, P5, then P6 (it can start after P1; it needs no part of the workflow). Hand tracking: see the roadmap (above).
+P1 alone removes the "invisible dimension" problem from part D.
+
+The deck's options row may be replaced by the docked properties panel (DIDSA-CAD roadmap, DIDSA-VR item 8). P2 and P3 put the kinds wherever the
+tool's options live at the time; nothing here depends on it being the six-slot row.
 
 ## Tests
 
@@ -124,18 +129,19 @@ Suggested order: P0, P1, P2, P3, P4, P5; P6 and P7 as separate decisions. P1 alo
 - Not testable headless: how preview-at-the-laser, the stick cycling and label dragging feel; hand input at all. Each phase ends with a
   checklist for the owner's headset, as live sessions did.
 
-## Decisions for the owner
+## Decisions (owner, 2026-11-18)
 
-1. **Conflicting constraint.** Keep VR's "take it straight back out" (a laser shakes, so a mistaken pick is likelier), move both apps to it,
-   or adopt the flat app's "keep it and show red". Recommendation: the same in both; VR's take-back with the reason on the status line, and
-   the flat app keeping its red display for conflicts that appear later (an edited value), which VR would then also show.
-2. **Constrained sketch drag in VR.** Port the projector (the flat app's `sketch_projector.dart` maths, re-written in GDScript from the spec,
-   as the mates projector was) or drag by solving on the backend at each step. The port is the bigger job and the better feel.
-3. **Preview at the laser vs all candidates at once.** Parity says one preview at the laser. VR's "every candidate floating" is quicker
-   when you already know which you want. Option: keep both, with the options row as the switch (one preview by default).
-4. **Reference dimensions between pinned things.** VR offers them in place of a driving dimension; the flat app offers nothing there. Bring
-   the flat app to VR's behaviour (recommended) or the reverse.
-5. **Where the catalogue lives** (DIDSA-CAD `docs/`, or beside the backend schemas so the backend can check a request against it too).
+1. **Conflicting constraint: one rule in both apps.** A constraint the sketch cannot take is taken straight back out, with the reason on the
+   status line (VR's behaviour; the flat app moves to it). A conflict that appears later (an edited value, a moved reference) is kept and shown
+   red, as the flat app does today, and VR shows it the same way. Flat-app work: P4.
+2. **Constrained sketch drag: port the projector** to GDScript for the better feel (P6), not a backend solve per step.
+3. **Both placement styles.** One dimension previewed at the laser is the default (parity); VR's every-candidate-at-once stays as an option
+   on the options row, for when you already know which you want.
+4. **Reference dimensions between pinned things: the flat app follows VR**, offering a reference dimension where a driving one cannot be
+   made (flat-app work in P1).
+5. **The catalogue lives in DIDSA-CAD `docs/`** (`docs/sketch-dimension-catalogue.json`), as proposed above. A backend check of requests
+   against it can come later if wanted.
+6. **Hand tracking** goes on the roadmap as a whole-client roll-out, not here (P5 keeps the sketcher ready for it).
 
 ## Risks
 
