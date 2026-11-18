@@ -64,6 +64,21 @@ func _colour_of(node: MeshInstance3D) -> Color:
 	return (m as BaseMaterial3D).albedo_color if m is BaseMaterial3D else Color.BLACK
 
 
+func _find_button(page: Control, starts_with: String) -> Button:
+	for button in page.find_children("*", "Button", true, false):
+		if (button as Button).text.begins_with(starts_with):
+			return button
+	return null
+
+
+func _press(page: Control, starts_with: String) -> void:
+	var button := _find_button(page, starts_with)
+	if button == null:
+		print("SMOKE no button '%s' on the page: false" % starts_with)
+		return
+	button.pressed.emit()
+
+
 func _near_colour(a: Color, b: Color) -> bool:
 	## (a look put back is rebuilt from the colour's 8-bit hex: within a 255th)
 	return absf(a.r - b.r) < 0.01 and absf(a.g - b.g) < 0.01 and absf(a.b - b.b) < 0.01 and absf(a.a - b.a) < 0.01
@@ -205,6 +220,7 @@ func _initialize() -> void:
 	await _wait(0.6)
 	bolt = _part("occ-bolt")
 	nut = _part("occ-nut")
+	mount = _part("")
 	_check(_colour_of(bolt).is_equal_approx(Color(1, 0, 0, 0.25)) and is_equal_approx(_colour_of(nut).a, 0.25), "after the presenter's model is refetched (new nodes) this person's paint is put back on them")
 	# --- the cut
 	var camera: Node3D = main.session_camera()
@@ -285,6 +301,56 @@ func _initialize() -> void:
 	_check(to_presenter.is_empty(), "the presenter was sent nothing by this observer but presence")
 	var after: Array = backend.log.slice(requests_at_start).filter(func(r: Dictionary) -> bool: return not str(r["path"]).ends_with("assembly-mesh.glb") and not str(r["path"]).ends_with("/health"))
 	_check(after.is_empty() and backend.log.all(func(r: Dictionary) -> bool: return not r["headers"].has("x-api-key") and r["method"] == HTTPClient.METHOD_GET), "the backend saw only GETs of the model with the view token: no key, no PUT, no POST (%d other requests)" % after.size())
+	# --- the tablet's three observer pages: their buttons do what the calls do
+	var pages = main._tablet.pages
+	var cursor_page: Control = pages._build_cursor_page()
+	var share_page: Control = pages._build_share_page()
+	var view_page: Control = pages._build_my_view_page()
+	await _aim_cursor(Vector3(0.6, BENCH, 1.0), Vector3(0, 0, -1), 0.8)
+	_check((cursor_page.find_child("CursorLine", true, false) as Label).text.begins_with("Picked: Part"), "the cursor page says what is picked (%s)" % (cursor_page.find_child("CursorLine", true, false) as Label).text)
+	_press(cursor_page, "Hide it")
+	_check(not bolt.visible, "the cursor page's Hide it hides the pick")
+	_press(cursor_page, "Isolate it")
+	_check(not mount.visible and not nut.visible, "...Isolate it hides the rest")
+	_press(cursor_page, "Show everything")
+	_check(bolt.visible and nut.visible and mount.visible, "...Show everything shows it all")
+	_press(cursor_page, "Make it see-through")
+	await _wait(0.1)
+	_check(is_equal_approx(_colour_of(bolt).a, 0.25), "...Make it see-through makes the pick 25% opaque")
+	_press(cursor_page, "Clear its paint")
+	await _wait(0.1)
+	_check(is_equal_approx(_colour_of(bolt).a, 1.0), "...Clear its paint brings it back")
+	var marks_before: int = hub.messages_of(me, "mark").size()
+	_press(share_page, "Share what")
+	_press(share_page, "Ping")
+	_press(share_page, "Look here")
+	await _wait(0.2)
+	var sent_kinds: Array = hub.messages_of(me, "mark").slice(marks_before).map(func(m: Dictionary) -> String: return str(m["kind"]))
+	_check(sent_kinds == ["share", "ping", "look_here"], "the Share page's Share, Ping and Look here send a mark each (%s)" % str(sent_kinds))
+	_press(share_page, "Stop sharing")
+	await _wait(0.2)
+	_check(not hub.messages_of(me, "mark_clear").is_empty(), "...and Stop sharing clears the share")
+	var raise_hand: Button = _find_button(share_page, "Raise hand")
+	raise_hand.button_pressed = true
+	await _wait(0.2)
+	_check(bool(presenter.participants[me]["hand"]), "the Raise hand toggle puts the hand up (the presenter's roster says so)")
+	raise_hand.button_pressed = false
+	await _wait(0.2)
+	_check(not bool(presenter.participants[me]["hand"]), "...and down")
+	var pull: Button = _find_button(view_page, "Pull a part out")
+	pull.button_pressed = true
+	_check(own.pull_out, "My view's Pull a part out toggle turns pulling on")
+	pull.button_pressed = false
+	_check(not own.pull_out, "...and off")
+	_press(view_page, "Put pulled parts back")
+	bolt.visible = false
+	_press(view_page, "Reset my view")
+	_check(bolt.visible and (view_page.find_child("MyViewSummary", true, false) as Label).text == "Your view is the presenter's.", "My view's Reset my view puts the view back, and its summary says so")
+	var kinds_all: Array = (hub.sent_by[me] as Array).map(func(m: Dictionary) -> String: return str(m["t"]))
+	_check(kinds_all.all(func(k: String) -> bool: return ["presence", "mark", "mark_clear", "hand"].has(k)) and not hub.ignored.has(me), "after all of that the observer has sent the hub only presence, marks, mark_clear and hand: no state, nothing dropped")
+	cursor_page.free()
+	share_page.free()
+	view_page.free()
 	# --- leaving puts everything back
 	await main.session.leave_session()
 	await process_frame
