@@ -296,11 +296,11 @@ func _initialize() -> void:
 	await pull()
 	await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
 	print("SMOKE the pick made the circle on the way, with ONE convert-entities/edge, and offers its radius (30) as a driven candidate: ", calls_to("convert-entities/edge").size() == 1 and ed.session.selection[0]["kind"] == "circle" and ed.session.ghosts.size() == 2 and ed.session.ghost("radius").get("driven", false) and absf(float(ed.session.ghost("radius")["value"]) - 30.0) < 0.01)
-	var label_uv: Vector2 = ed.view._ghost_text_uv["radius"]
-	await aim_uv(label_uv)
+	ed.on_option("dk:radius") # (parity plan S5: the kind is chosen on the options row, then a pull on empty sheet drops it)
+	await aim_uv(hole + Vector2(45.0, 40.0))
 	await pull()
 	await settle(func() -> bool: return not ed.session.ref_dims.is_empty() or not ed.session.busy)
-	print("SMOKE pulling the trigger on a driven candidate keeps it (in brackets, R30) with no constraint call: ", ed.session.ref_dims.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").is_empty() and ed.session.dimension_items()[0]["text"] == "(R30)")
+	print("SMOKE dropping a driven candidate keeps it at once, no number pad (in brackets, R30) with no constraint call: ", not main._keyboard.is_open() and ed.session.ref_dims.size() == 1 and calls_to("POST /sketch/sketches/sk1/constraints").is_empty() and ed.session.dimension_items()[0]["text"] == "(R30)")
 	table.manager.deactivate()
 	table.close()
 
