@@ -215,7 +215,7 @@ func _initialize() -> void:
 	print("SMOKE the dimension's label is a hit rectangle on the sheet (its uv, its size): ", not hit.is_empty() and (hit["half"] as Vector2).x > 0.0)
 	var label_uv: Vector2 = hit["uv"]
 	await aim_uv(label_uv)
-	print("SMOKE aiming at the label lights it: the editor's hover is the dimension, not the geometry beside it: ", ed._hover_annotation == {"kind": "dimension", "id": dim_id} and ed._hover_entity.is_empty() and ed.view._annotation_hover == "dimension:" + dim_id)
+	print("SMOKE aiming at the label lights it: the editor's hover is the dimension, not the geometry beside it: ", ed._hover_annotation.get("kind") == "dimension" and ed._hover_annotation.get("id") == dim_id and ed._hover_entity.is_empty() and ed.view._annotation_hover == "dimension:" + dim_id)
 	await aim_uv(centre_uv + Vector2(30, 30))
 	print("SMOKE ...and aiming away puts the hover out: ", ed._hover_annotation.is_empty() and ed.view._annotation_hover == "")
 	await aim_uv(label_uv)
@@ -263,7 +263,7 @@ func _initialize() -> void:
 	print("SMOKE Horizontal on the line makes a constraint with a glyph that is a hit on the sheet: ", horizontal_id != "" and not glyph.is_empty())
 	ed.session.clear_selection()
 	await aim_uv(glyph["uv"])
-	print("SMOKE aiming at the glyph lights it (the constraint, not the line): ", ed._hover_annotation == {"kind": "constraint", "id": horizontal_id})
+	print("SMOKE aiming at the glyph lights it (the constraint, not the line): ", ed._hover_annotation.get("kind") == "constraint" and ed._hover_annotation.get("id") == horizontal_id)
 	await pull()
 	print("SMOKE a pull selects the constraint and its menu is Delete and Clear only (no Edit value): ", ed.session.annotations == [{"kind": "constraint", "id": horizontal_id}] and table.ui.option_button("delete") != null and table.ui.option_button("edit_value") == null)
 	await ed.on_option("delete")
