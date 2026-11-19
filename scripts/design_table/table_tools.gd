@@ -104,7 +104,7 @@ const HINTS := {
 	"text": "Press Text and type the words, choose the font and size below, then pick where it goes.",
 	"trim": "Aim at the part of a line, circle or arc to cut away (it must cross another line or curve) and pull the trigger. A line's end can also be pulled out to the next crossing.",
 	"offset": "Set the distance below, then pick a line or arc: a copy is made that far to one side (Reverse for the other).",
-	"dimension": "Pick a line, a circle, or two points, then pick the value to type it.",
+	"dimension": "Pick a line, a circle, or points; the dimension follows the laser. Stick left / right or the row below changes its kind; pull on empty sheet to drop it and type the value. B steps back.",
 	"horizontal": "Pick a line to make it horizontal.",
 	"vertical": "Pick a line to make it vertical.",
 	"parallel": "Pick two lines.",

@@ -96,6 +96,11 @@ var show_constraints := true
 var _annotation_hits: Array = [] ## T5: what a laser can pick among the labels: [{kind: "dimension" | "constraint", id, uv, angle, half: Vector2}] (sketch mm)
 var _annotation_hover := "" ## "kind:id" of the label under the laser
 var _ghost_text_uv := {} ## ghost key -> where its text sits on the drawing (what pointing at it means)
+var _dim_preview: MeshInstance3D ## S5: the Dimension tool's one candidate at the laser, on its own surface (redrawn as the laser moves, not every label)
+var _dim_preview_label: Label3D = null
+var _dim_preview_params: Dictionary = {} ## the layout sizes for it, worked out once per rebuild of the drawing (they scan every point)
+var dim_preview_uv: Variant = null ## where its label sits (null: no preview)
+var ghosts_hidden := false ## S5: the Dimension tool previews one candidate at the laser instead of drawing them all (F7 off)
 var _line_material: ShaderMaterial
 var _tokens: Resource
 var _geo_state := {}
@@ -134,6 +139,7 @@ func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale:
 	_geo = _new_mesh_node("Drawing")
 	_dims = _new_mesh_node("Dimensions")
 	_preview = _new_mesh_node("Preview")
+	_dim_preview = _new_mesh_node("DimensionPreview")
 	_aids = _new_mesh_node("Aids")
 	_keep = _new_mesh_node("KeepRing")
 	_refs_node = _new_mesh_node("PartGeometry")
@@ -892,6 +898,7 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 		child.queue_free()
 	_ghost_text_uv.clear()
 	_annotation_hits.clear()
+	_dim_preview_params = {}
 	var selected_labels := {}
 	if session != null:
 		for a in session.annotations:
@@ -926,7 +933,7 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 			var text_h: float = float(LABEL_FONT) * LABEL_PIXEL / canvas_scale # (_dim_params' own text height, without its obstacle scan)
 			_annotation_hits.append({"kind": "dimension", "id": str(item["id"]), "uv": layout["text_uv"], "angle": float(layout["text_angle"]),
 				"half": Vector2(text_h * 0.6 * float(maxi(str(item["text"]).length(), 1)) * 0.5, text_h * 0.5)})
-	for g in ghosts:
+	for g in ([] if ghosts_hidden else ghosts):
 		var spec: Dictionary = g.get("spec", {})
 		if spec.is_empty():
 			continue
@@ -1035,6 +1042,36 @@ func set_annotation_hover(kind_id: String) -> void:
 func show_ghosts(ghosts: Array) -> void:
 	## Candidate dimensions for the picked entities, drawn on the sheet where you point at the value to type it.
 	_rebuild_dimensions(_last_session, ghosts)
+
+
+func show_dimension_preview(g: Dictionary) -> void:
+	## S5: the one dimension candidate following the laser (dimension_preview.gd's preview(): its spec already laid out at the laser), with "?" for
+	## its value as the flat app shows it, or its measured value in brackets for a driven (reference) one. {} hides it.
+	if _dim_preview_label != null:
+		_dim_preview_label.queue_free()
+		_dim_preview_label = null
+	dim_preview_uv = null
+	var spec: Dictionary = g.get("spec", {})
+	if spec.is_empty():
+		_set_surface(_dim_preview, PackedVector3Array(), PackedColorArray())
+		return
+	var text := "?"
+	if bool(g.get("driven", false)):
+		var kind := str(g.get("text_kind", "linear"))
+		text = "(%s)" % (_last_session.dimension_text(kind, float(g["value"])) if _last_session != null else str(g["value"]))
+	if _dim_preview_params.is_empty():
+		_dim_preview_params = _dim_params(_last_session)
+	var params := _dim_preview_params.duplicate()
+	params["text_w"] = float(params["text_h"]) * 0.6 * float(maxi(text.length(), 1))
+	var layout := DimensionLayout.layout(spec, params)
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	_draw_dimension(verts, colors, layout, _tokens.warn)
+	_set_surface(_dim_preview, verts, colors)
+	_dim_preview_label = _label_on_sheet(text, layout, _tokens.warn)
+	_dim_preview_label.reparent(_canvas, false)
+	_dim_preview_label.name = "DimensionPreviewLabel"
+	dim_preview_uv = layout["text_uv"]
 
 
 func ghost_near(ghosts: Array, uv: Vector2, radius: float) -> String:

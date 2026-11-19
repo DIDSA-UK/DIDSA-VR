@@ -373,6 +373,12 @@ func handle(method: int, path: String, body) -> Dictionary:
 			if e["id"] == path.get_file():
 				e["construction"] = bool(body.get("construction", e.get("construction", false)))
 		return _ok({"id": path.get_file()})
+	if path.contains("/constraints/") and path.ends_with("/label") and verb == "PUT":
+		var lk: String = path.get_base_dir().get_file()
+		if not cons.has(lk):
+			return {"ok": false, "code": 404, "json": {"detail": "no such constraint"}, "error": "no such constraint"}
+		cons[lk]["label"] = (body as Dictionary).duplicate()
+		return _ok({})
 	if path.contains("/constraints/") and verb == "PATCH":
 		var k: String = path.get_file()
 		cons[k]["distance"] = body["value"]

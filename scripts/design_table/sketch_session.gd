@@ -2810,7 +2810,7 @@ func circle_spec(kind: String, id: String, place := {}) -> Dictionary:
 		# The radius point lies along an axis, where the centre mark already is: a leader or a diameter line is drawn at an angle instead (radius up and to the
 		# right, diameter up and to the left), as on a drawing, so it does not run along the centre line.
 		u = Vector2.from_angle(deg_to_rad(40.0 if kind == "radius" else 140.0))
-	var spec := {"kind": kind, "c": centre, "r": r, "u": u}
+	var spec := {"kind": kind, "c": centre, "r": r, "u": u, "rim_a": rim_angle}
 	if r >= 0.0001 and (place.has("angle") or place.has("leg")):
 		spec["u"] = Vector2.from_angle(rim_angle + deg_to_rad(float(place.get("angle", 0.0))))
 		spec["label_r"] = r + float(place.get("leg", 0.0))
@@ -3561,6 +3561,9 @@ func _distance_apply(a: String, b: String, orientation: String) -> Dictionary:
 	return {"create": {"type": "distance", "point_a_id": a, "point_b_id": b, "orientation": orientation}, "factor": 1.0, "value_key": "distance"}
 
 
+const DIMENSION_UNSAVED_PLACEMENT := ["majorradius", "majordiameter", "minorradius", "minordiameter"] ## a full ellipse's axis is drawn centre to tip here, tip to tip in the flat app (S4's open item): its placement is not saved until both agree
+
+
 func ghost(key: String) -> Dictionary:
 	for g in ghosts:
 		if g["key"] == key:
@@ -3568,11 +3571,15 @@ func ghost(key: String) -> Dictionary:
 	return {}
 
 
-func confirm_ghost(key: String, value: float) -> Dictionary:
-	## The user typed `value` (mm or degrees) for a dimension candidate. Returns {ok, message}.
+func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dictionary:
+	## The user typed `value` (mm or degrees) for a dimension candidate. Returns {ok, message}. `dropped` (S5): the candidate as the Dimension tool's
+	## drop froze it (dimension_preview.gd): its create body carries the side (quadrant) the laser chose, and its `place` is saved as the new
+	## dimension's label placement (PUT .../constraints/{id}/label) once the dimension is kept, so it stays where it was dropped.
 	var g := ghost(key)
 	if g.is_empty():
 		return {"ok": false, "message": ""}
+	if not dropped.is_empty() and str(dropped.get("key", "")) == key:
+		g = dropped
 	if bool(g.get("driven", false)):
 		return await keep_driven(key) # a reference dimension has no value to type: it measures
 	if value <= 0.0:
@@ -3608,6 +3615,15 @@ func confirm_ghost(key: String, value: float) -> Dictionary:
 		await undo()
 		busy = true
 		status.emit("That size conflicts with the other constraints, so it wasn't added.")
+	var place: Dictionary = g.get("place", {})
+	if kept and not place.is_empty() and not DIMENSION_UNSAVED_PLACEMENT.has(key):
+		var cid := str(apply["patch_id"]) if apply.has("patch_id") else str(r["json"]["id"])
+		var saved: Dictionary = await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + cid + "/label", place)
+		if saved["ok"]:
+			if constraints.has(cid):
+				constraints[cid]["label"] = place.duplicate() # drawn there at once (the next solve brings it back from the backend too)
+		else:
+			status.emit("The dimension is set, but its place couldn't be saved: %s" % str(saved["error"]))
 	selection.clear()
 	ghosts.clear()
 	busy = false

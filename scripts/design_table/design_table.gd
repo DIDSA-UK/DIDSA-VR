@@ -541,6 +541,17 @@ func open_keyboard(initial_text: String, on_confirm: Callable, options: Dictiona
 	_main.open_keyboard_for(initial_text, on_confirm, docked)
 
 
+func keyboard_open() -> bool:
+	## The popup keyboard is up (for anything).
+	return _main != null and _main.get("_keyboard") != null and _main._keyboard.is_open()
+
+
+func close_keyboard() -> void:
+	## S5: B steps back from the number pad of a dropped dimension.
+	if keyboard_open():
+		_main._keyboard.close()
+
+
 func _layout_deck() -> void:
 	## The deck's top edge starts deck_gap in front of the slab's front edge, just under it (moves with the slab when it is resized).
 	var lean := deg_to_rad(90.0 - deck_lean_degrees)

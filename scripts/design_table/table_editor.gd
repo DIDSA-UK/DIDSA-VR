@@ -47,6 +47,7 @@ const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd
 const SelectionActions := preload("res://scripts/design_table/selection_actions.gd")
 const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrumbs.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
+const DimensionPreview := preload("res://scripts/design_table/dimension_preview.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "unfix", "construction", "delete", "clear"]
@@ -128,6 +129,9 @@ var hover_part_entity := {} ## T5: the face, edge or vertex of the part the lase
 var _hover_annotation := {} ## T5: the dimension label or constraint glyph under the laser: {kind, id} or {}
 var _last_pull := {"key": "", "ms": 0} ## the last pull on a label: a second one on the same dimension inside DOUBLE_PULL_MS opens the number pad
 var hovering := false ## the laser is on the part or the sheet this frame, and this editor holds the claim
+var dim_flow := DimensionPreview.new() ## S5: the Dimension tool's preview / choose / drop flow (one candidate at the laser; F7: every candidate at once)
+var _dim_shown: Dictionary = {} ## the candidate the preview last drew
+var _dim_last_uv: Variant = null ## where the laser was when it was drawn (null: draw it again)
 
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
@@ -521,6 +525,8 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		view.set_preview("", [], null)
 		if tool == SELECT_TOOL:
 			_update_stack_hint(pick_mm)
+		if tool == "dimension":
+			_update_dimension_preview(uv)
 		var key := "%s:%s:%s" % [_hover_entity.get("kind", ""), _hover_entity.get("id", ""), str(_hover_entity.get("ref", {}))]
 		if key != _last_view_key:
 			_last_view_key = key
@@ -675,6 +681,8 @@ func _on_right_pressed(action: String) -> void:
 	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
 		clear_part_selection() # B closes the drawer, like its X
 		return
+	if action == "by_button" and table.is_open() and dimension_step_back():
+		return # F4: one step back in the dimension flow
 	if action == table.click_action and table.is_open() and not hovering and selection_first and state in ["pick_plane", "idle"] and (not part_selection.is_empty() or not _selected_build.is_empty()) \
 			and not table._right.get_meta("ui_hover", false):
 		clear_part_selection() # a pull on empty space (no part entity, no UI) lets go of the selection
@@ -1792,8 +1800,12 @@ func _refresh_view() -> void:
 		return
 	view.show_dimensions = table.build.visibility.is_on(Visibility.DIMENSIONS) # the drawer's Dims / Constr. tiles: only this open sketch's own glyphs
 	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
+	dim_flow.sync(session)
 	view.rebuild(session, session.selection, _hover_entity)
+	view.ghosts_hidden = table.active_tool == "dimension" and not dim_flow.show_all # S5: the Dimension tool shows one candidate, at the laser
 	view.show_ghosts(session.ghosts)
+	_dim_last_uv = null
+	_update_dimension_preview(_hover_uv)
 	var keep_id: String = session.merge_keep_id() if table.active_tool == SELECT_TOOL else ""
 	view.set_keep_ring(session.points[keep_id] if keep_id != "" else null)
 	if keep_id != _keep_shown:
@@ -1887,6 +1899,16 @@ func _sketch_trigger() -> void:
 			_update_options() # the Finish button counts the points
 	elif tool == SELECT_TOOL and repick_point != "":
 		await _do_repick()
+	elif tool == "dimension" and not dim_flow.show_all:
+		# S5: a pull on another entity changes the pick; on empty sheet it drops the previewed dimension (with the pad open: back to the preview)
+		if dim_flow.stage == "pad" and _hover_entity.is_empty():
+			dimension_step_back()
+		elif not _hover_entity.is_empty():
+			await session.select(_hover_entity)
+		elif dim_flow.live():
+			await _drop_dimension()
+		else:
+			session.clear_selection()
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if tool == SELECT_TOOL and ghost == "" and not _hover_annotation.is_empty():
@@ -2022,17 +2044,132 @@ func _type_dimension(ghost_key: String) -> void:
 		{"title": "%s (%s)" % [g["label"], g["unit"]]})
 
 
-func dimension_typed(ghost_key: String, text: String) -> void:
-	## The numeric pad came back with `text`. Rejects anything that isn't a plain number; the session rejects zero and below.
+func dimension_typed(ghost_key: String, text: String, dropped: Dictionary = {}) -> void:
+	## The numeric pad came back with `text`. Rejects anything that isn't a plain number; the session rejects zero and below. `dropped`: the candidate
+	## as a drop froze it (S5: its side and placement are made with it).
 	var cleaned := text.strip_edges()
 	if not cleaned.is_valid_float():
 		table.set_status("That isn't a number.")
 		UiFeedback.haptic(table._right, "error")
+		if not dropped.is_empty():
+			dim_flow.step_back(session) # (the pad has closed: back to the preview, to drop it again)
 		return
-	var result: Dictionary = await session.confirm_ghost(ghost_key, cleaned.to_float())
+	var result: Dictionary = await session.confirm_ghost(ghost_key, cleaned.to_float(), dropped)
+	if not dropped.is_empty():
+		dim_flow.sync(session)
+		if dim_flow.stage == "pad":
+			dim_flow.step_back(session) # refused: the candidate is still there to drop again
+		_dim_last_uv = null
+		_update_dimension_preview(_hover_uv)
 	if bool(result["ok"]):
 		UiFeedback.haptic(table._right, "confirm")
 		table.set_status("Dimension set.")
+
+
+# --- S5: the Dimension tool's preview at the laser, the kind on the stick or the options row, the drop, B one step back -------------------
+
+func _update_dimension_preview(uv: Variant) -> void:
+	## Draws the one candidate at the laser (dimension_preview.gd), or the dropped one while the pad is open. A pad closed with its own Cancel goes
+	## back to the preview.
+	if view == null or session == null:
+		return
+	if dim_flow.stage == "pad" and not table.keyboard_open():
+		dim_flow.step_back(session)
+		_dim_last_uv = null
+	var want: Dictionary = {}
+	if table.active_tool == "dimension":
+		if dim_flow.stage == "pad":
+			want = dim_flow.frozen
+		elif dim_flow.live():
+			if uv == null:
+				return # off the sheet: the preview stays where it was last
+			if _dim_last_uv != null and (uv as Vector2).distance_to(_dim_last_uv) < 0.001 / view.canvas_scale:
+				return # (the laser has not moved a millimetre in the world)
+			var before := str(_dim_shown.get("key", ""))
+			want = dim_flow.preview(session, uv, PICK_RADIUS / view.canvas_scale)
+			_dim_last_uv = uv
+			if str(want.get("key", "")) != before:
+				_update_options.call_deferred() # the cursor rule changed the kind: the options row lights it
+	if want.is_empty() and _dim_shown.is_empty():
+		return
+	_dim_shown = want
+	view.show_dimension_preview(want)
+
+
+func _drop_dimension() -> void:
+	## The trigger on empty sheet with a preview live: kind, placement and side are frozen and the number pad opens (a driven one is kept at once).
+	var g: Dictionary = dim_flow.drop(session, _hover_uv, PICK_RADIUS / view.canvas_scale)
+	if g.is_empty():
+		return
+	if bool(g.get("driven", false)):
+		await _keep_driven(str(g["key"]))
+		dim_flow.sync(session)
+		return
+	_dim_shown = g
+	view.show_dimension_preview(g)
+	var key := str(g["key"])
+	var dropped := g.duplicate(true)
+	table.open_keyboard("%.2f" % float(g["value"]), func(text: String) -> void: await dimension_typed(key, text, dropped),
+		{"title": "%s (%s)" % [g["label"], g["unit"]]})
+	table.set_status("%s dropped: type the value. B goes back to move it." % str(g["label"]))
+	_update_options()
+
+
+func dimension_owns_b() -> bool:
+	## F4: B is "one step back" with the Dimension tool while the pad is open, or while something is picked and the laser is on the sheet.
+	if session == null or table.active_tool != "dimension":
+		return false
+	return dim_flow.stage == "pad" or (hovering and _hover_uv != null and not session.selection.is_empty())
+
+
+func dimension_step_back() -> bool:
+	## B: the pad back to the preview (the pad closes), the preview back to picking (the pick is let go). False if there was nothing to step back from.
+	if not dimension_owns_b():
+		return false
+	var was := dim_flow.stage
+	var to := dim_flow.step_back(session)
+	if to == "":
+		return false
+	if was == "pad":
+		table.close_keyboard()
+		table.set_status("Back to the preview: aim, then pull on empty sheet to drop it.")
+	else:
+		table.set_status(_sketch_hint())
+	UiFeedback.haptic(table._right, "close")
+	_dim_last_uv = null
+	_update_dimension_preview(_hover_uv)
+	_update_options()
+	return true
+
+
+func dimension_stick(stick: Vector2) -> bool:
+	## F3, called by table_manip.gd's drive_input while the table is engaged: the right stick left / right steps the previewed kind while a preview
+	## is live, the laser is on the sheet and no hand grips the table. True when the stick is the preview's (the part must not turn with it).
+	if session == null or table.active_tool != "dimension" or not DimensionPreview.owns_stick(dim_flow.live(), hovering and _hover_uv != null, table.manip.grip_count() > 0):
+		dim_flow.stick(0.0)
+		return false
+	var step := dim_flow.stick(stick.x)
+	if step != 0:
+		var key := dim_flow.cycle(session, _hover_uv, step)
+		UiFeedback.haptic(table._right, "press")
+		table.set_status("%s." % str(session.ghost(key).get("label", key)))
+		_dim_last_uv = null
+		_update_dimension_preview(_hover_uv)
+		_update_options()
+	return true
+
+
+func _dimension_options() -> Array:
+	## The options row with the Dimension tool: the kinds that fit the pick, the previewed one lit (a press chooses it, as the stick does; with
+	## every candidate at once, a press types it), then the "All at once" toggle (F7).
+	var list: Array = []
+	var current: String = dim_flow.frozen.get("key", "") if dim_flow.stage == "pad" else dim_flow.current_key(session, _hover_uv)
+	for g in session.ghosts:
+		if list.size() >= MENU_SLOTS - 1:
+			break
+		list.append({"id": "dk:%s" % g["key"], "text": str(g["label"]), "toggle": not dim_flow.show_all, "pressed": not dim_flow.show_all and str(g["key"]) == current})
+	list.append({"id": "dk_all", "text": "All at once", "toggle": true, "pressed": dim_flow.show_all})
+	return list
 
 
 # --- Tools and the options row -------------------------------------------------------------
@@ -2117,6 +2254,9 @@ func _update_option_list() -> void:
 					list = [{"id": "refs_fix", "text": "Fix %d reference(s)" % session.flagged_references().size()}]
 					if session.flagged_references().any(func(row): return str(row["status"]) == "potentially_moved"):
 						list.append({"id": "refs_keep", "text": "Keep moved ones"})
+		"dimension":
+			if session != null:
+				list = _dimension_options()
 		"polygon":
 			if session != null:
 				list = [{"id": "sides_down", "text": "Fewer"}, {"id": "sides_label", "text": "%d sides" % session.polygon_sides, "disabled": true}, {"id": "sides_up", "text": "More"}]
@@ -2186,6 +2326,22 @@ func on_option(option_id: String) -> void:
 		return
 	if option_id.begins_with("dim:"):
 		_type_dimension(option_id.substr(4))
+		return
+	if option_id.begins_with("dk:") and session != null:
+		var key := option_id.substr(3)
+		if dim_flow.show_all:
+			_type_dimension(key)
+		elif dim_flow.stage != "pad" and dim_flow.choose(session, key):
+			_dim_last_uv = null
+			_update_dimension_preview(_hover_uv)
+		_update_options()
+		return
+	if option_id == "dk_all" and session != null:
+		dim_flow.show_all = not dim_flow.show_all
+		if dim_flow.show_all and dim_flow.stage == "pad":
+			dimension_step_back()
+		_refresh_view()
+		_update_options()
 		return
 	if option_id == "edit_value" and session != null and session.annotations.size() == 1:
 		_edit_dimension_value(str(session.annotations[0]["id"]))
