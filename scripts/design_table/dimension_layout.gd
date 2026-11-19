@@ -17,6 +17,16 @@ extends RefCounted
 ##   {kind: "radius", c, r, u}                  a leader from the centre through the circle at direction u, arrow on the circle, text beyond
 ##   {kind: "diameter", c, r, u}                a line through the centre with an arrow at each end on the circle, text above it
 ##   {kind: "angle", apex, d1, d2, r}           an arc of radius r from direction d1 to d2 about the apex, arrows at both ends
+##   {kind: "arc_length", c, r, a0, sweep}      a concentric arc outside the arc c / r running a0 (radians) round counter-clockwise by sweep, extension lines out
+##                                              from its two ends, arrows at both
+## A spec may carry the label's SAVED PLACEMENT (the backend's `label`; the saved numbers are read by sketch_session.gd, which turns them into these
+## spec keys, so this file never sees the backend's own field names). Without them the automatic layout below applies (F2 of the parity plan):
+##   linear / perp / horizontal / vertical   place {offset, along}: where the dimension line sits and where the label sits along it (the meaning of
+##                                           sketch-label-placement-cases.json); perp may carry `u` too (two parallel lines: offset runs along u,
+##                                           the dimension line across it)
+##   radius / diameter    label_r: the label's distance from the centre, along u
+##   angle / arc_length   label_a (radians, absolute): the label's place round the arc; angle's r and arc_length's `ra` (the dimension arc's radius) are the saved radii
+## The label's centre is then exactly where it was saved (text_uv), the dimension line is broken round it or runs on out to it.
 ## params: offset (distance of the dimension line from the geometry), arrow (arrowhead length), gap (extension line gap), over (overshoot),
 ## centroid (the middle of the sketch: with no better reason a dimension line goes away from it), obstacles (the sketch's points: the dimension line
 ## takes the side with more room), text_w / text_h (the text's size, to keep it clear of its leader).
@@ -25,17 +35,25 @@ extends RefCounted
 static func layout(spec: Dictionary, params: Dictionary) -> Dictionary:
 	match str(spec.get("kind", "")):
 		"linear", "perp":
+			if spec.has("place"):
+				return _linear_placed(spec["a"], spec["b"], spec.get("u", _left_normal(spec["b"] - spec["a"])), spec["place"], params)
 			return _linear(spec["a"], spec["b"], params)
 		"horizontal":
+			if spec.has("place"):
+				return _axis_placed(spec["a"], spec["b"], spec["place"], params, true)
 			return _axis_aligned(spec["a"], spec["b"], params, true)
 		"vertical":
+			if spec.has("place"):
+				return _axis_placed(spec["a"], spec["b"], spec["place"], params, false)
 			return _axis_aligned(spec["a"], spec["b"], params, false)
 		"radius":
-			return _radius(spec["c"], float(spec["r"]), spec["u"], params)
+			return _radius(spec["c"], float(spec["r"]), spec["u"], params, float(spec.get("label_r", NAN)))
 		"diameter":
-			return _diameter(spec["c"], float(spec["r"]), spec["u"], params)
+			return _diameter(spec["c"], float(spec["r"]), spec["u"], params, float(spec.get("label_r", NAN)))
 		"angle":
-			return _angle(spec["apex"], spec["d1"], spec["d2"], float(spec["r"]), params)
+			return _angle(spec["apex"], spec["d1"], spec["d2"], float(spec["r"]), params, float(spec.get("label_a", NAN)))
+		"arc_length":
+			return _arc_length(spec["c"], float(spec["r"]), float(spec["a0"]), float(spec["sweep"]), float(spec.get("ra", NAN)), float(spec.get("label_a", NAN)), params)
 	return _empty()
 
 
@@ -195,16 +213,117 @@ static func _axis_aligned(a: Vector2, b: Vector2, params: Dictionary, horizontal
 	return out
 
 
-static func _radius(c: Vector2, r: float, u: Vector2, params: Dictionary) -> Dictionary:
+static func _left_normal(d: Vector2) -> Vector2:
+	var dir := d.normalized()
+	return Vector2(-dir.y, dir.x)
+
+
+static func _split_around(a: Vector2, b: Vector2, centre: Vector2, half: float) -> Array:
+	## The segment a-b with a gap of half either side of `centre` (a point of it): the pieces that are left ([] when nothing is).
+	var d := b - a
+	var len := d.length()
+	if len < 0.00001:
+		return []
+	var t := d / len
+	var s := (centre - a).dot(t)
+	var out: Array = []
+	if s - half > 0.00001:
+		out.append([a, a + t * minf(s - half, len)])
+	if s + half < len - 0.00001:
+		out.append([a + t * maxf(s + half, 0.0), b])
+	return out
+
+
+static func _placed_line(out: Dictionary, p1: Vector2, p2: Vector2, label: Vector2, params: Dictionary) -> void:
+	## The dimension line p1-p2 (arrows as ever at its ends) with its label at `label`, a point on the line's own axis: the line is broken round the text
+	## when the label is between the ends, and runs on out to it (a leader, as on a drawing) when it is beyond one.
+	_arrows_for(p1, p2, params, out["segments"], out["arrows"])
+	var d := p2 - p1
+	var len := d.length()
+	if len < 0.00001:
+		return
+	var t := d / len
+	var half := float(params["text_w"]) * 0.5 + float(params["gap"])
+	var s := (label - p1).dot(t)
+	if s + half < 0.0:
+		out["segments"].append([label + t * half, p1])
+	elif s - half > len:
+		out["segments"].append([p2, label - t * half])
+	for piece in _split_around(p1, p2, label, half):
+		out["segments"].append(piece)
+
+
+static func _linear_placed(a: Vector2, b: Vector2, n: Vector2, place: Dictionary, params: Dictionary) -> Dictionary:
+	## A distance a-b whose dimension line is `offset` off a-b along n, its label `along` from the line's middle towards b.
+	var out := _empty()
+	var d := b - a
+	if d.length() < 0.00001:
+		return out
+	var t := d.normalized()
+	var off := float(place.get("offset", 0.0))
+	var p1 := a + n * off
+	var p2 := b + n * off
+	_extension_lines(out, [[a, p1], [b, p2]], params)
+	var label := (p1 + p2) * 0.5 + t * float(place.get("along", 0.0))
+	_placed_line(out, p1, p2, label, params)
+	var angle := upright(t.angle())
+	out["text_angle"] = angle
+	out["text_up"] = _text_frame(angle)[1]
+	out["text_uv"] = label
+	return out
+
+
+static func _extension_lines(out: Dictionary, pairs: Array, params: Dictionary) -> void:
+	## An extension line from each geometry end to its dimension-line end (a gap off the geometry, an overshoot past the line); none where they meet.
+	var gap := float(params["gap"])
+	var over := float(params["over"])
+	for pair in pairs:
+		var g: Vector2 = pair[0]
+		var e: Vector2 = pair[1]
+		var span := e - g
+		if span.length() <= gap * 1.5:
+			continue
+		var s := span.normalized()
+		out["segments"].append([g + s * gap, e + s * over])
+
+
+static func _axis_placed(a: Vector2, b: Vector2, place: Dictionary, params: Dictionary, horizontal: bool) -> Dictionary:
+	## horizontal: the dimension line at y = the higher point's y + offset, the label at x = the middle's x + along; vertical: x past the further-right point,
+	## y from the middle (the cases file's distance_horizontal / distance_vertical).
+	var out := _empty()
+	var off := float(place.get("offset", 0.0))
+	var along := float(place.get("along", 0.0))
+	var p1: Vector2
+	var p2: Vector2
+	var label: Vector2
+	if horizontal:
+		var y := maxf(a.y, b.y) + off
+		p1 = Vector2(a.x, y)
+		p2 = Vector2(b.x, y)
+		label = Vector2((a.x + b.x) * 0.5 + along, y)
+	else:
+		var x := maxf(a.x, b.x) + off
+		p1 = Vector2(x, a.y)
+		p2 = Vector2(x, b.y)
+		label = Vector2(x, (a.y + b.y) * 0.5 + along)
+	if p1.distance_to(p2) < 0.00001:
+		return out
+	_extension_lines(out, [[a, p1], [b, p2]], params)
+	_placed_line(out, p1, p2, label, params)
+	var angle := 0.0 if horizontal else PI * 0.5
+	out["text_angle"] = angle
+	out["text_up"] = _text_frame(angle)[1]
+	out["text_uv"] = label
+	return out
+
+
+static func _radius(c: Vector2, r: float, u: Vector2, params: Dictionary, label_r := NAN) -> Dictionary:
 	var out := _empty()
 	if r < 0.00001:
 		return out
 	var dir := u.normalized() if u.length() > 0.00001 else Vector2(1, 0)
 	var arrow := float(params["arrow"])
 	var tip := c + dir * r
-	var end := tip + dir * (arrow * 2.5 + float(params["gap"]))
-	out["segments"].append([c, end])
-	out["arrows"].append([tip, dir])
 	var angle := upright(dir.angle())
 	var frame := _text_frame(angle)
 	var t: Vector2 = frame[0]
@@ -212,31 +331,94 @@ static func _radius(c: Vector2, r: float, u: Vector2, params: Dictionary) -> Dic
 	var half_w := float(params["text_w"]) * 0.5
 	var half_h := float(params["text_h"]) * 0.5
 	var push := absf(dir.dot(t)) * half_w + absf(dir.dot(up)) * half_h + float(params["gap"])
+	out["arrows"].append([tip, dir])
 	out["text_angle"] = angle
 	out["text_up"] = up
-	out["text_uv"] = end + dir * push
+	if is_nan(label_r):
+		var end := tip + dir * (arrow * 2.5 + float(params["gap"]))
+		out["segments"].append([c, end])
+		out["text_uv"] = end + dir * push
+		return out
+	# a saved placement: the label sits where it was put (inside the circle or out), the leader runs to it from the centre, or from it to the rim
+	out["text_uv"] = c + dir * label_r
+	if label_r - push >= r:
+		out["segments"].append([c, c + dir * (label_r - push)])
+	elif label_r + push < r:
+		out["segments"].append([c + dir * (label_r + push), tip])
+	else:
+		out["segments"].append([c + dir * maxf(label_r - push, 0.0), tip])
 	return out
 
 
-static func _diameter(c: Vector2, r: float, u: Vector2, params: Dictionary) -> Dictionary:
+static func _diameter(c: Vector2, r: float, u: Vector2, params: Dictionary, label_r := NAN) -> Dictionary:
 	var out := _empty()
 	if r < 0.00001:
 		return out
 	var dir := u.normalized() if u.length() > 0.00001 else Vector2(1, 0)
 	var p1 := c - dir * r
 	var p2 := c + dir * r
-	out["segments"].append([p1, p2])
 	out["arrows"].append([p1, -dir])
 	out["arrows"].append([p2, dir])
 	var angle := upright(dir.angle())
 	var frame := _text_frame(angle)
 	out["text_angle"] = angle
 	out["text_up"] = frame[1]
-	out["text_uv"] = c + (frame[1] as Vector2) * (float(params["text_h"]) * 0.75)
+	if is_nan(label_r):
+		out["segments"].append([p1, p2])
+		out["text_uv"] = c + (frame[1] as Vector2) * (float(params["text_h"]) * 0.75)
+		return out
+	var label := c + dir * label_r
+	var half := float(params["text_w"]) * 0.5 + float(params["gap"])
+	out["text_uv"] = label
+	if absf(label_r) > r:
+		out["segments"].append([p1, p2])
+		out["segments"].append([p2 if label_r > 0.0 else p1, label - dir * half * signf(label_r)])
+	else:
+		for piece in _split_around(p1, p2, label, half):
+			out["segments"].append(piece)
 	return out
 
 
-static func _angle(apex: Vector2, d1: Vector2, d2: Vector2, r: float, params: Dictionary) -> Dictionary:
+static func _arc_core(out: Dictionary, centre: Vector2, r: float, a0: float, sweep: float, label_a: float, params: Dictionary) -> void:
+	## The dimension arc of radius r about centre from angle a0 round by sweep (signed, radians), arrowheads at both ends. With a saved label angle the
+	## arc is broken round the text when the label is on it and runs on to it when it is beyond an end.
+	var tangent_sign := signf(sweep)
+	var a1 := a0 + sweep
+	var half_gap := (float(params["text_w"]) * 0.5 + float(params["gap"])) / maxf(r, 0.0001) # the text's half width as an angle on this arc
+	var lo := minf(a0, a1)
+	var hi := maxf(a0, a1)
+	var cut_lo := NAN
+	var cut_hi := NAN
+	if not is_nan(label_a):
+		var rel := wrapf(label_a - (a0 + sweep * 0.5), -PI, PI) + (a0 + sweep * 0.5) # the label's angle in the sweep's own turn, nearest the middle
+		if rel >= lo and rel <= hi:
+			cut_lo = rel - half_gap
+			cut_hi = rel + half_gap
+		else:
+			lo = minf(lo, rel - half_gap)
+			hi = maxf(hi, rel + half_gap)
+	var ranges: Array = [[lo, hi]]
+	if not is_nan(cut_lo):
+		ranges = []
+		if cut_lo > lo + 0.0001:
+			ranges.append([lo, cut_lo])
+		if cut_hi < hi - 0.0001:
+			ranges.append([cut_hi, hi])
+	for rng in ranges:
+		var span: float = rng[1] - rng[0]
+		var steps := maxi(3, int(span / (PI / 24.0)))
+		var pts: Array = []
+		for i in steps + 1:
+			var t: float = rng[0] + span * float(i) / float(steps)
+			pts.append(centre + Vector2(cos(t), sin(t)) * r)
+		out["arcs"].append(pts)
+	var tangent_start := Vector2(-sin(a0), cos(a0)) * tangent_sign
+	var tangent_end := Vector2(-sin(a1), cos(a1)) * tangent_sign
+	out["arrows"].append([centre + Vector2(cos(a0), sin(a0)) * r, -tangent_start])
+	out["arrows"].append([centre + Vector2(cos(a1), sin(a1)) * r, tangent_end])
+
+
+static func _angle(apex: Vector2, d1: Vector2, d2: Vector2, r: float, params: Dictionary, label_a := NAN) -> Dictionary:
 	var out := _empty()
 	if r < 0.00001 or d1.length() < 0.00001 or d2.length() < 0.00001:
 		return out
@@ -244,29 +426,52 @@ static func _angle(apex: Vector2, d1: Vector2, d2: Vector2, r: float, params: Di
 	var sweep := wrapf(d2.angle() - a1, -PI, PI) # the smaller way round, signed
 	if absf(sweep) < 0.0001:
 		return out
-	var steps := maxi(6, int(absf(sweep) / (PI / 24.0)))
-	var pts: Array = []
-	for i in steps + 1:
-		var t := a1 + sweep * float(i) / float(steps)
-		pts.append(apex + Vector2(cos(t), sin(t)) * r)
-	out["arcs"].append(pts)
-	var tangent_start := Vector2(-sin(a1), cos(a1)) * signf(sweep)
-	var end_angle := a1 + sweep
-	var tangent_end := Vector2(-sin(end_angle), cos(end_angle)) * signf(sweep)
-	out["arrows"].append([pts[0], -tangent_start])
-	out["arrows"].append([pts[pts.size() - 1], tangent_end])
+	_arc_core(out, apex, r, a1, sweep, label_a, params)
 	var gap := float(params["gap"])
 	var over := float(params["over"])
-	for pair in [[d1.normalized(), pts[0]], [d2.normalized(), pts[pts.size() - 1]]]:
+	var end_angle := a1 + sweep
+	for pair in [[d1.normalized(), apex + Vector2(cos(a1), sin(a1)) * r], [d2.normalized(), apex + Vector2(cos(end_angle), sin(end_angle)) * r]]:
 		out["segments"].append([apex + (pair[0] as Vector2) * gap, (pair[1] as Vector2) + (pair[0] as Vector2) * over])
-	var mid_angle := a1 + sweep * 0.5
-	var mid_dir := Vector2(cos(mid_angle), sin(mid_angle))
 	var angle := 0.0 # an angle's value is written horizontally
 	var frame := _text_frame(angle)
+	out["text_angle"] = angle
+	out["text_up"] = frame[1]
+	if not is_nan(label_a):
+		out["text_uv"] = apex + Vector2(cos(label_a), sin(label_a)) * r
+		return out
+	var mid_angle := a1 + sweep * 0.5
+	var mid_dir := Vector2(cos(mid_angle), sin(mid_angle))
 	var t2: Vector2 = frame[0]
 	var up2: Vector2 = frame[1]
 	var push := absf(mid_dir.dot(t2)) * float(params["text_w"]) * 0.5 + absf(mid_dir.dot(up2)) * float(params["text_h"]) * 0.5 + gap
-	out["text_angle"] = angle
-	out["text_up"] = up2
 	out["text_uv"] = apex + mid_dir * (r + push)
+	return out
+
+
+static func _arc_length(c: Vector2, r: float, a0: float, sweep: float, ra: float, label_a: float, params: Dictionary) -> Dictionary:
+	## The length of an arc: a dimension arc concentric with it, outside it (radius ra when saved, else the automatic offset), extension lines radially out from
+	## its two ends and the value at its middle (or where it was put).
+	var out := _empty()
+	if r < 0.00001 or absf(sweep) < 0.0001:
+		return out
+	var big := ra if not is_nan(ra) else r + float(params["offset"])
+	_arc_core(out, c, big, a0, sweep, label_a, params)
+	var gap := float(params["gap"])
+	var over := float(params["over"])
+	for angle in [a0, a0 + sweep]:
+		var dir := Vector2(cos(angle), sin(angle))
+		var s := signf(big - r)
+		if absf(big - r) > gap * 1.5:
+			out["segments"].append([c + dir * (r + s * gap), c + dir * (big + s * over)])
+	var text_angle := 0.0
+	var frame := _text_frame(text_angle)
+	out["text_angle"] = text_angle
+	out["text_up"] = frame[1]
+	if not is_nan(label_a):
+		out["text_uv"] = c + Vector2(cos(label_a), sin(label_a)) * big
+		return out
+	var mid_angle := a0 + sweep * 0.5
+	var mid_dir := Vector2(cos(mid_angle), sin(mid_angle))
+	var push := absf(mid_dir.dot(frame[0])) * float(params["text_w"]) * 0.5 + absf(mid_dir.dot(frame[1])) * float(params["text_h"]) * 0.5 + gap
+	out["text_uv"] = c + mid_dir * (big + push)
 	return out

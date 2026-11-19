@@ -110,6 +110,37 @@ func _initialize() -> void:
 	var tail: Array = s.lines.keys().slice(-2)
 	await dimension(s, [{"kind": "line", "id": tail[0]}, {"kind": "line", "id": tail[1]}], "angle")
 	await dimension(s, [{"kind": "line", "id": tail[0]}], "length")
+	# the part D types (S2): one of each, made through the routes (VR makes them from a pick from S4 on), a few with a saved label placement
+	var d_arc: String = s.arcs.keys()[0]
+	var d_arc_c: Vector2 = s.points[s.arcs[d_arc]["c"]]
+	var d_arc_r: float = d_arc_c.distance_to(s.points[s.arcs[d_arc]["s"]])
+	var d_circle_c: Vector2 = s.points[s.circles[circle_id]["c"]]
+	var d_circle_r: float = d_circle_c.distance_to(s.points[s.circles[circle_id]["p"]])
+	var d_corner := ""
+	for id in s.points:
+		if (s.points[id] as Vector2).is_equal_approx(Vector2(-90, 40)):
+			d_corner = str(id)
+	var d_made := {}
+	var d_bodies := [
+		["arc_length", {"type": "arc_length", "arc_id": d_arc, "length": d_arc_r * PI * 0.5}, {"leg": 10.0, "angle": 15.0}],
+		["horizontal_angle", {"type": "horizontal_angle", "line_id": tail[1], "angle_degrees": 45.0, "quadrant": 0}, {"radius": 26.0, "angle": 6.0}],
+		["point_angle", {"type": "point_angle", "vertex_point_id": s.arcs[d_arc]["c"], "point1_id": s.arcs[d_arc]["s"], "point2_id": s.arcs[d_arc]["e"], "angle_degrees": 90.0}, {}],
+		["point_circle_distance", {"type": "point_circle_distance", "point_id": d_corner, "circle_or_arc_id": circle_id, "distance": d_circle_c.distance_to(Vector2(-90, 40)) - d_circle_r, "side": "min"}, {"offset": 14.0, "along": 0.0}],
+		["circle_distance", {"type": "circle_distance", "entity1_id": circle_id, "entity2_id": d_arc, "distance": d_circle_c.distance_to(d_arc_c) - d_circle_r - d_arc_r, "side": "min"}, {}],
+		["line_circle_distance", {"type": "line_circle_distance", "line_id": tail[0], "circle_or_arc_id": circle_id, "distance": 70.0 - d_circle_r, "side": "min"}, {}]]
+	for entry in d_bodies:
+		var before: Array = s.constraints.keys()
+		var r: Dictionary = await s.api.call(HTTPClient.METHOD_POST, "/sketch/sketches/%s/constraints" % s.sketch_id, entry[1])
+		await s.refresh(false)
+		for cid in s.constraints:
+			if not before.has(cid) and str(s.constraints[cid].get("type", "")) == str(entry[0]):
+				d_made[entry[0]] = cid
+		if not r["ok"]:
+			print("  refused: ", entry[0], " ", r.get("error"))
+		elif not (entry[2] as Dictionary).is_empty() and d_made.has(entry[0]):
+			await s.api.call(HTTPClient.METHOD_PUT, "/sketch/sketches/%s/constraints/%s/label" % [s.sketch_id, d_made[entry[0]]], entry[2])
+			await s.refresh(false)
+	print("SMOKE one of each part D dimension is on the sketch and drawn: ", d_made.size() == 6 and s.dimension_items().filter(func(i): return d_made.values().has(i["id"])).size() == 6)
 	s.set_tool("slot")
 	await s.tap({"uv": Vector2(-130, 75)})
 	await s.tap({"uv": Vector2(-60, 75)})

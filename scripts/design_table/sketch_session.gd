@@ -2222,13 +2222,18 @@ func prune_annotations() -> void:
 
 
 func dimension_value(id: String) -> Dictionary:
-	## The value of a dimension constraint as the label shows it: {ok, value, unit, kind}. Angles are degrees; everything else mm (a circle's size is its radius).
+	## The value of a dimension constraint as the label shows it: {ok, value, unit, kind}. Angles are degrees; everything else mm (a circle's size is its radius; an arc's length and
+	## the three distances to circles are their own fields: `length`, `distance`).
 	var c: Dictionary = constraints.get(id, {})
 	match str(c.get("type", "")):
 		"distance", "point_line_distance", "line_distance":
 			return {"ok": true, "value": float(c.get("distance", 0.0)), "unit": "mm", "kind": "distance"}
-		"angle":
+		"angle", "horizontal_angle", "point_angle":
 			return {"ok": true, "value": float(c.get("angle_degrees", 0.0)), "unit": "deg", "kind": "angle"}
+		"arc_length":
+			return {"ok": true, "value": float(c.get("length", 0.0)), "unit": "mm", "kind": "arc_length"}
+		"point_circle_distance", "circle_distance", "line_circle_distance":
+			return {"ok": true, "value": float(c.get("distance", 0.0)), "unit": "mm", "kind": "distance"}
 	return {"ok": false, "value": 0.0, "unit": "", "kind": ""}
 
 
@@ -2376,7 +2381,7 @@ func _ghosts_raw(picked: Array) -> Array:
 			var mid: Vector2 = (points[l1[0]] + points[l1[1]] + points[l2[0]] + points[l2[1]]) * 0.25
 			if absf(d1.dot(d2)) >= PARALLEL_COS:
 				var dist: float = absf((points[l2[0]] - points[l1[0]]).cross(d1))
-				out.append(_ghost("line_distance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "distance"}, perp_spec(str(l1[0]), str(second["id"]))))
+				out.append(_ghost("line_distance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "distance"}, line_distance_spec(str(first["id"]), str(second["id"]))))
 			else:
 				var ang := rad_to_deg(acos(clampf(d1.dot(d2), -1.0, 1.0)))
 				out.append(_ghost("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "angle_degrees"}, angle_spec(str(first["id"]), str(second["id"]))))
@@ -2436,11 +2441,15 @@ func dimension_text(kind: String, value: float) -> String:
 			return "\u2300" + format_value(value)
 		"angle":
 			return format_value(value) + "\u00b0"
+		"arc_length":
+			return "\u2312" + format_value(value) # the arc sign, as the flat app writes an arc's length
 	return format_value(value)
 
 
-func circle_spec(kind: String, id: String) -> Dictionary:
-	## The layout spec of a circle's or arc's radius / diameter: its centre, radius and the direction its radius point lies in.
+func circle_spec(kind: String, id: String, place := {}) -> Dictionary:
+	## The layout spec of a circle's or arc's radius / diameter: its centre, radius and the direction its radius point lies in. A saved placement
+	## (`angle`: the leader's direction in degrees counter-clockwise from the rim point's; `leg`: the label's distance beyond the circle) overrides the
+	## automatic direction.
 	var c: Dictionary = circles.get(id, arcs.get(id, {}))
 	var rim: String = c.get("p", c.get("s", ""))
 	if not points.has(c.get("c", "")) or not points.has(rim):
@@ -2449,17 +2458,38 @@ func circle_spec(kind: String, id: String) -> Dictionary:
 	var rim_pt: Vector2 = points[rim]
 	var u := rim_pt - centre
 	var r := u.length()
+	var rim_angle := u.angle()
 	if r < 0.0001:
 		u = Vector2(1, 0)
 	elif absf(u.x) < r * 0.2 or absf(u.y) < r * 0.2:
 		# The radius point lies along an axis, where the centre mark already is: a leader or a diameter line is drawn at an angle instead (radius up and to the
 		# right, diameter up and to the left), as on a drawing, so it does not run along the centre line.
 		u = Vector2.from_angle(deg_to_rad(40.0 if kind == "radius" else 140.0))
-	return {"kind": kind, "c": centre, "r": r, "u": u}
+	var spec := {"kind": kind, "c": centre, "r": r, "u": u}
+	if r >= 0.0001 and (place.has("angle") or place.has("leg")):
+		spec["u"] = Vector2.from_angle(rim_angle + deg_to_rad(float(place.get("angle", 0.0))))
+		spec["label_r"] = r + float(place.get("leg", 0.0))
+	return spec
 
 
-func angle_spec(l1: String, l2: String) -> Dictionary:
-	## The layout spec of the angle between two lines: the point they meet at, a direction along each (away from it) and an arc radius.
+static func _place_of(c: Dictionary) -> Dictionary:
+	## The saved label placement of a constraint (`PUT .../constraints/{id}/label`), {} when it has none.
+	var label: Variant = c.get("label")
+	return label if label is Dictionary else {}
+
+
+static func _linear_place(place: Dictionary) -> Dictionary:
+	## The part of a saved placement a linear dimension reads ({} when it carries none of it).
+	if not (place.has("offset") or place.has("along")):
+		return {}
+	return {"offset": float(place.get("offset", 0.0)), "along": float(place.get("along", 0.0))}
+
+
+func angle_spec(l1: String, l2: String, value := -1.0, quadrant := -1, place := {}) -> Dictionary:
+	## The layout spec of the angle between two lines: the point they meet at, a direction along each (away from it) and an arc radius. With the constraint's
+	## own `value` and `quadrant` it is the sector the backend measures (quadrant bit 0 flips the first ray, bit 1 the second; none saved: the second flips
+	## when the angle between the outward rays is nearer 180 - value than value), and a saved placement (`radius`, `along`) sets the arc's radius and where
+	## the label sits on it. Without them (a candidate): the nearer sector.
 	var p1 := _line_points(l1)
 	var p2 := _line_points(l2)
 	if not points.has(p1[0]) or not points.has(p1[1]) or not points.has(p2[0]) or not points.has(p2[1]):
@@ -2478,16 +2508,198 @@ func angle_spec(l1: String, l2: String) -> Dictionary:
 	var d2 := far_b - point
 	if d1.length() < 0.0001 or d2.length() < 0.0001:
 		return {}
-	return {"kind": "angle", "apex": point, "d1": d1.normalized(), "d2": d2.normalized(), "r": minf(d1.length(), d2.length()) * 0.6}
+	var r := minf(d1.length(), d2.length()) * 0.6
+	if value >= 0.0 or quadrant >= 0:
+		d1 = (a0 + a1) * 0.5 - point # outward: from where they meet towards each line's middle
+		d2 = (b0 + b1) * 0.5 - point
+		if d1.length() < 0.0001 or d2.length() < 0.0001:
+			d1 = far_a - point
+			d2 = far_b - point
+		if quadrant >= 0:
+			d1 = -d1 if quadrant & 1 != 0 else d1
+			d2 = -d2 if quadrant & 2 != 0 else d2
+		else:
+			var between := rad_to_deg(absf(wrapf(d2.angle() - d1.angle(), -PI, PI)))
+			if absf(between - (180.0 - value)) < absf(between - value):
+				d2 = -d2
+	var spec := {"kind": "angle", "apex": point, "d1": d1.normalized(), "d2": d2.normalized(), "r": r}
+	if place.has("radius") or place.has("along"):
+		_place_on_arc(spec, place, true)
+	return spec
 
 
-func perp_spec(point_id: String, line_id: String) -> Dictionary:
+static func _place_on_arc(spec: Dictionary, place: Dictionary, along_is_length: bool) -> void:
+	## Turns a saved angle placement into the spec's own keys: `r` (the arc's radius) and `label_a` (where the label sits on it, radians). The label is
+	## `along` (an arc length, positive towards the second ray) or `angle` (degrees counter-clockwise) from the middle of the arc that runs the short way
+	## from the first ray to the second.
+	var a1 := (spec["d1"] as Vector2).angle()
+	var sweep := wrapf((spec["d2"] as Vector2).angle() - a1, -PI, PI)
+	var r := float(place["radius"]) if place.has("radius") else float(spec["r"])
+	if r < 0.0001:
+		return
+	var mid := a1 + sweep * 0.5
+	spec["r"] = r
+	spec["label_a"] = mid + (signf(sweep) * float(place.get("along", 0.0)) / r if along_is_length else deg_to_rad(float(place.get("angle", 0.0))))
+
+
+func horizontal_angle_spec(line_id: String, quadrant := -1, value := -1.0, place := {}) -> Dictionary:
+	## A line's angle to the horizontal: drawn at the line's end (quadrant bit 0, else its start), against the +x ray (bit 1 set: -x). None saved: from the start,
+	## against whichever horizontal ray makes the sector the value.
+	var ends := _line_points(line_id)
+	if not points.has(ends[0]) or not points.has(ends[1]):
+		return {}
+	var start: Vector2 = points[ends[0]]
+	var end: Vector2 = points[ends[1]]
+	var at_end := quadrant >= 0 and quadrant & 1 != 0
+	var minus_x := quadrant >= 0 and quadrant & 2 != 0
+	if quadrant < 0 and value >= 0.0:
+		var to_x := rad_to_deg(absf((end - start).angle()))
+		minus_x = absf(180.0 - to_x - value) < absf(to_x - value)
+	var vertex := end if at_end else start
+	var ray := (start if at_end else end) - vertex
+	if ray.length() < 0.0001:
+		return {}
+	var spec := {"kind": "angle", "apex": vertex, "d1": ray.normalized(), "d2": Vector2(-1.0 if minus_x else 1.0, 0.0), "r": ray.length() * 0.5}
+	if place.has("radius") or place.has("angle"):
+		_place_on_arc(spec, place, false)
+	return spec
+
+
+func point_angle_spec(vertex_id: String, p1_id: String, p2_id: String, quadrant := -1, place := {}) -> Dictionary:
+	## The angle at a vertex Point between the rays to two others (quadrant bit 0 flips the first ray, bit 1 the second).
+	if not points.has(vertex_id) or not points.has(p1_id) or not points.has(p2_id):
+		return {}
+	var v: Vector2 = points[vertex_id]
+	var d1: Vector2 = points[p1_id] - v
+	var d2: Vector2 = points[p2_id] - v
+	if d1.length() < 0.0001 or d2.length() < 0.0001:
+		return {}
+	var r := minf(d1.length(), d2.length()) * 0.6
+	if quadrant >= 0:
+		d1 = -d1 if quadrant & 1 != 0 else d1
+		d2 = -d2 if quadrant & 2 != 0 else d2
+	var spec := {"kind": "angle", "apex": v, "d1": d1.normalized(), "d2": d2.normalized(), "r": r}
+	if place.has("radius") or place.has("angle"):
+		_place_on_arc(spec, place, false)
+	return spec
+
+
+func arc_length_spec(arc_id: String, place := {}) -> Dictionary:
+	## An arc's length: the dimension arc runs round beside the arc itself (`leg` out from it when saved, never nearer the centre than a tenth of the radius),
+	## the label `angle` degrees counter-clockwise of its middle when saved.
+	var a: Dictionary = arcs.get(arc_id, {})
+	if a.is_empty() or not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
+		return {}
+	var c: Vector2 = points[a["c"]]
+	var r: float = c.distance_to(points[a["s"]])
+	if r < 0.0001:
+		return {}
+	var start: Vector2 = points[a["s"]]
+	var end: Vector2 = points[a["e"]]
+	var a0 := (start - c).angle()
+	var sweep := fposmod((end - c).angle() - a0, TAU)
+	if sweep < 0.00001:
+		sweep = TAU
+	var spec := {"kind": "arc_length", "c": c, "r": r, "a0": a0, "sweep": sweep}
+	if place.has("leg") or place.has("angle"):
+		spec["ra"] = maxf(r + float(place.get("leg", 0.0)), 0.1 * r)
+		spec["label_a"] = a0 + sweep * 0.5 + deg_to_rad(float(place.get("angle", 0.0)))
+	return spec
+
+
+func _round_of(id: String) -> Dictionary:
+	## A circle's or arc's {c, r} (centre and radius), {} if it is not here.
+	var d: Dictionary = circles.get(id, arcs.get(id, {}))
+	var rim: String = d.get("p", d.get("s", ""))
+	if d.is_empty() or not points.has(d.get("c", "")) or not points.has(rim):
+		return {}
+	var centre: Vector2 = points[d["c"]]
+	return {"c": centre, "r": centre.distance_to(points[rim])}
+
+
+static func _linear_between(a: Vector2, b: Vector2, place: Dictionary) -> Dictionary:
+	if a.distance_to(b) < 0.0001:
+		return {}
+	var spec := {"kind": "linear", "a": a, "b": b}
+	var p := _linear_place(place)
+	if not p.is_empty():
+		spec["place"] = p
+	return spec
+
+
+func point_circle_spec(point_id: String, curve_id: String, side: String, place := {}) -> Dictionary:
+	## A Point's nearest (min) or farthest (max) distance to a circle or arc: a linear dimension from the Point to the circle's point on the line through the
+	## Point and the centre, the nearer one for min.
+	var rd := _round_of(curve_id)
+	if rd.is_empty() or not points.has(point_id):
+		return {}
+	var p: Vector2 = points[point_id]
+	var c: Vector2 = rd["c"]
+	if p.distance_to(c) < 0.0001:
+		return {}
+	var u := (c - p).normalized()
+	return _linear_between(p, c - u * float(rd["r"]) if side == "min" else c + u * float(rd["r"]), place)
+
+
+func circle_circle_spec(id1: String, id2: String, side: String, place := {}) -> Dictionary:
+	## Two circles' / arcs' gap (min: facing each other) or overall size (max: facing away) along their centre line.
+	var r1 := _round_of(id1)
+	var r2 := _round_of(id2)
+	if r1.is_empty() or r2.is_empty() or (r1["c"] as Vector2).distance_to(r2["c"]) < 0.0001:
+		return {}
+	var u: Vector2 = ((r2["c"] as Vector2) - (r1["c"] as Vector2)).normalized()
+	var facing := 1.0 if side == "min" else -1.0
+	return _linear_between((r1["c"] as Vector2) + u * float(r1["r"]) * facing, (r2["c"] as Vector2) - u * float(r2["r"]) * facing, place)
+
+
+func line_circle_spec(line_id: String, curve_id: String, side: String, place := {}) -> Dictionary:
+	## A line's distance to a circle's / arc's tangent side (min) or far side (max): from the centre's foot on the line to the circle's point square to it.
+	var rd := _round_of(curve_id)
+	var ends := _line_points(line_id)
+	if rd.is_empty() or not points.has(ends[0]) or not points.has(ends[1]) or (points[ends[0]] as Vector2).distance_to(points[ends[1]]) < 0.0001:
+		return {}
+	var c: Vector2 = rd["c"]
+	var foot := Geometry2D.get_closest_point_to_segment_uncapped(c, points[ends[0]], points[ends[1]])
+	if foot.distance_to(c) < 0.0001:
+		return {}
+	var toward := (foot - c).normalized()
+	return _linear_between(foot, c + toward * float(rd["r"]) * (1.0 if side == "min" else -1.0), place)
+
+
+func perp_spec(point_id: String, line_id: String, place := {}) -> Dictionary:
 	var lp := _line_points(line_id)
 	if not points.has(point_id) or not points.has(lp[0]) or not points.has(lp[1]):
 		return {}
 	var p: Vector2 = points[point_id]
-	var foot := Geometry2D.get_closest_point_to_segment(p, points[lp[0]], points[lp[1]])
-	return {"kind": "perp", "a": p, "b": foot}
+	var foot := Geometry2D.get_closest_point_to_segment_uncapped(p, points[lp[0]], points[lp[1]]) # (the line's extension: a point beyond its end is measured to it)
+	var spec := {"kind": "perp", "a": p, "b": foot}
+	var lp_place := _linear_place(place)
+	if not lp_place.is_empty():
+		spec["place"] = lp_place
+	return spec
+
+
+func line_distance_spec(l1: String, l2: String, place := {}) -> Dictionary:
+	## The distance between two parallel lines: across from the first line's middle to its foot on the second. A saved placement moves the dimension line along
+	## the first line (`offset`) and the label across (`along`).
+	var p1 := _line_points(l1)
+	var p2 := _line_points(l2)
+	if not points.has(p1[0]) or not points.has(p1[1]) or not points.has(p2[0]) or not points.has(p2[1]):
+		return {}
+	var a0: Vector2 = points[p1[0]]
+	var a1: Vector2 = points[p1[1]]
+	if a0.distance_to(a1) < 0.0001:
+		return {}
+	var mid := (a0 + a1) * 0.5
+	var foot := Geometry2D.get_closest_point_to_segment_uncapped(mid, points[p2[0]], points[p2[1]])
+	if mid.distance_to(foot) < 0.0001:
+		return {}
+	var spec := {"kind": "perp", "a": mid, "b": foot}
+	var lp_place := _linear_place(place)
+	if not lp_place.is_empty():
+		spec["u"] = (a1 - a0).normalized()
+		spec["place"] = lp_place
+	return spec
 
 
 func _is_internal_angle(c: Dictionary) -> bool:
@@ -2555,7 +2767,8 @@ func _glyph_spot(entity_id: String) -> Dictionary:
 
 func dimension_items() -> Array:
 	## What the sketch's existing (typed, not provisional) dimensions look like: [{id, spec, text}], for sketch_view.gd to draw as a drawing
-	## draws them. A circle's / arc's own size dimension is a radius; a distance between two points is linear, horizontal or vertical.
+	## draws them. A circle's / arc's own size dimension is a radius; a distance between two points is linear, horizontal or vertical; the part D types
+	## (arc length, two angles, three distances to circles) have their own. A saved label placement is honoured for every type; unplaced, the layout is automatic.
 	var out: Array = []
 	var radius_of := {}
 	for id in circles:
@@ -2563,35 +2776,73 @@ func dimension_items() -> Array:
 	for id in arcs:
 		radius_of[str(arcs[id].get("k", ""))] = ["arc", id]
 	for id in constraints:
-		var c: Dictionary = constraints[id]
-		var type := str(c.get("type", ""))
-		if type == "distance" and not bool(c.get("provisional", false)) and float(c.get("distance", 0.0)) > 0.005: # (a zero distance is a shape's own structure, e.g. a circle's cardinal points)
-			if radius_of.has(str(id)):
-				var which: Array = radius_of[str(id)]
-				var rspec := circle_spec("radius", str(which[1]))
-				if not rspec.is_empty():
-					out.append({"id": id, "spec": rspec, "text": dimension_text("radius", float(c["distance"]))})
-			elif points.has(str(c.get("point_a_id", ""))) and points.has(str(c.get("point_b_id", ""))):
-				var kind := str(c.get("orientation", "linear"))
-				out.append({"id": id, "spec": {"kind": kind, "a": points[c["point_a_id"]], "b": points[c["point_b_id"]]}, "text": dimension_text("linear", float(c["distance"]))})
-		elif type == "point_line_distance":
-			var pspec := perp_spec(str(c.get("point_id", "")), str(c.get("line_id", "")))
-			if not pspec.is_empty():
-				out.append({"id": id, "spec": pspec, "text": dimension_text("linear", float(c.get("distance", 0.0)))})
-		elif type == "line_distance":
-			var lp := _line_points(str(c.get("line1_id", "")))
-			var mid_id := str(lp[0])
-			if points.has(mid_id):
-				var lspec := perp_spec(mid_id, str(c.get("line2_id", "")))
-				if not lspec.is_empty():
-					out.append({"id": id, "spec": lspec, "text": dimension_text("linear", float(c.get("distance", 0.0)))})
-		elif type == "angle" and not _is_internal_angle(c):
-			var aspec := angle_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")))
-			if not aspec.is_empty():
-				out.append({"id": id, "spec": aspec, "text": dimension_text("angle", float(c.get("angle_degrees", 0.0)))})
+		var item := _dimension_item(str(id), constraints[id], radius_of)
+		if not item.is_empty():
+			out.append(item)
 	for item in driven_items():
 		out.append(item)
 	return out
+
+
+func _dimension_item(id: String, c: Dictionary, radius_of: Dictionary) -> Dictionary:
+	## One constraint as a drawn dimension {id, spec, text}, {} when it is not one (or what it measures is not here).
+	var type := str(c.get("type", ""))
+	var place := _place_of(c)
+	var spec := {}
+	var text := ""
+	match type:
+		"distance":
+			if bool(c.get("provisional", false)) or float(c.get("distance", 0.0)) <= 0.005: # (a zero distance is a shape's own structure, e.g. a circle's cardinal points)
+				return {}
+			var value := float(c["distance"])
+			if radius_of.has(id):
+				spec = circle_spec("radius", str((radius_of[id] as Array)[1]), place)
+				text = dimension_text("radius", value)
+			elif points.has(str(c.get("point_a_id", ""))) and points.has(str(c.get("point_b_id", ""))):
+				spec = {"kind": str(c.get("orientation", "linear")), "a": points[c["point_a_id"]], "b": points[c["point_b_id"]]}
+				var p := _linear_place(place)
+				if not p.is_empty():
+					spec["place"] = p
+				text = dimension_text("linear", value)
+		"point_line_distance":
+			spec = perp_spec(str(c.get("point_id", "")), str(c.get("line_id", "")), place)
+			text = dimension_text("linear", float(c.get("distance", 0.0)))
+		"line_distance":
+			spec = line_distance_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")), place)
+			text = dimension_text("linear", float(c.get("distance", 0.0)))
+		"angle":
+			if not _is_internal_angle(c):
+				var value := float(c.get("angle_degrees", 0.0))
+				spec = angle_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")), value, _quadrant_of(c), place)
+				text = dimension_text("angle", value)
+		"horizontal_angle":
+			var value := float(c.get("angle_degrees", 0.0))
+			spec = horizontal_angle_spec(str(c.get("line_id", "")), _quadrant_of(c), value, place)
+			text = dimension_text("angle", value)
+		"point_angle":
+			spec = point_angle_spec(str(c.get("vertex_point_id", "")), str(c.get("point1_id", "")), str(c.get("point2_id", "")), _quadrant_of(c), place)
+			text = dimension_text("angle", float(c.get("angle_degrees", 0.0)))
+		"arc_length":
+			spec = arc_length_spec(str(c.get("arc_id", "")), place)
+			text = dimension_text("arc_length", float(c.get("length", 0.0)))
+		"point_circle_distance":
+			spec = point_circle_spec(str(c.get("point_id", "")), str(c.get("circle_or_arc_id", "")), str(c.get("side", "min")), place)
+			text = dimension_text("linear", float(c.get("distance", 0.0)))
+		"circle_distance":
+			spec = circle_circle_spec(str(c.get("entity1_id", "")), str(c.get("entity2_id", "")), str(c.get("side", "min")), place)
+			text = dimension_text("linear", float(c.get("distance", 0.0)))
+		"line_circle_distance":
+			spec = line_circle_spec(str(c.get("line_id", "")), str(c.get("circle_or_arc_id", "")), str(c.get("side", "min")), place)
+			text = dimension_text("linear", float(c.get("distance", 0.0)))
+	if spec.is_empty():
+		return {}
+	return {"id": id, "spec": spec, "text": text}
+
+
+static func _quadrant_of(c: Dictionary) -> int:
+	## The saved quadrant of an angle dimension (0-3), -1 when it has none.
+	var q: Variant = c.get("quadrant")
+	return int(q) if q != null and float(q) >= 0.0 else -1
 
 
 func driven_items() -> Array:
@@ -2610,7 +2861,7 @@ static func _ref_dim_key(d: Dictionary) -> String:
 	## The ghost key a stored reference dimension is laid out like (radius, diameter, angle, linear...): what dimension_layout draws it as.
 	var types: Array = (d.get("refs", []) as Array).map(func(r): return str(r.get("type", "")))
 	match str(d.get("kind", "")):
-		"radius", "diameter", "angle":
+		"radius", "diameter", "angle", "arc_length", "horizontal_angle", "point_angle", "min_distance", "max_distance":
 			return str(d["kind"])
 		"horizontal", "vertical":
 			return str(d["kind"])
@@ -2630,6 +2881,9 @@ func _ref_dim_spec(d: Dictionary) -> Dictionary:
 	var refs: Array = d.get("refs", [])
 	var selected: Array = refs.map(func(r): return {"kind": str(r["type"]), "id": str(r["id"])})
 	var key := _ref_dim_key(d)
+	var part_d: Variant = _part_d_ref_spec(key, refs, float(d.get("value", -1.0)) if d.get("value") != null else -1.0)
+	if part_d != null:
+		return part_d as Dictionary
 	for g in _ghosts_raw(selected):
 		if g["key"] == key and not (g.get("spec", {}) as Dictionary).is_empty():
 			return g["spec"]
@@ -2638,6 +2892,32 @@ func _ref_dim_spec(d: Dictionary) -> Dictionary:
 		if points.has(ends[0]) and points.has(ends[1]):
 			return {"kind": str(d["kind"]), "a": points[ends[0]], "b": points[ends[1]]}
 	return {}
+
+
+func _part_d_ref_spec(key: String, refs: Array, value: float) -> Variant:
+	## The layout of a stored reference dimension of a part D kind (arc length, angle to horizontal, three-point angle, min / max distance), automatic as it has
+	## no saved placement; null for another kind.
+	var ids: Array = refs.map(func(r): return str(r["id"]))
+	var types: Array = refs.map(func(r): return str(r["type"]))
+	match key:
+		"arc_length":
+			return arc_length_spec(str(ids[0]))
+		"horizontal_angle":
+			return horizontal_angle_spec(str(ids[0]), -1, value)
+		"point_angle":
+			return point_angle_spec(str(ids[0]), str(ids[1]), str(ids[2]))
+		"min_distance", "max_distance":
+			var side := "min" if key == "min_distance" else "max"
+			if types.has("point") and types.size() == 2:
+				var k := types.find("point")
+				return point_circle_spec(str(ids[k]), str(ids[1 - k]), side)
+			if types.has("line") and types.size() == 2:
+				var k := types.find("line")
+				return line_circle_spec(str(ids[k]), str(ids[1 - k]), side)
+			if types.size() == 2:
+				return circle_circle_spec(str(ids[0]), str(ids[1]), side)
+			return {}
+	return null
 
 
 static func _ref_dim_request(selected: Array, key: String) -> Dictionary:
@@ -2652,7 +2932,10 @@ static func _ref_dim_request(selected: Array, key: String) -> Dictionary:
 
 
 static func _dimension_kind(key: String) -> String:
-	return key if key in ["radius", "diameter", "angle"] else "linear"
+	## How a candidate's or reference dimension's number is written (dimension_text's kinds).
+	if key in ["radius", "diameter", "angle", "arc_length"]:
+		return key
+	return "angle" if key in ["horizontal_angle", "point_angle"] else "linear"
 
 
 func keep_driven(key: String) -> Dictionary:
