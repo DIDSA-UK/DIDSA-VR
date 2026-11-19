@@ -13,6 +13,7 @@ e2e_revolve_thin
 e2e_sketch_frame
 e2e_sketch_select
 e2e_sketch_dimension_types
+e2e_sketch_dimension_drop
 e2e_sketch_infer
 e2e_sketch_merge
 e2e_new_part

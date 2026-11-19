@@ -230,13 +230,13 @@ func drive_input(stick: Vector2, pull: bool, push: bool, delta: float) -> void:
 	if _table.pivot == null or _table.seated == null:
 		return
 	var right: XRController3D = _table._right
-	if bool(right.get_meta("ui_hover", false)):
-		return # the laser is on the tool deck: the stick is the deck's, not the part's
 	var editor = _table.get("editor")
-	if editor != null and editor.dimension_stick(stick):
+	if editor != null and editor.dimension_stick(stick): # (before the ui_hover test: the sketch editor's own claim on the sheet sets it too)
 		stick = Vector2.ZERO # F3: the stick steps the previewed dimension's kind, not the part
 	if push and editor != null and editor.dimension_owns_b():
 		push = false # F4: B steps back in the dimension flow (table_editor.gd), it does not push the part away
+	if bool(right.get_meta("ui_hover", false)):
+		return # the laser is on the tool deck: the stick is the deck's, not the part's
 	if stick.length() >= stick_deadzone and not _table.sketch_locked(): # the sketch is tilted to face you: the stick must not spin or tip it away
 		_table.stop_pose_tween()
 		_table.apply_pose(_table.pivot.position, TablePose.stick_turn(_table.pivot.basis.orthonormalized(), stick, delta, rotate_speed_degrees), _table.user_scale)

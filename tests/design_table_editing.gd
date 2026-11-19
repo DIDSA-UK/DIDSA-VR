@@ -388,8 +388,10 @@ func _initialize() -> void:
 	var constrained: bool = await settle(func() -> bool: return not calls_to("/constraints").is_empty() and not ed.session.busy)
 	print("SMOKE ...and the pull adds a horizontal constraint on it: ", constrained and calls_to("/constraints")[0][1]["type"] == "horizontal")
 
-	# --- Dimension: pick the line, point at its label, type a value
+	# --- Dimension: pick the line, point at its label, type a value (the "All at once" style, F7 of docs/dimension-constraint-parity-plan.md; the default
+	# one-preview flow is tests/design_table_dimension_preview.gd)
 	table.manager.activate("dimension")
+	ed.on_option("dk_all")
 	await aim_uv(bottom_mid)
 	await pull()
 	var ghosted: bool = await settle(func() -> bool: return not ed.session.ghosts.is_empty())
