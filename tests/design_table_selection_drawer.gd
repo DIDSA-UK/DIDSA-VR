@@ -4,7 +4,7 @@ extends SceneTree
 ## default action first (New sketch on face for a flat face; Fillet for an edge), disabled actions kept; choosing an action STARTS the existing tool with the selection
 ## already picked (Fillet with the edge in `edges`, state pick_edges), the drawer hides while the tool runs; New sketch on face opens the sketch on THAT face; a pull on
 ## empty space, B, and the X all clear the selection and close the drawer, a pull on the deck does not; a Build tree row offers the feature / sketch actions; with a sketch
-## open the drawer carries the sketch selection's options. From the standing eye point the drawer's on-screen rectangle clears the tool deck, the Properties window and
+## open the drawer is the breadcrumb and the X only (F2: the options are in the Properties panel). From the standing eye point the drawer's on-screen rectangle clears the tool deck, the Properties window and
 ## the tree window at the smallest and largest slab, with the drawer open and while a sketch is open. NOT checked: whether the drawer is the right place, or quicker
 ## than the deck, on a headset; the live backend (tests/e2e_table_context.gd).
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_selection_drawer.gd  (see tests/README.md)
@@ -256,13 +256,13 @@ func _initialize() -> void:
 	var plane_call: Array = calls_to("/create-plane-features")[0] if not calls_to("/create-plane-features").is_empty() else [0, {}]
 	print("SMOKE New sketch on face opens a sketch on the selected face (an offset_face plane on exactly that face), and the selection is spent: ", opened and plane_call[1].get("plane_type", "") == "offset_face" and plane_call[1]["face_refs"][0]["face_ref"]["index"] == chosen["index"] and ed.part_selection.is_empty() and not table.drawer.shown)
 
-	# --- a sketch open: the drawer carries the sketch selection's options, and the sheet stands behind it
+	# --- a sketch open: the drawer is the breadcrumb and the X, and the sheet stands behind it
 	print("SMOKE with a sketch open the front-hinged sheet stands behind the drawer, never over it: ", table.sketch_sheet_front and table.sheet_centre().z + table.sheet_window_m.y * 0.5 * cos(deg_to_rad(table.sketch_tilt())) <= table.slab_size.y * 0.5 - Drawer.DRAWER_SIZE.y + 0.001)
 	table.manager.activate("select")
 	await frames(2)
 	await ed.session.select({"kind": "point", "id": ed.session.origin_id})
 	await frames(2)
-	print("SMOKE ...and a sketch selection's options (Fix for a point) are in the drawer too: ", table.drawer.shown and table.drawer.button_named("Action_fix") != null)
+	print("SMOKE ...and with a sketch open the drawer is the breadcrumb and the X only: the selection's options (Fix for a point) are in the Properties panel, not repeated here (F2): ", table.drawer.shown and table.drawer.actions.is_empty() and table.drawer.button_named("Action_fix") == null and table.drawer.button_named("Close") != null and table.drawer.button_named("More") == null and table.props.option_button("fix") != null)
 	var sketch_dr: Rect2 = drawer_rect_for.call()
 	eye.global_transform = main.get_node("XROrigin3D/XRCamera3D").global_transform
 	var deck_top2: float = eye.unproject_position(table.to_global(Vector3(0.0, -0.01, table.slab_size.y * 0.5 + table.deck_gap))).y

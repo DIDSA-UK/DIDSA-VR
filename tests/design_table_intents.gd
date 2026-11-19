@@ -1,8 +1,8 @@
 extends SceneTree
 ## S7 of docs/dimension-constraint-parity-plan.md: the sketcher's INTENT layer (table_editor.gd `intent_*`) driven the way a hand source would, with no controller button,
 ## no stick and no `table_manip.drive_input`: only a pointing ray (`aim`, which every source has) and the intents. It must reach the results of S5's tests (pick, preview,
-## cycle, drop, type, step back), S6's (label drag, saved, cancel) and S10's (point drag, drop payload, cancel, a pinned point); the options row's Prev / Next / Back
-## buttons do what the stick and B do; the hand's hit sizes are larger than the controller's.
+## cycle, drop, type, step back), S6's (label drag, saved, cancel) and S10's (point drag, drop payload, cancel, a pinned point); the options panel's kind buttons
+## do what the stick does (the old Prev / Next / Back buttons are gone, F2) and the pad's Cancel and B step back; the hand's hit sizes are larger than the controller's.
 ## NOT checked: a real hand or controller, the feel, the thread (sketch_point_drag.gd). The ray is still the table's laser, aimed by moving the controller node.
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_intents.gd  (see tests/README.md)
 
@@ -154,17 +154,14 @@ func _initialize() -> void:
 	_check(ed.intent_adjust(0.9) and ed.dim_flow.chosen == "h" and not ed.intent_adjust(0.9) and ed.dim_flow.chosen == "h", "intent_adjust(0.9): one step per flick, held does not step again")
 	_check(not ed.intent_adjust(0.0) and ed.intent_adjust(-0.9) and ed.dim_flow.chosen == "length", "intent_adjust back to the middle then -0.9: back to Length")
 	_check(table.pivot.basis.is_equal_approx(pivot_basis), "...and the part did not turn")
-	ed.on_option("dk_next")
-	var by_next: bool = ed.dim_flow.chosen == "h" and option_pressed("dk:h")
-	ed.on_option("dk_prev")
-	_check(by_next and ed.dim_flow.chosen == "length" and table.ui.option_button("dk_prev") != null and table.ui.option_button("dk_next") != null, "the Prev / Next buttons do what intent_step does")
+	ed.on_option("dk:h") # F2: the kind buttons are the hand path (a press on a kind chooses it, as the stick does); Prev / Next / Back are gone
+	var by_button: bool = ed.dim_flow.chosen == "h" and option_pressed("dk:h")
+	ed.on_option("dk:length")
+	_check(by_button and ed.dim_flow.chosen == "length" and table.ui.option_button("dk_prev") == null and table.ui.option_button("dk_next") == null and table.ui.option_button("dk_back") == null, "a kind button does what intent_step does, and there are no Prev / Next / Back buttons")
 	await ed.intent_select()
 	_check(table.keyboard_open() and ed.dim_flow.stage == "pad" and ed.dim_flow.frozen["key"] == "length", "intent_select on empty sheet drops it: the pad opens, the kind frozen")
-	_check(table.ui.option_button("dk_back") != null and table.ui.option_button("dk_prev") == null, "with the pad open the row offers Back, not Prev / Next")
+	_check(table.ui.option_button("dk_back") == null and table.ui.option_button("dk:length") != null, "with the pad open the panel still lists the kinds (no Back button: the pad has its own Cancel, B steps back)")
 	_check(ed.intent_back() and not table.keyboard_open() and ed.dim_flow.stage == "preview" and sess.selection.size() == 1, "intent_back: the pad closes, the preview is back, the pick kept")
-	await ed.intent_select()
-	ed.on_option("dk_back")
-	_check(not table.keyboard_open() and ed.dim_flow.stage == "preview", "the Back button does what intent_back does (from the deck, the sheet not hovered)")
 	await ed.intent_select()
 	main._keyboard._text = "33"
 	main._keyboard._confirm()

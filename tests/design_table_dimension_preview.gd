@@ -2,8 +2,8 @@ extends SceneTree
 ## S5 of docs/dimension-constraint-parity-plan.md through the design table's real laser path (table_editor.gd, table_manip.gd) against the FAKE backend
 ## (tests/helpers/fake_cad.gd), a rectangle drawn first. With the Dimension tool: a pull on a line picks it; the laser on empty sheet shows ONE
 ## candidate, its label at the laser (the others are not drawn); the options row lists the line's kinds with the previewed one lit and the
-## "All at once" toggle (F7) off. The right stick (table_manip.drive_input, as the controller feeds it while the table is engaged) steps the kind
-## and does not turn the part; with a hand gripping the table the stick is the table's (F3). B while the dimension flow has a step to go back to
+## "All candidates" toggle (F7) off. The right stick (table_manip.drive_input, as the controller feeds it while the table is engaged) steps the kind
+## and does not turn the part; with a hand gripping the table the stick still steps the kind while Orbit lock is on (the default) and is the table's when it is off (F2, owner decision 1). B while the dimension flow has a step to go back to
 ## does not push the part away. A pull on empty sheet drops it: the number pad opens and the preview stays put while the laser moves; B closes the
 ## pad and goes back to the preview; a second drop and a typed value make the dimension (POST) and save the dropped placement (PUT .../label);
 ## B with a pick and no pad lets the pick go; F7 on draws every candidate and no preview. NOT checked: a real stick or button on a headset, the
@@ -139,7 +139,7 @@ func _initialize() -> void:
 	# --- pick a line with the Dimension tool
 	table.manager.activate("dimension")
 	await frames(2)
-	_check(ed.dim_flow.stage == "picking" and option_pressed("dk_all") == false and table.ui.option_button("dk_all") != null, "the Dimension tool: nothing previewed yet, the options row has the 'All at once' toggle, off (F7)")
+	_check(ed.dim_flow.stage == "picking" and option_pressed("dk_all") == false and table.ui.option_button("dk_all") != null, "the Dimension tool: nothing previewed yet, the Properties panel has the 'All candidates' toggle, off (F7)")
 	await aim_uv(centre_uv + Vector2(1, -10))
 	await pull()
 	await settle(func() -> bool: return not ed.session.busy)
@@ -165,10 +165,33 @@ func _initialize() -> void:
 	table.manip.drive_input(Vector2(-0.9, 0.0), false, false, 0.1)
 	_check(ed.dim_flow.chosen == "length", "back to the middle, then left: back to Length")
 	table.manip.drive_input(Vector2.ZERO, false, false, 0.1)
+	# F2, owner decision 1: whenever a preview is live and the laser is on the sheet the stick cycles, except when Orbit lock is off and a hand grips.
 	table.manip._grips[l] = {"offset": Vector3.ZERO}
+	_check(table.part_locked and table.sketch_locked(), "(Orbit lock is on, the default, with the sketch open)")
 	var owned_gripped: bool = ed.dimension_stick(Vector2(0.9, 0.0))
+	_check(owned_gripped and ed.dim_flow.chosen == "h", "Orbit lock on, a hand gripping the table: the stick still steps the kind (it would do nothing to the part)")
+	table.manip.drive_input(Vector2.ZERO, false, false, 0.1)
+	ed.dimension_stick(Vector2.ZERO)
+	ed.dimension_stick(Vector2(-0.9, 0.0))
+	_check(ed.dim_flow.chosen == "length", "...and back")
+	ed.dimension_stick(Vector2.ZERO)
+	table.part_locked = false
+	var basis_gripped: Basis = table.pivot.basis
+	var owned_free: bool = ed.dimension_stick(Vector2(0.9, 0.0))
+	var ui_hover_was = table._right.get_meta("ui_hover", false)
+	table._right.set_meta("ui_hover", false) # (drive_input leaves the stick to the deck while the laser is on it; here the part's turn is what is looked at)
+	table.manip.drive_input(Vector2(0.9, 0.0), false, false, 0.1)
+	table._right.set_meta("ui_hover", ui_hover_was)
+	_check(not owned_free and ed.dim_flow.chosen == "length" and not table.pivot.basis.is_equal_approx(basis_gripped), "Orbit lock off, a hand gripping the table: the stick is the table's (the kind does not change, the part turns)")
 	table.manip._grips.erase(l)
-	_check(not owned_gripped and ed.dim_flow.chosen == "length", "with a hand gripping the table the stick is the table's: the kind does not change")
+	table.pivot.basis = basis_gripped
+	ed.dimension_stick(Vector2.ZERO)
+	_check(ed.dimension_stick(Vector2(0.9, 0.0)) and ed.dim_flow.chosen == "h", "Orbit lock off, no grip: the stick steps the kind as before")
+	ed.dimension_stick(Vector2.ZERO)
+	ed.dimension_stick(Vector2(-0.9, 0.0))
+	table.part_locked = true
+	table.manip.drive_input(Vector2.ZERO, false, false, 0.1)
+	_check(ed.dim_flow.chosen == "length", "(back to Length, Orbit lock on again)")
 	table.manip.drive_input(Vector2.ZERO, false, true, 0.2)
 	_check(table.pivot.position.is_equal_approx(pos_before), "B held while the dimension flow can step back does not push the part away")
 	ed.on_option("dk:v")

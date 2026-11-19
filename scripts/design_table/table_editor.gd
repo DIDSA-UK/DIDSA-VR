@@ -50,6 +50,7 @@ const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const DimensionPreview := preload("res://scripts/design_table/dimension_preview.gd")
 const InputSource := preload("res://scripts/design_table/input_source.gd")
 const PointDrag := preload("res://scripts/design_table/point_drag.gd")
+const PadLeader := preload("res://scripts/design_table/pad_leader.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "unfix", "construction", "delete", "clear"]
@@ -65,7 +66,6 @@ const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
 const FONTS := ["Open Sans", "Roboto", "Lato", "Fira Sans", "Barlow", "PT Sans", "IBM Plex Serif", "IBM Plex Mono", "Space Mono", "Rajdhani"] ## the backend's bundled fonts (app/sketch/text_fonts.py FONT_ALLOWLIST)
 const DOUBLE_PULL_MS := 500
-const MENU_SLOTS := 6 ## buttons in the options row
 
 var table ## design_table.gd
 var api ## cad_api.gd, or anything with request(method, path, body) and fetch_bytes(path); null = no backend
@@ -79,6 +79,7 @@ var _repick_queue: Array = [] ## the flagged points still to do, in order
 var clip := SketchClip.new() ## clips the copy to the sketch window while a sketch is open (sketch_clip.gd)
 var markers: Node3D = null ## plane_markers.gd, a child of the table's copy
 var origin_axes: Node3D = null ## origin_axes.gd, a child of the copy: the part's origin and axes, shown when the Visibility drawer has them on
+var pad_leader: MeshInstance3D = null ## B2: the line from a dropped dimension's number pad to its frozen label
 var highlight: Node = null ## this table's own face_highlight.gd (so Mates / Measure never see it)
 var part_id := "" ## the PART DEFINITION being edited (every instance of it changes), resolved from the seated node's occurrence
 var chosen_face := {} ## {body_id, index} when the sketch is on a face of the part
@@ -152,7 +153,6 @@ var _orient_tween: Tween = null
 var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
 var _menu_key := ""
 var _state_shown := "" ## the constraint summary the status line last carried
-var _menu_page := 0 ## which page of the Select tool's menu is showing
 var _canvas_msec := 0 ## when the drawing was last rebuilt for a zoom
 var _canvas_stale := false ## a zoom has changed the part's scale since the drawing was last rebuilt
 var _edited_nodes: Array = [] ## the arena nodes the last refresh updated: every instance of the part
@@ -165,6 +165,15 @@ func setup(p_table, p_api) -> void:
 	table._right.button_pressed.connect(_on_right_pressed)
 	table._right.button_released.connect(_on_right_released)
 	geometry_changed.connect(func() -> void: _rest_version += 1)
+	pad_leader = PadLeader.new()
+	pad_leader.name = "PadLeader"
+	pad_leader.active_fn = func() -> bool: return session != null and dim_flow.stage == "pad" and table.keyboard_open()
+	pad_leader.from_point = func() -> Variant: return table.keyboard_top_centre()
+	pad_leader.to_point = func() -> Variant: return view.dimension_preview_world_point() if view != null else null
+	pad_leader.light_label = func(on: bool) -> void:
+		if view != null:
+			view.light_dimension_preview(on)
+	table.add_child(pad_leader)
 
 
 func _call(method: int, path: String, body) -> Dictionary:
@@ -845,21 +854,13 @@ func _sync_part_selection() -> void:
 		return
 	var ctx := _drawer_context()
 	var rungs: Array = SelectionCrumbs.chain(selection, ctx)
-	var actions: Array = SelectionActions.actions_for(selection, ctx) if session == null else _sketch_actions()
+	var actions: Array = SelectionActions.actions_for(selection, ctx) if session == null else [] # in a sketch the drawer is the breadcrumb and the X only: the Properties panel is the one options panel (F2)
 	table.drawer.show_for(rungs, actions)
 	if session == null and not part_selection.is_empty():
 		var key_entity: Dictionary = part_selection[part_selection.size() - 1]
 		var point = _entity_point(key_entity)
 		if point != null:
 			table.drawer.show_leader(table.to_local(point))
-
-
-func _sketch_actions() -> Array:
-	## The sketch selection's menu (T5) as drawer actions: the same ids the options row takes.
-	var out: Array = []
-	for o in session.menu():
-		out.append({"id": str(o["id"]), "text": str(o["text"]), "group": "refine" if str(o["id"]).begins_with("dim:") else "modify", "enabled": true, "reason": ""})
-	return out
 
 
 func _entity_point(entity: Dictionary) -> Variant:
@@ -1813,7 +1814,6 @@ func _on_session_changed() -> void:
 	var selection_key := str(session.selection.map(func(e): return "%s:%s" % [e["kind"], e["id"]])) if session != null else ""
 	if selection_key != _menu_key:
 		_menu_key = selection_key
-		_menu_page = 0 # a different selection starts its menu on the first page
 	_refresh_view()
 	_update_options()
 	sync_undo_redo()
@@ -2421,8 +2421,9 @@ func dimension_step_back(from_button := false) -> bool:
 
 func dimension_stick(stick: Vector2) -> bool:
 	## F3, called by table_manip.gd's drive_input while the table is engaged: the right stick left / right steps the previewed kind while a preview
-	## is live, the laser is on the sheet and no hand grips the table. True when the stick is the preview's (the part must not turn with it).
-	if session == null or table.active_tool != "dimension" or not DimensionPreview.owns_stick(dim_flow.live(), hovering and _hover_uv != null, table.manip.grip_count() > 0):
+	## is live and the laser is on the sheet, except when Orbit lock is off and a hand grips (then the stick turns the part: DimensionPreview.owns_stick,
+	## owner decision 1). True when the stick is the preview's (the part must not turn with it).
+	if session == null or table.active_tool != "dimension" or not DimensionPreview.owns_stick(dim_flow.live(), hovering and _hover_uv != null, table.manip.grip_count() > 0, table.sketch_locked()):
 		dim_flow.stick(0.0)
 		return false
 	intent_adjust(stick.x)
@@ -2430,21 +2431,15 @@ func dimension_stick(stick: Vector2) -> bool:
 
 
 func _dimension_options() -> Array:
-	## The options row with the Dimension tool: the kinds that fit the pick, the previewed one lit (a press chooses it, as the stick does; with
-	## every candidate at once, a press types it), then the "All at once" toggle (F7).
+	## The Properties panel's list with the Dimension tool (parity follow-ups F2, docs/parity-followups-investigation.md A2): a KIND group, one exclusive toggle
+	## per kind that fits the pick, two to a line so every label reads, the previewed one lit (a press chooses it, which is the hand-ready step beside the stick;
+	## with every candidate at once, a press types it), then a SHOW group with the "All candidates" toggle (F7). No Prev / Next / Back: a kind button is the
+	## step, B has the pad's own Cancel and a second pull, and the list is never cut (the catalogue's largest has five kinds).
 	var list: Array = []
 	var current: String = dim_flow.frozen.get("key", "") if dim_flow.stage == "pad" else dim_flow.current_key(session, _hover_uv)
 	for g in session.ghosts:
-		if list.size() >= MENU_SLOTS - 1:
-			break
-		list.append({"id": "dk:%s" % g["key"], "text": str(g["label"]), "toggle": not dim_flow.show_all, "pressed": not dim_flow.show_all and str(g["key"]) == current})
-	list.append({"id": "dk_all", "text": "All at once", "toggle": true, "pressed": dim_flow.show_all})
-	# S7: what the right stick and B do, as buttons (so nothing needs a stick): the previous / next kind while a preview is live, Back while there is a step to go back to
-	if dim_flow.live() and session.ghosts.size() > 1:
-		list.append({"id": "dk_prev", "text": "Prev"})
-		list.append({"id": "dk_next", "text": "Next"})
-	if dimension_owns_b(true):
-		list.append({"id": "dk_back", "text": "Back"})
+		list.append({"id": "dk:%s" % g["key"], "text": str(g["label"]), "toggle": true, "per_row": 2, "group": "Kind", "pressed": not dim_flow.show_all and str(g["key"]) == current})
+	list.append({"id": "dk_all", "text": "All candidates", "toggle": true, "group": "Show", "pressed": dim_flow.show_all})
 	return list
 
 
@@ -2560,13 +2555,8 @@ func _update_option_list() -> void:
 
 
 func _menu_options() -> Array:
-	## The Select tool's contextual menu for what is selected, one page of the options row (More turns the page).
-	var page := SketchSelection.page(session.menu(), _menu_page, MENU_SLOTS)
-	_menu_page = int(page["page"])
-	var list: Array = (page["items"] as Array).duplicate(true)
-	if bool(page["has_more"]):
-		list.append({"id": "menu_more", "text": "More %d/%d" % [_menu_page + 1, int(page["pages"])]})
-	return list
+	## The Select tool's contextual menu for what is selected: every item, in its groups (DIMENSIONS, RELATIONS, EDIT: sketch_selection.gd), none paged away.
+	return session.menu()
 
 
 func on_option(option_id: String) -> void:
@@ -2596,10 +2586,6 @@ func on_option(option_id: String) -> void:
 	if option_id == "refs_keep":
 		await _keep_moved()
 		return
-	if option_id == "menu_more":
-		_menu_page += 1
-		_update_options()
-		return
 	if option_id.begins_with("dim:"):
 		_type_dimension(option_id.substr(4))
 		return
@@ -2611,12 +2597,6 @@ func on_option(option_id: String) -> void:
 			_dim_last_uv = null
 			_update_dimension_preview(_hover_uv)
 		_update_options()
-		return
-	if option_id == "dk_prev" or option_id == "dk_next":
-		intent_step(-1 if option_id == "dk_prev" else 1)
-		return
-	if option_id == "dk_back":
-		intent_back(true)
 		return
 	if option_id == "dk_all" and session != null:
 		dim_flow.show_all = not dim_flow.show_all
@@ -2646,7 +2626,6 @@ func on_option(option_id: String) -> void:
 		_update_options()
 		return
 	if session != null and session.tool == SELECT_TOOL and option_id in SelectMenuIds:
-		_menu_page = 0
 		var result: Dictionary = await session.apply_menu(option_id)
 		if bool(result["ok"]):
 			UiFeedback.haptic(table._right, "confirm")

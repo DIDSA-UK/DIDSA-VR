@@ -104,10 +104,11 @@ func stick(x: float) -> int:
 	return 0
 
 
-static func owns_stick(preview_live: bool, laser_on_sheet: bool, gripped: bool) -> bool:
-	## F3: the right stick cycles the kind only while a preview is live, the laser is on the sheet and no hand grips the table; otherwise it does
-	## what it did (turns the part, scrolls, walks).
-	return preview_live and laser_on_sheet and not gripped
+static func owns_stick(preview_live: bool, laser_on_sheet: bool, gripped: bool, part_locked: bool = false) -> bool:
+	## F3 / F2 (owner decision 1 of docs/parity-followups-investigation.md): the right stick cycles the kind whenever a preview is live and the laser is on the sheet,
+	## except when Orbit lock is off (`part_locked` false) and a hand grips the table: then the stick turns the part, as it did. With Orbit lock on (the default)
+	## the stick does nothing to the part in a sketch, so a grip takes nothing from it and cycling works while the other hand holds the table.
+	return preview_live and laser_on_sheet and (part_locked or not gripped)
 
 
 func preview(session, pointer: Vector2, band: float) -> Dictionary:

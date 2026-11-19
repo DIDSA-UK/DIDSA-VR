@@ -546,6 +546,11 @@ func keyboard_open() -> bool:
 	return _main != null and _main.get("_keyboard") != null and _main._keyboard.is_open()
 
 
+func keyboard_top_centre() -> Variant:
+	## The middle of the open number pad's top edge in the world (a Vector3), or null with no pad up: where a dropped dimension's leader line starts.
+	return _main._keyboard.top_centre_world() if keyboard_open() else null
+
+
 func close_keyboard() -> void:
 	## S5: B steps back from the number pad of a dropped dimension.
 	if keyboard_open():

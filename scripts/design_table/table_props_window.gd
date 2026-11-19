@@ -11,7 +11,9 @@ signal option_pressed(option_id: String)
 
 ## Layout (Phase 7.0 of docs/phase-7-plan.md): buttons are laid out two to a line, toggles four to a line, so a long option list needs fewer lines.
 ## An option may carry "wide": true for a line of its own, and "group": "<name>" for a caption over a run of related options. Apply and any text
-## longer than HALF_LINE_CHARS always take a whole line. Not verified on a headset: the row height is about 2.6 cm on the 0.40 m panel.
+## longer than HALF_LINE_CHARS always take a whole line. A toggle may carry "per_row": n: the run of toggles is then a grid n to a line at 1/n of the
+## panel's width (a KIND list, whose labels must be readable: a 110 px chip clips "Horizontal length"), not chips that wrap. Not verified on a headset: the
+## row height is about 2.6 cm on the 0.40 m panel.
 const ROW_HEIGHT := 44.0
 const ROW_GAP := 6
 const CHIP_WIDTH := 110.0
@@ -164,7 +166,7 @@ func _rebuild() -> void:
 		_rows.remove_child(child)
 		child.queue_free()
 	_buttons.clear()
-	var group: HFlowContainer = null # the run of toggles being laid out side by side
+	var group: Container = null # the run of toggles being laid out side by side (an HFlowContainer of chips, or a GridContainer when they carry per_row)
 	var pair: HBoxContainer = null # the line of buttons being filled, two to a line
 	var current_group := ""
 	for o in _options:
@@ -181,11 +183,24 @@ func _rebuild() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if bool(o.get("toggle", false)):
 			pair = null
+			var per_row := int(o.get("per_row", 0))
+			if group != null and (per_row > 0) != (group is GridContainer):
+				group = null # chips and a grid never share a run
 			if group == null:
-				group = HFlowContainer.new()
-				group.add_theme_constant_override("h_separation", ROW_GAP)
-				group.add_theme_constant_override("v_separation", ROW_GAP)
+				if per_row > 0:
+					var grid := GridContainer.new()
+					grid.columns = per_row
+					grid.add_theme_constant_override("h_separation", ROW_GAP)
+					grid.add_theme_constant_override("v_separation", ROW_GAP)
+					grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+					group = grid
+				else:
+					group = HFlowContainer.new()
+					group.add_theme_constant_override("h_separation", ROW_GAP)
+					group.add_theme_constant_override("v_separation", ROW_GAP)
 				_rows.add_child(group)
+			if per_row > 0:
+				b.custom_minimum_size.x = 0.0 # the grid's equal columns set the width, not the chip's 110 px
 			group.add_child(b)
 			continue
 		group = null # the next toggles start a new group

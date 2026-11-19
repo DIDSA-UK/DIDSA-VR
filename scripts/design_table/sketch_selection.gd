@@ -3,9 +3,11 @@ extends RefCounted
 ## (client/lib/sketch/sketch_controller.dart, availableConstraintOptions, and the ribbon's Make construction / Fix / Delete chips).
 ## Pure functions over a sketch_session.gd's selection and local model, no scene tree, so tests can pin every selection shape.
 ##
-## A selection is a list of {kind, id}, kind one of "point", "line", "circle", "arc". An option is {id, text}; the ids the session
+## A selection is a list of {kind, id}, kind one of "point", "line", "circle", "arc". An option is {id, text, group}; the ids the session
 ## understands are the keys of CONSTRAINT_OPTIONS (each posts the constraint(s) of that name), "fix", "construction", "delete" and
-## "clear"; "dim:<key>" options are the dimension candidates (sketch_session.gd ghosts) and open the number pad.
+## "clear"; "dim:<key>" options are the dimension candidates (sketch_session.gd ghosts) and open the number pad. `group` is the caption the Properties
+## panel sets over a run (parity follow-ups F2): DIMENSIONS (the candidates with their values), RELATIONS (the constraints that fit, Merge), EDIT (Fix, Unfix,
+## Construction / Solid, Delete, Clear). The menu is never paged: the panel shows every item and scrolls as the last resort.
 ##
 ##   1 line                  Horizontal, Vertical, Length
 ##   1 circle / arc          Radius, Diameter
@@ -20,6 +22,10 @@ extends RefCounted
 ##   point + ellipse         On ellipse
 ##   line + circle / arc     Tangent
 ##   any                     Fix (and Unfix when a Fix holds it), Construction / Solid (lines, circles, arcs), Delete, Clear
+
+const G_DIMENSIONS := "Dimensions"
+const G_RELATIONS := "Relations"
+const G_EDIT := "Edit"
 
 const TEXT := {
 	"horizontal": "Horizontal", "vertical": "Vertical", "parallel": "Parallel", "perpendicular": "Perpendicular",
@@ -80,22 +86,22 @@ static func options(selection: Array, session = null, ghosts: Array = []) -> Arr
 	if selection.is_empty():
 		return out
 	for g in ghosts:
-		out.append({"id": "dim:%s" % g["key"], "text": "%s %.2f" % [g["label"], float(g["value"])]})
+		out.append({"id": "dim:%s" % g["key"], "text": "%s %.2f" % [g["label"], float(g["value"])], "group": G_DIMENSIONS})
 	for id in constraint_ids(selection, session):
-		out.append({"id": id, "text": TEXT[id]})
+		out.append({"id": id, "text": TEXT[id], "group": G_RELATIONS})
 		if id == "coincident" and session != null and session.merge_offered():
-			out.append({"id": "merge", "text": TEXT["merge"]}) # (not a constraint: the session special-cases it)
+			out.append({"id": "merge", "text": TEXT["merge"], "group": G_RELATIONS}) # (not a constraint: the session special-cases it)
 	if session != null and counts(selection)["point"] > 2 and counts(selection)["point"] == selection.size() and session.merge_offered():
-		out.append({"id": "merge", "text": TEXT["merge"]}) # three or more points: Coincident is for two, Merge takes any number
-	out.append({"id": "fix", "text": TEXT["fix"]})
+		out.append({"id": "merge", "text": TEXT["merge"], "group": G_RELATIONS}) # three or more points: Coincident is for two, Merge takes any number
+	out.append({"id": "fix", "text": TEXT["fix"], "group": G_EDIT})
 	if session != null and not session.fix_constraints_for(selection).is_empty():
-		out.append({"id": "unfix", "text": TEXT["unfix"]}) # something picked is held by a Fix of its own: this takes it off
+		out.append({"id": "unfix", "text": TEXT["unfix"], "group": G_EDIT}) # something picked is held by a Fix of its own: this takes it off
 	var c := counts(selection)
 	if int(c["line"]) + int(c["curve"]) + int(c.get("other", 0)) > 0:
-		out.append({"id": "construction", "text": "Solid" if all_construction(selection, session) else "Construction"})
+		out.append({"id": "construction", "text": "Solid" if all_construction(selection, session) else "Construction", "group": G_EDIT})
 	if session == null or not only_origin(selection, session):
-		out.append({"id": "delete", "text": TEXT["delete"]})
-	out.append({"id": "clear", "text": TEXT["clear"]})
+		out.append({"id": "delete", "text": TEXT["delete"], "group": G_EDIT})
+	out.append({"id": "clear", "text": TEXT["clear"], "group": G_EDIT})
 	return out
 
 
@@ -109,13 +115,13 @@ static func annotation_options(annotations: Array, selection: Array, session = n
 	if annotations.size() == 1 and selection.is_empty() and str(annotations[0]["kind"]) == "dimension":
 		var value: Dictionary = session.dimension_value(str(annotations[0]["id"])) if session != null else {"ok": true}
 		if bool(value.get("ok", false)):
-			out.append({"id": "edit_value", "text": "Edit value"})
+			out.append({"id": "edit_value", "text": "Edit value", "group": G_EDIT})
 			if session != null and session.is_size_dimension(str(annotations[0]["id"])):
-				out.append({"id": "diameter_toggle", "text": "Show radius" if bool(session.diameter_shown.get(str(annotations[0]["id"]), false)) else "Show diameter"})
+				out.append({"id": "diameter_toggle", "text": "Show radius" if bool(session.diameter_shown.get(str(annotations[0]["id"]), false)) else "Show diameter", "group": G_EDIT})
 			if session != null and str((session.constraints.get(str(annotations[0]["id"]), {}) as Dictionary).get("type", "")) in ["angle", "horizontal_angle", "point_angle"]:
-				out.append({"id": "angle_side", "text": "Other side"})
-	out.append({"id": "delete", "text": TEXT["delete"]})
-	out.append({"id": "clear", "text": TEXT["clear"]})
+				out.append({"id": "angle_side", "text": "Other side", "group": G_EDIT})
+	out.append({"id": "delete", "text": TEXT["delete"], "group": G_EDIT})
+	out.append({"id": "clear", "text": TEXT["clear"], "group": G_EDIT})
 	return out
 
 
@@ -165,14 +171,3 @@ static func shared_end(a: Dictionary, b: Dictionary) -> String:
 		if str(p) != "" and (str(p) == str(b.get("s", "")) or str(p) == str(b.get("e", ""))):
 			return str(p)
 	return ""
-
-
-static func page(list: Array, shown: int, slots: int = 6) -> Dictionary:
-	## The options row holds `slots` buttons. A longer menu shows slots-1 and turns the last into "More n/m" (the same idea as tool_pager.gd).
-	## {items, has_more, page, pages}.
-	if list.size() <= slots:
-		return {"items": list.duplicate(), "has_more": false, "page": 0, "pages": 1}
-	var per := slots - 1
-	var pages := ceili(float(list.size()) / float(per))
-	var p := clampi(shown, 0, pages - 1)
-	return {"items": list.slice(p * per, mini((p + 1) * per, list.size())), "has_more": true, "page": p, "pages": pages}

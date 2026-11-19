@@ -165,6 +165,11 @@ func close() -> void:
 	_right.set_meta("ui_hit_distance", -1.0) # the surface only runs while open, so this has to be reset explicitly here too — otherwise the laser could stay shortened to a stale distance after closing
 
 
+func top_centre_world() -> Vector3:
+	## The middle of the open keyboard's top edge, in the world (where a docked pad's leader line starts: design_table/pad_leader.gd).
+	return global_transform * Vector3(0.0, panel_size.y * 0.5, 0.0)
+
+
 func handle_in_reach(hand: Node3D) -> bool:
 	## True if this open keyboard's drag handle is within the hand's grab reach —
 	## controller.gd defers to it, so a grip at the handle never also grabs a part.

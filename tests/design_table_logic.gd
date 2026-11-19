@@ -481,11 +481,14 @@ func _initialize() -> void:
 	print("SMOKE the origin alone can be fixed and cleared but never deleted: ", menu_ids.call([["point", "o"]]) == ["fix", "clear"])
 	print("SMOKE a point and a line: On line, Midpoint; a point and a circle: On curve; a line and a circle: Tangent: ", menu_ids.call([["point", "p"], ["line", "l1"]]).slice(0, 2) == ["point_on_line", "at_midpoint"] and menu_ids.call([["point", "p"], ["circle", "c1"]])[0] == "point_on_curve" and menu_ids.call([["line", "l1"], ["circle", "c1"]])[0] == "tangent")
 	print("SMOKE two circles: Concentric and Equal radius; two arcs sharing an end add Tangent, arcs that do not share one do not: ", menu_ids.call([["circle", "c1"], ["circle", "c2"]]).slice(0, 2) == ["concentric", "equal_radius"] and not menu_ids.call([["circle", "c1"], ["circle", "c2"]]).has("tangent") and menu_ids.call([["arc", "a1"], ["arc", "a2"]]).has("tangent") and not menu_ids.call([["arc", "a1"], ["arc", "a3"]]).has("tangent"))
-	print("SMOKE the dimension candidates come first, as 'dim:<key>' options with their value: ", SketchSelection.options(sel_of.call([["line", "l1"]]), model, [{"key": "length", "label": "Length", "value": 40.0}])[0] == {"id": "dim:length", "text": "Length 40.00"})
-	var long_list: Array = []
-	for i in 9:
-		long_list.append({"id": "o%d" % i, "text": "O%d" % i})
-	var p0 := SketchSelection.page(long_list, 0, 6)
-	var p1 := SketchSelection.page(long_list, 1, 6)
-	print("SMOKE a menu longer than the six-button row shows five and More, then the rest; a short one shows all: ", p0["items"].size() == 5 and p0["has_more"] and p0["pages"] == 2 and p1["items"].size() == 4 and p1["items"][0]["id"] == "o5" and SketchSelection.page(long_list.slice(0, 6), 0, 6)["has_more"] == false and SketchSelection.page(long_list, 9, 6)["page"] == 1)
+	print("SMOKE the dimension candidates come first, as 'dim:<key>' options with their value: ", SketchSelection.options(sel_of.call([["line", "l1"]]), model, [{"key": "length", "label": "Length", "value": 40.0}])[0] == {"id": "dim:length", "text": "Length 40.00", "group": "Dimensions"})
+	# F2: the menu is never paged; each item carries the caption the Properties panel sets over its run (Dimensions, then Relations, then Edit)
+	var line_menu: Array = SketchSelection.options(sel_of.call([["line", "l1"], ["line", "l2"]]), model, [{"key": "length", "label": "Length", "value": 40.0}, {"key": "h", "label": "Horizontal length", "value": 40.0}])
+	var order: Array = []
+	for o in line_menu:
+		if order.is_empty() or order.back() != o["group"]:
+			order.append(o["group"])
+	print("SMOKE the menu is whole (no paging) and grouped Dimensions, Relations, Edit in that order, every item with its group: ", order == ["Dimensions", "Relations", "Edit"] and line_menu.all(func(o): return o.has("group")) and line_menu.map(func(o): return o["id"]).has("delete"), " ", order)
+	var annotation_menu: Array = SketchSelection.annotation_options([{"kind": "constraint", "id": "x"}], [], null)
+	print("SMOKE a picked glyph's menu is the Edit group alone (Delete, Clear): ", annotation_menu.map(func(o): return o["id"]) == ["delete", "clear"] and annotation_menu.all(func(o): return o["group"] == "Edit"))
 	quit()

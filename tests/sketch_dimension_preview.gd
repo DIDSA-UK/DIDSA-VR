@@ -166,7 +166,9 @@ func _flow_logic() -> void:
 		"the stick steps once per flick (0.6 out), held or wavering does nothing more, back under 0.3 re-arms")
 	f.stick(0.0)
 	_check(Flow.owns_stick(true, true, false) and not Flow.owns_stick(true, true, true) and not Flow.owns_stick(true, false, false) and not Flow.owns_stick(false, true, false),
-		"F3: the stick is the preview's only with a preview live, the laser on the sheet and no grip on the table (gripped: the table's)")
+		"F3: the stick is the preview's only with a preview live and the laser on the sheet; gripped, with Orbit lock off (the default argument), it is the table's")
+	_check(Flow.owns_stick(true, true, true, true) and Flow.owns_stick(true, true, false, true) and not Flow.owns_stick(true, true, true, false) and not Flow.owns_stick(true, false, true, true) and not Flow.owns_stick(false, true, true, true),
+		"F2 (decision 1): with Orbit lock on a grip does not take the stick (cycling works while the other hand holds the table); with it off a grip does; no preview or the laser off the sheet: never")
 	var keys: Array = []
 	for i in 5:
 		keys.append(f.cycle(s, Vector2(10, 20), 1))

@@ -1075,6 +1075,22 @@ func show_dimension_preview(g: Dictionary) -> void:
 	dim_preview_uv = layout["text_uv"]
 
 
+func dimension_preview_world_point() -> Variant:
+	## B2: where the frozen (dropped) dimension's label is, in the world, for the number pad's leader line; null while there is none.
+	if _dim_preview_label == null or not is_instance_valid(_dim_preview_label) or not _dim_preview_label.is_inside_tree():
+		return null
+	return _dim_preview_label.global_position
+
+
+func light_dimension_preview(on: bool) -> void:
+	## B2: the dropped dimension's label is lit while its number pad is up (white, a thicker outline), so "which one am I typing" is plain.
+	if _dim_preview_label == null or not is_instance_valid(_dim_preview_label) or bool(_dim_preview_label.get_meta("lit", false)) == on:
+		return
+	_dim_preview_label.set_meta("lit", on)
+	_dim_preview_label.modulate = Color(1.0, 1.0, 1.0) if on else _tokens.warn
+	_dim_preview_label.outline_size = 24 if on else 12
+
+
 func ghost_near(ghosts: Array, uv: Vector2, radius: float) -> String:
 	## The key of the dimension candidate whose label is nearest `uv` within `radius` (mm), or "".
 	var best := ""
