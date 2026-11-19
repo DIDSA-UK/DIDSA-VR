@@ -9,22 +9,23 @@ sessions F1-F8 at the end, written like the plan's section 6. No code was change
 **How it was checked.** Code read on `main` (citations are `file:line` on those commits; DIDSA-CAD paths are prefixed `CAD`). Run here:
 headless Godot 4.7.2 probes (the breadcrumb text, the Properties panel's layout, redraw timings), a local DIDSA-CAD backend from `main` (a
 mid-size sketch built through the routes; what the solver reports for redundant constraints; `tests/e2e_references.gd` against `main` and
-against a backend from 2026-11-11; the full `tests/ci_e2e.sh` list), and `tests/session_marks_presenter.gd` 12 times. Nothing was run on a
+against a backend from 2026-11-11; the full `tests/ci_e2e.sh` list), `tests/session_marks_presenter.gd` 12 times, and (after the owner's answers) VR's `PointDrag` on shapes made through the real backend. Nothing was run on a
 headset or in the flat app's UI. "Read" below means checked by reading only.
 
-## Decisions for the owner (answer in one go)
+## Decisions (owner's answers, 2026-11-19)
 
-| # | Question | Options | Recommended |
-|---|---|---|---|
-| 1 | **B1** Stick ownership while previewing a dimension | (a) as built: only while no hand grips the table; (b) whenever a preview is live and the laser is on the sheet; (c) as (b), except when Orbit lock is off and a hand grips | **(c)** |
-| 2 | **B2** Where the number pad opens after a drop | (a) its dock, as built; (b) at the dropped label, as the plan said; (c) its dock, with a leader from the pad to the frozen label | **(c)** |
-| 3 | **B3** The drag projector's three as-built behaviours | fix none / fix the straight-chain stall and the arm offset / fix all three | **fix the stall and the arm offset** (CAD first, then VR); leave the 9e-4 mm shortfall |
-| 4 | **A1** Where sketch names live | (a) the backend numbers each entity and dimension at creation and keeps the number; (b) each app numbers by position, as the flat app does now | **(a)**, scheme in A1 |
-| 5 | **A2** In a sketch, is the selection drawer still a second home for the options? | (a) the drawer keeps 4 actions + More (as now); (b) the drawer shows the breadcrumb (and X) only, and the Properties panel is the one panel | **(b)** |
-| 6 | **C4** A full ellipse's axis: which number the editors show | (a) the drawn tip-to-tip value (VR today); (b) the stored half (the flat app's ribbon today) | **(a)**: change the flat app's ribbon |
-| 7 | **C3** Shape drags (rectangle corner, circle rim, polygon vertex...) | build the flat app's closed-form proposals in VR now, or wait for a headset look at the projector-only drag | **wait**; build the line drag (F8) |
-| 8 | **C6** Per-entity constraint colours in VR | (a) CAD writes a spec and vectors for `dof_analysis.dart`, VR ports it (the projector's route); (b) the backend computes it | **(a)** |
-| 9 | **D1** Should VR's e2e job run on pushes to `main`? | (a) PRs and by hand only (as now); (b) also on push to `main` (same paths) and weekly | **(b)** |
+| # | Question | Answer |
+|---|---|---|
+| 1 | **B1** Stick ownership while previewing a dimension | **(c), accepted**: whenever a preview is live and the laser is on the sheet, except when Orbit lock is off and a hand grips |
+| 2 | **B2** Where the number pad opens after a drop | **(c), accepted**: at its dock, with a leader line from the pad to the frozen label |
+| 3 | **B3** The drag projector's as-built behaviours | **Fix the straight-chain stall** (CAD first, then VR). The 9e-4 mm shortfall and the 0.2-0.5 mm arm offset stay (the offset may improve as a side effect; it is not a target) |
+| 4 | **A1** Where sketch names live | **(a), accepted**: the backend numbers each entity and dimension at creation and keeps the number (scheme in A1) |
+| 5 | **A2** The selection drawer in a sketch | **(b), accepted**: breadcrumb and X only; the Properties panel is the one panel |
+| 6 | **C4** An ellipse axis dimension: semi or full value | **A toggle in both apps, like Radius / Diameter**: "Show full axis" / "Show semi-axis" on a selected axis dimension; the editor shows and accepts the value on show (design in C4) |
+| 7 | **C3** Shape drags | **Build now** (the owner asked why not; measured here: VR's shape drags drift today, see C3) |
+| 8 | **C6** Per-entity constraint colours in VR | **Open**, restated: VR turns the whole sketch green only when all of it is fully constrained; the flat app turns each line green as soon as that line is fixed. To do that in VR, either (a) the flat app's calculation is written up as a spec with test data and VR re-implements it (how the drag projector was done; works offline, every frame), or (b) the backend works it out and sends it with every solve (one implementation; a round trip per edit; the flat app keeps its own). Recommended (a) |
+| 9 | **D1** VR's e2e job | **(b), accepted**: also on push to `main` (same paths) and weekly |
+| 10 | (new, from 6) Is the Radius / Diameter and semi / full choice **saved**? | **Open.** Today the flat app's Radius / Diameter choice is session-only (CAD `sketch_controller.dart:9215-9236`) and VR's too (`toggle_diameter`, S6): after a reload a diameter dimension reads as a radius, and the two apps can show the same dimension differently. Recommended: save it in the dimension's label record (the same `PUT .../label` that saves its placement, a `show` field), so it survives a reload and both apps agree |
 
 ## Summary
 
@@ -34,13 +35,13 @@ headset or in the flat app's UI. "Read" below means checked by reading only.
 | A2 Options in one panel | **Yes, partly**: Prev / Next / Back duplicate the kind buttons, B and the pad's Cancel; the 5-kind cap drops nothing today (the catalogue's maximum is 5) but would hide a sixth silently; the "nine buttons wide" row does not exist (it wraps), but **3 of a line's 4 kind labels are clipped** | High: the lit kind cannot be read | M | One panel, grouped, no paging, no Prev / Next / Back | F2 |
 | B1 Stick only with no grip | Confirmed as built; with Orbit lock on (the default) the stick does nothing to the part in a sketch anyway | Low-medium: cycling stops while the other hand holds the table | S | Decision 1 (c) | F2 |
 | B2 Pad at its dock | Confirmed as built | Medium: the eye leaves the label to type | S for (c) | Decision 2 (c) | F2 |
-| B3 Projector behaviours | Confirmed (pinned by the vectors) | (a) none visible; (b) a straight dimensioned chain cannot be dragged at all, and VR then says "Point moved."; (c) the end lands 0.2-0.5 mm off | CAD M, VR S | Decision 3 | F6, F7 |
+| B3 Projector behaviours | Confirmed (pinned by the vectors) | (a) none visible; (b) a straight dimensioned chain cannot be dragged at all, and VR then says "Point moved."; (c) the end lands 0.2-0.5 mm off | CAD M, VR S | Fix the stall only (decision 3) | F6, F7 |
 | C1 Redraw cost | **Yes, and worse than estimated**: `_refresh_view` 38 ms median on this PC for a 121-point sketch (rebuild alone 21 ms; 2.8 ms with labels hidden); it runs on every accepted drag frame and every hover change | High on a Quest: a few redraws a second while dragging | M | Reuse labels, one dimension pass, move only what moved during a drag | F3 |
 | C2 Drop sends the last accepted frame | Confirmed; also no busy guard at the press, and "Point moved." when nothing moved | Low-medium | S | One synchronous solve at release if the last wish was not run; refuse a press while busy | F3 |
-| C3 Lines / shapes do not drag; spline tangent unsupported | Confirmed; the flat app has a rigid line drag and closed-form shape proposals | Medium | Line S-M; shapes L | Line drag now; shapes after a headset look | F8 |
-| C4 Ellipse axes | Confirmed: an elliptical arc's axis saves no placement and a flat-app placement is read as none; the flat app's ribbon edits the half of what its canvas shows | Low | VR S, flat S | Draw the arc's axis radially; flat ribbon shows the drawn value | F5, F4 |
+| C3 Lines / shapes do not drag well; spline tangent unsupported | Confirmed; the flat app has a rigid line drag and closed-form shape proposals. **Measured: in VR a circle's centre drag resizes it, a rim drag moves its centre, a polygon vertex drag moves its centre, a rectangle corner drag moves the opposite corner** | Medium-high | Line S-M; shapes CAD S-M + VR M | Build both now (decision 7) | F6, F8 |
+| C4 Ellipse axes | Confirmed: an elliptical arc's axis saves no placement and a flat-app placement is read as none; the flat app's ribbon edits the half of what its canvas shows | Low | VR S-M, flat S-M | Draw the arc's axis radially; a semi / full toggle in both apps (decision 6) | F5, F4 |
 | C5 Existing dimension retyped | Confirmed for the two-line angle, point-to-line and line-to-line distance (the flat app updates those in place) | Medium: a refusal or a stacked duplicate | S | Patch the existing one, as the flat app does | F5 |
-| C6 Whole-sketch tint | Confirmed | Medium: no hint which line still needs a dimension | CAD S-M, VR M | Decision 8 | F6, F7 |
+| C6 Whole-sketch tint | Confirmed | Medium: no hint which line still needs a dimension | CAD S-M, VR M | Decision 8 (open) | F6, F7 |
 | C7 `hand` hit sizes | Confirmed: guesses, nothing switches to them | None today | - | Leave until hand tracking; measure then | - |
 | C8 Flat take-back checks | Real solver checked here: a redundant but consistent constraint **converges** (`result_code` 5) and is kept by both apps; an inconsistent one fails and the failed list names it. CAD CI ran the full `flutter test` on `main`: green | Low | S | Pin the solver's answers in backend tests | F4 |
 | D1 CI on `main` | Headless, render and CAD client / store jobs green; **VR's e2e job never ran on the merge** (PRs and by hand only); run here: two stale S4 assertions, the known flaky outage line, and **a checker blind spot** (SMOKE lines cut to 200 characters before checking hide a long label's `false`) | Medium | S | Fix the stale lines and the cut; run e2e on push to `main` | F1 |
@@ -170,6 +171,7 @@ CAD `docs/motion/sketch-projector-spec.md` 7.4 and 12; reproduced exactly by VR'
   optionally `omega` regrowth for (a)), the vectors regenerated (`tools/sketch_vectors/export.sh`), the spec's 7.4 / 12 rewritten: M (~300 lines
   plus regenerated JSON). Then VR: port the same change to `scripts/motion/sketch_projector.gd`, copy the vectors: S (~100 lines plus JSON).
   The "Point moved." message is a VR fix on its own (F3).
+- **Owner (2026-11-19): fix the stall (b) only.** (a) and (c) stay as built; if the stall fix also improves (c), the regenerated vectors show it.
 
 ## C. Follow-ups the sessions left
 
@@ -221,9 +223,29 @@ Busy is likely right after a previous drop (its `solve-and-refresh` in flight), 
 (`beginLineDrag`, both ends translate, the drop's solve settles the rest; CAD `sketch_controller.dart:8380-8410`, `:8401`) and, for the seven
 closed-form shapes, a proposal per frame clamped by the constraints (CAD `docs/sketch-drag-hybrid.md`). A spline tangency makes the group
 `unsupported` in both apps (the flat app then goes to the network each frame; VR moves nothing and lets the drop's solve place it).
-- **Line drag**: S-M in VR (the projector already takes several anchors: both ends with the same offset). Recommended (F8).
-- **Shape proposals**: L. The projector alone already keeps a rectangle rectangular and a rim on its circle through the shapes' own
-  constraints; whether it feels wrong is a headset question (decision 7).
+- **Line drag**: S-M in VR (the projector already takes several anchors: both ends with the same offset).
+- **Shape drags: measured, they are wrong today.** VR passes the projector no provisional sizes (`point_drag.gd` sets neither `provisional`
+  nor `stiff`), so a shape's own size constraints are skipped and the minimum-norm step spreads the motion over the shape's other points.
+  Shapes made through the routes VR's tools use (a local backend from DIDSA-CAD `main`), each point dragged 10 mm right and 5 mm up through
+  `PointDrag` (synchronous, the editor's own call), with no user constraint on any of them:
+
+  | Drag | What else moved | The flat app's proposal |
+  |---|---|---|
+  | circle centre | rim (5.16, -1.87): the circle changes size and turns | the whole circle translates |
+  | circle rim | **centre (4.65, 0.83)** | the centre stays, the radius changes |
+  | rectangle centre | every corner (10, 5): translates | translates |
+  | rectangle corner | **opposite corner (-1.11, -0.56)**: it grows about its middle | the opposite corner stays (CAD `sketch_controller.dart:7254-7262`) |
+  | polygon centre | every vertex (10, 5): translates | translates |
+  | polygon vertex | **centre (4.62, 2.31)** | the centre stays (CAD `docs/sketch-drag-hybrid.md`: "a vertex/rim drag never moves the centre") |
+  | slot end centre | the other centre (0.17, 0.87) | (not checked) |
+
+  So a user resizing a hole by its rim sees the hole wander. The fix is the flat app's hybrid: a closed-form proposal per shape family
+  (circle, arc, ellipse, ellipse arc, rectangle, polygon, slot) gives every point of the shape a target and switches the shape's
+  provisional sizes on at the proposal's values; the projector, which already takes `provisional` and `stiff`, clamps it to the user's
+  constraints. The proposals live in the flat app's Dart (`_closedForm*Geometry`, CAD `sketch_controller.dart:6513-7262`), so, as with the
+  projector, DIDSA-CAD first writes them into the spec with vectors (S-M, F6) and VR implements them from that (M, F8). Nothing blocks
+  building it now; the earlier "wait" was for evidence, which this is. Also missing in VR: the flat app's pre-grab rule that a fully
+  constrained point refuses the grab (VR refuses only pinned points).
 - **Spline tangent**: wait for DIDSA-CAD's own spline-tangency residual (`docs/sketch-drag-projector.md` item 6), then VR copies the vectors
   and ports one residual (S).
 
@@ -236,9 +258,19 @@ placement (`_linear_place`, `sketch_session.gd:2997-3001`): drawn at VR's automa
 value (80) and stores half; the flat app draws 80 (CAD `sketch_canvas.dart:3082-3090`) but its ribbon pre-fills and writes the stored 40
 (`sketch_controller.dart:11382`, `sketch_ribbon.dart:866`): the flat app disagrees with itself. Read, not run in the flat UI.
 
-**Recommendation:** VR draws an elliptical arc's axis dimension radially (the circle radius layout and placement kind) for existing items and
-candidates and saves its placement (S, F5); the flat app's ribbon shows and accepts the drawn value for a full ellipse's axis, as it does for
-a diameter (S, F4; decision 6).
+**Owner (decision 6): a toggle, like Radius / Diameter.** Design, the same in both apps:
+- A selected ellipse axis dimension offers **"Show full axis"** / **"Show semi-axis"** (VR: the EDIT group of the Properties panel, beside
+  "Show diameter"; flat: the ribbon, where its R / diameter switch is). The stored value is always the semi-axis, as now; the choice is a way of
+  reading it, exactly as diameter is of a radius.
+- Semi-axis: drawn centre to tip, the stored value. Full axis: drawn tip to tip, twice the value. The editor (VR's pad, the flat ribbon)
+  shows and accepts **the value on show** and stores half when the full axis is shown.
+- A new dimension shows what was chosen when it was made (`majorradius` / `minorradius` = semi, `majordiameter` / `minordiameter` = full, as
+  the flat app already does for a circle, `sketch_controller.dart:16670`); one with no saved choice shows the full axis (what both apps draw today).
+- An elliptical arc's axis gets the same toggle with the radius-style layout (semi: centre to the arc's tip, radial placement kind `radius`;
+  full: the circle-diameter style), so its placement is saved and the flat app's is read (S, F5).
+- Placement: the `ellipse_axis` kind `{offset, along}` is read on whichever line is drawn.
+- Whether the choice is saved (decision 10, open): recommended in the label record, for this toggle and for Radius / Diameter.
+Sizes: flat S-M (F4), VR S-M (F5).
 
 ### C5. Typing an existing angle, point-to-line or distance-to-circle dimension again
 
@@ -391,45 +423,53 @@ Exit: on that fixture `_refresh_view` at least 5x faster than 38 ms on the same 
 and `ci.sh` green; e2e drop lands at the release point. Headset checklist: a drag on a 40-dimension sketch (frames behind the laser).
 
 ### F4 - CAD: names, messages and the solver's answers (CAD backend + client, M)
-Needs decisions 4, 6. Read: A1, C4 (flat half), C8.
+Needs decisions 4, 6 and 10. Read: A1, C4, C8.
 Tasks: backend `number` per entity / dimension / relation as in A1 (assigned at creation, kept, optional on create for undo, back-filled on
 load in stored order), in every response and export; backend error texts use names instead of ids; flat app: `selectionLabel` reads
-`number` (position rule as fallback), the take-back message drops the bracketed solver detail, the ribbon shows and accepts the drawn value of
-a full ellipse's axis; backend tests pinning C8's four answers.
-Exit: backend tests and the full `flutter test` + `flutter analyze lib` green; a reload keeps names; a delete leaves the others' names alone.
+`number` (position rule as fallback), the take-back message drops the bracketed solver detail, the semi / full axis toggle of C4 in the ribbon (the editor edits the value on show);
+if decision 10 is yes, the backend keeps a `show` field in the label record and the flat app saves and reads both toggles there; backend
+tests pinning C8's four answers.
+Exit: backend tests and the full `flutter test` + `flutter analyze lib` green; a reload keeps names; a delete leaves the others' names alone;
+the toggle round-trips (show full, edit 80, stored 40).
 
 ### F5 - VR: dimension edits at parity and names (VR, M)
 Needs F4 (for names) and F2 (shared files). Read: A1, C4, C5; `sketch_session.gd` (`_ghosts_raw`, `_dimension_item`, `_distance_apply`,
 `confirm_ghost`), `selection_breadcrumbs.gd`, `cad_api.gd` `error_text`.
 Tasks: names from `number` in the breadcrumb, the status line and the sketch rung (the open sketch's feature name); C5's three in-place
-updates; C4's radial elliptical-arc axis with its placement saved and the flat app's placement read.
+updates; C4's semi / full toggle (EDIT group, the pad edits the value on show, the saved choice read and written if decision 10 is yes) and the
+elliptical arc's radial axis with its placement saved and the flat app's placement read.
 Exit: logic tests; e2e: retype an existing angle and point-to-line distance (one constraint, new value), an elliptical arc's placed axis read
 back, a backend name shown in the breadcrumb. Headset checklist: breadcrumb readable.
 
-### F6 - CAD: projector fixes and the rigidity contract (CAD docs + client tests, M)
-Needs decisions 3 and 8. Read: B3, C6; `docs/motion/sketch-projector-spec.md`, `client/lib/sketch/projector/sketch_projector.dart`,
-`dof_analysis.dart` and its tests.
-Tasks: the singular-start fix in the Dart projector (B3 b/c), vectors regenerated, spec 7.4 / 12 rewritten; `docs/sketch-rigidity-spec.md` and
-exported `docs/sketch-rigidity-vectors.json` (`--check` mode) from `dof_analysis.dart`'s cases.
-Exit: `scene-chain-20-nearly-straight` moves; `export.sh --check` reproducible for both files; full `flutter test` green. If it overflows,
-split projector and rigidity.
+### F6 - CAD: projector stall, shape proposals and (if decision 8 is (a)) the rigidity contract (CAD docs + client tests, M-L)
+Read: B3, C3, C6; `docs/motion/sketch-projector-spec.md`, `docs/sketch-drag-hybrid.md`, `client/lib/sketch/projector/sketch_projector.dart`,
+`sketch_controller.dart` (`_closedForm*Geometry`, `_runHybridDragFrame`), `dof_analysis.dart` and its tests.
+Tasks: (1) the singular-start fix in the Dart projector (B3 b only), vectors regenerated, spec 7.4 / 12 rewritten; (2) a spec section for the
+seven shape proposals (which point is grabbed, every shape point's target, which provisional sizes switch on and at what value, the pre-grab
+rule) and exported vectors from the hybrid-drag tests; (3) if decision 8 is (a): `docs/sketch-rigidity-spec.md` and
+`docs/sketch-rigidity-vectors.json` from `dof_analysis.dart`'s cases. Every export with `--check`.
+Exit: `scene-chain-20-nearly-straight` moves; the exports reproducible; full `flutter test` green. Stop and split at (1) | (2) | (3) if it
+overflows (the JSON does not count towards the size).
 
 ### F7 - VR: projector follow-up and per-entity colours (VR, M)
-Needs F6 and F3. Read: F6's handoff and specs only (VR code is written from the spec). Tasks: port the projector change, copy the vectors;
-`sketch_rigidity.gd` from the spec, per-entity colours in `sketch_view.gd`. Exit: all vectors pass; rigidity vectors pass; `ci.sh` green.
+Needs F6 (1) and (3), and F3. Read: F6's handoff and specs only (VR code is written from the spec). Tasks: port the stall fix, copy the vectors;
+if decision 8 is (a): `sketch_rigidity.gd` from the spec, per-entity colours in `sketch_view.gd`. Exit: all vectors pass; rigidity vectors pass; `ci.sh` green.
 Headset checklist: per-entity green on the slab and a white part.
 
-### F8 - VR: line drag (VR, S-M)
-Needs F3. Read: C3; `point_drag.gd`, `table_editor.gd` (`intent_drag_begin`, the point hold). Tasks: a trigger-hold on a line drags both ends
-through the projector (two anchors, one offset), drop as for points; pinned ends refuse. Exit: logic + e2e (drag, drop, stored points, Undo).
-Headset checklist: grabbing a line rather than its end with a shaking laser.
+### F8 - VR: line and shape drags (VR, M)
+Needs F3 and F6 (2). Read: C3, F6's shape-proposal spec section; `point_drag.gd`, `table_editor.gd` (`intent_drag_begin`, the point hold).
+Tasks: a trigger-hold on a line drags both ends through the projector (two anchors, one offset); a shape point's drag takes the proposal
+(every shape point's target, provisional sizes on at the proposal's values) clamped by the projector; the pre-grab rule; drop as for points.
+Tests: the shape-proposal vectors; the seven drags of C3's table reach the flat app's answers (centre stays on a rim / vertex drag, the
+opposite corner stays, a centre drag translates); e2e: drag, drop, stored points, Undo.
+Exit: those pass; `ci.sh` green. Headset checklist: grabbing a line rather than its end with a shaking laser; resizing a hole by its rim.
 
 ### Order, model and effort
 
 ```
 F1 (VR, any time; first, so every later session has working e2e and fixture checks)
-VR lane (shares table_editor.gd / sketch_session.gd): F2 -> F3 -> F5 (after F4) -> F8 -> F7 (after F6)
-CAD lane: F4 -> F6 (after decisions 3 and 8)
+VR lane (shares table_editor.gd / sketch_session.gd): F2 -> F3 -> F5 (after F4) -> F8 (after F6 (2)) -> F7 (after F6)
+CAD lane: F4 (after decision 10) -> F6 ((3) after decision 8)
 ```
 
 | Session | Model | Effort | Env pieces | Why |
@@ -439,17 +479,17 @@ CAD lane: F4 -> F6 (after decisions 3 and 8)
 | F3 | Sonnet | high | `godot backend` | Performance work with a measured target; threading already in place. |
 | F4 | Sonnet | high | CAD: backend env + Flutter | A contract change (names) across backend and client, decided here. |
 | F5 | Sonnet | medium | `godot backend` | Named changes against F4's contract. |
-| F6 | Opus | high | CAD: Flutter | Numerical change in the projector and a new spec others port from (as S8). |
+| F6 | Opus | high | CAD: Flutter | Numerical change in the projector and new spec sections others port from (as S8). |
 | F7 | Sonnet | high | `godot` | Port from specs, vectors decide; rerun on Opus from the last green checkpoint if it stops twice on one failure (section 9's rule). |
-| F8 | Sonnet | medium | `godot backend` | S10's machinery with two anchors. |
+| F8 | Sonnet | high | `godot backend` | Seven proposal families from a spec on S10's machinery; the vectors decide. |
 
-Not given a session: C7 (wait for hand tracking), shape proposals (decision 7), the spline-tangent residual (DIDSA-CAD's own item first).
+Not given a session: C7 (wait for hand tracking), the spline-tangent residual (DIDSA-CAD's own item first).
 
 ## Checked only by reading
 
 - Which VR flows can raise each id-bearing backend message (A1); the backend's entity order across a save and reopen.
 - The flat app's behaviour in its UI (A1 labels, the take-back message text on screen, C4's ribbon value, C5's in-place updates).
-- C2's busy case and the late final wish (no test drives them); C3's flat-app line and shape drags.
+- C2's busy case and the late final wish (no test drives them); C3's flat-app line and shape drags (VR's shape drags were run).
 - B1's "nothing is lost" (from `table_manip.gd`; the feel is a headset question).
 - The Quest estimate in C1 (a scaling factor, not a measurement); the redraw numbers exclude GPU work.
 - D3's cause (not reproduced).
