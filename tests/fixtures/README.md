@@ -34,6 +34,26 @@ into `models/` next to `project.godot` (or `user://models` on-device, e.g.
 via `adb push`), then it'll show up in the wrist tablet's Files tab like
 any other local model.
 
+## Copied from DIDSA-CAD: the seven files CI compares
+
+Seven files here are byte-for-byte copies of DIDSA-CAD's `main`. Each one's test compares its copy with the DIDSA-CAD checkout (env
+`DIDSA_CAD_DIR`, else `../DIDSA-CAD`) and fails with `DIFFERENT` when they differ; with no checkout it prints `no source` and passes. CI
+(`.github/workflows/headless-tests.yml`) checks DIDSA-CAD `main` out into `didsa-cad/` and sets `DIDSA_CAD_DIR`, on every push and weekly, so
+CAD-side drift fails there. After a change lands on DIDSA-CAD `main`, refresh the copy (from DIDSA-VR's root, DIDSA-CAD next to it) and rerun that test:
+
+| Copy here | Copy command | Test |
+|---|---|---|
+| `sketch_vectors.json` | `cp ../DIDSA-CAD/docs/motion/sketch-vectors.json tests/fixtures/sketch_vectors.json` | `sketch_projector_vectors` |
+| `sketch_dimension_catalogue.json` | `cp ../DIDSA-CAD/docs/sketch-dimension-catalogue.json tests/fixtures/sketch_dimension_catalogue.json` | `sketch_dimension_catalogue` |
+| `sketch_label_placement_cases.json` | `cp ../DIDSA-CAD/docs/sketch-label-placement-cases.json tests/fixtures/sketch_label_placement_cases.json` | `sketch_label_placement` |
+| `motion_vectors.json` | `cp ../DIDSA-CAD/docs/motion/vectors.json tests/fixtures/motion_vectors.json` | `motion_vectors` |
+| `appearance_vectors.json` | `cp ../DIDSA-CAD/docs/appearance/vectors.json tests/fixtures/appearance_vectors.json` | `appearance_vectors` |
+| `file_lookup_vectors.json` | `cp ../DIDSA-CAD/docs/file-lookup/vectors.json tests/fixtures/file_lookup_vectors.json` | `file_lookup_vectors` |
+| `scene_vectors.json` | `cp ../DIDSA-CAD/docs/scenes/vectors.json tests/fixtures/scene_vectors.json` | `scene_vectors` |
+
+A change to one of these files is made in DIDSA-CAD first and merged there; VR's copy follows (a VR branch that copies an unmerged CAD file fails
+the headless job until the CAD change is on `main`).
+
 ## `motion_vectors.json` — golden vectors for the free-motion projector
 
 A **copy** of DIDSA-CAD's `docs/motion/vectors.json` (159 cases, tolerance 1e-9; constraint-model versions 3 to 8),

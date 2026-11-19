@@ -13,6 +13,7 @@ export DIDSA_SERVERS_PATH="user://servers_test.cfg" # the servers list: a test r
 export DIDSA_NO_LANDING=1 # main.gd starts without the landing (the old start-up behaviour); tests/landing.gd turns it on for itself
 reset_settings() { rm -f "$HOME/.local/share/godot/app_userdata/DIDSA Design Tools VR/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA Design Tools VR/settings_test.cfg" "$HOME/.local/share/godot/app_userdata/DIDSA VR/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR/settings_test.cfg" "$HOME/.local/share/godot/app_userdata/DIDSA VR Spike/settings_test.cfg" "$HOME/Library/Application Support/Godot/app_userdata/DIDSA VR Spike/settings_test.cfg" 2>/dev/null; } # "DIDSA VR Spike" and "DIDSA VR" are the pre-rename folders
 reset_settings
+smoke_cut() { if [ -n "${SMOKE_CUT:-}" ]; then cut -c1-"$SMOKE_CUT"; else cat; fi; }
 
 echo "== parse check"
 for f in scripts/*.gd scripts/motion/*.gd scripts/ui/*.gd scripts/appearance/*.gd scripts/landing/*.gd scripts/cloud/*.gd scripts/session/*.gd; do
@@ -24,9 +25,17 @@ for t in landing landing_unsaved graphics_overrides qr_reticle tips_reel servers
   echo "== $t"
   reset_settings # every test starts from default settings (one test's remembered table size must not shape the next)
   out=$(timeout 300 "$GODOT" --headless --path . --script "res://tests/$t.gd" 2>&1)
-  echo "$out" | grep -E "SMOKE" | cut -c1-200
+  rc=$?
+  # Whole SMOKE lines: tests/check_smoke.py must see every character (a cut line hid a long label's `false`). SMOKE_CUT=200 shortens them for reading by hand;
+  # tests/ci.sh keeps the full lines in its log and cuts only what it echoes.
+  echo "$out" | grep -E "SMOKE" | smoke_cut
   if echo "$out" | grep -qE "SCRIPT ERROR|Parse Error"; then
     echo "FAIL $t"; echo "$out" | grep -E -A2 "SCRIPT ERROR|Parse Error"; fail=1
+  fi
+  # A test that timed out, died, or printed no SMOKE line at all: say why (the exit code, 124 = timed out) and show the end of its output, which is otherwise thrown away.
+  if [ "$rc" = 124 ]; then echo "FAIL $t (timed out after 300 s)"; fail=1; fi
+  if [ "$rc" != 0 ] || ! echo "$out" | grep -qE "^SMOKE"; then
+    echo "NOTE $t: exit code $rc, last 30 lines of its output:"; echo "$out" | grep -vE "^SMOKE" | tail -n 30 | sed 's/^/  | /'
   fi
 done
 

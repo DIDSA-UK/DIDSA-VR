@@ -162,7 +162,7 @@ func _initialize() -> void:
 	await s.apply_menu("fix")
 	print("SMOKE a line with a Length of 50 can be fixed where it is, and still converges: ", d3["ok"] and dim_id != "" and s.converged, " ", d3)
 	var edited: Dictionary = await s.edit_dimension(dim_id, 80.0)
-	print("SMOKE the edit that the fixed line cannot meet is KEPT, not taken back (the value stays 80, the sketch no longer converges): ", edited["ok"] and absf(float(s.constraints[dim_id]["distance"]) - 80.0) < 0.001 and not s.converged and s.constraint_state() == "over", " ", edited, " ", s.converged)
+	print("SMOKE the edit that the fixed line cannot meet is KEPT, not taken back (the value stays 80, the sketch no longer converges): ", edited["ok"] and absf(float(s.constraints[dim_id]["distance"]) - 80.0) < 0.001 and not s.converged and s.constraint_state() == "over", " converged=", s.converged, " ", edited) # (the debug tail must not end in a bare `false`: tests/check_smoke.py reads a trailing false as a failed assertion)
 	print("SMOKE ...and the message says what is red: ", String(edited["message"]).contains("red"))
 	var red: Dictionary = s.failed_point_ids()
 	print("SMOKE the solver's failed list is read and the line's points are red: ", not s.failed_constraint_ids.is_empty() and red.has(s.lines[l3]["a"]) and red.has(s.lines[l3]["b"]), " ", s.failed_constraint_ids.size(), " ", red.size())

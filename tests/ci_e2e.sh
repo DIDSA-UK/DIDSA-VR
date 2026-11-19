@@ -80,7 +80,11 @@ while read -r t; do
   echo "== $t" | tee -a "$LOG"
   timeout 120 "$GODOT" --headless --path . --script "res://tests/$t.gd" > "logs/$t.log" 2>&1
   rc=$?
-  grep -E "SMOKE" "logs/$t.log" | cut -c1-200 | tee -a "$LOG"
+  # The log (read by check_smoke.py) keeps whole SMOKE lines; only the console copy is cut to 200 characters.
+  grep -E "SMOKE" "logs/$t.log" | tee -a "$LOG" | cut -c1-200
+  if [ "$rc" != 0 ] || ! grep -qE "^SMOKE" "logs/$t.log"; then
+    echo "NOTE $t: exit code $rc ($( [ "$rc" = 124 ] && echo timed out )), last 30 lines of its output:" | tee -a "$LOG"; grep -vE "^SMOKE" "logs/$t.log" | tail -n 30 | sed 's/^/  | /' | tee -a "$LOG"
+  fi
   if [ "$rc" = 124 ]; then echo "FAIL $t (timed out after 120 s)" | tee -a "$LOG"; fail=1; fi
   if grep -qE "SCRIPT ERROR|Parse Error" "logs/$t.log"; then
     echo "FAIL $t" | tee -a "$LOG"; grep -E -A2 "SCRIPT ERROR|Parse Error" "logs/$t.log" | tee -a "$LOG"; fail=1

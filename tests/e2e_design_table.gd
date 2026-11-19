@@ -149,7 +149,15 @@ func _initialize() -> void:
 	table.manager.activate("dimension")
 	var circle_id: String = ed.session.circles.keys()[0]
 	await ed.session.select({"kind": "circle", "id": circle_id})
-	print("SMOKE the Dimension tool offers the circle's radius: ", ed.session.ghosts.size() == 2 and absf(ed.session.ghosts[0]["value"] - 4.0) < 0.01)
+	# Since parity S4 a circle's options follow the catalogue: Diameter first (8), then Radius (4).
+	var radius_ghost: Dictionary = {}
+	var diameter_ghost: Dictionary = {}
+	for g in ed.session.ghosts:
+		if g["key"] == "radius":
+			radius_ghost = g
+		elif g["key"] == "diameter":
+			diameter_ghost = g
+	print("SMOKE the Dimension tool offers the circle's diameter first and its radius: ", ed.session.ghosts.size() == 2 and absf(float(diameter_ghost.get("value", -1.0)) - 8.0) < 0.01 and absf(float(radius_ghost.get("value", -1.0)) - 4.0) < 0.01 and ed.session.ghosts[0]["key"] == "diameter", " ", ed.session.ghosts.map(func(g): return [g["key"], g["value"]]))
 	await ed.dimension_typed("radius", "6.5")
 	var c: Dictionary = ed.session.circles[circle_id]
 	var radius: float = ed.session.points[c["c"]].distance_to(ed.session.points[c["p"]])

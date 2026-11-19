@@ -3,7 +3,23 @@ name: E2E against the real backend
 # Builds DIDSA-CAD's backend image and runs the e2e tests listed in tests/e2e_ci_list.txt against it
 # (tests/ci_e2e.sh). Separate from the fast headless job (slow first build, depends on another repo). Not a required check yet.
 # Run by hand with a different backend ref: Actions > "E2E against the real backend" > Run workflow (cad_ref).
+# Also on every push to main (same paths as a pull request: the parity work reached main without a PR and the job never ran) and weekly (DIDSA-CAD's backend moves on its own).
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/design_table/**"
+      - "scripts/cloud/**"
+      - "scripts/mesh_identity.gd"
+      - "tests/e2e_*.gd"
+      - "tests/fake_project_store.gd"
+      - "tests/cloud_rig.gd"
+      - "tests/ci_e2e.sh"
+      - "tests/e2e_ci_list.txt"
+      - "tests/expected_false_e2e.txt"
+      - ".github/workflows/e2e-backend.yml"
+  schedule:
+    - cron: "43 5 * * 1"
   workflow_dispatch:
     inputs:
       cad_ref:

@@ -19,6 +19,10 @@ on:
       - "tests/**"
       - "project.godot"
       - ".github/workflows/headless-tests.yml"
+  # Weekly (Monday 04:17 UTC): a change on DIDSA-CAD's side (the copied fixtures below) is otherwise never seen until the next push here.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,6 +41,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # DIDSA-CAD is public (no token). The tests that hold a COPY of one of its files (tests/fixtures/README.md, "Copied from DIDSA-CAD") compare it with this
+      # checkout through DIDSA_CAD_DIR and fail when the copy differs; without a checkout they print "no source" and pass, so drift went unseen.
+      - uses: actions/checkout@v4
+        with:
+          repository: DIDSA-UK/DIDSA-CAD
+          ref: main
+          path: didsa-cad
+
+      - name: Check the DIDSA-CAD checkout holds the files the copies are compared with
+        run: |
+          for f in docs/motion/sketch-vectors.json docs/sketch-dimension-catalogue.json docs/sketch-label-placement-cases.json docs/motion/vectors.json docs/appearance/vectors.json docs/file-lookup/vectors.json docs/scenes/vectors.json; do
+            test -f "didsa-cad/$f" || { echo "missing didsa-cad/$f"; exit 1; }
+          done
 
       - name: Cache Godot binary
         id: godot-cache
@@ -60,6 +78,7 @@ jobs:
       - name: Headless suite
         env:
           GODOT: ${{ env.GODOT_BIN }}
+          DIDSA_CAD_DIR: ${{ github.workspace }}/didsa-cad
         run: tests/ci.sh
 
       - name: Upload run log

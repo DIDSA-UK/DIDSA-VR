@@ -163,6 +163,11 @@ func _initialize() -> void:
 	s.set_tool("dimension")
 	var arc_made: Dictionary = await s.select(arc_pick)
 	var arc_centre: String = s.arcs.values()[0]["c"] if s.arcs.size() == 1 else ""
-	print("SMOKE picking it makes ONE construction arc with a pinned centre (convert-entities/edge on a partial circular edge), and offers radius 3 as a driven candidate: ", arc_made["ok"] and s.arcs.size() == 1 and arc_centre != "" and s.point_locked.get(arc_centre, false) and s.points[arc_centre].distance_to(Vector2(57, 37)) < 0.05 and s.ghosts.size() == 2 and bool(s.ghosts[0].get("driven", false)) and absf(float(s.ghosts[0]["value"]) - 3.0) < 0.05, " ", s.ghosts.map(func(g): return [g["key"], g["value"]]))
+	var arc_keys: Array = s.ghosts.map(func(g): return g["key"])
+	var arc_radius: float = -1.0
+	for g in s.ghosts:
+		if g["key"] == "radius":
+			arc_radius = float(g["value"])
+	print("SMOKE picking it makes ONE construction arc with a pinned centre (convert-entities/edge on a partial circular edge), and, the arc being pinned, offers its three reference dimensions (radius 3, diameter 6, arc length) as driven candidates: ", arc_made["ok"] and s.arcs.size() == 1 and arc_centre != "" and s.point_locked.get(arc_centre, false) and s.points[arc_centre].distance_to(Vector2(57, 37)) < 0.05 and s.ghosts.size() == 3 and s.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(arc_radius - 3.0) < 0.05 and arc_keys.has("diameter") and arc_keys.has("arcLength"), " ", s.ghosts.map(func(g): return [g["key"], g["value"]]))
 	ed.end_sketch()
 	quit()

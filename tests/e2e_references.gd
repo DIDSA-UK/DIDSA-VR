@@ -155,6 +155,9 @@ func _initialize() -> void:
 	print("SMOKE the part is now 90 mm wide (two base corners moved): ", moved == 2 and absf(node.get_aabb().size.x - 90.0) < 0.5 or absf(node.get_aabb().size.y - 90.0) < 0.5 or absf(node.get_aabb().size.z - 90.0) < 0.5)
 	var xs: Array = (node.get_meta("topology").values()[0]["vertices"] as Dictionary).values().map(func(v): return (v as Vector3).x)
 	var new_width: float = xs.max() - xs.min()
-	print("SMOKE the pinned corner followed the part's corner to its new place (it is now at x = 90): the sketch's plane is centred on the face, which also moved 15 mm, so the corner is 15 mm further out on the sheet: ", absf(new_width - 90.0) < 0.01 and absf(s.points[ref_id].distance_to(corner_uv) - 15.0) < 0.05, " ", s.points[ref_id].distance_to(corner_uv))
+	# Where the corner is on the sheet now: the part's corner (90, 40, 20) in the sketch's plane as refreshed. (The plane is not centred on the face: a face plane's origin is OCCT's
+	# location for it, which stays put when the box is widened, so the corner is the full 30 mm further out on the sheet, not 15. docs/parity-followups-investigation.md D2.)
+	var new_corner_uv: Vector2 = SketchMath.to_sheet(Vector3(90, 40, 20), s.plane)
+	print("SMOKE the pinned corner followed the part's corner to its new place (the part is now 90 wide, the corner at x = 90): the pinned point is where the corner now is on the sheet, which is further out than before: ", absf(new_width - 90.0) < 0.01 and s.points[ref_id].distance_to(new_corner_uv) < 0.05 and s.points[ref_id].distance_to(corner_uv) > 1.0, " pinned ", s.points[ref_id], " corner ", new_corner_uv, " was ", corner_uv)
 	print("SMOKE the sketch is not flagged as having lost a reference, the dimension is still there and the free end is still 12 mm from the (unmoved) edge: ", not lost and s.constraints.size() >= constraints_before and s.converged)
 	quit()

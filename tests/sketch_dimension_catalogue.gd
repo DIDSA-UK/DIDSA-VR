@@ -196,10 +196,15 @@ func _initialize() -> void:
 	var text := FileAccess.get_file_as_string(FIXTURE)
 	var data: Dictionary = JSON.parse_string(text)
 	_check(data is Dictionary and int(data.get("version", 0)) == 1 and (data["entries"] as Array).size() > 10, "the catalogue fixture reads (version 1)")
-	var cad := ProjectSettings.globalize_path("res://").path_join("../DIDSA-CAD/docs/sketch-dimension-catalogue.json")
 	var cad_state := "no source"
-	if FileAccess.file_exists(cad):
-		cad_state = "same" if FileAccess.get_file_as_string(cad) == text else "DIFFERENT"
+	var cad_candidates: Array[String] = []
+	if OS.get_environment("DIDSA_CAD_DIR") != "": # (as the other fixture-copy tests: env DIDSA_CAD_DIR, else ../DIDSA-CAD)
+		cad_candidates.append(OS.get_environment("DIDSA_CAD_DIR").path_join("docs/sketch-dimension-catalogue.json"))
+	cad_candidates.append(ProjectSettings.globalize_path("res://").path_join("../DIDSA-CAD/docs/sketch-dimension-catalogue.json"))
+	for cad in cad_candidates:
+		if FileAccess.file_exists(cad):
+			cad_state = "same" if FileAccess.get_file_as_string(cad) == text else "DIFFERENT"
+			break
 	_check(cad_state != "DIFFERENT", "the fixture equals DIDSA-CAD's docs/sketch-dimension-catalogue.json (%s)" % cad_state)
 
 	# group the entries by what is picked

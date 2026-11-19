@@ -6,7 +6,8 @@ set -u
 cd "$(dirname "$0")/.."
 LOG="${RUN_LOG:-run.log}"
 set -o pipefail
-tests/run_all.sh 2>&1 | tee "$LOG"
+# The log keeps whole lines (check_smoke.py reads every character); only the console copy is cut to 200 characters.
+tests/run_all.sh 2>&1 | tee "$LOG" | cut -c1-200
 suite=${PIPESTATUS[0]}
 python3 -I tests/check_smoke.py "$LOG" --baseline tests/expected_false.txt --no-smoke tests/no_smoke.txt
 check=$?

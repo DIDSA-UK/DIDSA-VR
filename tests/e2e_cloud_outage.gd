@@ -164,7 +164,9 @@ func _run() -> void:
 	_check(await _start_store(), "the store is started again on the same folder")
 	var status: Dictionary = await _store_json("/projects/%s/uploads/%s" % [project_name, session_id])
 	var had := int(status["json"].get("received", -1)) if status["ok"] else -1
-	_check(status["ok"] and had >= MB and had < 3 * MB, "...it kept the chunks it had (%d of %d bytes) across the restart" % [had, 3 * MB])
+	# (The kill lands after the first chunk is seen, but on a fast run the other chunks are in before it does: the store then holds all 3 MB and only the commit was lost. Both are
+	# "kept what it had"; the upload resuming byte for byte, next line, is what proves the rest. Was `had < 3 * MB`, which failed on those runs: docs/parity-followups-investigation.md D1.)
+	_check(status["ok"] and had >= MB and had <= 3 * MB, "...it kept the chunks it had (%d of %d bytes) across the restart" % [had, 3 * MB])
 	report = await a.project.sync()
 	var got: Dictionary = await probe.get_file(project_name, "Big.didsa")
 	_check(report["sent"] == ["Big.didsa"] and got["ok"] and CloudFiles.hash_bytes(got["body"]) == CloudFiles.hash_bytes(big) and got["version"] == 1, "the upload resumed and the store has the file byte for byte, as version 1")

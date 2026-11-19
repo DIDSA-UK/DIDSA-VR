@@ -28,6 +28,8 @@ func _pose(x: float, y: float, z: float) -> Array:
 
 
 func _initialize() -> void:
+	# A first line before anything can stall: a run that prints no SMOKE line at all stopped in the start-up or in host_session() below (docs/parity-followups-investigation.md D3).
+	print("SMOKE session_marks_presenter starting: true")
 	hub = Hub.new()
 	backend = Backend.new()
 	main = load("res://scenes/main.tscn").instantiate()
@@ -43,6 +45,7 @@ func _initialize() -> void:
 	main.hub_key = hub.key
 	main._show_model(FileAccess.get_file_as_bytes("res://tests/fixtures/session_assembly.glb"), "", main.spawn_scale, true)
 	main.assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.02), Vector3(0.0, 1.2, -1.0))
+	print("SMOKE start-up done, about to host: true")
 	var hosted: Dictionary = await main.session.host_session()
 	_check(hosted["ok"], "hosting")
 	var marks: Node3D = main.session.marks
