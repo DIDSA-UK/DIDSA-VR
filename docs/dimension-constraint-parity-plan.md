@@ -1,6 +1,6 @@
 # Plan: dimensions and constraints at parity with the flat app (sessions)
 
-**Status: final (2026-11-18), revised for running (2026-11-19). Gate met 2026-11-19; S0 and S8 done 2026-11-19 (S8 in its own session)** (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
+**Status: all sessions done (S0-S10, 2026-11-19), on `ccr-be4859df-3jil9a` in both repos, not yet merged to `main`.** Open items: section 10. (History: final 2026-11-18; revised for running 2026-11-19; gate met 2026-11-19.)
 
 The build plan for [`dimension-constraint-parity-scope.md`](dimension-constraint-parity-scope.md) (the gap tables, the workflow and the owner's
 decisions of 2026-11-18). Written for **coding sessions**: each session below is one repo, one branch, one PR. Line numbers drift: search for
@@ -320,3 +320,26 @@ last green checkpoint rather than letting it keep trying.
 **Saving start-up cost.** Every session above runs `tools/setup_test_env.sh` (Godot, Mesa, the backend's conda env). Putting it in the cloud
 environment's setup script (one environment for the VR lane, one for CAD) means it runs once when a container is built, not in each session's
 token budget.
+
+## 10. Open items after the sessions (2026-11-19)
+
+Nothing here blocks merging. Each is the owner's call or a follow-up.
+
+**Owner decisions**
+- S5: the stick cycles kinds only while no hand grips the table (F3 read as "no grip", since the laser on the sheet always engages it); the
+  number pad opens at its dock, not at the label.
+- Spec 7.4 (S8, reproduced by S9): curved walks stop up to ~9e-4 mm short; a nearly straight dimensioned chain does not move; the arm near full
+  reach ends 0.2-0.5 mm off its axis. A fix starts in DIDSA-CAD's projector and vectors, then VR follows.
+
+**Follow-ups**
+- Drag performance on a Quest (S10): a 20-point group costs 10-11 ms per solve on a PC (off the main thread), and every accepted frame rebuilds
+  the whole sketch drawing (`_refresh_view` -> `view.rebuild`). If it lags, redraw only the dragged points during a drag.
+- The drop sends the last accepted frame, not a final solve at the release point (S10).
+- Lines and whole shapes do not drag yet (F6: points first); a spline tangent in the group is `unsupported` (the backend places it on drop).
+- An elliptical arc's axis dimension: radial in the flat app, linear in VR, so VR saves no placement for it (S6). A full ellipse's axis:
+  VR's pad shows the full value, the flat app's editor the stored half.
+- The `hand` hit sizes in `input_source.gd` are guesses (S7); hand tracking itself is on the roadmap.
+- Flat app (DIDSA-CAD): the S1 follow-up's full `flutter test` was not rerun after its last test edit (the two files it changed pass); the S1
+  take-back on drawing paths was run for the inferred Horizontal only.
+
+**Not verified anywhere:** everything a person must see or feel. The headset checklists are in the tracker rows S2, S3, S4, S5, S6, S7, S10.
