@@ -60,8 +60,9 @@ const GLYPH_STEP := 0.007 ## and the extra for each further glyph on the same en
 const CONSTRAINT_GLYPH_COLOUR := Color(0.55, 0.95, 0.80, 1.0)
 const LABEL_PIXEL := 0.00035 ## world metres per label pixel
 const LABEL_FONT := 40
-const GLYPH_HIT_MM := 0.007 ## world metres: half the side of the square a constraint glyph can be pointed at in (a glyph is small, so this is generous)
+const InputSource := preload("res://scripts/design_table/input_source.gd")
 
+var input_source := InputSource.DEFAULT ## S7: the glyph hit size is per source (a glyph is small, so it is generous)
 var plane: Dictionary = {}
 var repick_point := "" ## the flagged reference point the user is choosing a replacement for: drawn extra large
 var window_m := Vector2(0.8, 0.4) ## the window's size in the world, metres: fixed
@@ -979,7 +980,7 @@ func _draw_constraint_glyphs(session, selected_labels: Dictionary = {}) -> void:
 		if gsel or ghov:
 			label.outline_modulate = _tokens.warn if gsel else _tokens.accent
 		_constraint_labels.add_child(label)
-		_annotation_hits.append({"kind": "constraint", "id": str(item["id"]), "uv": uv, "angle": 0.0, "half": Vector2(GLYPH_HIT_MM, GLYPH_HIT_MM) / canvas_scale})
+		_annotation_hits.append({"kind": "constraint", "id": str(item["id"]), "uv": uv, "angle": 0.0, "half": Vector2.ONE * InputSource.value(input_source, "glyph") / canvas_scale})
 
 
 func constraint_glyph_texts() -> Array:

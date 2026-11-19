@@ -48,6 +48,7 @@ const SelectionActions := preload("res://scripts/design_table/selection_actions.
 const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrumbs.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const DimensionPreview := preload("res://scripts/design_table/dimension_preview.gd")
+const InputSource := preload("res://scripts/design_table/input_source.gd")
 const PointDrag := preload("res://scripts/design_table/point_drag.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
@@ -62,8 +63,6 @@ const SIGNED_OPTIONS := ["mb_dx", "mb_dy", "mb_dz", "text_rot", "g_helix", "g_sh
 const NONNEGATIVE_OPTIONS := ["g_bore", "g_fillet", "g_backlash", "r_backlash", "r_backing", "b_bore", "b_spiral"] ## settings that may be zero (none) but not negative
 const PICK_RANGE := 4.0 ## metres: how far the laser reaches onto the table
 const SNAP_RADIUS := 0.012 ## world metres around the laser in which a snap is taken
-const PICK_RADIUS := 0.014 ## world metres around the laser in which an entity is picked
-const GHOST_RADIUS := 0.030
 const FONTS := ["Open Sans", "Roboto", "Lato", "Fira Sans", "Barlow", "PT Sans", "IBM Plex Serif", "IBM Plex Mono", "Space Mono", "Rajdhani"] ## the backend's bundled fonts (app/sketch/text_fonts.py FONT_ALLOWLIST)
 const DOUBLE_PULL_MS := 500
 const MENU_SLOTS := 6 ## buttons in the options row
@@ -135,6 +134,7 @@ var _dim_shown: Dictionary = {} ## the candidate the preview last drew
 var _dim_last_uv: Variant = null ## where the laser was when it was drawn (null: draw it again)
 
 var _label_hold: Dictionary = {} ## the trigger held on something Select can drag: {kind: "label" (F5, S6: id, press (sketch mm), was_selected, dragging, place) | "point" (F6, S10: id, press, dragging, pinned)}; one pull and let go leaves it a plain pull
+var input_source := InputSource.DEFAULT ## S7: which source points (hit sizes: input_source.gd)
 var point_drag := PointDrag.new() ## S10: the sketch-point drag in progress (its projector calls run off the main thread; `synchronous` for tests)
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
@@ -437,6 +437,21 @@ func _hover_part(origin: Vector3, dir: Vector3) -> void:
 	highlight.set_hover_entity(table._right, table.table_copy, hover_part_entity)
 
 
+func _reach_mm(what: String) -> float:
+	## A hit size of the current input source ("pick" or "ghost", input_source.gd) in sketch millimetres.
+	return InputSource.value(input_source, what) / view.canvas_scale
+
+
+func set_input_source(source: String) -> void:
+	## S7: "controller" (default) or "hand": the hit sizes follow. Nothing selects "hand" until hand tracking lands.
+	if not InputSource.SOURCES.has(source):
+		return
+	input_source = source
+	if view != null:
+		view.input_source = source
+		_refresh_view()
+
+
 func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	_hover_uv = null
 	_hover_entity = {}
@@ -470,7 +485,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		var line_start: Variant = null
 		var now_ms := Time.get_ticks_msec()
 		if tool == "line":
-			var passed: Dictionary = session.nearest_entity(uv, PICK_RADIUS / view.canvas_scale, ["line"])
+			var passed: Dictionary = session.nearest_entity(uv, _reach_mm("pick"), ["line"])
 			if not passed.is_empty():
 				_woken.touch(str(passed["id"]), now_ms) # passing over a line wakes it: the next line may be parallel / perpendicular to it
 		else:
@@ -509,7 +524,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 			_refresh_view()
 	elif CONSTRAIN_TOOLS.has(tool) or tool == "dimension" or tool == SELECT_TOOL or tool == "revolve" or EDIT_TOOLS.has(tool):
 		_clear_aids()
-		var pick_mm: float = PICK_RADIUS / view.canvas_scale
+		var pick_mm: float = _reach_mm("pick")
 		var kinds: Array = ["point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]
 		if tool in ["horizontal", "vertical", "parallel", "perpendicular", "revolve"]:
 			kinds = ["line"]
@@ -1643,6 +1658,7 @@ func _build_view() -> void:
 	view.name = "SketchView"
 	copy.add_child(view)
 	view.setup(plane, table.sheet_window_m, centre, table.effective_scale(), table.tokens)
+	view.input_source = input_source
 	clip.begin(copy, table._main.view_modes)
 	_follow_window()
 	_canvas_stale = false
@@ -1899,7 +1915,7 @@ func label_drag_move(uv: Vector2) -> void:
 		return
 	var id := str(_label_hold["id"])
 	if not bool(_label_hold["dragging"]):
-		if uv.distance_to(_label_hold["press"]) <= PICK_RADIUS / view.canvas_scale:
+		if uv.distance_to(_label_hold["press"]) <= _reach_mm("pick"):
 			return
 		_label_hold["dragging"] = true
 		if table.keyboard_open():
@@ -1988,7 +2004,7 @@ func _point_drag_move(uv: Variant) -> void:
 	if session == null or view == null:
 		return
 	if not bool(_label_hold["dragging"]):
-		if not uv is Vector2 or (uv as Vector2).distance_to(_label_hold["press"]) <= PICK_RADIUS / view.canvas_scale:
+		if not uv is Vector2 or (uv as Vector2).distance_to(_label_hold["press"]) <= _reach_mm("pick"):
 			return
 		if bool(_label_hold["pinned"]):
 			if not bool(_label_hold["said"]):
@@ -2104,7 +2120,7 @@ func _sketch_trigger() -> void:
 		else:
 			session.clear_selection()
 	elif tool == "dimension" or tool == SELECT_TOOL:
-		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
+		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, _reach_mm("ghost"))
 		if tool == SELECT_TOOL and ghost == "" and not _hover_annotation.is_empty():
 			_begin_label_hold(_hover_annotation) # the pull below is the plain one; if the trigger stays held and the laser moves, it becomes a drag (F5)
 			await _pull_annotation(_hover_annotation)
@@ -2116,7 +2132,7 @@ func _sketch_trigger() -> void:
 		elif not _hover_entity.is_empty():
 			var picked: Dictionary = _hover_entity
 			if tool == SELECT_TOOL:
-				var other: Dictionary = session.stacked_alternative(picked, PICK_RADIUS / view.canvas_scale * 0.25)
+				var other: Dictionary = session.stacked_alternative(picked, _reach_mm("pick") * 0.25)
 				if not other.is_empty():
 					picked = other # a second pull on a stack of points takes the other one
 				_begin_point_hold(picked) # F6: held and moved, a sketch point drags
@@ -2282,7 +2298,7 @@ func _update_dimension_preview(uv: Variant) -> void:
 			if _dim_last_uv != null and (uv as Vector2).distance_to(_dim_last_uv) < 0.001 / view.canvas_scale:
 				return # (the laser has not moved a millimetre in the world)
 			var before := str(_dim_shown.get("key", ""))
-			want = dim_flow.preview(session, uv, PICK_RADIUS / view.canvas_scale)
+			want = dim_flow.preview(session, uv, _reach_mm("pick"))
 			_dim_last_uv = uv
 			if str(want.get("key", "")) != before:
 				_update_options.call_deferred() # the cursor rule changed the kind: the options row lights it
@@ -2294,7 +2310,7 @@ func _update_dimension_preview(uv: Variant) -> void:
 
 func _drop_dimension() -> void:
 	## The trigger on empty sheet with a preview live: kind, placement and side are frozen and the number pad opens (a driven one is kept at once).
-	var g: Dictionary = dim_flow.drop(session, _hover_uv, PICK_RADIUS / view.canvas_scale)
+	var g: Dictionary = dim_flow.drop(session, _hover_uv, _reach_mm("pick"))
 	if g.is_empty():
 		return
 	if bool(g.get("driven", false)):
