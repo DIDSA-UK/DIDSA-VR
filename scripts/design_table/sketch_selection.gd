@@ -110,6 +110,10 @@ static func annotation_options(annotations: Array, selection: Array, session = n
 		var value: Dictionary = session.dimension_value(str(annotations[0]["id"])) if session != null else {"ok": true}
 		if bool(value.get("ok", false)):
 			out.append({"id": "edit_value", "text": "Edit value"})
+			if session != null and session.is_size_dimension(str(annotations[0]["id"])):
+				out.append({"id": "diameter_toggle", "text": "Show radius" if bool(session.diameter_shown.get(str(annotations[0]["id"]), false)) else "Show diameter"})
+			if session != null and str((session.constraints.get(str(annotations[0]["id"]), {}) as Dictionary).get("type", "")) in ["angle", "horizontal_angle", "point_angle"]:
+				out.append({"id": "angle_side", "text": "Other side"})
 	out.append({"id": "delete", "text": TEXT["delete"]})
 	out.append({"id": "clear", "text": TEXT["clear"]})
 	return out

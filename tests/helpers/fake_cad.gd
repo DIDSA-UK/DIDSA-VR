@@ -15,6 +15,7 @@ var cons := {}
 var n := 0
 var fail := "" ## a path fragment whose POST should fail with a 422
 var converge := true
+var failed_ids: Array = [] ## `solver_reported_failed_constraint_ids` the solves answer with (only meaningful with converge off, as the real backend)
 var occurrences := {}
 var plane_for: Callable = Callable()
 var mesh_bytes := PackedByteArray()
@@ -316,6 +317,11 @@ func handle(method: int, path: String, body) -> Dictionary:
 		reference_dimensions.erase(path.get_file())
 		_prune_reference_helpers()
 		return _ok({})
+	if path.contains("/constraints/") and path.ends_with("/label") and verb == "DELETE":
+		var dk: String = path.get_base_dir().get_file()
+		if cons.has(dk):
+			cons[dk].erase("label")
+		return _ok({})
 	if verb == "DELETE":
 		var tail: String = path.get_file()
 		points.erase(tail)
@@ -381,7 +387,12 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _ok({})
 	if path.contains("/constraints/") and verb == "PATCH":
 		var k: String = path.get_file()
-		cons[k]["distance"] = body["value"]
+		if str(cons[k].get("type", "")) in ["angle", "horizontal_angle", "point_angle"]:
+			cons[k]["angle_degrees"] = body["value"]
+		else:
+			cons[k]["distance"] = body["value"]
+		if body.has("quadrant"):
+			cons[k]["quadrant"] = body["quadrant"]
 		cons[k]["provisional"] = false
 		return _ok({"converged": converge})
 	if path.ends_with("/solve-and-refresh"):
@@ -389,7 +400,7 @@ func handle(method: int, path: String, body) -> Dictionary:
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": pinned.has(id), "is_reference": reference_ids.has(id)})
 		var has_loop := entities.any(func(e): return e["type"] in ["rectangle", "circle", "polygon", "slot"])
-		return _ok({"solve": {"converged": converge, "dof": 2}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop", "open_chain": profile_open_chain and not has_loop}, "reference_dimensions": _reference_dimension_rows()})
+		return _ok({"solve": {"converged": converge, "dof": 2, "solver_reported_failed_constraint_ids": failed_ids}, "points": plist, "constraints": cons.values(), "profile": {"status": "closed_loop" if has_loop else "no_loop", "open_chain": profile_open_chain and not has_loop}, "reference_dimensions": _reference_dimension_rows()})
 	if path.ends_with("/export"):
 		return _ok({"entities": entities, "reference_ids": reference_ids.keys(), "reference_dimensions": _reference_dimension_rows()})
 	if path.ends_with("/reference-dimensions") and verb == "POST":

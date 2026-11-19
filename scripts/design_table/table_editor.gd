@@ -133,6 +133,7 @@ var dim_flow := DimensionPreview.new() ## S5: the Dimension tool's preview / cho
 var _dim_shown: Dictionary = {} ## the candidate the preview last drew
 var _dim_last_uv: Variant = null ## where the laser was when it was drawn (null: draw it again)
 
+var _label_hold: Dictionary = {} ## F5 (S6): the trigger held on a dimension label {id, press (sketch mm), was_selected, dragging, place}; one pull and let go leaves it a plain pull
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
@@ -160,6 +161,7 @@ func setup(p_table, p_api) -> void:
 	api = p_api
 	features = PartFeatures.new(Callable(self, "_call"))
 	table._right.button_pressed.connect(_on_right_pressed)
+	table._right.button_released.connect(_on_right_released)
 	geometry_changed.connect(func() -> void: _rest_version += 1)
 
 
@@ -437,6 +439,8 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	if session == null or view == null:
 		return
 	var uv: Variant = _sheet_hit(origin, dir)
+	if not _label_hold.is_empty() and uv != null:
+		label_drag_move(uv) # F5: the trigger is held on a label: the laser drags it
 	if uv == null:
 		view.set_annotation_hover("")
 		view.set_cursor(null)
@@ -678,6 +682,9 @@ func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 # --- The trigger ----------------------------------------------------------------------------
 
 func _on_right_pressed(action: String) -> void:
+	if action == "by_button" and not _label_hold.is_empty() and bool(_label_hold["dragging"]):
+		_cancel_label_hold() # B lets the dragged label go back where it was
+		return
 	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
 		clear_part_selection() # B closes the drawer, like its X
 		return
@@ -1850,6 +1857,89 @@ func _pull_annotation(hit: Dictionary) -> void:
 	table.set_status("%s selected: Edit value or Delete in the options row." % ("Dimension" if str(hit["kind"]) == "dimension" else "Constraint") if session.is_annotation_selected(str(hit["kind"]), str(hit["id"])) else "Let go.")
 
 
+# --- F5 (S6): a label moved by holding the trigger on it ----------------------------------------------------------------
+
+func _begin_label_hold(hit: Dictionary) -> void:
+	## Called by the pull on a dimension label (Select): the hold starts only for a label that can be placed (not a reference dimension, which the backend gives no place
+	## to). The pull itself is unchanged: it selects, and a second quick one opens the pad. If the laser then moves further than a pick's reach with the trigger still down,
+	## `label_drag_move` turns it into a drag; releasing before that leaves a plain pull. This is also where S10's point drag plugs in (the same hold, a point under the laser).
+	_label_hold = {}
+	if str(hit.get("kind", "")) != "dimension" or session == null or session.label_candidate(str(hit["id"])).is_empty() or _hover_uv == null:
+		return
+	_label_hold = {"id": str(hit["id"]), "press": _hover_uv, "was_selected": session.is_annotation_selected("dimension", str(hit["id"])), "dragging": false, "place": {}}
+
+
+func label_dragging() -> bool:
+	return not _label_hold.is_empty() and bool(_label_hold["dragging"])
+
+
+func label_drag_move(uv: Vector2) -> void:
+	## One frame of a label drag (the laser at `uv`, sketch mm): past a pick's reach from where the trigger went down it starts, then the label follows the laser, drawn
+	## where it would be saved (the placement the flat app reads, DimensionPreview.placement_at). A pointer that gives no placement leaves the label where it was.
+	if _label_hold.is_empty() or session == null or view == null:
+		return
+	var id := str(_label_hold["id"])
+	if not bool(_label_hold["dragging"]):
+		if uv.distance_to(_label_hold["press"]) <= PICK_RADIUS / view.canvas_scale:
+			return
+		_label_hold["dragging"] = true
+		if table.keyboard_open():
+			table.close_keyboard() # a second quick pull that turned into a drag: the pad it opened is not wanted
+		_last_pull = {"key": "", "ms": 0}
+		if not session.is_annotation_selected("dimension", id):
+			session.toggle_annotation("dimension", id) # a grabbed label is lit as a selected one
+		UiFeedback.haptic(table._right, "press")
+		table.set_status("Moving the label: let go of the trigger to drop it, B to put it back.")
+	var g: Dictionary = session.label_candidate(id)
+	if g.is_empty():
+		return
+	var place: Dictionary = DimensionPreview.placement_at(session, g, uv)
+	if place.is_empty() or place == _label_hold["place"]:
+		return
+	_label_hold["place"] = place
+	session.label_override[id] = place
+	view.show_ghosts(session.ghosts) # redraws the dimensions with the label at the laser
+
+
+func _on_right_released(action: String) -> void:
+	if action == table.click_action and not _label_hold.is_empty():
+		await _end_label_hold()
+
+
+func _end_label_hold() -> void:
+	## The trigger came up: a drag saves the placement (and says if it couldn't); a hold that never moved was only a pull.
+	var hold := _label_hold
+	_label_hold = {}
+	if hold.is_empty() or not bool(hold["dragging"]) or session == null:
+		return
+	var id := str(hold["id"])
+	var place: Dictionary = hold["place"]
+	if place.is_empty():
+		session.label_override.erase(id)
+		_refresh_view()
+		return
+	var result: Dictionary = await session.move_label(id, place)
+	if bool(result["ok"]):
+		UiFeedback.haptic(table._right, "confirm")
+		table.set_status("Label moved.")
+		sync_undo_redo()
+	else:
+		UiFeedback.haptic(table._right, "error")
+		if str(result["message"]) != "":
+			table.set_status(str(result["message"]))
+	_refresh_view()
+
+
+func _cancel_label_hold() -> void:
+	var id := str(_label_hold.get("id", ""))
+	_label_hold = {}
+	if session != null and id != "":
+		session.label_override.erase(id)
+	table.set_status(_sketch_hint())
+	UiFeedback.haptic(table._right, "close")
+	_refresh_view()
+
+
 func _edit_dimension_value(id: String) -> void:
 	var current: Dictionary = session.dimension_value(id)
 	if not bool(current["ok"]):
@@ -1912,6 +2002,7 @@ func _sketch_trigger() -> void:
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, GHOST_RADIUS / view.canvas_scale)
 		if tool == SELECT_TOOL and ghost == "" and not _hover_annotation.is_empty():
+			_begin_label_hold(_hover_annotation) # the pull below is the plain one; if the trigger stays held and the laser moves, it becomes a drag (F5)
 			await _pull_annotation(_hover_annotation)
 		elif ghost != "":
 			if bool(session.ghost(ghost).get("driven", false)):
@@ -2345,6 +2436,23 @@ func on_option(option_id: String) -> void:
 		return
 	if option_id == "edit_value" and session != null and session.annotations.size() == 1:
 		_edit_dimension_value(str(session.annotations[0]["id"]))
+		return
+	if option_id == "diameter_toggle" and session != null and session.annotations.size() == 1:
+		session.toggle_diameter(str(session.annotations[0]["id"])) # the flat app's Radius / Diameter switch: a way of reading the same radius
+		_refresh_view()
+		_update_options()
+		return
+	if option_id == "angle_side" and session != null and session.annotations.size() == 1:
+		var side: Dictionary = await session.set_angle_side(str(session.annotations[0]["id"]))
+		if bool(side["ok"]) and str(side["message"]) == "":
+			UiFeedback.haptic(table._right, "confirm")
+			table.set_status("Angle side changed.")
+		elif str(side["message"]) != "":
+			UiFeedback.haptic(table._right, "error")
+			table.set_status(str(side["message"]))
+		sync_undo_redo()
+		_refresh_view()
+		_update_options()
 		return
 	if session != null and session.tool == SELECT_TOOL and option_id in SelectMenuIds:
 		_menu_page = 0

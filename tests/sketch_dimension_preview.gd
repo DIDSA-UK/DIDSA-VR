@@ -8,7 +8,7 @@ extends SceneTree
 ##     value it gives the three angles; the label at the laser for every kind a line, a circle, an arc and the curve pairs offer; drop freezes
 ##     kind / placement / side and B steps back pad -> preview -> picking (F4); a driven (reference) candidate never goes to the pad; F7 off by
 ##     default and no preview with it on.
-##   * Through the fake backend: confirming a drop posts the frozen side (quadrant) and saves the placement (PUT .../label); an ellipse axis saves none.
+##   * Through the fake backend: confirming a drop posts the frozen side (quadrant) and saves the placement (PUT .../label); a full ellipse's axis saves its placement too (S6), an elliptical arc's does not.
 ## NOT checked here: the laser, the stick and B on the real input path (tests/design_table_dimension_preview.gd), the real backend (tests/e2e_sketch_dimension_drop.gd).
 ## Run: "$GODOT" --headless --path . --script res://tests/sketch_dimension_preview.gd  (see tests/README.md)
 
@@ -333,12 +333,17 @@ func _through_the_fake() -> void:
 	r = await s.confirm_ghost("angle", 135.0, f.frozen)
 	posts = fake.calls.filter(func(c): return c[0].ends_with("/constraints") and c[0].begins_with("POST"))
 	_check(r["ok"] and posts.size() == 1 and int(posts[0][1].get("quadrant", -1)) == 1 and float(posts[0][1]["angle_degrees"]) == 135.0, "a dropped two-line angle posts the sector the laser chose (quadrant 1) with the value")
-	# the ellipse axis: no placement saved (drawn differently in the two apps until S4's open item is settled)
+	# a full ellipse's axis is drawn tip to tip like the flat app's, so its placement is saved like any other (S6); an elliptical arc's axis is read radially there, so not
 	fake.calls.clear()
 	var e := {"key": "majorradius", "place": {"offset": 1.0, "along": 0.0}, "apply": {"patch_id": str(fake.cons.keys()[0]), "factor": 1.0}}
 	s.ghosts = [e]
 	await s.confirm_ghost("majorradius", 12.0, e)
-	_check(fake.calls.filter(func(c): return c[0].ends_with("/label")).is_empty(), "an ellipse axis's placement is not saved (S4's ellipse item)")
+	_check(fake.calls.filter(func(c): return c[0].begins_with("PUT") and c[0].ends_with("/label")).size() == 1, "a full ellipse's axis placement is saved (S6)")
+	fake.calls.clear()
+	e = {"key": "majorradius", "place": {"offset": 1.0, "along": 0.0}, "place_unsaved": true, "apply": {"patch_id": str(fake.cons.keys()[0]), "factor": 1.0}}
+	s.ghosts = [e]
+	await s.confirm_ghost("majorradius", 12.0, e)
+	_check(fake.calls.filter(func(c): return c[0].ends_with("/label")).is_empty(), "an elliptical arc's axis placement is not written from here")
 
 
 func _initialize() -> void:

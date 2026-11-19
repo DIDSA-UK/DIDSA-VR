@@ -76,6 +76,8 @@ var profile_open_chain := false ## no closed profile but exactly one open chain 
 var dof := -1
 var converged := true
 var failed_constraint_ids: Array = [] ## the backend's `solver_reported_failed_constraint_ids` of the last solve: only ever filled when the solve did not converge (a conflict that came later, or one the user kept)
+var label_override: Dictionary = {} ## constraint id -> a placement being dragged (S6): drawn instead of the saved one until the drop saves it (or the drag is let go)
+var diameter_shown: Dictionary = {} ## constraint id -> true: a circle's / arc's size dimension read as a diameter (the flat app's R / diameter toggle: a view choice, the stored value stays the radius, nothing is sent)
 var _state_sketch := "" ## the sketch the last state below belongs to
 var _last_state := ""
 
@@ -778,11 +780,26 @@ static func concentric_body(infer: Dictionary, entity_id: String) -> Dictionary:
 	return {"type": "concentric", "entity1_id": str(infer["target"]["id"]), "entity2_id": entity_id}
 
 
+func _taken_back(was_converged: bool, made_ids: Array) -> bool:
+	## 3.3 (as built in S1, accepted): is what was just made, after its solve, to be taken back? A sketch that converged before and no longer does: yes. A sketch that was
+	## ALREADY not converged (a conflict kept earlier) keeps the new constraint unless the solve's failed list names it (else one kept conflict would block every
+	## new constraint). Read after `refresh`, which fills `converged` and `failed_constraint_ids`.
+	if converged:
+		return false
+	if was_converged:
+		return true
+	for id in made_ids:
+		if failed_constraint_ids.has(str(id)):
+			return true
+	return false
+
+
 func _finish_inferred(label: String, calls: Array, body: Dictionary, infer: Dictionary) -> Dictionary:
 	## `_finish`, with the one constraint the shape was inferred to have. If the solver will not take it with the rest of the sketch only IT is taken back
 	## out: the shape stays (a conflicting guess must not cost the line), and the status line says so.
 	if body.is_empty():
 		return await _finish(label, calls)
+	var was_converged := converged
 	var made := await _post(SKETCH + sketch_id + "/constraints", body)
 	var undo_call: Array = []
 	if made["ok"]:
@@ -792,7 +809,7 @@ func _finish_inferred(label: String, calls: Array, body: Dictionary, infer: Dict
 	var what := str(infer.get("kind", "")).replace("_", " ")
 	if not made["ok"]:
 		status.emit("Couldn't keep it %s: %s" % [what, str(made["error"])])
-	elif not converged:
+	elif _taken_back(was_converged, [str(made["json"]["id"])]):
 		await api.call(int(undo_call[0]), str(undo_call[1]), null)
 		(_undo.back()["calls"] as Array).erase(undo_call)
 		await refresh(false)
@@ -1222,12 +1239,13 @@ func _point_on_reference(pick: Dictionary, created: Array) -> String:
 	var id := str(r["json"]["id"])
 	created.append(id)
 	constraint["point_id"] = id
+	var was_converged := converged
 	var held := await _post(SKETCH + sketch_id + "/constraints", constraint)
 	if not held["ok"]:
 		status.emit("Couldn't hold that point on the part's edge: %s" % str(held["error"]))
 		return "" # the caller's cleanup takes the point back out
 	await refresh(false)
-	if not converged:
+	if _taken_back(was_converged, [str(held["json"]["id"])]):
 		# The solver would not accept it together with the rest of the sketch (the backend's at-midpoint is the one it distrusts most: it reports "not
 		# converged" in a sketch that already has a redundancy, such as a converted hole): take it back out rather than leave a broken sketch.
 		await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(held["json"]["id"]), null)
@@ -1536,12 +1554,13 @@ func _apply_constraint(tool_id: String, picked: Array) -> Dictionary:
 				body = {"type": "point_on_line", "point_id": a["id"], "line_id": b["id"]}
 			else:
 				body = {"type": "point_on_circle", "point_id": a["id"], "circle_or_arc_id": b["id"]}
+	var was_converged := converged
 	var r := await _post(SKETCH + sketch_id + "/constraints", body)
 	if not r["ok"]:
 		return {"ok": false, "message": "Couldn't add that constraint: %s" % str(r["error"])}
 	var calls: Array = [[HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(r["json"]["id"])]]
 	await _finish(tool_id, calls, false)
-	if not converged:
+	if _taken_back(was_converged, [str(r["json"]["id"])]):
 		# It can't be satisfied together with the rest: take it straight back out rather than leave a broken sketch.
 		await undo()
 		return {"ok": false, "message": "That conflicts with the other constraints, so it wasn't added."}
@@ -1833,6 +1852,8 @@ func apply_menu(option_id: String) -> Dictionary:
 func _constrain_selection(label: String, bodies: Array) -> Dictionary:
 	busy = true
 	var calls: Array = []
+	var was_converged := converged
+	var made_ids: Array = []
 	for body in bodies:
 		var r := await _post(SKETCH + sketch_id + "/constraints", body)
 		if not r["ok"]:
@@ -1843,11 +1864,12 @@ func _constrain_selection(label: String, bodies: Array) -> Dictionary:
 			status.emit(message)
 			return {"ok": false, "message": message}
 		calls.append([HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + str(r["json"]["id"])])
+		made_ids.append(str(r["json"]["id"]))
 	selection.clear()
 	ghosts.clear()
 	await _finish(label, calls, false)
 	busy = false
-	if not converged:
+	if _taken_back(was_converged, made_ids):
 		await undo()
 		var conflict := "That conflicts with the other constraints, so it wasn't added."
 		status.emit(conflict)
@@ -2242,7 +2264,7 @@ func dimension_value(id: String) -> Dictionary:
 	var c: Dictionary = constraints.get(id, {})
 	match str(c.get("type", "")):
 		"distance", "point_line_distance", "line_distance":
-			return {"ok": true, "value": float(c.get("distance", 0.0)), "unit": "mm", "kind": "distance"}
+			return {"ok": true, "value": float(c.get("distance", 0.0)) * value_scale(id), "unit": "mm", "kind": "distance"}
 		"angle", "horizontal_angle", "point_angle":
 			return {"ok": true, "value": float(c.get("angle_degrees", 0.0)), "unit": "deg", "kind": "angle"}
 		"arc_length":
@@ -2250,6 +2272,136 @@ func dimension_value(id: String) -> Dictionary:
 		"point_circle_distance", "circle_distance", "line_circle_distance":
 			return {"ok": true, "value": float(c.get("distance", 0.0)), "unit": "mm", "kind": "distance"}
 	return {"ok": false, "value": 0.0, "unit": "", "kind": ""}
+
+
+func value_scale(id: String) -> float:
+	## How many times the stored value the label shows: 2 for a full ellipse's axis (stored centre to tip, drawn tip to tip, as the flat app) and for a circle's / arc's
+	## size dimension read as a diameter (the toggle); else 1. dimension_value multiplies by it and edit_dimension divides.
+	if not ellipse_axis_line(id).is_empty():
+		return 2.0
+	if bool(diameter_shown.get(id, false)) and is_size_dimension(id):
+		return 2.0
+	return 1.0
+
+
+func is_size_dimension(id: String) -> bool:
+	## Whether constraint `id` is the radius a circle or an arc holds (what the R / diameter toggle flips).
+	for cid in circles:
+		if str(circles[cid].get("k", "")) == id:
+			return true
+	for aid in arcs:
+		if str(arcs[aid].get("k", "")) == id:
+			return true
+	return false
+
+
+func toggle_diameter(id: String) -> bool:
+	## The flat app's Radius / Diameter toggle for an existing circle or arc dimension: the same stored radius, read the other way (R5 <-> diameter 10). A view choice for
+	## this open sketch, as there: nothing is sent. False when `id` is not a size dimension.
+	if not is_size_dimension(id):
+		return false
+	if bool(diameter_shown.get(id, false)):
+		diameter_shown.erase(id)
+	else:
+		diameter_shown[id] = true
+	changed.emit()
+	return true
+
+
+func ellipse_axis_line(constraint_id: String) -> Dictionary:
+	## {a, b} (sketch mm): the tip-to-tip line of the full ellipse axis whose size constraint is `constraint_id` (a: the far tip, b: the tip the constraint names); {} when
+	## it is not one. The far tip is the ellipse's own negative tip Point, else the mirror of b through the centre.
+	for eid in ellipses:
+		var e: Dictionary = ellipses[eid]
+		var major := str(e.get("km", "")) == constraint_id
+		if not (major or str(e.get("kn", "")) == constraint_id) or constraint_id == "":
+			continue
+		var tip_id := str(e["ma"] if major else e["mi"])
+		var neg_id := str(e.get("man", "") if major else e.get("mnn", ""))
+		if not points.has(str(e.get("c", ""))) or not points.has(tip_id):
+			return {}
+		var tip: Vector2 = points[tip_id]
+		var far: Vector2 = points[neg_id] if neg_id != "" and points.has(neg_id) else (points[e["c"]] as Vector2) * 2.0 - tip
+		return {"a": far, "b": tip}
+	return {}
+
+
+func angle_side_value(id: String, quadrant: int) -> float:
+	## The angle (degrees) that angle dimension `id` would measure in sector `quadrant` of the lines / points as they are now: what keeps the geometry still when the side
+	## changes. -1 when `id` is not an angle or its lines are not here.
+	var c: Dictionary = constraints.get(id, {})
+	var spec: Dictionary = {}
+	match str(c.get("type", "")):
+		"angle":
+			spec = angle_spec(str(c.get("line1_id", "")), str(c.get("line2_id", "")), -1.0, quadrant)
+		"horizontal_angle":
+			spec = horizontal_angle_spec(str(c.get("line_id", "")), quadrant)
+		"point_angle":
+			spec = point_angle_spec(str(c.get("vertex_point_id", "")), str(c.get("point1_id", "")), str(c.get("point2_id", "")), quadrant)
+	if spec.is_empty() or not spec.has("d1") or not spec.has("d2"):
+		return -1.0
+	return rad_to_deg(acos(clampf((spec["d1"] as Vector2).dot(spec["d2"]), -1.0, 1.0)))
+
+
+func set_angle_side(id: String, quadrant: int = -1) -> Dictionary:
+	## Edits which angle an existing angle dimension is (S6; the flat app re-sends the value with a new quadrant, PATCH .../constraints/{id} {value, quadrant}). The new
+	## value is what the picked side measures NOW, so nothing moves; type a number afterwards to turn it. `quadrant` -1: the next of the four (0-3, as the backend
+	## saves it). Undo puts the old side and value back. A conflict is kept, red, as an edited value is. {ok, message}.
+	var c: Dictionary = constraints.get(id, {})
+	if busy or not str(c.get("type", "")) in ["angle", "horizontal_angle", "point_angle"]:
+		return {"ok": false, "message": ""}
+	var current := _quadrant_of(c)
+	var q := quadrant if quadrant >= 0 else posmod((current if current >= 0 else 0) + 1, 4)
+	var value := angle_side_value(id, q)
+	if value <= 0.0:
+		var msg := "That side has no angle: the lines are parallel there."
+		status.emit(msg)
+		return {"ok": false, "message": msg}
+	busy = true
+	var path := SKETCH + sketch_id + "/constraints/" + id
+	var old_body := {"value": float(c.get("angle_degrees", 0.0))}
+	if current >= 0:
+		old_body["quadrant"] = current
+	var r: Dictionary = await api.call(HTTPClient.METHOD_PATCH, path, {"value": value, "quadrant": q})
+	if not r["ok"]:
+		busy = false
+		var message := "Couldn't change that angle: %s" % str(r["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	_undo.append({"label": "angle side", "calls": [[HTTPClient.METHOD_PATCH, path, old_body]]})
+	await refresh(false)
+	annotations.clear()
+	busy = false
+	changed.emit()
+	var message := "" if converged else "That side conflicts with the other constraints: what it holds is red. Change it again, or Undo."
+	if message != "":
+		status.emit(message)
+	return {"ok": true, "message": message}
+
+
+func label_candidate(id: String) -> Dictionary:
+	## An existing dimension as the label drag reads it (the shape DimensionPreview.placement_at takes): {key, spec, apply: {create}}, built from its drawn row; {} for a
+	## reference (driven) dimension, which carries no placement on the backend, and for what is not a dimension.
+	var c: Dictionary = constraints.get(id, {})
+	if c.is_empty():
+		return {}
+	for item in dimension_items():
+		if str(item["id"]) != id:
+			continue
+		if bool(item.get("driven", false)):
+			return {}
+		var key := "x"
+		match str(c.get("type", "")):
+			"angle":
+				key = "angle"
+			"line_distance":
+				key = "lineDistance"
+			"horizontal_angle":
+				key = "horizontalAngle"
+			"point_angle":
+				key = "pointAngle"
+		return {"key": key, "spec": item["spec"], "apply": {"create": c}}
+	return {}
 
 
 func edit_dimension(id: String, value: float) -> Dictionary:
@@ -2264,13 +2416,14 @@ func edit_dimension(id: String, value: float) -> Dictionary:
 		return {"ok": false, "message": msg}
 	busy = true
 	var path := SKETCH + sketch_id + "/constraints/" + id
-	var r: Dictionary = await api.call(HTTPClient.METHOD_PATCH, path, {"value": value})
+	var scale := value_scale(id)
+	var r: Dictionary = await api.call(HTTPClient.METHOD_PATCH, path, {"value": value / scale})
 	if not r["ok"]:
 		busy = false
 		var message := "Couldn't change that dimension: %s" % str(r["error"])
 		status.emit(message)
 		return {"ok": false, "message": message}
-	_undo.append({"label": "dimension value", "calls": [[HTTPClient.METHOD_PATCH, path, {"value": float(current["value"])}]]})
+	_undo.append({"label": "dimension value", "calls": [[HTTPClient.METHOD_PATCH, path, {"value": float(current["value"]) / scale}]]})
 	await refresh(false)
 	# A conflict that comes LATER (an edited value) is kept, as in the flat app: the solver's failed list turns what it holds red. (A constraint that conflicts
 	# right after it is made is still taken back: that is confirm_ghost's and the menu's rule.)
@@ -2295,19 +2448,24 @@ func delete_annotations() -> Dictionary:
 			ids.append(str(a["id"]))
 	busy = true
 	var calls: Array = []
+	var labels := {} ## index into calls -> the saved label placement of the constraint that call re-makes
 	var failed := ""
 	for cid in ids:
 		var c: Dictionary = (constraints.get(cid, {}) as Dictionary).duplicate(true)
 		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + cid, null)
 		if r["ok"]:
 			c.erase("id")
+			var saved_place: Variant = c.get("label")
+			c.erase("label")
+			if saved_place is Dictionary and not (saved_place as Dictionary).is_empty():
+				labels[calls.size()] = saved_place # the label is its own route: Undo puts it back after the constraint is made again
 			calls.append([HTTPClient.METHOD_POST, SKETCH + sketch_id + "/constraints", c])
 		elif int(r.get("code", 0)) != 404:
 			failed = str(r["error"])
 	annotations.clear()
 	var with_geometry := not selection.is_empty()
 	if not calls.is_empty() and not with_geometry:
-		_undo.append({"label": "delete constraint", "calls": calls})
+		_undo.append({"label": "delete constraint", "calls": calls, "labels": labels})
 	await refresh(false)
 	busy = false
 	if with_geometry:
@@ -2489,8 +2647,18 @@ func _ellipse_ghosts(first: Dictionary) -> Array:
 			radius_apply = _distance_apply(str(el["c"]), tip_id, "linear")
 			diameter_apply = _distance_apply(str(el["c"]), tip_id, "linear")
 			diameter_apply["factor"] = 0.5
-		out.append(_cand("%sradius" % axis, "%s radius" % axis.capitalize(), "mm", r, cc + (tip - cc) * 0.5, radius_apply, {"kind": "linear", "a": cc, "b": tip}, "radius"))
-		out.append(_cand("%sdiameter" % axis, "%s diameter" % axis.capitalize(), "mm", r * 2.0, cc + (tip - cc) * 0.5, diameter_apply, {"kind": "linear", "a": cc * 2.0 - tip, "b": tip}, "diameter"))
+		# A full ellipse's axis is drawn tip to tip, as the flat app draws it once made (ellipse_axis_line), so a placement dropped on the candidate is the one
+		# that dimension reads. An elliptical arc has no far tip: its axis is a distance from the centre.
+		var far: Vector2 = cc * 2.0 - tip
+		if is_full:
+			var far_id := str(el.get("man", "") if axis == "major" else el.get("mnn", ""))
+			if far_id != "" and points.has(far_id):
+				far = points[far_id]
+		out.append(_cand("%sradius" % axis, "%s radius" % axis.capitalize(), "mm", r, cc + (tip - cc) * 0.5, radius_apply, {"kind": "linear", "a": far if is_full else cc, "b": tip}, "radius"))
+		out.append(_cand("%sdiameter" % axis, "%s diameter" % axis.capitalize(), "mm", r * 2.0, cc + (tip - cc) * 0.5, diameter_apply, {"kind": "linear", "a": far, "b": tip}, "diameter"))
+		if not is_full:
+			out[-2]["place_unsaved"] = true # the flat app lays an elliptical arc's axis out radially (placement kind `radius`): its saved placement is read differently, so it is not written from here
+			out[-1]["place_unsaved"] = true
 	return out
 
 
@@ -3385,7 +3553,7 @@ func dimension_items() -> Array:
 func _dimension_item(id: String, c: Dictionary, radius_of: Dictionary) -> Dictionary:
 	## One constraint as a drawn dimension {id, spec, text}, {} when it is not one (or what it measures is not here).
 	var type := str(c.get("type", ""))
-	var place := _place_of(c)
+	var place: Dictionary = label_override.get(id, _place_of(c))
 	var spec := {}
 	var text := ""
 	match type:
@@ -3393,9 +3561,18 @@ func _dimension_item(id: String, c: Dictionary, radius_of: Dictionary) -> Dictio
 			if bool(c.get("provisional", false)) or float(c.get("distance", 0.0)) <= 0.005: # (a zero distance is a shape's own structure, e.g. a circle's cardinal points)
 				return {}
 			var value := float(c["distance"])
+			var axis := ellipse_axis_line(id)
 			if radius_of.has(id):
-				spec = circle_spec("radius", str((radius_of[id] as Array)[1]), place)
-				text = dimension_text("radius", value)
+				var shown_diameter := bool(diameter_shown.get(id, false))
+				spec = circle_spec("diameter" if shown_diameter else "radius", str((radius_of[id] as Array)[1]), place)
+				text = dimension_text("diameter" if shown_diameter else "radius", value * (2.0 if shown_diameter else 1.0))
+			elif not axis.is_empty():
+				# a full ellipse's axis, as the flat app draws it: tip to tip, the number twice the stored (centre to tip) value
+				spec = {"kind": "linear", "a": axis["a"], "b": axis["b"]}
+				var axis_place := _linear_place(place)
+				if not axis_place.is_empty():
+					spec["place"] = axis_place
+				text = dimension_text("linear", value * 2.0)
 			elif points.has(str(c.get("point_a_id", ""))) and points.has(str(c.get("point_b_id", ""))):
 				spec = {"kind": str(c.get("orientation", "linear")), "a": points[c["point_a_id"]], "b": points[c["point_b_id"]]}
 				var p := _linear_place(place)
@@ -3561,7 +3738,6 @@ func _distance_apply(a: String, b: String, orientation: String) -> Dictionary:
 	return {"create": {"type": "distance", "point_a_id": a, "point_b_id": b, "orientation": orientation}, "factor": 1.0, "value_key": "distance"}
 
 
-const DIMENSION_UNSAVED_PLACEMENT := ["majorradius", "majordiameter", "minorradius", "minordiameter"] ## a full ellipse's axis is drawn centre to tip here, tip to tip in the flat app (S4's open item): its placement is not saved until both agree
 
 
 func ghost(key: String) -> Dictionary:
@@ -3569,6 +3745,40 @@ func ghost(key: String) -> Dictionary:
 		if g["key"] == key:
 			return g
 	return {}
+
+
+func save_label(id: String, place: Dictionary) -> Dictionary:
+	## Saves where a dimension's label sits (PUT .../constraints/{id}/label; the placement is the flat app's too, section 3.2): a new dimension's drop and a label dragged
+	## afterwards both come here. The drawing takes it at once; Undo puts the old placement back (or none). {ok, message}.
+	if id == "" or place.is_empty() or not constraints.has(id):
+		return {"ok": false, "message": ""}
+	var old: Dictionary = _place_of(constraints[id]).duplicate()
+	var saved: Dictionary = await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + id + "/label", place)
+	if not saved["ok"]:
+		var message := "Couldn't save the label's place: %s" % str(saved["error"])
+		status.emit(message)
+		return {"ok": false, "message": message}
+	constraints[id]["label"] = place.duplicate() # drawn there at once (the next solve brings it back from the backend too)
+	label_override.erase(id)
+	changed.emit()
+	return {"ok": true, "message": "", "old": old}
+
+
+func move_label(id: String, place: Dictionary) -> Dictionary:
+	## A label dragged and dropped (S6, F5): its new placement is saved as above and Undo puts the old one back (or the automatic place, when it had none).
+	if busy:
+		label_override.erase(id)
+		changed.emit()
+		return {"ok": false, "message": ""}
+	var saved := await save_label(id, place)
+	if bool(saved["ok"]):
+		var old: Dictionary = saved["old"]
+		var path := SKETCH + sketch_id + "/constraints/" + id + "/label"
+		_undo.append({"label": "label move", "calls": [[HTTPClient.METHOD_PUT, path, old]] if not old.is_empty() else [[HTTPClient.METHOD_DELETE, path]]})
+	else:
+		label_override.erase(id)
+		changed.emit()
+	return saved
 
 
 func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dictionary:
@@ -3589,6 +3799,7 @@ func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dicti
 	if busy:
 		return {"ok": false, "message": ""}
 	busy = true
+	var was_converged := converged
 	var apply: Dictionary = g["apply"]
 	var stored: float = value * float(apply.get("factor", 1.0))
 	var r: Dictionary
@@ -3609,21 +3820,17 @@ func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dicti
 	if not calls.is_empty():
 		_undo.append({"label": "dimension", "calls": calls})
 	await refresh(false)
-	var kept := converged
-	if not kept and not calls.is_empty():
+	var made_id := str(r["json"]["id"]) if r["json"] is Dictionary and (r["json"] as Dictionary).has("id") else ""
+	var kept := not (not calls.is_empty() and _taken_back(was_converged, [made_id]))
+	if not kept:
 		busy = false
 		await undo()
 		busy = true
 		status.emit("That size conflicts with the other constraints, so it wasn't added.")
 	var place: Dictionary = g.get("place", {})
-	if kept and not place.is_empty() and not DIMENSION_UNSAVED_PLACEMENT.has(key):
-		var cid := str(apply["patch_id"]) if apply.has("patch_id") else str(r["json"]["id"])
-		var saved: Dictionary = await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + cid + "/label", place)
-		if saved["ok"]:
-			if constraints.has(cid):
-				constraints[cid]["label"] = place.duplicate() # drawn there at once (the next solve brings it back from the backend too)
-		else:
-			status.emit("The dimension is set, but its place couldn't be saved: %s" % str(saved["error"]))
+	if kept and not place.is_empty() and not bool(g.get("place_unsaved", false)):
+		var cid := str(apply["patch_id"]) if apply.has("patch_id") else made_id
+		await save_label(cid, place)
 	selection.clear()
 	ghosts.clear()
 	busy = false
@@ -3648,8 +3855,13 @@ func undo() -> bool:
 	var step: Dictionary = _undo.pop_back()
 	var was_busy := busy
 	busy = true
+	var labels: Dictionary = step.get("labels", {})
+	var index := 0
 	for entry in step["calls"]:
-		await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
+		var done: Dictionary = await api.call(int(entry[0]), str(entry[1]), entry[2] if entry.size() > 2 else null)
+		if labels.has(index) and done["ok"] and done["json"] is Dictionary and (done["json"] as Dictionary).has("id"):
+			await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + str(done["json"]["id"]) + "/label", labels[index])
+		index += 1
 	pending.clear()
 	chain_first = ""
 	selection.clear()
