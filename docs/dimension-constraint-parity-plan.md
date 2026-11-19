@@ -1,6 +1,6 @@
 # Plan: dimensions and constraints at parity with the flat app (sessions)
 
-**Status: final (2026-11-18), not started.** Waits for its gate (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
+**Status: final (2026-11-18), revised for running (2026-11-19), not started. Gate met 2026-11-19** (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
 
 The build plan for [`dimension-constraint-parity-scope.md`](dimension-constraint-parity-scope.md) (the gap tables, the workflow and the owner's
 decisions of 2026-11-18). Written for **coding sessions**: each session below is one repo, one branch, one PR. Line numbers drift: search for
@@ -8,7 +8,9 @@ the named symbol. Status of every session: the tracker (section 7).
 
 ## 1. Gate: when this starts
 
-Not before all of these hold. The first session checks them and stops if one does not.
+Not before all of these hold. **Checked 2026-11-19: items 1 and 2 hold** (DIDSA-CAD #385 merged to `main` with A, B, C1-C3 and D done;
+C's item 10 was done by reading only, not run against VR: the owner decides whether that is enough, else S2's e2e covers it; DIDSA-VR `main` has no open work in the named files after
+P2 / P4 and this plan were merged). Item 3 is each session's own setup. The first session does not re-check items 1-2.
 
 1. DIDSA-CAD `docs/bug-report-2026-11-18-plan.md` is complete: its Progress table shows parts A, B, C (C1, C2, C3) and D done, and the
    branch holding them (`ccr-5fd5d437-1l26qn` and C's) is **merged to DIDSA-CAD `main`**. Part C's own VR check (its item 10: VR handles the new
@@ -92,26 +94,41 @@ solve's `solver_reported_failed_constraint_ids` turn what they hold red, in both
 
 - **One repo, one branch, one PR**, about 1 500 changed lines with tests at most. If the list overflows, stop at the last green checkpoint and
   split; record the split in the tracker.
-- **Start:** read sections 1-4 here, the scope, the session's brief, and only the files it names. Do not re-derive the scope's findings.
-- **Env:** VR: `TOOLS_DIR=/opt/tools CAD_DIR=<CAD checkout on main> tools/setup_test_env.sh` (Godot, Xvfb, the backend's env), then
-  `source /opt/tools/env.sh`. CAD client: Flutter as in that repo's notes. The first Flutter compile is slow: run long suites in the
+- **Start:** read sections 1-4 here, the session's brief, the previous session's handoff (tracker Notes), and only the scope sections and files
+  the brief names. Do not re-derive the scope's findings or re-read a finished session's diff.
+- **Reading budget.** These files are large; never read one whole. `grep -n` the named symbol and read that function (and its callers if needed):
+  DIDSA-CAD `sketch_controller.dart` (~19 900 lines), `sketch_projector.dart` (~1 300); DIDSA-VR `table_editor.gd` (~3 100),
+  `sketch_session.gd` (~2 800), `sketch_view.gd` (~1 000). The test files they belong to are read the same way: find the nearest existing case
+  and copy its pattern.
+- **Run tests narrowly while working** (the one test file, `tests/run_all.sh` filtered as `tests/README.md` shows), and the full `ci.sh` once
+  at the end, in the background to a file; read the summary lines, not the whole log.
+- **Env:** VR: `TOOLS_DIR=/opt/tools CAD_DIR=<CAD checkout on main> tools/setup_test_env.sh <pieces>`, then `source /opt/tools/env.sh`.
+  Install only the pieces the session needs (section 9): `godot` always; `render` only where the brief has a render test; `backend` only with
+  e2e; never `flutter` in a VR session. CAD client: Flutter as in that repo's notes. The first Flutter compile is slow: run long suites in the
   background to a file.
 - **VR test rules** (DIDSA-VR `CLAUDE.md`, `tests/README.md`): a new test file goes in `tests/run_all.sh` and a row in `tests/README.md`;
   live-backend tests also in `tests/e2e_ci_list.txt`; `DIDSA_NO_LANDING=1`; a test that instantiates `main.tscn` sets `secrets_file_path` first.
 - **Finish:** the brief's exit criteria pass; `tests/ci.sh` (VR) or the full `flutter test` + `flutter analyze` on `lib` (CAD client);
-  the tracker row; a dated `docs/status.md` entry (built, verified, not verified); a **headset checklist** in the handoff for anything a
+  the tracker row, whose Notes are the **handoff for the next session** (at most 15 lines: what changed, the symbols added or renamed, anything left
+  for later, the headset checklist); a dated `docs/status.md` entry (built, verified, not verified); a **headset checklist** in the handoff for anything a
   person must feel or see. Never write "works on the headset" unless the owner says so.
 
-## 5. Order
+## 5. Order (revised 2026-11-19)
 
 ```
-gate -> S0 (CAD) -> S1 (CAD, flat)
-             \-> S2 (VR) -> S3 (VR)
-                      \-> S4 (VR) -> S5 (VR) -> S6 (VR) -> S7 (VR)
-gate -> S8 (CAD docs/tools) -> S9 (VR) -> S10 (VR, needs S3 too)
+S0+S8 (CAD, one session) -> S1 (CAD, flat)
+                         -> S2 -> S3 -> S4 -> S5 -> S6 -> S10 -> S7     (VR, one lane: they share table_editor.gd / sketch_session.gd)
+                         -> S9 (VR, new files only; parallel with S2-S6)
 ```
 
-S1 and S2 can run in parallel after S0; S8 can run any time after the gate. S9-S10 (drag) are independent of S4-S7.
+- **S0 and S8 run as one CAD session**: both are "write the contract from the Dart and a test that reads it", in the same repo, with the same
+  Flutter setup; one start-up and one first Flutter compile instead of two. If it overflows section 4's size, it stops after S0 and S8 runs alone.
+- **S1** runs any time after S0 (CAD repo, no overlap with VR).
+- **S9** only adds `scripts/motion/sketch_projector.gd` and its test, so it runs in parallel with the VR lane without conflicts.
+- **S10 moved before S7, and after S6**: S6's label drag (F5) and S10's point drag (F6) are both a trigger-hold in `table_editor.gd`'s Select
+  branch, so they are built one after the other on the same code (S10 reuses S6's hold; when a label and a point are both under the laser, the
+  nearer hit wins, a tie goes to the point). **S7 is last** so its intent layer covers every input, drag included.
+- Only one VR lane session at a time; each starts from `main` after the previous one's PR is merged.
 
 ## 6. Sessions
 
@@ -203,14 +220,14 @@ with a shaking laser.
 
 ### S7 - VR: hand-ready input (VR, S-M)
 
-Needs S6. Tasks: one intent layer in `table_editor.gd` for the sketcher (select, cancel / back, next / previous, adjust, drag) that the
+Needs S6 and S10 (runs last). Tasks: one intent layer in `table_editor.gd` for the sketcher (select, cancel / back, next / previous, adjust, drag) that the
 controller code calls into; every stick action mirrored by a button on the options row or deck; label / glyph / ghost hit sizes per input source
 (`GHOST_RADIUS`, `GLYPH_HIT_MM` become per-input constants). No hand tracking (DIDSA-CAD roadmap, DIDSA-VR item 10). Tests: the intent
 layer driven without a controller (as a hand source would) reaches the same results as S5's tests. Exit: those pass.
 
 ### S8 - Sketch projector: port spec and golden vectors (CAD: docs + tools, S-M)
 
-After the gate. Read: DIDSA-CAD `docs/sketch-drag-projector.md`, `client/lib/sketch/projector/sketch_projector.dart`,
+Runs in the same session as S0, after it (section 5). Read: DIDSA-CAD `docs/sketch-drag-projector.md`, `client/lib/sketch/projector/sketch_projector.dart`,
 `client/test/sketch_projector_test.dart`, and how the mates projector was handed over (`docs/motion/projector-spec.md`, `vectors.json`).
 Tasks: `docs/motion/sketch-projector-spec.md` (the method, every constraint type's residual including part D's, the branch rules taken
 from the reference frame, the continuation walk and its constants, the group restriction, what `unsupported` means); a small Dart tool that
@@ -226,7 +243,7 @@ split: core + distance / angle / line types first, curves and part D second.
 
 ### S10 - VR: dragging sketch points (VR, M-L)
 
-Needs S9 and S3. Tasks: Select's trigger-hold on a point drags it (F6) through the projector each frame, the rest of its group following;
+Needs S9 and S6 (S3 through it). Reuses S6's trigger-hold (section 5 for which hit wins). Tasks: Select's trigger-hold on a point drags it (F6) through the projector each frame, the rest of its group following;
 the drop sends the result as a wish (`solve-and-refresh` with `point_updates` and anchors, as the flat app does) and takes the backend's answer;
 points pinned by a reference, the origin or a Fix do not move; DOF colours (S3) update on the drop. Tests: logic (a drag on a dimensioned
 shape keeps its dimensions within tolerance every frame); e2e (drag, drop, the backend's positions). Exit: those pass; headset checklist: the
@@ -236,7 +253,7 @@ feel of a constrained point sliding along its path.
 
 | Session | Repo | State | Branch / PR | Notes |
 |---|---|---|---|---|
-| S0 | CAD | Not started (gate) | | |
+| S0 | CAD | Not started (gate met) | | One session with S8 |
 | S1 | CAD client | Not started | | |
 | S2 | VR | Not started | | |
 | S3 | VR | Not started | | |
@@ -244,15 +261,41 @@ feel of a constrained point sliding along its path.
 | S5 | VR | Not started | | |
 | S6 | VR | Not started | | |
 | S7 | VR | Not started | | |
-| S8 | CAD | Not started (gate) | | |
+| S8 | CAD | Not started (gate met) | | One session with S0 |
 | S9 | VR | Not started | | |
 | S10 | VR | Not started | | |
 
 ## 8. Prompt for each session
 
 > Repo: `<DIDSA-CAD | DIDSA-VR>` (attach the other one; this plan lives in DIDSA-VR `docs/dimension-constraint-parity-plan.md`). Implement
-> **Sn** of that plan. Read sections 1-4 and the Sn brief first, then the scope it names, then only the files the brief lists. Check the gate
-> (section 1) if Sn is the first session to run. Follow section 3 exactly. Stop when the brief's exit criteria pass; do not start the next
+> **Sn** of that plan. Read sections 1-4 and the Sn brief first, then the previous session's handoff in the tracker, then the scope sections it
+> names, then only the files the brief lists, within section 4's reading budget. Install only the environment pieces section 9 gives for Sn. Follow section 3 exactly. Stop when the brief's exit criteria pass; do not start the next
 > session's work. Finish with the tracker row (branch / PR, handoff notes, the headset checklist) and a dated `docs/status.md` entry (built,
 > verified, not verified). No unrelated refactors; run the tests the brief names against the real backend where it says so; say what you could
 > only verify by reading.
+
+## 9. Model, effort and environment per session (2026-11-19)
+
+The model is chosen by how much the session must **decide** rather than follow. A spec, a numerical port or an input design with open
+choices gets the strongest model; a brief that is a list of named changes against a finished contract gets the mid model. No session is
+small and mechanical enough for the smallest model, because each one needs the whole build-test-fix loop.
+
+| Session | Model | Effort | Env pieces | Why |
+|---|---|---|---|---|
+| S0+S8 | Opus | high | CAD: Flutter | Writes the two contracts every later session tests against; a wrong row or residual spreads to S1, S2, S4, S5, S9. Mostly reading and short, exact output. |
+| S1 | Sonnet | medium | CAD: Flutter | Named changes in a known controller, with tests to S0's file. |
+| S2 | Sonnet | high | `godot render backend` | Wide but specified (six types, placement from the cases file); the most lines in the lane. |
+| S3 | Sonnet | medium | `godot backend` | Colours, a status line, Unfix, a glyph fix it confirms first. |
+| S4 | Sonnet | medium | `godot backend` | Make `_ghosts_raw` match the catalogue; the catalogue test decides it. |
+| S5 | Opus | high | `godot backend` | The interaction design: stick ownership against table engagement, step-back, the sticky sector; the most judgement in the plan. |
+| S6 | Sonnet | medium | `godot backend` | Label drag and edits on S5's machinery. |
+| S10 | Sonnet | high | `godot backend` | Wires S9's projector into S6's hold; the maths is already done and tested. Move to Opus if S9's handoff lists open branch-rule questions. |
+| S7 | Sonnet | medium | `godot` | A refactor behind an intent layer, checked by re-running S5's tests through it. |
+| S9 | Opus | high | `godot` | A numerical port from a spec (derivatives, min-norm step, the walk); vectors decide pass or fail, but getting there needs the maths. |
+
+Opus: `claude-opus-5-5`; Sonnet: `claude-sonnet-5-5`. If a Sonnet session stops twice on the same failure, rerun that session on Opus from its
+last green checkpoint rather than letting it keep trying.
+
+**Saving start-up cost.** Every session above runs `tools/setup_test_env.sh` (Godot, Mesa, the backend's conda env). Putting it in the cloud
+environment's setup script (one environment for the VR lane, one for CAD) means it runs once when a container is built, not in each session's
+token budget.
