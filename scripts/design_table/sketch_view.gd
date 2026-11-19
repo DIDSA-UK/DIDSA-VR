@@ -39,6 +39,8 @@ const REF_WIDTH := 0.00126
 const REF_USED_COLOUR := Color(0.55, 0.85, 1.0, 1.0) ## a part corner / edge / hole the sketch actually uses (a dimension or constraint goes to it): the part's own geometry, lit a little
 const REF_POINT := 0.0034
 const OBJECT_COLOUR := Color(0.96, 0.98, 1.0)
+const FULL_COLOUR := Color(0.70, 0.98, 0.76) ## object lines of a fully constrained sketch (nothing left to move, tied to the origin)
+const FAILED_COLOUR := Color(1.0, 0.36, 0.36) ## what a constraint the solve could not satisfy holds (a conflict that came later; the sketch is over-constrained)
 const CONSTRUCTION_COLOUR := Color(0.58, 0.70, 0.84)
 const GUIDE_COLOUR := Color(0.45, 1.0, 0.6, 0.9) ## an alignment guide: the snap green
 const GUIDE_WIDTH := 0.0014
@@ -523,6 +525,8 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 	## The origin's axes, then every entity of the session drawn as a drawing draws it: object lines heavy and solid, construction lines thin
 	## and chained, a centre mark on every circle, and the sketch's dimensions with their extension lines, arrows and text. `highlight` is a list
 	## of {kind, id} (the picked entities); `hover` the one under the laser.
+	_last_highlight = highlight
+	_last_hover = hover
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var accent: Color = _tokens.accent
@@ -536,6 +540,15 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 		for h in highlight:
 			selected["%s:%s" % [h.get("kind", ""), h.get("id", "")]] = true
 		var hovered := "%s:%s" % [hover.get("kind", ""), hover.get("id", "")] if not hover.is_empty() else ""
+		# a picked or hovered glyph / dimension lights what it holds
+		for a in session.annotations:
+			selected.merge(session.constraint_held(str(a["id"])))
+		if _annotation_hover != "":
+			selected.merge(session.constraint_held(_annotation_hover.substr(_annotation_hover.find(":") + 1)))
+		# the sketch's state: fully constrained geometry is tinted, what the solver says conflicts is red
+		var base_obj: Color = FULL_COLOUR if session.constraint_state() == "full" else OBJECT_COLOUR
+		var failed_e: Dictionary = session.failed_entity_ids()
+		var failed_p: Dictionary = session.failed_point_ids()
 		for id in session.lines:
 			var l: Dictionary = session.lines[id]
 			if not session.points.has(l["a"]) or not session.points.has(l["b"]):
@@ -549,7 +562,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var hov: bool = key == hovered and not sel
 			var lit: bool = sel
 			var construction: bool = l.get("construction", false)
-			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, lit)
 		for id in session.circles:
 			var c: Dictionary = session.circles[id]
@@ -564,7 +577,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var hov: bool = key == hovered and not sel
 			var lit: bool = sel
 			var construction: bool = c.get("construction", false)
-			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			var centre: Vector2 = session.points[c["c"]]
 			var radius := centre.distance_to(session.points[c["p"]])
 			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, lit)
@@ -584,7 +597,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var hov: bool = key == hovered and not sel
 			var lit: bool = sel
 			var construction: bool = a.get("construction", false)
-			var colour: Color = _look(sel, hov, CONSTRUCTION_COLOUR if construction else OBJECT_COLOUR, warn, accent)
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
 			_stroke(verts, colors, sweep, false, construction, colour, lit)
 			var arm := 0.005 / canvas_scale # an arc's centre is marked with a small cross
@@ -605,7 +618,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				var ohov: bool = okey == hovered and not osel
 				var olit: bool = osel
 				var oconstruction: bool = source[id].get("construction", false)
-				var ocolour: Color = _look(osel, ohov, CONSTRUCTION_COLOUR if oconstruction else OBJECT_COLOUR, warn, accent)
+				var ocolour: Color = _look(osel, ohov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if oconstruction else base_obj), warn, accent)
 				_stroke(verts, colors, outline, kind == "ellipse", oconstruction, ocolour, olit)
 		for id in session.texts:
 			var tkey: String = "text:" + id
@@ -613,7 +626,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 			var thov: bool = tkey == hovered and not tsel
 			var tlit: bool = tsel
 			var tconstruction: bool = session.texts[id].get("construction", false)
-			var tcolour: Color = _look(tsel, thov, CONSTRUCTION_COLOUR if tconstruction else OBJECT_COLOUR, warn, accent)
+			var tcolour: Color = _look(tsel, thov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if tconstruction else base_obj), warn, accent)
 			for poly in session.text_outlines.get(id, []):
 				_stroke(verts, colors, poly, true, tconstruction, tcolour, tlit)
 		for id in session.points:
@@ -632,7 +645,7 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 				_marker(verts, colors, session.points[id], POINT_SIZE * 2.4, origin_colour, 1.6)
 				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
 				continue
-			var colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3), warn, accent)
+			var colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), FAILED_COLOUR if failed_p.has(id) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3)), warn, accent)
 			var ref_state: String = session.reference_status(id)
 			if ref_state == "lost" or ref_state == "potentially_moved":
 				var flag: Color = LOST_COLOUR if ref_state == "lost" else MOVED_COLOUR
@@ -825,6 +838,8 @@ static func session_ellipse_points(centre: Vector2, major: Vector2, minor: Vecto
 # --- Dimensions ---------------------------------------------------------------------------
 
 var _last_session = null
+var _last_highlight: Array = []
+var _last_hover: Dictionary = {}
 
 
 func _dim_params(session) -> Dictionary:
@@ -894,6 +909,8 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
 				continue
 			var item_colour: Color = DRIVEN_COLOUR if bool(item.get("driven", false)) else DIM_COLOUR
+			if session.failed_constraint_ids.has(str(item["id"])):
+				item_colour = FAILED_COLOUR
 			var akey := "dimension:%s" % str(item["id"])
 			var asel: bool = selected_labels.has(akey)
 			var ahov: bool = akey == _annotation_hover and not asel
@@ -940,7 +957,8 @@ func _draw_constraint_glyphs(session, selected_labels: Dictionary = {}) -> void:
 		var gkey := "constraint:%s" % str(item["id"])
 		var gsel: bool = selected_labels.has(gkey)
 		var ghov: bool = gkey == _annotation_hover and not gsel
-		label.modulate = _tokens.warn if gsel else (CONSTRAINT_GLYPH_COLOUR.lerp(_tokens.accent, 0.65) if ghov else CONSTRAINT_GLYPH_COLOUR)
+		var glyph_colour: Color = FAILED_COLOUR if session.failed_constraint_ids.has(str(item["id"])) else CONSTRAINT_GLYPH_COLOUR
+		label.modulate = _tokens.warn if gsel else (glyph_colour.lerp(_tokens.accent, 0.65) if ghov else glyph_colour)
 		label.outline_size = 18 if (gsel or ghov) else 10
 		label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
 		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
@@ -1007,7 +1025,11 @@ func set_annotation_hover(kind_id: String) -> void:
 	if kind_id == _annotation_hover:
 		return
 	_annotation_hover = kind_id
-	_rebuild_dimensions(_last_session, _last_session.ghosts if _last_session != null else [])
+	if _last_session != null:
+		rebuild(_last_session, _last_highlight, _last_hover) # the geometry the label holds is lit too (and the labels redrawn)
+		_rebuild_dimensions(_last_session, _last_session.ghosts)
+	else:
+		_rebuild_dimensions(_last_session, [])
 
 
 func show_ghosts(ghosts: Array) -> void:

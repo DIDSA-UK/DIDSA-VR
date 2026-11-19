@@ -49,7 +49,7 @@ const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrum
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
-const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "construction", "delete", "clear"]
+const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "unfix", "construction", "delete", "clear"]
 const EDIT_TOOLS := ["trim", "offset"] ## sketch tools that act on a picked entity (not on taps)
 const SELECT_TOOL := "select" ## picks any entity; the menu under the tool row says what the selection can do
 const CONSTRAIN_TOOLS := ["horizontal", "vertical", "parallel", "perpendicular", "coincident"]
@@ -144,6 +144,7 @@ var _last_view_key := ""
 var _orient_tween: Tween = null
 var _opened_revision := 0 ## the sketch session's revision when the sketch was opened
 var _menu_key := ""
+var _state_shown := "" ## the constraint summary the status line last carried
 var _menu_page := 0 ## which page of the Select tool's menu is showing
 var _canvas_msec := 0 ## when the drawing was last rebuilt for a zoom
 var _canvas_stale := false ## a zoom has changed the part's scale since the drawing was last rebuilt
@@ -1476,6 +1477,7 @@ func begin_sketch(spec: Dictionary) -> bool:
 	_sync_text_settings()
 	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
+	session.fully_constrained.connect(_on_fully_constrained)
 	_light_chosen_plane()
 	_build_view()
 	table.orient_to_plane(session.plane)
@@ -1543,6 +1545,7 @@ func reopen_sketch(feature_id: String) -> bool:
 	session = new_session
 	_opened_revision = session.revision
 	session.changed.connect(_on_session_changed)
+	session.fully_constrained.connect(_on_fully_constrained)
 	_light_chosen_plane()
 	_build_view()
 	table.orient_to_plane(session.plane)
@@ -1764,6 +1767,10 @@ static func _vertices_on_plane(part: Node3D, plane: Dictionary) -> Array:
 	return out
 
 
+func _on_fully_constrained() -> void:
+	UiFeedback.haptic(table._right, "confirm") # the sketch has just become fully constrained (the mates tool ticks the hand the same way)
+
+
 func _on_session_changed() -> void:
 	var selection_key := str(session.selection.map(func(e): return "%s:%s" % [e["kind"], e["id"]])) if session != null else ""
 	if selection_key != _menu_key:
@@ -1773,6 +1780,11 @@ func _on_session_changed() -> void:
 	_update_options()
 	sync_undo_redo()
 	_sync_part_selection() # T6: the drawer carries the sketch selection's options
+	var summary: String = session.constraint_summary() if session != null else ""
+	if summary != _state_shown:
+		_state_shown = summary
+		if state == "sketch":
+			table.set_status(_sketch_hint()) # the status line carries the DOF
 
 
 func _refresh_view() -> void:
@@ -1802,6 +1814,9 @@ func _sketch_hint() -> String:
 	if def != null and def.hint != "":
 		hint = def.hint
 	var warning: String = session.reference_warning() if session != null else ""
+	var summary: String = session.constraint_summary() if session != null else ""
+	if summary != "":
+		hint = "%s  %s" % [summary, hint]
 	if not table.infer_enabled:
 		hint = "Infer off: nothing is added automatically.  " + hint # a toggle left off explains itself
 	return hint if warning == "" else "%s  %s" % [warning, hint]
@@ -1839,7 +1854,11 @@ func edit_dimension_typed(id: String, text: String) -> void:
 		UiFeedback.haptic(table._right, "error")
 		return
 	var result: Dictionary = await session.edit_dimension(id, cleaned.to_float())
-	if bool(result["ok"]):
+	if bool(result["ok"]) and str(result["message"]) != "":
+		UiFeedback.haptic(table._right, "error") # kept, but the sketch no longer solves: the red parts say where
+		table.set_status(str(result["message"]))
+		sync_undo_redo()
+	elif bool(result["ok"]):
 		UiFeedback.haptic(table._right, "confirm")
 		table.set_status("Dimension changed.")
 		sync_undo_redo()

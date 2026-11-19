@@ -23,6 +23,7 @@ extends RefCounted
 
 signal changed ## the local model was refreshed from the backend
 signal status(text: String) ## something worth telling the user (progress, a refusal, an error)
+signal fully_constrained ## a solve has just brought the sketch (the same one, already open) to fully constrained
 
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
@@ -75,6 +76,9 @@ var profile_status := ""
 var profile_open_chain := false ## no closed profile but exactly one open chain of lines / arcs (the backend's `open_chain`): a thin Revolve can use it
 var dof := -1
 var converged := true
+var failed_constraint_ids: Array = [] ## the backend's `solver_reported_failed_constraint_ids` of the last solve: only ever filled when the solve did not converge (a conflict that came later, or one the user kept)
+var _state_sketch := "" ## the sketch the last state below belongs to
+var _last_state := ""
 
 var references_ok := false ## the part's own vertices and edges may be used as references (set by the editor: the topology it shows is the one the backend resolves against)
 var annotations: Array = [] ## T5: picked dimension labels and constraint glyphs: [{kind: "dimension" | "constraint", id}] (a dimension IS a constraint of the backend; it is a separate kind here because it is picked by its label)
@@ -205,6 +209,7 @@ func refresh(with_entities: bool = true) -> bool:
 			_ingest_entities(exported["json"])
 			if not texts.is_empty() or not text_outlines.is_empty():
 				await _fetch_text_outlines()
+	_note_state()
 	changed.emit()
 	return true
 
@@ -227,6 +232,7 @@ func _ingest_state(json: Dictionary) -> void:
 	var solve: Dictionary = json.get("solve", {})
 	dof = int(solve.get("dof", -1))
 	converged = bool(solve.get("converged", true))
+	failed_constraint_ids = _strings(solve.get("solver_reported_failed_constraint_ids", []))
 	profile_status = str(json.get("profile", {}).get("status", ""))
 	profile_open_chain = bool(json.get("profile", {}).get("open_chain", false))
 
@@ -1815,6 +1821,8 @@ func apply_menu(option_id: String) -> Dictionary:
 			return await toggle_construction()
 		"fix":
 			return await _constrain_selection("fix", _fix_bodies())
+		"unfix":
+			return await unfix_selection()
 	if option_id == "merge":
 		return await merge_selected()
 	var bodies := _bodies_for(option_id)
@@ -2239,7 +2247,7 @@ func dimension_value(id: String) -> Dictionary:
 
 func edit_dimension(id: String, value: float) -> Dictionary:
 	## T5: sets an existing dimension's value (PATCH the constraint, as confirm_ghost does for a first value). Undo puts the old one back; a value the
-	## solver cannot meet is taken back at once with a message. {ok, message}.
+	## solver cannot meet is KEPT and shown red (a conflict that comes later, 3.3 of docs/dimension-constraint-parity-plan.md). {ok, message}: ok even then, the message says so.
 	var current := dimension_value(id)
 	if not current["ok"] or busy:
 		return {"ok": false, "message": "That isn't a dimension with a value."}
@@ -2257,16 +2265,15 @@ func edit_dimension(id: String, value: float) -> Dictionary:
 		return {"ok": false, "message": message}
 	_undo.append({"label": "dimension value", "calls": [[HTTPClient.METHOD_PATCH, path, {"value": float(current["value"])}]]})
 	await refresh(false)
-	var kept := converged
-	if not kept:
-		busy = false
-		await undo()
-		busy = true
-		status.emit("That value conflicts with the other constraints, so it wasn't changed.")
+	# A conflict that comes LATER (an edited value) is kept, as in the flat app: the solver's failed list turns what it holds red. (A constraint that conflicts
+	# right after it is made is still taken back: that is confirm_ghost's and the menu's rule.)
+	var message := "" if converged else "That value conflicts with the other constraints: what it holds is red. Change it again, or Undo."
+	if message != "":
+		status.emit(message)
 	annotations.clear()
 	busy = false
 	changed.emit()
-	return {"ok": kept, "message": "" if kept else "That value conflicts with the other constraints, so it wasn't changed."}
+	return {"ok": true, "message": message}
 
 
 func delete_annotations() -> Dictionary:
@@ -2712,8 +2719,255 @@ func _is_internal_angle(c: Dictionary) -> bool:
 	return false
 
 
+# --- Constraint state (S3): fully / under / over constrained, what the solver reported failed ---------------
+
+func _note_state() -> void:
+	## Remembers the state after a solve; a sketch that has just become fully constrained says so (the editor ticks the hand).
+	var state := constraint_state()
+	if _state_sketch == sketch_id and state == "full" and _last_state != "full":
+		fully_constrained.emit()
+	_state_sketch = sketch_id
+	_last_state = state
+
+
+func _kind_of_id(id: String) -> String:
+	## "point" | "line" | "circle" | "arc" | "ellipse" | "ellipse_arc" | "spline" | "text" for an id of this sketch, "" for none of them.
+	if points.has(id):
+		return "point"
+	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
+		if _entity_dict(kind).has(id):
+			return kind
+	return ""
+
+
+func _ids_named_by(c: Dictionary) -> Array:
+	## Every id (point or entity) a constraint's fields name, whatever the field is called (`line_id`, `entity1_id`, `point_ids`, `center1_point_id`, ...).
+	var out: Array = []
+	for key in c:
+		if str(key) == "id":
+			continue
+		var v = c[key]
+		if v is String:
+			if _kind_of_id(v) != "":
+				out.append(v)
+		elif v is Array:
+			for item in v:
+				if item is String and _kind_of_id(item) != "":
+					out.append(item)
+	return out
+
+
+func constraint_point_ids(c: Dictionary) -> Array:
+	## The points a constraint holds: the ones it names plus the points of the entities it names.
+	var seen := {}
+	for id in _ids_named_by(c):
+		var kind := _kind_of_id(id)
+		if kind == "point":
+			seen[id] = true
+		else:
+			for pid in _entity_point_ids(kind, _entity_dict(kind)[id]):
+				if str(pid) != "":
+					seen[str(pid)] = true
+	return seen.keys()
+
+
+func constraint_held(constraint_id: String) -> Dictionary:
+	## What picking or hovering a constraint's glyph / label should light: {"kind:id": true} for the points and entities it names ("point:p1", "line:l2").
+	var out := {}
+	var c: Dictionary = constraints.get(constraint_id, {})
+	for id in _ids_named_by(c):
+		out["%s:%s" % [_kind_of_id(id), id]] = true
+	return out
+
+
+func failed_point_ids() -> Dictionary:
+	## id -> true for the points of every constraint the last solve reported failed (red in the view).
+	var out := {}
+	for cid in failed_constraint_ids:
+		for pid in constraint_point_ids(constraints.get(str(cid), {})):
+			out[pid] = true
+	return out
+
+
+func failed_entity_ids() -> Dictionary:
+	## id -> true for each line, circle, arc ... with a point in failed_point_ids().
+	var out := {}
+	var red := failed_point_ids()
+	if red.is_empty():
+		return out
+	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
+		var dict := _entity_dict(kind)
+		for id in dict:
+			for pid in _entity_point_ids(kind, dict[id]):
+				if red.has(str(pid)):
+					out[id] = true
+					break
+	return out
+
+
+func has_geometry() -> bool:
+	return not (lines.is_empty() and circles.is_empty() and arcs.is_empty() and ellipses.is_empty() and ellipse_arcs.is_empty() and splines.is_empty() and texts.is_empty())
+
+
+func is_grounded() -> bool:
+	## True when some drawn geometry is tied (through entities and constraints) to the origin, a fixed point or a point of the part. A fully dimensioned
+	## shape floating free has a DOF of 0 too (the solver counts a whole-body move as no freedom), so the DOF alone must not say "fully constrained".
+	var parent := {}
+	var find := func(x: String) -> String:
+		var r := x
+		while parent.get(r, r) != r:
+			r = parent[r]
+		var c := x
+		while parent.get(c, c) != r: # compress
+			var nxt: String = parent[c]
+			parent[c] = r
+			c = nxt
+		return r
+	var link := func(ids: Array) -> void:
+		var first := ""
+		for id in ids:
+			var sid := str(id)
+			if sid == "":
+				continue
+			if first == "":
+				first = sid
+			else:
+				parent[find.call(sid)] = find.call(first)
+	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
+		var dict := _entity_dict(kind)
+		for id in dict:
+			link.call(_entity_point_ids(kind, dict[id]))
+	for id in shapes:
+		link.call(shapes[id].get("own_point_ids", []))
+	for cid in constraints:
+		link.call(constraint_point_ids(constraints[cid]))
+	var seeds: Array = []
+	if origin_id != "":
+		seeds.append(origin_id)
+	for pid in point_locked:
+		if point_locked[pid]:
+			seeds.append(pid)
+	for pid in reference_ids:
+		if points.has(pid):
+			seeds.append(pid)
+	var grounded := {}
+	for pid in seeds:
+		grounded[find.call(str(pid))] = true
+	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
+		var dict := _entity_dict(kind)
+		for id in dict:
+			for pid in _entity_point_ids(kind, dict[id]):
+				if str(pid) != "" and not seeds.has(str(pid)) and grounded.has(find.call(str(pid))):
+					return true
+	return false
+
+
+func constraint_state() -> String:
+	## "" (unknown, or nothing drawn yet) | "over" (the solve did not converge) | "full" (nothing left to move, and tied to the origin) | "under".
+	if dof < 0 or not has_geometry():
+		return ""
+	if not converged:
+		return "over"
+	if dof <= 0 and is_grounded():
+		return "full"
+	return "under"
+
+
+func constraint_summary() -> String:
+	## One short phrase for the status line: "Fully constrained", "3 DOF left" or "Over-constrained: red parts conflict" ("" while unknown).
+	match constraint_state():
+		"full":
+			return "Fully constrained."
+		"over":
+			return "Over-constrained: the red parts conflict."
+		"under":
+			return "%d DOF left." % maxi(dof, 1) if dof > 0 else "Not tied to the origin yet."
+	return ""
+
+
+func fix_constraints_for(picked: Array = selection) -> Array:
+	## Ids of the Fix constraints that hold something in `picked` (what Unfix removes).
+	var mine := {}
+	for e in picked:
+		var kind := str(e.get("kind", ""))
+		var id := str(e.get("id", ""))
+		if kind == "point":
+			mine[id] = true
+		elif _entity_dict(kind).has(id):
+			for pid in _entity_point_ids(kind, _entity_dict(kind)[id]):
+				mine[str(pid)] = true
+	var out: Array = []
+	for cid in constraints:
+		if str(constraints[cid].get("type", "")) != "fixed":
+			continue
+		for pid in constraints[cid].get("point_ids", []):
+			if mine.has(str(pid)):
+				out.append(str(cid))
+				break
+	return out
+
+
+func unfix_selection() -> Dictionary:
+	## Select's Unfix: removes the Fix constraints that hold what is picked (one undo step puts them back). {ok, message}.
+	if busy:
+		return {"ok": false, "message": ""}
+	var ids := fix_constraints_for()
+	if ids.is_empty():
+		return {"ok": false, "message": "Nothing picked is fixed."}
+	busy = true
+	var calls: Array = []
+	var failed := ""
+	for cid in ids:
+		var c: Dictionary = (constraints.get(cid, {}) as Dictionary).duplicate(true)
+		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + cid, null)
+		if r["ok"]:
+			for owner in _fix_owners(c.get("point_ids", [])): # (undo fixes the same thing again: the entity those points make up, else each point)
+				calls.append([HTTPClient.METHOD_POST, SKETCH + sketch_id + "/constraints", {"type": "fixed", "entity_id": str(owner)}])
+		else:
+			failed = str(r["error"])
+	selection.clear()
+	ghosts.clear()
+	if not calls.is_empty():
+		_undo.append({"label": "unfix", "calls": calls})
+	await refresh(false)
+	busy = false
+	if failed != "":
+		status.emit("Couldn't unfix: %s" % failed)
+	return {"ok": failed == "" and not calls.is_empty(), "message": failed}
+
+
 const CONSTRAINT_GLYPHS := {"horizontal": "H", "vertical": "V", "parallel": "//", "perpendicular": "|_", "equal_length": "=", "equal_radius": "=", "collinear": "co",
-	"concentric": "(o)", "point_on_line": "on", "point_on_circle": "on", "at_midpoint": "M", "tangent": "T", "curve_tangent": "T", "point_on_ellipse": "on", "fixed": "F"} ## plain letters: they always have a glyph in the font
+	"concentric": "(o)", "point_on_line": "on", "point_on_circle": "on", "at_midpoint": "M", "tangent": "T", "curve_tangent": "T", "spline_tangent": "T", "point_on_ellipse": "on", "fixed": "F"} ## plain letters: they always have a glyph in the font
+
+
+func _curve_with_centre(point_id: String) -> String:
+	## The circle or arc whose centre is `point_id` ("" for none): the backend names Equal radius by centre and rim POINTS, not by entity.
+	for id in circles:
+		if str(circles[id]["c"]) == point_id:
+			return id
+	for id in arcs:
+		if str(arcs[id]["c"]) == point_id:
+			return id
+	return ""
+
+
+func _fix_owners(point_ids: Array) -> Array:
+	## Where a Fix glyph sits: the entity those points make up when there is one (a line's middle, a circle's centre), else on each point. The backend
+	## sends the resolved `point_ids`, never the entity the user picked.
+	if point_ids.size() <= 1:
+		return point_ids
+	for kind in ["line", "circle", "arc"]:
+		var dict := _entity_dict(kind)
+		for id in dict:
+			var mine := _entity_point_ids(kind, dict[id])
+			var all := true
+			for pid in point_ids:
+				if not mine.has(pid):
+					all = false
+					break
+			if all:
+				return [id]
+	return point_ids
 
 
 func constraint_items() -> Array:
@@ -2732,18 +2986,24 @@ func constraint_items() -> Array:
 				owners = [str(c.get("line_id", ""))]
 			"parallel", "perpendicular", "equal_length", "collinear":
 				owners = [str(c.get("line1_id", "")), str(c.get("line2_id", ""))]
-			"concentric", "equal_radius":
+			"concentric":
 				owners = [str(c.get("entity1_id", "")), str(c.get("entity2_id", ""))]
+			"equal_radius":
+				owners = [_curve_with_centre(str(c.get("center1_point_id", ""))), _curve_with_centre(str(c.get("center2_point_id", "")))]
 			"point_on_line", "at_midpoint", "point_on_circle", "point_on_ellipse":
 				owners = [str(c.get("point_id", ""))]
 			"tangent":
 				owners = [str(c.get("line_id", ""))]
 			"curve_tangent":
 				owners = [str(c.get("shared_point_id", ""))]
+			"spline_tangent":
+				owners = [str(c.get("segment_a_p3", ""))] # the join of the two segments
 			"fixed":
-				owners = [str(c.get("entity_id", ""))]
+				owners = _fix_owners(c.get("point_ids", []))
 		for owner in owners:
-			var spot := _glyph_spot(owner)
+			if str(owner) == "":
+				continue
+			var spot := _glyph_spot(str(owner))
 			if not spot.is_empty():
 				out.append({"id": id, "text": text, "uv": spot["uv"], "normal": spot["normal"], "owner": owner})
 	return out

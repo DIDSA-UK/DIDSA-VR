@@ -37,6 +37,9 @@ class SnapModel extends RefCounted:
 	func is_reference(id: String) -> bool:
 		return references.has(id)
 
+	func fix_constraints_for(_picked: Array) -> Array:
+		return [] ## (Unfix is offered only for something a Fix holds: this stand-in has no constraints)
+
 	func merge_offered() -> bool:
 		return false ## (the menu asks the session whether Merge suits the selection; this stand-in has no entities to say)
 

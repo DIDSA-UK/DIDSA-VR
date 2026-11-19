@@ -19,13 +19,13 @@ extends RefCounted
 ##   point + circle / arc    On curve
 ##   point + ellipse         On ellipse
 ##   line + circle / arc     Tangent
-##   any                     Fix, Construction / Solid (lines, circles, arcs), Delete, Clear
+##   any                     Fix (and Unfix when a Fix holds it), Construction / Solid (lines, circles, arcs), Delete, Clear
 
 const TEXT := {
 	"horizontal": "Horizontal", "vertical": "Vertical", "parallel": "Parallel", "perpendicular": "Perpendicular",
 	"equal_length": "Equal", "collinear": "Collinear", "concentric": "Concentric", "equal_radius": "Equal radius",
 	"tangent": "Tangent", "coincident": "Coincident", "merge": "Merge", "point_on_line": "On line", "at_midpoint": "Midpoint",
-	"point_on_curve": "On curve", "point_on_ellipse": "On ellipse", "fix": "Fix", "delete": "Delete", "clear": "Clear",
+	"point_on_curve": "On curve", "point_on_ellipse": "On ellipse", "fix": "Fix", "unfix": "Unfix", "delete": "Delete", "clear": "Clear",
 }
 
 
@@ -88,6 +88,8 @@ static func options(selection: Array, session = null, ghosts: Array = []) -> Arr
 	if session != null and counts(selection)["point"] > 2 and counts(selection)["point"] == selection.size() and session.merge_offered():
 		out.append({"id": "merge", "text": TEXT["merge"]}) # three or more points: Coincident is for two, Merge takes any number
 	out.append({"id": "fix", "text": TEXT["fix"]})
+	if session != null and not session.fix_constraints_for(selection).is_empty():
+		out.append({"id": "unfix", "text": TEXT["unfix"]}) # something picked is held by a Fix of its own: this takes it off
 	var c := counts(selection)
 	if int(c["line"]) + int(c["curve"]) + int(c.get("other", 0)) > 0:
 		out.append({"id": "construction", "text": "Solid" if all_construction(selection, session) else "Construction"})
