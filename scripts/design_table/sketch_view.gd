@@ -930,7 +930,7 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 		var spec: Dictionary = g.get("spec", {})
 		if spec.is_empty():
 			continue
-		var kind := "radius" if g["key"] == "radius" else ("diameter" if g["key"] == "diameter" else ("angle" if g["key"] == "angle" else "linear"))
+		var kind: String = str(g.get("text_kind", "linear"))
 		var text: String = session.dimension_text(kind, float(g["value"])) if session != null else str(g["value"])
 		if bool(g.get("driven", false)):
 			text = "(%s)" % text

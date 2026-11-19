@@ -103,8 +103,12 @@ func _initialize() -> void:
 		var bl: String = pts[Vector2(-170, -60)]
 		var br: String = pts[Vector2(-90, -60)]
 		var tr: String = pts[Vector2(-90, 40)]
-		await dimension(s, [{"kind": "point", "id": bl}, {"kind": "point", "id": br}], "horizontal")
-		await dimension(s, [{"kind": "point", "id": br}, {"kind": "point", "id": tr}], "vertical")
+		for id in s.lines: # (two corners of a rectangle read as two parallel lines now, so the sides are picked as lines)
+			var ends := [str(s.lines[id]["a"]), str(s.lines[id]["b"])]
+			if ends.has(bl) and ends.has(br):
+				await dimension(s, [{"kind": "line", "id": id}], "h")
+			elif ends.has(br) and ends.has(tr):
+				await dimension(s, [{"kind": "line", "id": id}], "v")
 	var circle_id: String = s.circles.keys()[0]
 	await dimension(s, [{"kind": "circle", "id": circle_id}], "radius")
 	var tail: Array = s.lines.keys().slice(-2)

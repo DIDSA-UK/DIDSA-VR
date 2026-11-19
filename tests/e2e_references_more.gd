@@ -126,7 +126,7 @@ func _initialize() -> void:
 	var rim_pick: Dictionary = refs.pick(centre_uv + Vector2(-6.0, 0.0), 1.5, ["circle"]) # the rim is the part's own (the sketch's helper circle on it is hidden): picked through the part, found again by the session
 	var picked: Dictionary = await s.select(rim_pick if not rim_pick.is_empty() else {})
 	var keys: Array = s.ghosts.map(func(g): return g["key"])
-	print("SMOKE picking the hole's circle offers radius and diameter as driven candidates, 6 and 12: ", picked["ok"] and keys == ["radius", "diameter"] and s.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(s.ghosts[0]["value"]) - 6.0) < 0.01, " ", keys)
+	print("SMOKE picking the hole's circle offers radius and diameter as driven candidates, 6 and 12: ", picked["ok"] and keys == ["diameter", "radius"] and s.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(s.ghost("radius")["value"]) - 6.0) < 0.01, " ", keys)
 	var constraints_before: int = s.constraints.size()
 	var kept: Dictionary = await s.confirm_ghost("diameter", 0.0)
 	print("SMOKE keeping the diameter shows (⌀12) and adds no constraint to the sketch: ", kept["ok"] and s.dimension_items().filter(func(i): return i.get("driven", false))[0]["text"] == "(⌀12)" and s.constraints.size() == constraints_before)
@@ -164,7 +164,7 @@ func _initialize() -> void:
 	var edge_pick: Dictionary = refs.pick(mid_uv + Vector2(10, 0.5), 2.0, ["line"])
 	await s.select(edge_pick)
 	var pinned_keys: Array = s.ghosts.map(func(g): return g["key"])
-	print("SMOKE the hole's centre and the part's edge (both pinned) offer their distance as a driven candidate only: ", pinned_keys.has("point_line") and s.ghosts.all(func(g): return bool(g.get("driven", false))), " ", pinned_keys)
+	print("SMOKE the hole's centre and the part's edge (both pinned) offer their distance as a driven candidate only: ", pinned_keys.has("perpendicular") and s.ghosts.all(func(g): return bool(g.get("driven", false))), " ", pinned_keys)
 	# a clean sketch on the same face: the middle is held by the real backend's at-midpoint
 	await ed.finish_sketch()
 	await ed.begin_sketch({"face": top_face(node)})

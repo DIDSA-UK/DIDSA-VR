@@ -34,7 +34,6 @@ const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon
 const CURVE_KINDS := ["ellipse", "ellipse_arc", "spline"] ## entities drawn from a sampled outline
 const OUTLINE_SEGMENTS := 64
 const SELECT_NEEDED := {"horizontal": 1, "vertical": 1, "parallel": 2, "perpendicular": 2, "coincident": 2}
-const PARALLEL_COS := 0.9998 ## two lines closer than ~1.1 degrees to parallel are measured as a distance, not an angle
 const AXIS_SNAP_DEGREES := 4.0 ## a line within this of horizontal / vertical is made exactly so
 
 var api: Callable
@@ -1573,7 +1572,7 @@ func toggle_select(entity: Dictionary) -> void:
 		selection.remove_at(at)
 	else:
 		selection.append(e)
-	ghosts = _build_ghosts() if selection.size() <= 2 else []
+	ghosts = _build_ghosts() if selection.size() <= 3 else []
 	changed.emit()
 
 
@@ -2184,14 +2183,22 @@ func toggle_construction() -> Dictionary:
 # --- Dimension ---------------------------------------------------------------------------
 
 func _select_for_dimension(entity: Dictionary) -> Dictionary:
+	## One pick for the Dimension tool, by the catalogue's pick rules: at most two picks, and a third restarts the selection unless all three are Points (the
+	## first is the vertex); picking a picked entity again takes it out; an ellipse, a partial ellipse, a spline or a text stands alone (a pick of one restarts,
+	## and so does a pick after one).
 	var kind := str(entity["kind"])
-	if selection.size() >= 2:
+	var id := str(entity["id"])
+	for i in selection.size():
+		if str(selection[i]["kind"]) == kind and str(selection[i]["id"]) == id:
+			selection.remove_at(i)
+			ghosts = _build_ghosts()
+			changed.emit()
+			return {"ok": true, "done": false, "message": ""}
+	if kind in STANDALONE_KINDS or (not selection.is_empty() and str(selection[0]["kind"]) in STANDALONE_KINDS):
 		selection.clear()
-	if kind == "circle" or kind == "arc" or kind == "ellipse":
-		selection.clear() # a round thing is dimensioned on its own
-	elif not selection.is_empty() and str(selection[0]["kind"]) in ["circle", "arc"]:
+	elif selection.size() >= 2 and not (selection.size() == 2 and kind == "point" and selection.all(func(e): return str(e["kind"]) == "point")):
 		selection.clear()
-	selection.append({"kind": kind, "id": str(entity["id"])})
+	selection.append({"kind": kind, "id": id})
 	ghosts = _build_ghosts()
 	changed.emit()
 	return {"ok": true, "done": false, "message": ""}
@@ -2322,85 +2329,414 @@ func _build_ghosts() -> Array:
 
 
 func _ghosts_for(picked: Array) -> Array:
-	## What `picked` can be dimensioned as, the way the flat app offers it: one line -> its length;
-	## one circle / arc -> radius and diameter; two points -> linear, horizontal and vertical distance; a point and
-	## a line -> their distance; two lines -> a distance if parallel, else an angle. Each: {key, label, unit,
-	## value, uv (where the label floats), apply: {patch_id?, create?, factor}}. When everything picked is already pinned (pieces of the part, the origin,
-	## or Fixed) nothing a dimension could say would move anything, so each candidate is a DRIVEN (reference-only) one: `driven` true, it only measures,
-	## and keeping it (keep_driven) adds no constraint: it becomes a persistent reference dimension on the backend.
+	## What `picked` can be dimensioned as: exactly the options of DIDSA-CAD's docs/sketch-dimension-catalogue.json (keys, labels, order, conditions;
+	## tests/sketch_dimension_catalogue.gd holds this to it). Each: {key, label, unit, value, uv (where the label floats), apply: {patch_id?, create?, factor},
+	## spec (how it is drawn), creates (the catalogue's `creates`), ref (the reference kind it would be), text_kind, side? ("pointer": which angle it is follows the
+	## pointer, frozen at the drop)}. When everything picked is already pinned (pieces of the part, the origin, or Fixed) nothing a dimension could say would move
+	## anything, so the catalogue's `pinned` block applies instead (PINNED_KINDS): the candidates whose reference kind it lists, each a DRIVEN (reference-only) one:
+	## `driven` true, it only measures, and keeping it (keep_driven) adds no constraint: it becomes a persistent reference dimension on the backend.
 	var out: Array = _ghosts_raw(picked)
 	if not out.is_empty() and _all_pinned(picked):
+		var allowed: Array = PINNED_KINDS.get(pins_key(picked), [])
+		var seen := {}
+		var kept: Array = []
 		for g in out:
+			var ref := str(g.get("ref", ""))
+			if ref == "" or not allowed.has(ref) or seen.has(ref):
+				continue # (another candidate of the same reference kind says the same thing)
+			seen[ref] = true
 			g["driven"] = true
 			g["label"] = "Reference " + str(g["label"]).to_lower()
+			kept.append(g)
+		return kept
 	return out
+
+
+const PINNED_KINDS := { ## the catalogue's `pinned.kinds`: what is offered as a reference dimension between pinned things (tests hold it to the file)
+	"point+point": ["distance", "horizontal", "vertical"], "point+line": ["distance"], "line": ["distance", "horizontal", "vertical", "horizontal_angle"],
+	"line+line": ["angle", "distance"], "circle": ["radius", "diameter"], "arc": ["radius", "diameter", "arc_length"], "point+point+point": ["point_angle"],
+	"point+circle": ["min_distance", "max_distance"], "point+arc": ["min_distance", "max_distance"], "circle+circle": ["min_distance", "max_distance"],
+	"circle+arc": ["min_distance", "max_distance"], "arc+arc": ["min_distance", "max_distance"], "line+circle": ["min_distance", "max_distance"],
+	"line+arc": ["min_distance", "max_distance"]}
+const KIND_RANK := {"point": 0, "line": 1, "circle": 2, "arc": 3, "ellipse": 4, "ellipse_arc": 5, "spline": 6, "text": 7}
+const STANDALONE_KINDS := ["ellipse", "ellipse_arc", "spline", "text"] ## dimensioned on their own: a pick of one restarts the selection, and so does a pick after it
+
+
+static func pins_key(picked: Array) -> String:
+	## The catalogue's key for a pick: the kinds joined with '+', in the fixed order point, line, circle, arc (three points keep their order: the vertex first).
+	var kinds: Array = picked.map(func(e): return str(e["kind"]))
+	if kinds.size() != 3:
+		kinds.sort_custom(func(x, y): return int(KIND_RANK.get(x, 9)) < int(KIND_RANK.get(y, 9)))
+	return "+".join(kinds)
+
+
+static func dimension_kind_of_key(key: String) -> String:
+	## How a candidate's number is written (dimension_text's kinds), from its key (the catalogue's keys, or a reference dimension's kind).
+	if key in ["radius", "majorradius", "minorradius"]:
+		return "radius"
+	if key in ["diameter", "majordiameter", "minordiameter"]:
+		return "diameter"
+	if key in ["angle", "horizontalAngle", "pointAngle", "horizontal_angle", "point_angle"]:
+		return "angle"
+	if key in ["arcLength", "arc_length"]:
+		return "arc_length"
+	return "linear"
+
+
+func _cand(key: String, label: String, unit: String, value: float, uv: Vector2, apply: Dictionary, spec: Dictionary, creates: String, ref := "", side := "") -> Dictionary:
+	var g := _ghost(key, label, unit, value, uv, apply, spec)
+	g["creates"] = creates
+	g["ref"] = ref
+	g["text_kind"] = dimension_kind_of_key(key)
+	if side != "":
+		g["side"] = side
+	return g
+
+
+func _spec_value(spec: Dictionary) -> float:
+	## The length a linear / perp spec measures (the value of the distances that have no number of their own to read).
+	return (spec["a"] as Vector2).distance_to(spec["b"]) if spec.has("a") and spec.has("b") else 0.0
 
 
 func _ghosts_raw(picked: Array) -> Array:
-	var out: Array = []
+	## The catalogue's options for a selection, no pinned rule. [] for anything the catalogue offers nothing for.
 	if picked.is_empty():
-		return out
-	var first: Dictionary = picked[0]
+		return []
 	if picked.size() == 1:
-		match first["kind"]:
-			"line":
-				var pts := _line_points(first["id"])
-				if points.has(pts[0]) and points.has(pts[1]):
-					var d: float = points[pts[0]].distance_to(points[pts[1]])
-					out.append(_ghost("length", "Length", "mm", d, (points[pts[0]] + points[pts[1]]) * 0.5,
-						_distance_apply(pts[0], pts[1], "linear"), {"kind": "linear", "a": points[pts[0]], "b": points[pts[1]]}))
-			"ellipse":
-				var el: Dictionary = ellipses.get(first["id"], {})
-				if points.has(el.get("c", "")) and points.has(el.get("ma", "")) and points.has(el.get("mi", "")):
-					var cc: Vector2 = points[el["c"]]
-					var ra: float = cc.distance_to(points[el["ma"]])
-					var rb: float = cc.distance_to(points[el["mi"]])
-					if is_reference(str(first["id"])):
-						pass # a pinned reference ellipse: its size is the part's, there is nothing to dimension
-					elif str(el["km"]) != "":
-						out.append(_ghost("major_radius", "Major radius", "mm", ra, cc + (points[el["ma"]] - cc) * 0.5, {"patch_id": el["km"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["ma"]]}))
-					if str(el["kn"]) != "":
-						out.append(_ghost("minor_radius", "Minor radius", "mm", rb, cc + (points[el["mi"]] - cc) * 0.5, {"patch_id": el["kn"], "factor": 1.0}, {"kind": "linear", "a": cc, "b": points[el["mi"]]}))
-			"circle", "arc":
-				var c: Dictionary = circles.get(first["id"], arcs.get(first["id"], {}))
-				var rim: String = c.get("p", c.get("s", ""))
-				if points.has(c.get("c", "")) and points.has(rim) and str(c.get("k", "")) != "":
-					var r: float = points[c["c"]].distance_to(points[rim])
-					out.append(_ghost("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}, circle_spec("radius", str(first["id"]))))
-					out.append(_ghost("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}, circle_spec("diameter", str(first["id"]))))
-		return out
-	var second: Dictionary = picked[1]
-	if first["kind"] == "point" and second["kind"] == "point":
-		var a: String = first["id"]
-		var b: String = second["id"]
-		if a != b and points.has(a) and points.has(b):
-			var pa: Vector2 = points[a]
-			var pb: Vector2 = points[b]
-			out.append(_ghost("linear", "Distance", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(a, b, "linear"), {"kind": "linear", "a": pa, "b": pb}))
-			out.append(_ghost("horizontal", "Horizontal", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(a, b, "horizontal"), {"kind": "horizontal", "a": pa, "b": pb}))
-			out.append(_ghost("vertical", "Vertical", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(a, b, "vertical"), {"kind": "vertical", "a": pa, "b": pb}))
-	elif first["kind"] == "line" and second["kind"] == "line" and first["id"] != second["id"]:
-		var l1 := _line_points(first["id"])
-		var l2 := _line_points(second["id"])
-		if points.has(l1[0]) and points.has(l1[1]) and points.has(l2[0]) and points.has(l2[1]):
-			var d1: Vector2 = (points[l1[1]] - points[l1[0]]).normalized()
-			var d2: Vector2 = (points[l2[1]] - points[l2[0]]).normalized()
-			var mid: Vector2 = (points[l1[0]] + points[l1[1]] + points[l2[0]] + points[l2[1]]) * 0.25
-			if absf(d1.dot(d2)) >= PARALLEL_COS:
-				var dist: float = absf((points[l2[0]] - points[l1[0]]).cross(d1))
-				out.append(_ghost("line_distance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "distance"}, line_distance_spec(str(first["id"]), str(second["id"]))))
-			else:
-				var ang := rad_to_deg(acos(clampf(d1.dot(d2), -1.0, 1.0)))
-				out.append(_ghost("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": first["id"], "line2_id": second["id"]}, "factor": 1.0, "value_key": "angle_degrees"}, angle_spec(str(first["id"]), str(second["id"]))))
-	elif (first["kind"] == "point" and second["kind"] == "line") or (first["kind"] == "line" and second["kind"] == "point"):
-		var pt: String = first["id"] if first["kind"] == "point" else second["id"]
-		var ln: String = first["id"] if first["kind"] == "line" else second["id"]
-		var lp := _line_points(ln)
-		if points.has(pt) and points.has(lp[0]) and points.has(lp[1]):
-			var closest: Vector2 = Geometry2D.get_closest_point_to_segment(points[pt], points[lp[0]], points[lp[1]])
-			var dist2: float = points[pt].distance_to(closest)
-			out.append(_ghost("point_line", "Distance", "mm", dist2, (points[pt] + closest) * 0.5, {"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}, perp_spec(pt, ln)))
+		return _single_ghosts(picked[0])
+	if picked.size() == 2:
+		return _pair_ghosts(picked[0], picked[1])
+	if picked.size() == 3 and picked.all(func(e): return str(e["kind"]) == "point"):
+		return _point_angle_ghosts(str(picked[0]["id"]), str(picked[1]["id"]), str(picked[2]["id"]))
+	return []
+
+
+func _single_ghosts(first: Dictionary) -> Array:
+	var out: Array = []
+	var id := str(first["id"])
+	match str(first["kind"]):
+		"line":
+			var pts := _line_points(id)
+			if points.has(pts[0]) and points.has(pts[1]):
+				var pa: Vector2 = points[pts[0]]
+				var pb: Vector2 = points[pts[1]]
+				out.append(_cand("length", "Length", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(pts[0], pts[1], "linear"), {"kind": "linear", "a": pa, "b": pb}, "distance:linear", "distance"))
+				out.append(_cand("h", "Horizontal length", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(pts[0], pts[1], "horizontal"), {"kind": "horizontal", "a": pa, "b": pb}, "distance:horizontal", "horizontal"))
+				out.append(_cand("v", "Vertical length", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(pts[0], pts[1], "vertical"), {"kind": "vertical", "a": pa, "b": pb}, "distance:vertical", "vertical"))
+				if pa.distance_to(pb) > 0.0001:
+					# From the start against +x (quadrant 0): the angle the reference dimension reads, 0-180. The pointer picks the end and the side later (S5).
+					var theta := rad_to_deg(absf((pb - pa).angle()))
+					out.append(_cand("horizontalAngle", "Angle to horizontal", "deg", theta, (pa + pb) * 0.5,
+						{"create": {"type": "horizontal_angle", "line_id": id, "quadrant": 0}, "factor": 1.0, "value_key": "angle_degrees"}, horizontal_angle_spec(id, 0, theta), "horizontal_angle", "horizontal_angle", "pointer"))
+		"circle", "arc":
+			var c: Dictionary = circles.get(id, arcs.get(id, {}))
+			var rim: String = c.get("p", c.get("s", ""))
+			if points.has(c.get("c", "")) and points.has(rim) and str(c.get("k", "")) != "":
+				var r: float = points[c["c"]].distance_to(points[rim])
+				var radius := _cand("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}, circle_spec("radius", id), "radius", "radius")
+				var diameter := _cand("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}, circle_spec("diameter", id), "diameter", "diameter")
+				out.append_array([diameter, radius] if str(first["kind"]) == "circle" else [radius, diameter]) # a circle is dimensioned by its diameter first
+				if str(first["kind"]) == "arc":
+					var length := _arc_length(id)
+					if length > 0.0:
+						var existing := _constraint_where("arc_length", "arc_id", id)
+						var apply: Dictionary = {"patch_id": existing, "factor": 1.0} if existing != "" else {"create": {"type": "arc_length", "arc_id": id}, "factor": 1.0, "value_key": "length"}
+						out.append(_cand("arcLength", "Arc length", "mm", length, points[c["c"]], apply, arc_length_spec(id), "arc_length", "arc_length"))
+		"ellipse", "ellipse_arc":
+			out = _ellipse_ghosts(first)
 	return out
+
+
+func _constraint_where(type: String, field: String, value: String) -> String:
+	## The id of an existing constraint of this type whose `field` is `value` ("" for none).
+	for cid in constraints:
+		if str(constraints[cid].get("type", "")) == type and str(constraints[cid].get(field, "")) == value:
+			return str(cid)
+	return ""
+
+
+func _arc_length(id: String) -> float:
+	var a: Dictionary = arcs.get(id, {})
+	if a.is_empty() or not points.has(a["c"]) or not points.has(a["s"]) or not points.has(a["e"]):
+		return 0.0
+	var c: Vector2 = points[a["c"]]
+	return c.distance_to(points[a["s"]]) * fposmod((points[a["e"]] - c).angle() - (points[a["s"]] - c).angle(), TAU)
+
+
+func _ellipse_ghosts(first: Dictionary) -> Array:
+	## An ellipse or partial ellipse: both axes' radius and diameter, major first (the catalogue's order). A full ellipse's axes are its two size constraints; a
+	## partial one has none, so its axis is a plain distance from the centre to the axis point.
+	var out: Array = []
+	var id := str(first["id"])
+	var is_full := str(first["kind"]) == "ellipse"
+	var el: Dictionary = ellipses.get(id, {}) if is_full else ellipse_arcs.get(id, {})
+	if is_reference(id) or not points.has(el.get("c", "")) or not points.has(el.get("ma", "")) or not points.has(el.get("mi", "")):
+		return out # a pinned reference ellipse: its size is the part's, there is nothing to dimension
+	var cc: Vector2 = points[el["c"]]
+	for axis in ["major", "minor"]:
+		var tip_id: String = el["ma"] if axis == "major" else el["mi"]
+		var k := str(el.get("km" if axis == "major" else "kn", ""))
+		var tip: Vector2 = points[tip_id]
+		var r := cc.distance_to(tip)
+		var radius_apply: Dictionary
+		var diameter_apply: Dictionary
+		if is_full:
+			if k == "":
+				continue
+			radius_apply = {"patch_id": k, "factor": 1.0}
+			diameter_apply = {"patch_id": k, "factor": 0.5}
+		else:
+			radius_apply = _distance_apply(str(el["c"]), tip_id, "linear")
+			diameter_apply = _distance_apply(str(el["c"]), tip_id, "linear")
+			diameter_apply["factor"] = 0.5
+		out.append(_cand("%sradius" % axis, "%s radius" % axis.capitalize(), "mm", r, cc + (tip - cc) * 0.5, radius_apply, {"kind": "linear", "a": cc, "b": tip}, "radius"))
+		out.append(_cand("%sdiameter" % axis, "%s diameter" % axis.capitalize(), "mm", r * 2.0, cc + (tip - cc) * 0.5, diameter_apply, {"kind": "linear", "a": cc * 2.0 - tip, "b": tip}, "diameter"))
+	return out
+
+
+func _point_pair_ghosts(a: String, b: String) -> Array:
+	## Aligned, Horizontal and Vertical between two points (a circle's or arc's centre stands in for it).
+	if a == b or not points.has(a) or not points.has(b):
+		return []
+	var pa: Vector2 = points[a]
+	var pb: Vector2 = points[b]
+	return [
+		_cand("linear", "Aligned", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(a, b, "linear"), {"kind": "linear", "a": pa, "b": pb}, "distance:linear", "distance"),
+		_cand("h", "Horizontal", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(a, b, "horizontal"), {"kind": "horizontal", "a": pa, "b": pb}, "distance:horizontal", "horizontal"),
+		_cand("v", "Vertical", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(a, b, "vertical"), {"kind": "vertical", "a": pa, "b": pb}, "distance:vertical", "vertical")]
+
+
+static func point_pair_kind(pa: Vector2, pb: Vector2, cursor: Vector2) -> String:
+	## The catalogue's cursor rule "point_pair_box", for a pair of points (or centres), until a kind has been picked: the cursor within the pair's x span and outside
+	## its y span gives "h"; within the y span and outside the x span, "v"; else (inside the box, or a corner region) "linear". Spans are closed intervals.
+	var in_x := cursor.x >= minf(pa.x, pb.x) and cursor.x <= maxf(pa.x, pb.x)
+	var in_y := cursor.y >= minf(pa.y, pb.y) and cursor.y <= maxf(pa.y, pb.y)
+	if in_x and not in_y:
+		return "h"
+	if in_y and not in_x:
+		return "v"
+	return "linear"
+
+
+func cursor_rule(picked: Array = selection) -> Dictionary:
+	## {rule: "point_pair_box", a, b} for the selections the catalogue gives that rule (two points, or centres standing in for circles / arcs), else {}.
+	if picked.size() != 2:
+		return {}
+	var anchors: Array = []
+	for e in picked:
+		match str(e["kind"]):
+			"point":
+				anchors.append(str(e["id"]))
+			"circle", "arc":
+				anchors.append(str((circles.get(str(e["id"]), arcs.get(str(e["id"]), {})) as Dictionary).get("c", "")))
+			_:
+				return {}
+	if anchors[0] == anchors[1] or not points.has(anchors[0]) or not points.has(anchors[1]) or _ghosts_raw(picked).is_empty() or _line_pair_for_points(picked).size() == 2:
+		return {}
+	return {"rule": "point_pair_box", "a": points[anchors[0]], "b": points[anchors[1]]}
+
+
+func _lines_parallel(l1: String, l2: String) -> bool:
+	## The catalogue's lines_parallel: the unit directions' |cross| <= sin(0.02 rad).
+	var p1 := _line_points(l1)
+	var p2 := _line_points(l2)
+	if not points.has(p1[0]) or not points.has(p1[1]) or not points.has(p2[0]) or not points.has(p2[1]):
+		return false
+	var d1: Vector2 = points[p1[1]] - points[p1[0]]
+	var d2: Vector2 = points[p2[1]] - points[p2[0]]
+	if d1.length() < 0.000001 or d2.length() < 0.000001:
+		return false
+	return absf(d1.normalized().cross(d2.normalized())) <= sin(0.02)
+
+
+func _lines_of_point(point_id: String) -> Array:
+	## The lines a point is an end of or sits at the middle of.
+	var out: Array = []
+	if not points.has(point_id):
+		return out
+	for lid in lines:
+		var ends := _line_points(str(lid))
+		if ends[0] == point_id or ends[1] == point_id:
+			out.append(lid)
+		elif points.has(ends[0]) and points.has(ends[1]) and (points[point_id] - (points[ends[0]] + points[ends[1]]) * 0.5).length_squared() <= 1e-9:
+			out.append(lid)
+	return out
+
+
+func _line_pair_for_points(picked: Array) -> Array:
+	## Two points that each lie on a line (an end or the middle) where those lines are different and parallel are read as those two lines: [l1, l2], else [].
+	if picked.size() != 2 or str(picked[0]["kind"]) != "point" or str(picked[1]["kind"]) != "point":
+		return []
+	for l1 in _lines_of_point(str(picked[0]["id"])):
+		for l2 in _lines_of_point(str(picked[1]["id"])):
+			if l1 != l2 and _lines_parallel(str(l1), str(l2)):
+				return [l1, l2]
+	return []
+
+
+func _line_pair_ghosts(l1: String, l2: String) -> Array:
+	## Two lines: their distance when parallel, else the angle between them.
+	if l1 == l2:
+		return []
+	var p1 := _line_points(l1)
+	var p2 := _line_points(l2)
+	if not points.has(p1[0]) or not points.has(p1[1]) or not points.has(p2[0]) or not points.has(p2[1]):
+		return []
+	var mid: Vector2 = (points[p1[0]] + points[p1[1]] + points[p2[0]] + points[p2[1]]) * 0.25
+	if _lines_parallel(l1, l2):
+		var spec := line_distance_spec(l1, l2)
+		var d1: Vector2 = (points[p1[1]] - points[p1[0]]).normalized()
+		var dist: float = absf((points[p2[0]] - points[p1[0]]).cross(d1))
+		return [_cand("lineDistance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": l1, "line2_id": l2}, "factor": 1.0, "value_key": "distance"}, spec, "line_distance", "distance")]
+	var d1n: Vector2 = (points[p1[1]] - points[p1[0]]).normalized()
+	var d2n: Vector2 = (points[p2[1]] - points[p2[0]]).normalized()
+	var ang := rad_to_deg(acos(clampf(d1n.dot(d2n), -1.0, 1.0)))
+	return [_cand("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": l1, "line2_id": l2}, "factor": 1.0, "value_key": "angle_degrees"}, angle_spec(l1, l2), "angle", "angle", "pointer")]
+
+
+func _point_line_ghosts(pt: String, ln: String, perpendicular_label: String, with_axes: bool) -> Array:
+	## A point (or a circle's centre) against a line: the perpendicular distance; for a plain point also Horizontal / Vertical / Aligned to the line's nearer end.
+	## Nothing when the point is one of the line's own ends.
+	var lp := _line_points(ln)
+	if not points.has(pt) or not points.has(lp[0]) or not points.has(lp[1]) or pt == lp[0] or pt == lp[1]:
+		return []
+	var perp := perp_spec(pt, ln)
+	var out: Array = [_cand("perpendicular", perpendicular_label, "mm", _spec_value(perp), ((perp["a"] + perp["b"]) * 0.5) if not perp.is_empty() else points[pt],
+		{"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}, perp, "point_line_distance", "distance")]
+	if with_axes:
+		var near: String = lp[0] if points[pt].distance_squared_to(points[lp[0]]) <= points[pt].distance_squared_to(points[lp[1]]) else lp[1]
+		var pa: Vector2 = points[pt]
+		var pb: Vector2 = points[near]
+		out.append(_cand("h", "Horizontal", "mm", absf(pb.x - pa.x), Vector2((pa.x + pb.x) * 0.5, minf(pa.y, pb.y)), _distance_apply(pt, near, "horizontal"), {"kind": "horizontal", "a": pa, "b": pb}, "distance:horizontal", ""))
+		out.append(_cand("v", "Vertical", "mm", absf(pb.y - pa.y), Vector2(minf(pa.x, pb.x), (pa.y + pb.y) * 0.5), _distance_apply(pt, near, "vertical"), {"kind": "vertical", "a": pa, "b": pb}, "distance:vertical", ""))
+		out.append(_cand("linear", "Aligned", "mm", pa.distance_to(pb), (pa + pb) * 0.5, _distance_apply(pt, near, "linear"), {"kind": "linear", "a": pa, "b": pb}, "distance:linear", ""))
+	return out
+
+
+func _curve_own_points(id: String) -> Array:
+	## A circle's centre and rim, an arc's centre, start and end.
+	if circles.has(id):
+		return [circles[id]["c"], circles[id]["p"]]
+	if arcs.has(id):
+		return [arcs[id]["c"], arcs[id]["s"], arcs[id]["e"]]
+	return []
+
+
+func _centre_of(id: String) -> String:
+	return str((circles.get(id, arcs.get(id, {})) as Dictionary).get("c", ""))
+
+
+func _min_max(key: String, label: String, side: String, value: float, uv: Vector2, create: Dictionary, spec: Dictionary, creates: String) -> Dictionary:
+	create["side"] = side
+	return _cand(key, label, "mm", value, uv, {"create": create, "factor": 1.0, "value_key": "distance"}, spec, creates, "%s_distance" % side)
+
+
+func _pair_ghosts(first: Dictionary, second: Dictionary) -> Array:
+	var ka := str(first["kind"])
+	var kb := str(second["kind"])
+	var a := str(first["id"])
+	var b := str(second["id"])
+	if ka == "point" and kb == "point":
+		var pair := _line_pair_for_points([first, second])
+		if pair.size() == 2:
+			return _line_pair_ghosts(str(pair[0]), str(pair[1]))
+		return _point_pair_ghosts(a, b)
+	if ka == "line" and kb == "line":
+		return _line_pair_ghosts(a, b)
+	if (ka == "point" and kb == "line") or (ka == "line" and kb == "point"):
+		return _point_line_ghosts(a if ka == "point" else b, a if ka == "line" else b, "Perpendicular", true)
+	var a_round := ka in ["circle", "arc"]
+	var b_round := kb in ["circle", "arc"]
+	if not (a_round or b_round):
+		return []
+	# a circle or arc against a point, a line or another circle / arc: its centre stands in for it
+	var anchor_a := _centre_of(a) if a_round else (a if ka == "point" else "")
+	var anchor_b := _centre_of(b) if b_round else (b if kb == "point" else "")
+	if anchor_a != "" and anchor_b != "":
+		if anchor_a == anchor_b:
+			return []
+		var out := _point_pair_ghosts(anchor_a, anchor_b)
+		if out.is_empty():
+			return out
+		out.append_array(_curve_distance_ghosts(first, second))
+		return out
+	var line_id := a if ka == "line" else (b if kb == "line" else "")
+	var curve: Dictionary = first if a_round else second
+	if line_id != "":
+		var out := _point_line_ghosts(_centre_of(str(curve["id"])), line_id, "Perpendicular from centre", false)
+		if out.is_empty():
+			return out # (the centre is an end of the line)
+		out.append_array(_line_curve_ghosts(line_id, str(curve["id"])))
+		return out
+	return []
+
+
+func _curve_distance_ghosts(first: Dictionary, second: Dictionary) -> Array:
+	## Minimum and Maximum distance: a point to a circle / arc, or two circles / arcs.
+	var ka := str(first["kind"])
+	var kb := str(second["kind"])
+	var a := str(first["id"])
+	var b := str(second["id"])
+	if ka in ["circle", "arc"] and kb in ["circle", "arc"]:
+		var ra := _round_of(a)
+		var rb := _round_of(b)
+		if ra.is_empty() or rb.is_empty():
+			return []
+		var apart := (ra["c"] as Vector2).distance_to(rb["c"])
+		var out: Array = []
+		var base := {"type": "circle_distance", "entity1_id": a, "entity2_id": b}
+		if apart > float(ra["r"]) + float(rb["r"]):
+			var s_min := circle_circle_spec(a, b, "min")
+			out.append(_min_max("minDistance", "Minimum distance", "min", _spec_value(s_min), (ra["c"] + rb["c"]) * 0.5, base.duplicate(), s_min, "circle_distance:min"))
+		var s_max := circle_circle_spec(a, b, "max")
+		out.append(_min_max("maxDistance", "Maximum distance", "max", _spec_value(s_max), (ra["c"] + rb["c"]) * 0.5, base.duplicate(), s_max, "circle_distance:max"))
+		return out
+	var pt := a if ka == "point" else b
+	var curve := b if ka == "point" else a
+	if not points.has(pt) or _curve_own_points(curve).has(pt):
+		return [] # the point is one of the curve's own: there is no distance to measure
+	var out: Array = []
+	for side in ["min", "max"]:
+		var spec := point_circle_spec(pt, curve, side)
+		out.append(_min_max("%sDistance" % side, "%s distance" % ("Minimum" if side == "min" else "Maximum"), side, _spec_value(spec), (points[pt] + _round_of(curve).get("c", points[pt])) * 0.5,
+			{"type": "point_circle_distance", "point_id": pt, "circle_or_arc_id": curve}, spec, "point_circle_distance:%s" % side))
+	return out
+
+
+func _line_curve_ghosts(line_id: String, curve: String) -> Array:
+	## Tangent distance (only while the circle does not touch the line) and Far-side distance from a line to a circle / arc.
+	var rd := _round_of(curve)
+	var ends := _line_points(line_id)
+	if rd.is_empty() or not points.has(ends[0]) or not points.has(ends[1]) or ends.has(_centre_of(curve)):
+		return []
+	var gap := _point_line_gap(rd["c"], points[ends[0]], points[ends[1]]) - float(rd["r"])
+	var out: Array = []
+	var base := {"type": "line_circle_distance", "line_id": line_id, "circle_or_arc_id": curve}
+	if gap > 0.0:
+		var s_min := line_circle_spec(line_id, curve, "min")
+		out.append(_min_max("tangentDistance", "Tangent distance", "min", _spec_value(s_min), rd["c"], base.duplicate(), s_min, "line_circle_distance:min"))
+	var s_max := line_circle_spec(line_id, curve, "max")
+	out.append(_min_max("farDistance", "Far-side distance", "max", _spec_value(s_max), rd["c"], base.duplicate(), s_max, "line_circle_distance:max"))
+	return out
+
+
+static func _point_line_gap(p: Vector2, a: Vector2, b: Vector2) -> float:
+	## A point's distance from the line's infinite extension.
+	return p.distance_to(Geometry2D.get_closest_point_to_segment_uncapped(p, a, b))
+
+
+func _point_angle_ghosts(vertex: String, p1: String, p2: String) -> Array:
+	## Three points, the first the vertex: the angle between the rays to the other two (the pointer picks the sector later).
+	if vertex == p1 or vertex == p2 or p1 == p2 or not points.has(vertex) or not points.has(p1) or not points.has(p2):
+		return []
+	var d1: Vector2 = points[p1] - points[vertex]
+	var d2: Vector2 = points[p2] - points[vertex]
+	if d1.length() < 0.0001 or d2.length() < 0.0001:
+		return []
+	var ang := rad_to_deg(acos(clampf(d1.normalized().dot(d2.normalized()), -1.0, 1.0)))
+	return [_cand("pointAngle", "Angle", "deg", ang, points[vertex] + (d1.normalized() + d2.normalized()).normalized() * minf(d1.length(), d2.length()) * 0.6,
+		{"create": {"type": "point_angle", "vertex_point_id": vertex, "point1_id": p1, "point2_id": p2, "quadrant": 0}, "factor": 1.0, "value_key": "angle_degrees"},
+		point_angle_spec(vertex, p1, p2, 0), "point_angle", "point_angle", "pointer")]
 
 
 func _all_pinned(entities: Array) -> bool:
@@ -2419,6 +2755,8 @@ func _all_pinned(entities: Array) -> bool:
 			"arc":
 				var a: Dictionary = arcs.get(str(e["id"]), {})
 				ids = [a.get("c", ""), a.get("s", ""), a.get("e", "")]
+			"ellipse", "ellipse_arc":
+				ids = _entity_point_ids(str(e["kind"]), _entity_dict(str(e["kind"])).get(str(e["id"]), {}))
 		for pid in ids:
 			seen += 1
 			if not point_locked.get(pid, false) and not is_origin(str(pid)):
@@ -3118,21 +3456,24 @@ func driven_items() -> Array:
 
 
 static func _ref_dim_key(d: Dictionary) -> String:
-	## The ghost key a stored reference dimension is laid out like (radius, diameter, angle, linear...): what dimension_layout draws it as.
+	## The candidate key a stored reference dimension is laid out like (the catalogue's: h, v, linear, lineDistance, perpendicular, radius ...; a part D kind keeps its
+	## own name): what dimension_layout draws it as.
 	var types: Array = (d.get("refs", []) as Array).map(func(r): return str(r.get("type", "")))
 	match str(d.get("kind", "")):
 		"radius", "diameter", "angle", "arc_length", "horizontal_angle", "point_angle", "min_distance", "max_distance":
 			return str(d["kind"])
-		"horizontal", "vertical":
-			return str(d["kind"])
+		"horizontal":
+			return "h"
+		"vertical":
+			return "v"
 		"distance":
 			if types == ["line"]:
 				return "length"
 			if types == ["point", "point"]:
 				return "linear"
 			if types == ["line", "line"]:
-				return "line_distance"
-			return "point_line"
+				return "lineDistance"
+			return "perpendicular"
 	return "linear"
 
 
@@ -3180,22 +3521,9 @@ func _part_d_ref_spec(key: String, refs: Array, value: float) -> Variant:
 	return null
 
 
-static func _ref_dim_request(selected: Array, key: String) -> Dictionary:
-	## {kind, refs} for the backend's reference-dimensions route, from what the Dimension tool picked and the candidate the user kept ({} if it is not one).
-	var refs: Array = selected.map(func(e): return {"type": str(e["kind"]), "id": str(e["id"])})
-	match key:
-		"length", "linear", "line_distance", "point_line":
-			return {"kind": "distance", "refs": refs}
-		"horizontal", "vertical", "radius", "diameter", "angle":
-			return {"kind": key, "refs": refs}
-	return {}
-
-
 static func _dimension_kind(key: String) -> String:
 	## How a candidate's or reference dimension's number is written (dimension_text's kinds).
-	if key in ["radius", "diameter", "angle", "arc_length"]:
-		return key
-	return "angle" if key in ["horizontal_angle", "point_angle"] else "linear"
+	return dimension_kind_of_key(key)
 
 
 func keep_driven(key: String) -> Dictionary:
@@ -3205,9 +3533,9 @@ func keep_driven(key: String) -> Dictionary:
 	var g := ghost(key)
 	if g.is_empty() or not bool(g.get("driven", false)):
 		return {"ok": false, "message": ""}
-	var request := _ref_dim_request(selection, key)
-	if request.is_empty():
+	if str(g.get("ref", "")) == "":
 		return {"ok": false, "message": ""}
+	var request := {"kind": str(g["ref"]), "refs": selection.map(func(e): return {"type": str(e["kind"]), "id": str(e["id"])})}
 	var made := await _post(SKETCH + sketch_id + "/reference-dimensions", request)
 	if not made["ok"]:
 		var message := "Couldn't keep that dimension: %s" % str(made["error"])

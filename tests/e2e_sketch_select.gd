@@ -148,7 +148,7 @@ func _initialize() -> void:
 	await s.apply_menu("vertical")
 	print("SMOKE Vertical (menu) makes the third line plumb: ", abs(s.points[s.lines[l3]["a"]].x - s.points[s.lines[l3]["b"]].x) < 0.001)
 	await pick([["line", base], ["line", l2]])
-	print("SMOKE two lines offer Parallel, Perpendicular, Equal, Collinear and a dimension: ", menu_ids().slice(0, 5) == ["dim:line_distance", "parallel", "perpendicular", "equal_length", "collinear"] or menu_ids().has("parallel"))
+	print("SMOKE two lines offer Parallel, Perpendicular, Equal, Collinear and a dimension: ", menu_ids().slice(0, 5) == ["dim:lineDistance", "parallel", "perpendicular", "equal_length", "collinear"] or menu_ids().has("parallel"))
 	await s.apply_menu("parallel")
 	var p_a: Vector2 = s.points[s.lines[base]["b"]] - s.points[s.lines[base]["a"]]
 	var p_b: Vector2 = s.points[s.lines[l2]["b"]] - s.points[s.lines[l2]["a"]]
@@ -167,8 +167,8 @@ func _initialize() -> void:
 	# a distance from the origin
 	var end_pt: String = s.lines[l3]["b"]
 	await pick([["point", s.origin_id], ["point", end_pt]])
-	print("SMOKE the origin and a point offer a Distance, a Horizontal and a Vertical dimension: ", menu_ids().has("dim:linear") and menu_ids().has("dim:horizontal") and menu_ids().has("dim:vertical") and menu_ids().has("coincident"))
-	var done: Dictionary = await s.confirm_ghost("horizontal", 80.0)
+	print("SMOKE the origin and a point offer a Distance, a Horizontal and a Vertical dimension: ", menu_ids().has("dim:linear") and menu_ids().has("dim:h") and menu_ids().has("dim:v") and menu_ids().has("coincident"))
+	var done: Dictionary = await s.confirm_ghost("h", 80.0)
 	print("SMOKE ...a typed 80 mm horizontal dimension FROM THE ORIGIN is accepted and solved: ", done["ok"] and abs(s.points[end_pt].x - 80.0) < 0.01)
 
 	# point on line / midpoint

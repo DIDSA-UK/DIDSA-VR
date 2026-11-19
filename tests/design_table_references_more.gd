@@ -258,7 +258,7 @@ func _initialize() -> void:
 	await pull()
 	await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
 	var keys: Array = ed.session.ghosts.map(func(g): return g["key"])
-	print("SMOKE it is already there from the centre snap (no second circle) and offers radius and diameter, as DRIVEN candidates (it is pinned, nothing a dimension says could move it): ", ed.session.selection[0]["kind"] == "circle" and calls_to("convert-entities/edge").size() == 1 and keys == ["radius", "diameter"] and ed.session.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(ed.session.ghosts[0]["value"]) - 30.0) < 0.01)
+	print("SMOKE it is already there from the centre snap (no second circle) and offers radius and diameter, as DRIVEN candidates (it is pinned, nothing a dimension says could move it): ", ed.session.selection[0]["kind"] == "circle" and calls_to("convert-entities/edge").size() == 1 and keys == ["diameter", "radius"] and ed.session.ghosts.all(func(g): return bool(g.get("driven", false))) and absf(float(ed.session.ghost("radius")["value"]) - 30.0) < 0.01)
 	var constraints_before := calls_to("POST /sketch/sketches/sk1/constraints").size()
 	var kept: Dictionary = await ed.session.confirm_ghost("diameter", 0.0)
 	var items: Array = ed.session.dimension_items()
@@ -295,7 +295,7 @@ func _initialize() -> void:
 	print("SMOKE aiming Dimension at a rim that is not in the sketch yet picks it from the part (a circle with a circle_edge reference, lit on the view): ", ed._hover_entity.get("kind") == "circle" and ed._hover_entity["ref"]["kind"] == "circle_edge" and ed.view._refs_hover.mesh != null)
 	await pull()
 	await settle(func() -> bool: return not ed.session.selection.is_empty() and not ed.session.busy)
-	print("SMOKE the pick made the circle on the way, with ONE convert-entities/edge, and offers its radius (30) as a driven candidate: ", calls_to("convert-entities/edge").size() == 1 and ed.session.selection[0]["kind"] == "circle" and ed.session.ghosts.size() == 2 and ed.session.ghosts[0]["key"] == "radius" and bool(ed.session.ghosts[0]["driven"]) and absf(float(ed.session.ghosts[0]["value"]) - 30.0) < 0.01)
+	print("SMOKE the pick made the circle on the way, with ONE convert-entities/edge, and offers its radius (30) as a driven candidate: ", calls_to("convert-entities/edge").size() == 1 and ed.session.selection[0]["kind"] == "circle" and ed.session.ghosts.size() == 2 and ed.session.ghost("radius").get("driven", false) and absf(float(ed.session.ghost("radius")["value"]) - 30.0) < 0.01)
 	var label_uv: Vector2 = ed.view._ghost_text_uv["radius"]
 	await aim_uv(label_uv)
 	await pull()

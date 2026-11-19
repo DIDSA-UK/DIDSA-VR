@@ -85,7 +85,7 @@ func _initialize() -> void:
 	# helpers; none of them is drawn as sketch geometry)
 	var hit: Dictionary = ed.part_refs.pick(Vector2(30, 0), 2.0, ["line"])
 	var centre_pick: Dictionary = ed.part_refs.pick(Vector2(0.5, 0.5), 3.0, ["point"])
-	await dimension(s, [centre_pick, hit], "point_line")
+	await dimension(s, [centre_pick, hit], "perpendicular")
 	var helper_lines: Array = s.lines.keys().filter(func(id): return s.is_reference(id))
 	print("SMOKE the dimension made reference helpers (the edge as a pinned line, the hole's centre), none selectable: ", not helper_lines.is_empty() and s.nearest_entity(Vector2(30, 0), 1.0, ["line"]).is_empty() and s.reference_ids.size() >= 3, " ", s.reference_ids.size())
 	print("SMOKE ...and the dimension is a reference one, in brackets (no constraint sent to the backend for it): ", s.dimension_items().filter(func(i): return i.get("driven", false)).size() == 1)

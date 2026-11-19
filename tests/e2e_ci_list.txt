@@ -62,3 +62,4 @@ e2e_cloud_outage
 e2e_session_presenter
 e2e_session_observer
 e2e_sketch_constraint_state
+e2e_sketch_dimension_options

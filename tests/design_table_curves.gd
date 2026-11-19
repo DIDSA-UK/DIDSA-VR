@@ -117,7 +117,7 @@ func _initialize() -> void:
 	s.selection.clear()
 	s.set_tool("dimension")
 	await s.select({"kind": "ellipse", "id": "E1"})
-	print("SMOKE Dimension on an ellipse offers Major radius 20 and Minor radius 10 (patching its two size constraints): ", s.ghosts.map(func(g): return g["key"]) == ["major_radius", "minor_radius"] and absf(float(s.ghost("major_radius")["value"]) - 20.0) < 0.001 and s.ghost("minor_radius")["apply"]["patch_id"] == "KN")
+	print("SMOKE Dimension on an ellipse offers both axes, radius and diameter, major first (patching its two size constraints): ", s.ghosts.map(func(g): return g["key"]) == ["majorradius", "majordiameter", "minorradius", "minordiameter"] and absf(float(s.ghost("majorradius")["value"]) - 20.0) < 0.001 and s.ghost("minorradius")["apply"]["patch_id"] == "KN" and absf(float(s.ghost("minordiameter")["value"]) - 20.0) < 0.001 and s.ghost("minordiameter")["apply"]["factor"] == 0.5)
 	# --- Delete cascades like the flat app: constraints first, then what is built on a deleted point
 	s.points = {"a": Vector2(0, 0), "b": Vector2(10, 0), "c": Vector2(10, 10)}
 	s.lines = {"L1": {"a": "a", "b": "b", "construction": false}, "L2": {"a": "b", "b": "c", "construction": false}}

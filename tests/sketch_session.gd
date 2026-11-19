@@ -204,7 +204,7 @@ func _initialize() -> void:
 		if s.points[l["a"]].y == 0 and s.points[l["b"]].y == 0 and not l["construction"]:
 			bottom = id
 	await s.select({"kind": "line", "id": bottom})
-	print("SMOKE one line offers its length: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "length" and absf(s.ghosts[0]["value"] - 40.0) < 0.001)
+	print("SMOKE one line offers its length, horizontal and vertical extent and its angle to horizontal: ", s.ghosts.map(func(g): return g["key"]) == ["length", "h", "v", "horizontalAngle"] and s.ghosts[0]["key"] == "length" and absf(s.ghosts[0]["value"] - 40.0) < 0.001)
 	fake.calls.clear()
 	r = await s.confirm_ghost("length", 50.0)
 	var dim_call: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))[0]
@@ -224,14 +224,21 @@ func _initialize() -> void:
 	var pts: Array = s.points.keys()
 	await s.select({"kind": "point", "id": pts[0]})
 	await s.select({"kind": "point", "id": pts[1]})
-	print("SMOKE two points offer distance, horizontal and vertical: ", s.ghosts.map(func(g): return g["key"]) == ["linear", "horizontal", "vertical"])
+	print("SMOKE two corners of a rectangle are read as the two parallel lines they lie on (the catalogue's note): a distance between lines, not a point distance: ", s.ghosts.map(func(g): return g["key"]) == ["lineDistance"])
+	await fresh("point")
+	await s.tap({"uv": Vector2(5, 5)})
+	await s.tap({"uv": Vector2(45, 35)})
 	s.set_tool("dimension")
+	var free: Array = s.points.keys().filter(func(id): return not s.is_origin(str(id)))
+	await s.select({"kind": "point", "id": free[0]})
+	await s.select({"kind": "point", "id": free[1]})
+	print("SMOKE two points offer distance, horizontal and vertical: ", s.ghosts.map(func(g): return g["key"]) == ["linear", "h", "v"], " ", s.ghosts.map(func(g): return g["key"]))
 	await fresh("circle")
 	await s.tap({"uv": Vector2(0, 0)})
 	await s.tap({"uv": Vector2(10, 0)})
 	s.set_tool("dimension")
 	await s.select({"kind": "circle", "id": s.circles.keys()[0]})
-	print("SMOKE a circle offers radius and diameter: ", s.ghosts.map(func(g): return g["key"]) == ["radius", "diameter"] and absf(s.ghosts[0]["value"] - 10.0) < 0.001 and absf(s.ghosts[1]["value"] - 20.0) < 0.001)
+	print("SMOKE a circle offers diameter first, then radius: ", s.ghosts.map(func(g): return g["key"]) == ["diameter", "radius"] and absf(s.ghosts[1]["value"] - 10.0) < 0.001 and absf(s.ghosts[0]["value"] - 20.0) < 0.001)
 	fake.calls.clear()
 	await s.confirm_ghost("diameter", 30.0)
 	var patch_call: Array = fake.calls.filter(func(c): return c[0].begins_with("PATCH"))[0]
@@ -246,7 +253,7 @@ func _initialize() -> void:
 	var ls: Array = s.lines.keys()
 	await s.select({"kind": "line", "id": ls[0]})
 	await s.select({"kind": "line", "id": ls[1]})
-	print("SMOKE two parallel lines offer a distance, not an angle: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "line_distance" and absf(s.ghosts[0]["value"] - 5.0) < 0.001)
+	print("SMOKE two parallel lines offer a distance, not an angle: ", s.ghosts.size() == 1 and s.ghosts[0]["key"] == "lineDistance" and absf(s.ghosts[0]["value"] - 5.0) < 0.001)
 	await fresh("line")
 	await s.tap({"uv": Vector2(0, 0)})
 	await s.tap({"uv": Vector2(10, 0)})
@@ -298,7 +305,7 @@ func _initialize() -> void:
 	await s.select({"kind": "point", "id": s.origin_id})
 	await s.select({"kind": "point", "id": far})
 	fake.calls.clear()
-	await s.confirm_ghost("horizontal", 25.0)
+	await s.confirm_ghost("h", 25.0)
 	var made: Array = fake.calls.filter(func(c): return c[0].ends_with("/constraints"))
 	print("SMOKE a dimension can start at the origin (distance constraint with the origin as one end): ", made.size() == 1 and made[0][1]["point_a_id"] == s.origin_id and made[0][1]["point_b_id"] == far and made[0][1]["orientation"] == "horizontal")
 	fake = Fake.new() # a backend with no such route: the sketch still opens, just with no origin point
@@ -340,7 +347,7 @@ func _initialize() -> void:
 	print("SMOKE a circle's typed size is drawn as a RADIUS leader from its centre (angled off the axis, where the centre mark is): ", circle_items.size() == 1 and circle_items[0]["spec"]["kind"] == "radius" and circle_items[0]["text"] == "R10" and absf(absf((circle_items[0]["spec"]["u"] as Vector2).x) - absf((circle_items[0]["spec"]["u"] as Vector2).y)) > 0.0001)
 	s.set_tool("dimension")
 	await s.select({"kind": "circle", "id": circle_id})
-	print("SMOKE ...and the radius and diameter candidates carry their layout (the diameter at another angle than the radius leader): ", s.ghosts.size() == 2 and s.ghosts[0]["spec"]["kind"] == "radius" and s.ghosts[1]["spec"]["kind"] == "diameter" and not (s.ghosts[0]["spec"]["u"] as Vector2).is_equal_approx(s.ghosts[1]["spec"]["u"]))
+	print("SMOKE ...and the radius and diameter candidates carry their layout (the diameter at another angle than the radius leader): ", s.ghosts.size() == 2 and s.ghosts[1]["spec"]["kind"] == "radius" and s.ghosts[0]["spec"]["kind"] == "diameter" and not (s.ghosts[0]["spec"]["u"] as Vector2).is_equal_approx(s.ghosts[1]["spec"]["u"]))
 
 	# --- slot: two centres and a third pick that sets the width
 	await fresh("slot")
@@ -369,7 +376,7 @@ func _initialize() -> void:
 	var sl: Array = s.lines.keys()
 	s.set_tool("select")
 	await s.select({"kind": "line", "id": sl[0]})
-	print("SMOKE with Select, one pick selects a line and offers its length as a dimension candidate: ", s.selection.size() == 1 and s.ghosts.size() == 1 and s.ghosts[0]["key"] == "length" and s.menu()[0]["id"] == "dim:length")
+	print("SMOKE with Select, one pick selects a line and offers its length as a dimension candidate: ", s.selection.size() == 1 and s.ghosts.size() == 4 and s.ghosts[0]["key"] == "length" and s.menu()[0]["id"] == "dim:length")
 	await s.select({"kind": "line", "id": sl[1]})
 	print("SMOKE ...a second line joins the selection (no limit of one or two) and the menu is the two-line one: ", s.selection.size() == 2 and s.menu().map(func(o): return o["id"]).has("parallel") and s.menu().map(func(o): return o["id"]).has("perpendicular"))
 	await s.select({"kind": "line", "id": sl[1]})
