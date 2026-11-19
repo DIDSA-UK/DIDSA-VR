@@ -54,6 +54,7 @@ var line_method := "ends" ## "ends" (end to end, chained) | "middle" (the middle
 var busy := false
 
 var points := {} ## id -> Vector2 (sheet mm)
+var point_xy := {} ## id -> [x, y]: the same points as the backend sent them (64-bit; a Vector2 is not), what a point drag starts the projector from (S10)
 var point_locked := {} ## id -> bool
 var reference_ids := {} ## id -> true: the points and shapes the backend says are reference helpers (made only to point the sketch at the part's own corner, edge, hole or face). Drawn quietly, never offered for selection or deletion
 var lines := {} ## id -> {a, b, construction}
@@ -197,9 +198,9 @@ func is_open() -> bool:
 
 # --- Reading the backend's answer --------------------------------------------------------
 
-func refresh(with_entities: bool = true) -> bool:
-	## ONE solve-and-refresh (points, constraints, profile), plus an export when entities changed.
-	var state: Dictionary = await api.call(HTTPClient.METHOD_POST, SKETCH + sketch_id + "/solve-and-refresh", null)
+func refresh(with_entities: bool = true, solve_body: Variant = null) -> bool:
+	## ONE solve-and-refresh (points, constraints, profile), plus an export when entities changed. `solve_body` (S10): the drop's {anchor_point_ids, point_updates}.
+	var state: Dictionary = await api.call(HTTPClient.METHOD_POST, SKETCH + sketch_id + "/solve-and-refresh", solve_body)
 	if not state["ok"]:
 		status.emit("Couldn't solve the sketch: %s" % str(state["error"]))
 		return false
@@ -218,9 +219,11 @@ func refresh(with_entities: bool = true) -> bool:
 func _ingest_state(json: Dictionary) -> void:
 	revision += 1
 	points.clear()
+	point_xy.clear()
 	point_locked.clear()
 	for p in json.get("points", []):
 		points[str(p["id"])] = Vector2(float(p["x"]), float(p["y"]))
+		point_xy[str(p["id"])] = [float(p["x"]), float(p["y"])]
 		point_locked[str(p["id"])] = bool(p.get("is_locked", false))
 		if bool(p.get("is_reference", false)):
 			reference_ids[str(p["id"])] = true
@@ -3779,6 +3782,46 @@ func move_label(id: String, place: Dictionary) -> Dictionary:
 		label_override.erase(id)
 		changed.emit()
 	return saved
+
+
+func restore_points() -> void:
+	## The points as the backend last said (a point drag lays its frames over `points`; this takes them off again).
+	for id in point_xy:
+		points[id] = Vector2(point_xy[id][0], point_xy[id][1])
+
+
+func drop_points(drop: Dictionary) -> Dictionary:
+	## A sketch-point drag dropped (S10, F6): `drop` is PointDrag.finish()'s {updates: id -> [x, y], anchors, old, unsupported}. Sent as the wish, as the flat app does it:
+	## ONE solve-and-refresh with `point_updates` (written first, all or nothing) and `anchor_point_ids` (the grabbed points stay where they were dropped while the
+	## rest settles around them); the backend's answer is the truth (points, DOF colours, the failed list). A conflict it leaves is kept, red (3.3: only a conflict
+	## right after making something is taken back), and Undo puts every point that moved back. Returns {ok, message}.
+	var updates: Dictionary = drop["updates"]
+	if updates.is_empty():
+		restore_points()
+		changed.emit()
+		return {"ok": true, "message": ""}
+	if busy:
+		restore_points()
+		changed.emit()
+		return {"ok": false, "message": ""}
+	busy = true
+	var before: Dictionary = point_xy.duplicate(true)
+	var wish: Array = []
+	for id in updates:
+		wish.append({"id": str(id), "x": float(updates[id][0]), "y": float(updates[id][1])})
+	var ok := await refresh(false, {"anchor_point_ids": drop["anchors"], "point_updates": wish})
+	busy = false
+	if not ok:
+		restore_points()
+		changed.emit()
+		return {"ok": false, "message": "The point could not be moved."}
+	var back: Array = []
+	for id in before:
+		if point_xy.has(id) and (absf(point_xy[id][0] - before[id][0]) > 1e-9 or absf(point_xy[id][1] - before[id][1]) > 1e-9):
+			back.append({"id": str(id), "x": before[id][0], "y": before[id][1]})
+	if not back.is_empty():
+		_undo.append({"label": "point move", "calls": [[HTTPClient.METHOD_POST, SKETCH + sketch_id + "/solve-and-refresh", {"anchor_point_ids": [], "point_updates": back}]]})
+	return {"ok": true, "message": "" if converged else "Moved, but the sketch no longer solves: the red parts say where. Undo puts it back."}
 
 
 func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dictionary:

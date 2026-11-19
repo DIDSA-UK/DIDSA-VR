@@ -48,6 +48,7 @@ const SelectionActions := preload("res://scripts/design_table/selection_actions.
 const SelectionCrumbs := preload("res://scripts/design_table/selection_breadcrumbs.gd")
 const UiFeedback := preload("res://scripts/ui/ui_feedback.gd")
 const DimensionPreview := preload("res://scripts/design_table/dimension_preview.gd")
+const PointDrag := preload("res://scripts/design_table/point_drag.gd")
 
 const SKETCH_TOOLS := ["line", "rectangle", "circle", "arc", "polygon", "point", "slot", "ellipse", "ellipse_arc", "spline", "text"]
 const SelectMenuIds := ["horizontal", "vertical", "parallel", "perpendicular", "equal_length", "collinear", "concentric", "equal_radius", "tangent", "coincident", "merge", "point_on_line", "at_midpoint", "point_on_curve", "fix", "unfix", "construction", "delete", "clear"]
@@ -133,7 +134,8 @@ var dim_flow := DimensionPreview.new() ## S5: the Dimension tool's preview / cho
 var _dim_shown: Dictionary = {} ## the candidate the preview last drew
 var _dim_last_uv: Variant = null ## where the laser was when it was drawn (null: draw it again)
 
-var _label_hold: Dictionary = {} ## F5 (S6): the trigger held on a dimension label {id, press (sketch mm), was_selected, dragging, place}; one pull and let go leaves it a plain pull
+var _label_hold: Dictionary = {} ## the trigger held on something Select can drag: {kind: "label" (F5, S6: id, press (sketch mm), was_selected, dragging, place) | "point" (F6, S10: id, press, dragging, pinned)}; one pull and let go leaves it a plain pull
+var point_drag := PointDrag.new() ## S10: the sketch-point drag in progress (its projector calls run off the main thread; `synchronous` for tests)
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
 var _hover_entity: Dictionary = {}
@@ -290,6 +292,9 @@ func _reset() -> void:
 	clip.end()
 	repick_point = ""
 	_repick_queue.clear()
+	point_drag.cancel()
+	point_drag.wait_all()
+	_label_hold = {}
 	session = null
 	part_id = "" # no part behind the table now: nothing keyed on it (the Build tree) may read from the backend
 	view = null
@@ -439,8 +444,8 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 	if session == null or view == null:
 		return
 	var uv: Variant = _sheet_hit(origin, dir)
-	if not _label_hold.is_empty() and uv != null:
-		label_drag_move(uv) # F5: the trigger is held on a label: the laser drags it
+	if not _label_hold.is_empty():
+		_hold_move(uv) # F5 / F6: the trigger is held on a label or a point: the laser drags it
 	if uv == null:
 		view.set_annotation_hover("")
 		view.set_cursor(null)
@@ -515,7 +520,10 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 			# T5: a dimension label or constraint glyph under the laser wins over the geometry beside it (a label is small and sits near its line)
 			_hover_annotation = view.annotation_near(uv, pick_mm * 0.35)
 			if not _hover_annotation.is_empty():
-				_hover_entity = {}
+				if _point_beats_annotation():
+					_hover_annotation = {} # S10: a point nearer the laser than the label's centre (a tie goes to the point) is the hit; any other geometry still gives way to a label
+				else:
+					_hover_entity = {}
 		view.set_annotation_hover("%s:%s" % [_hover_annotation["kind"], _hover_annotation["id"]] if not _hover_annotation.is_empty() else "")
 		if repick_point == "" and "point" in kinds and str(_hover_entity.get("kind", "")) != "point" and part_refs != null and session.references_ok and tool != "revolve":
 			var corner: Dictionary = part_refs.pick(uv, pick_mm, ["point"]) # a point beats a line it is on, and the part's own corner or hole centre is a point (the sketch's helper for it is hidden)
@@ -683,7 +691,7 @@ func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 
 func _on_right_pressed(action: String) -> void:
 	if action == "by_button" and not _label_hold.is_empty() and bool(_label_hold["dragging"]):
-		_cancel_label_hold() # B lets the dragged label go back where it was
+		_cancel_label_hold() # B lets the dragged label or point go back where it was
 		return
 	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
 		clear_part_selection() # B closes the drawer, like its X
@@ -1866,11 +1874,22 @@ func _begin_label_hold(hit: Dictionary) -> void:
 	_label_hold = {}
 	if str(hit.get("kind", "")) != "dimension" or session == null or session.label_candidate(str(hit["id"])).is_empty() or _hover_uv == null:
 		return
-	_label_hold = {"id": str(hit["id"]), "press": _hover_uv, "was_selected": session.is_annotation_selected("dimension", str(hit["id"])), "dragging": false, "place": {}}
+	_label_hold = {"kind": "label", "id": str(hit["id"]), "press": _hover_uv, "was_selected": session.is_annotation_selected("dimension", str(hit["id"])), "dragging": false, "place": {}}
 
 
 func label_dragging() -> bool:
-	return not _label_hold.is_empty() and bool(_label_hold["dragging"])
+	return not _label_hold.is_empty() and str(_label_hold["kind"]) == "label" and bool(_label_hold["dragging"])
+
+
+func point_dragging() -> bool:
+	return not _label_hold.is_empty() and str(_label_hold["kind"]) == "point" and bool(_label_hold["dragging"])
+
+
+func _hold_move(uv: Variant) -> void:
+	if str(_label_hold["kind"]) == "point":
+		_point_drag_move(uv)
+	elif uv != null:
+		label_drag_move(uv)
 
 
 func label_drag_move(uv: Vector2) -> void:
@@ -1903,7 +1922,10 @@ func label_drag_move(uv: Vector2) -> void:
 
 func _on_right_released(action: String) -> void:
 	if action == table.click_action and not _label_hold.is_empty():
-		await _end_label_hold()
+		if str(_label_hold.get("kind", "label")) == "point":
+			await _end_point_hold()
+		else:
+			await _end_label_hold()
 
 
 func _end_label_hold() -> void:
@@ -1931,10 +1953,92 @@ func _end_label_hold() -> void:
 
 
 func _cancel_label_hold() -> void:
+	if str(_label_hold.get("kind", "label")) == "point":
+		_cancel_point_hold()
+		return
 	var id := str(_label_hold.get("id", ""))
 	_label_hold = {}
 	if session != null and id != "":
 		session.label_override.erase(id)
+	table.set_status(_sketch_hint())
+	UiFeedback.haptic(table._right, "close")
+	_refresh_view()
+
+
+# --- F6 (S10): a sketch point moved by holding the trigger on it ---------------------------------------------------------
+
+func _point_beats_annotation() -> bool:
+	## The nearer-hit rule (parity plan section 5): the laser is on a label (or glyph) AND on a sketch point of its own. The nearer to the laser wins: the label's CENTRE
+	## against the point, and a tie goes to the point. Only a point competes: a line or a circle beside a label still gives way to it (a label sits next to its line).
+	if str(_hover_entity.get("kind", "")) != "point" or _hover_entity.has("ref") or _hover_annotation.is_empty():
+		return false
+	return float(_hover_entity.get("distance", INF)) <= float(_hover_annotation.get("distance", INF))
+
+
+func _begin_point_hold(hit: Dictionary) -> void:
+	## Called by the Select pull on a sketch point (not the part's own corner, which is not the sketch's). The pull itself is the plain one. A point that is pinned (the origin,
+	## a reference, a point the part or a Fix holds) gets a hold that says so if it is dragged and moves nothing.
+	if _label_hold.is_empty() and str(hit.get("kind", "")) == "point" and not hit.has("ref") and session != null and session.points.has(str(hit["id"])) and _hover_uv != null:
+		_label_hold = {"kind": "point", "id": str(hit["id"]), "press": _hover_uv, "dragging": false, "pinned": str(hit["id"]) in PointDrag.pinned_ids(session), "said": false}
+
+
+func _point_drag_move(uv: Variant) -> void:
+	## One frame of a point hold: past a pick's reach from where the trigger went down it becomes a drag (the projector starts from the sketch as it is), then each frame
+	## the accepted answer is laid over the points and the sketch redrawn. A pinned point never starts one.
+	if session == null or view == null:
+		return
+	if not bool(_label_hold["dragging"]):
+		if not uv is Vector2 or (uv as Vector2).distance_to(_label_hold["press"]) <= PICK_RADIUS / view.canvas_scale:
+			return
+		if bool(_label_hold["pinned"]):
+			if not bool(_label_hold["said"]):
+				_label_hold["said"] = true
+				UiFeedback.haptic(table._right, "error")
+				table.set_status("That point is held in place (the origin, the part, or a Fix): it does not move.")
+			return
+		if not point_drag.begin(session, str(_label_hold["id"]), _label_hold["press"]):
+			return
+		_label_hold["dragging"] = true
+		if table.keyboard_open():
+			table.close_keyboard()
+		_last_pull = {"key": "", "ms": 0}
+		UiFeedback.haptic(table._right, "press")
+		table.set_status("Moving the point: let go of the trigger to drop it, B to put it back.")
+	var changed: Array = point_drag.step(uv)
+	if changed.is_empty():
+		return
+	for id in changed:
+		var p: Array = point_drag.accepted_point(str(id))
+		session.points[str(id)] = Vector2(p[0], p[1])
+	_refresh_view()
+
+
+func _end_point_hold() -> void:
+	## The trigger came up: a drag is sent as the wish (one solve-and-refresh) and the backend's answer is what the sketch shows; a hold that never moved was only a pull.
+	var hold := _label_hold
+	_label_hold = {}
+	if hold.is_empty() or not bool(hold["dragging"]) or session == null:
+		return
+	var drop: Dictionary = point_drag.finish()
+	var result: Dictionary = await session.drop_points(drop)
+	if session == null:
+		return
+	if bool(result["ok"]) and str(result["message"]) == "":
+		UiFeedback.haptic(table._right, "confirm")
+		table.set_status("Point moved.")
+	else:
+		UiFeedback.haptic(table._right, "error")
+		if str(result["message"]) != "":
+			table.set_status(str(result["message"]))
+	sync_undo_redo()
+	_refresh_view()
+
+
+func _cancel_point_hold() -> void:
+	point_drag.cancel() # an answer still being computed is dropped when it lands
+	_label_hold = {}
+	if session != null:
+		session.restore_points()
 	table.set_status(_sketch_hint())
 	UiFeedback.haptic(table._right, "close")
 	_refresh_view()
@@ -2015,6 +2119,7 @@ func _sketch_trigger() -> void:
 				var other: Dictionary = session.stacked_alternative(picked, PICK_RADIUS / view.canvas_scale * 0.25)
 				if not other.is_empty():
 					picked = other # a second pull on a stack of points takes the other one
+				_begin_point_hold(picked) # F6: held and moved, a sketch point drags
 			await session.select(picked)
 		else:
 			session.clear_selection()
@@ -3301,6 +3406,9 @@ func end_sketch() -> void:
 	cancel_preview()
 	repick_point = ""
 	_repick_queue.clear()
+	point_drag.cancel()
+	point_drag.wait_all()
+	_label_hold = {}
 	session = null
 	clip.end()
 	if view != null and is_instance_valid(view):

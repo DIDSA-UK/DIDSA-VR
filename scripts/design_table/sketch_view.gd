@@ -1023,7 +1023,7 @@ func annotation_near(uv: Vector2, reach_mm: float) -> Dictionary:
 			var d := delta.length() - (1000.0 if hit["kind"] == "dimension" else 0.0)
 			if d < best_d:
 				best_d = d
-				best = {"kind": hit["kind"], "id": hit["id"]}
+				best = {"kind": hit["kind"], "id": hit["id"], "distance": delta.length()} # `distance`: the laser to its centre (S10's nearer-hit rule)
 	return best
 
 

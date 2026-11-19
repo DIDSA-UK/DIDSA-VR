@@ -12,6 +12,7 @@ var calls: Array = [] ## ["POST /path", body]
 var points := {}
 var entities: Array = [] ## export-shaped dicts
 var cons := {}
+var last_solve_body: Variant = null ## the body of the last solve-and-refresh (a drop's point_updates / anchor_point_ids)
 var n := 0
 var fail := "" ## a path fragment whose POST should fail with a 422
 var converge := true
@@ -396,6 +397,11 @@ func handle(method: int, path: String, body) -> Dictionary:
 		cons[k]["provisional"] = false
 		return _ok({"converged": converge})
 	if path.ends_with("/solve-and-refresh"):
+		last_solve_body = body
+		if body is Dictionary:
+			for u in (body as Dictionary).get("point_updates", []): # the drop's wish (S10): written before the "solve"
+				if points.has(str(u["id"])) and not pinned.has(str(u["id"])):
+					points[str(u["id"])] = Vector2(float(u["x"]), float(u["y"]))
 		var plist: Array = []
 		for id in points:
 			plist.append({"id": id, "x": points[id].x, "y": points[id].y, "is_locked": pinned.has(id), "is_reference": reference_ids.has(id)})
