@@ -2439,6 +2439,12 @@ func _dimension_options() -> Array:
 			break
 		list.append({"id": "dk:%s" % g["key"], "text": str(g["label"]), "toggle": not dim_flow.show_all, "pressed": not dim_flow.show_all and str(g["key"]) == current})
 	list.append({"id": "dk_all", "text": "All at once", "toggle": true, "pressed": dim_flow.show_all})
+	# S7: what the right stick and B do, as buttons (so nothing needs a stick): the previous / next kind while a preview is live, Back while there is a step to go back to
+	if dim_flow.live() and session.ghosts.size() > 1:
+		list.append({"id": "dk_prev", "text": "Prev"})
+		list.append({"id": "dk_next", "text": "Next"})
+	if dimension_owns_b(true):
+		list.append({"id": "dk_back", "text": "Back"})
 	return list
 
 
@@ -2605,6 +2611,12 @@ func on_option(option_id: String) -> void:
 			_dim_last_uv = null
 			_update_dimension_preview(_hover_uv)
 		_update_options()
+		return
+	if option_id == "dk_prev" or option_id == "dk_next":
+		intent_step(-1 if option_id == "dk_prev" else 1)
+		return
+	if option_id == "dk_back":
+		intent_back(true)
 		return
 	if option_id == "dk_all" and session != null:
 		dim_flow.show_all = not dim_flow.show_all
