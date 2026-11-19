@@ -485,6 +485,35 @@ CAD lane: F4 -> F6
 
 Not given a session: C7 (wait for hand tracking), the spline-tangent residual (DIDSA-CAD's own item first).
 
+### Tracker
+
+All sessions work on branch **`ccr-30fb030e-pts96i`** in their repo (DIDSA-VR has it; a DIDSA-CAD session creates it from `main` if it is not
+there yet, else pulls it). Only one session per repo at a time on the branch. A session starts from the branch tip (pull first). The
+Notes column is the handoff for the next session (at most 15 lines: what changed, symbols added or renamed, what is left, the headset
+checklist).
+
+| Session | Repo | State | Notes |
+|---|---|---|---|
+| F1 | VR | Not started | |
+| F2 | VR | Not started | |
+| F3 | VR | Not started | |
+| F4 | CAD | Not started | |
+| F5 | VR | Not started | |
+| F6 | CAD | Not started | |
+| F7 | VR | Not started | |
+| F8 | VR | Not started | |
+
+### Prompt for each session
+
+> Repo: `<DIDSA-VR | DIDSA-CAD>` (attach the other one; this plan lives in DIDSA-VR `docs/parity-followups-investigation.md`, on branch
+> `ccr-30fb030e-pts96i`). Work on branch `ccr-30fb030e-pts96i` in the repo you change (pull it first; in DIDSA-CAD create it from `main` if it
+> does not exist). Implement **Fn** of that document. Read its decisions table, the Fn brief, the items it names, and the previous session's
+> Notes in the tracker; follow DIDSA-VR `docs/dimension-constraint-parity-plan.md` section 4 (session rules, reading budget, environment,
+> finish) and the repo's CLAUDE.md. Install only the environment pieces the model / effort table gives for Fn. Stop when the brief's exit
+> criteria pass; do not start the next session's work. Finish with the tracker row (state, handoff notes, headset checklist) in DIDSA-VR's
+> copy of this document and a dated `docs/status.md` entry in the repo you changed (built, verified, not verified). Commit and push to the
+> branch; do not open a PR or merge. Say what you could only verify by reading; never write "works on the headset".
+
 ## Checked only by reading
 
 - Which VR flows can raise each id-bearing backend message (A1); the backend's entity order across a save and reopen.
