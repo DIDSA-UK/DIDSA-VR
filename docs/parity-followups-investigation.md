@@ -472,6 +472,13 @@ VR lane (shares table_editor.gd / sketch_session.gd): F2 -> F3 -> F5 (after F4) 
 CAD lane: F4 -> F6
 ```
 
+**Combined sessions (owner asked, 2026-11-19), by the parity plan's section 5 rule (same repo, same model, fits ~1 500 lines together):**
+- **F1 + F2: one session**, Sonnet high, `godot backend`. F1 first as its own checkpoint (commit and push it green), then F2. If F1's uncut
+  checker shows many new `false` lines and F1 passes ~600 changed lines, stop after F1 and run F2 alone (record the split in the tracker).
+- **F7 + F8: one session if F6's handoff allows**, Sonnet high, `godot backend`. Order: the stall port, the shape and line drags (F8), then
+  the rigidity port and colours. Stop at the last green checkpoint past ~1 300 changed lines and run the rest alone.
+- Not combined: F3 + F8 (over the size, and F8 waits for F6), F2 + F5 (F5 waits for F4), F4 + F6 (different code and models), F5 + F7.
+
 | Session | Model | Effort | Env pieces | Why |
 |---|---|---|---|---|
 | F1 | Sonnet | medium | `godot backend` (+ the store and hub requirements for `ci_e2e.sh`) | Named test and CI fixes; causes found here. |
