@@ -1,6 +1,6 @@
 # Plan: dimensions and constraints at parity with the flat app (sessions)
 
-**Status: final (2026-11-18), revised for running (2026-11-19), not started. Gate met 2026-11-19** (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
+**Status: final (2026-11-18), revised for running (2026-11-19). Gate met 2026-11-19; S0 done 2026-11-19, S8 split off to its own session** (section 1). Defaults F1-F7 (section 2) can still be changed before the session that uses them.
 
 The build plan for [`dimension-constraint-parity-scope.md`](dimension-constraint-parity-scope.md) (the gap tables, the workflow and the owner's
 decisions of 2026-11-18). Written for **coding sessions**: each session below is one repo, one branch, one PR. Line numbers drift: search for
@@ -253,7 +253,7 @@ feel of a constrained point sliding along its path.
 
 | Session | Repo | State | Branch / PR | Notes |
 |---|---|---|---|---|
-| S0 | CAD | Not started (gate met) | | One session with S8 |
+| S0 | CAD | **Done** (2026-11-19) | DIDSA-CAD `ccr-be4859df-3jil9a` (no PR yet) | Added `docs/sketch-dimension-catalogue.json` (17 entries, `pinned`), `docs/sketch-label-placement-cases.json` (15 placement kinds, 22 cases x 3 pointers), `client/test/sketch_dimension_catalogue_test.dart` (builds each entry in a real `SketchController`), `client/test/sketch_label_placement_cases_test.dart`.<br>Beyond 3.1's shape: an option may carry its own `when` (Minimum: `curves_apart`; Tangent: `line_misses_curve`; point + curve min / max: `point_not_of_curve`); top-level `notes` (selections that offer nothing; two Points on two parallel lines read as the lines; pick rules), `conditions` and `cursor_rules` (prose); `pinned.kinds` keys are the picks joined by `+`.<br>Options: code and catalogue agreed everywhere, no fix needed. **Left for S1:** `referenceDimensionKinds` lacks the part D kinds the `pinned` block lists (`horizontal_angle`, `arc_length`, `point_angle`, `min_distance` / `max_distance`); the test's `_pinnedKindsAwaitingS1` lists them and S1 empties it.<br>For S2: the two-line `angle` places by `radius` + `along` (arc length), the part D angles by `radius` + `angle` (degrees); a full ellipse's axis is linear tip to tip, an elliptical arc's is radial; arc length's dimension arc never goes inside 0.1 r. For S4: VR keys become the catalogue's (F1: `majorradius`, `minDistance`, `tangentDistance`, ...).<br>No VR change, so no headset checklist. |
 | S1 | CAD client | Not started | | |
 | S2 | VR | Not started | | |
 | S3 | VR | Not started | | |
@@ -261,7 +261,7 @@ feel of a constrained point sliding along its path.
 | S5 | VR | Not started | | |
 | S6 | VR | Not started | | |
 | S7 | VR | Not started | | |
-| S8 | CAD | Not started (gate met) | | One session with S0 |
+| S8 | CAD | Not started: **split from S0** (2026-11-19) | | S0 alone came to 1 356 changed lines, near section 4's ~1 500, so S8 runs as its own CAD session (same row of section 9: Opus, high, CAD: Flutter; brief unchanged; S0's files are on `main` once merged, or on `ccr-be4859df-3jil9a`).<br>Found while setting up: `sketch_projector.dart` imports `sketch_api_client.dart`, which pulls in `shared_preferences` (Flutter), so the export tool cannot be a plain `dart run` script: run it through `flutter test` (or split the DTOs out first).<br>Branch rules for S9: not examined yet (S8's job). |
 | S9 | VR | Not started | | |
 | S10 | VR | Not started | | |
 
