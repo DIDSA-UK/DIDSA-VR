@@ -116,19 +116,33 @@ solve's `solver_reported_failed_constraint_ids` turn what they hold red, in both
 ## 5. Order (revised 2026-11-19)
 
 ```
-S0+S8 (CAD, one session) -> S1 (CAD, flat)
-                         -> S2 -> S3 -> S4 -> S5 -> S6 -> S10 -> S7     (VR, one lane: they share table_editor.gd / sketch_session.gd)
-                         -> S9 (VR, new files only; parallel with S2-S6)
+S0 (done) -> S8 (CAD) -> S9 (VR, new files only; parallel with the VR lane)
+          -> S1 (CAD, flat)
+          -> S2 -> S3+S4 -> S5 -> S6 -> S10 (+ S7 if it fits) -> S7 if left     (VR lane: they share table_editor.gd / sketch_session.gd)
 ```
 
-- **S0 and S8 run as one CAD session**: both are "write the contract from the Dart and a test that reads it", in the same repo, with the same
+**Sessions that share one session (2026-11-19).** A merge is worth it only when both phases are in the same repo, read the same files, use the
+same model (section 9) and fit section 4's size together; otherwise the second phase pays for carrying the first one's context on every turn.
+- **S3+S4: one session.** Both mostly change `sketch_session.gd` and `sketch_selection.gd`, both M, both Sonnet medium; S4 does not need S3, so
+  they are two checkpoints on the same files. Do S3 first, commit and push it green, then S4. If S3 alone passes ~800 changed lines, stop
+  after it and run S4 as its own session (record the split in the tracker).
+- **S7 after S10 in the same session, if it fits.** Same input code in `table_editor.gd`, both Sonnet. Start S7 only if S10 ends under ~900
+  changed lines; otherwise S7 runs alone.
+- **Not merged, and why:** S0 / S8 and S1 (S1 would run at Opus rates; S0 alone was 1 356 lines); S1 and S2 (different repos and toolchains,
+  no shared files); S2 and S4 (over the size together); S5 and S6 (S5 is the Opus design session; S6's routine work should not pay Opus rates).
+- **Sizes run high.** S0, sized S, came to 1 356 changed lines (much of it JSON). Treat a brief's size as a lower bound and keep the
+  stop-and-split rule of section 4.
+
+- **S0 and S8 were planned as one CAD session** (S0 overflowed; S8 now runs alone): both are "write the contract from the Dart and a test that reads it", in the same repo, with the same
   Flutter setup; one start-up and one first Flutter compile instead of two. If it overflows section 4's size, it stops after S0 and S8 runs alone.
 - **S1** runs any time after S0 (CAD repo, no overlap with VR).
 - **S9** only adds `scripts/motion/sketch_projector.gd` and its test, so it runs in parallel with the VR lane without conflicts.
 - **S10 moved before S7, and after S6**: S6's label drag (F5) and S10's point drag (F6) are both a trigger-hold in `table_editor.gd`'s Select
   branch, so they are built one after the other on the same code (S10 reuses S6's hold; when a label and a point are both under the laser, the
   nearer hit wins, a tie goes to the point). **S7 is last** so its intent layer covers every input, drag included.
-- Only one VR lane session at a time; each starts from `main` after the previous one's PR is merged.
+- Only one VR lane session at a time. **Branches:** the sessions so far share `ccr-be4859df-3jil9a` in both repos; a session starts from that
+  branch's tip (pull first) unless it has been merged to `main`. Two sessions in the **same repo** never run at the same time on one branch
+  (S1 and S8 are both CAD: run them one after the other, or give the second its own branch).
 
 ## 6. Sessions
 
@@ -256,11 +270,11 @@ feel of a constrained point sliding along its path.
 | S0 | CAD | **Done** (2026-11-19) | DIDSA-CAD `ccr-be4859df-3jil9a` (no PR yet) | Added `docs/sketch-dimension-catalogue.json` (17 entries, `pinned`), `docs/sketch-label-placement-cases.json` (15 placement kinds, 22 cases x 3 pointers), `client/test/sketch_dimension_catalogue_test.dart` (builds each entry in a real `SketchController`), `client/test/sketch_label_placement_cases_test.dart`.<br>Beyond 3.1's shape: an option may carry its own `when` (Minimum: `curves_apart`; Tangent: `line_misses_curve`; point + curve min / max: `point_not_of_curve`); top-level `notes` (selections that offer nothing; two Points on two parallel lines read as the lines; pick rules), `conditions` and `cursor_rules` (prose); `pinned.kinds` keys are the picks joined by `+`.<br>Options: code and catalogue agreed everywhere, no fix needed. **Left for S1:** `referenceDimensionKinds` lacks the part D kinds the `pinned` block lists (`horizontal_angle`, `arc_length`, `point_angle`, `min_distance` / `max_distance`); the test's `_pinnedKindsAwaitingS1` lists them and S1 empties it.<br>For S2: the two-line `angle` places by `radius` + `along` (arc length), the part D angles by `radius` + `angle` (degrees); a full ellipse's axis is linear tip to tip, an elliptical arc's is radial; arc length's dimension arc never goes inside 0.1 r. For S4: VR keys become the catalogue's (F1: `majorradius`, `minDistance`, `tangentDistance`, ...).<br>No VR change, so no headset checklist. |
 | S1 | CAD client | Not started | | |
 | S2 | VR | Not started | | |
-| S3 | VR | Not started | | |
-| S4 | VR | Not started | | |
+| S3 | VR | Not started | | One session with S4 (section 5) |
+| S4 | VR | Not started | | One session with S3 (section 5) |
 | S5 | VR | Not started | | |
 | S6 | VR | Not started | | |
-| S7 | VR | Not started | | |
+| S7 | VR | Not started | | In S10's session if S10 ends under ~900 lines (section 5) |
 | S8 | CAD | Not started: **split from S0** (2026-11-19) | | S0 alone came to 1 356 changed lines, near section 4's ~1 500, so S8 runs as its own CAD session (same row of section 9: Opus, high, CAD: Flutter; brief unchanged; S0's files are on `main` once merged, or on `ccr-be4859df-3jil9a`).<br>Found while setting up: `sketch_projector.dart` imports `sketch_api_client.dart`, which pulls in `shared_preferences` (Flutter), so the export tool cannot be a plain `dart run` script: run it through `flutter test` (or split the DTOs out first).<br>Branch rules for S9: not examined yet (S8's job). |
 | S9 | VR | Not started | | |
 | S10 | VR | Not started | | |
@@ -282,14 +296,13 @@ small and mechanical enough for the smallest model, because each one needs the w
 
 | Session | Model | Effort | Env pieces | Why |
 |---|---|---|---|---|
-| S0+S8 | Opus | high | CAD: Flutter | Writes the two contracts every later session tests against; a wrong row or residual spreads to S1, S2, S4, S5, S9. Mostly reading and short, exact output. |
+| S0, S8 | Opus | high | CAD: Flutter | (Separate sessions since S0 overflowed.) Write the two contracts every later session tests against; a wrong row or residual spreads to S1, S2, S4, S5, S9. Mostly reading and short, exact output. |
 | S1 | Sonnet | medium | CAD: Flutter | Named changes in a known controller, with tests to S0's file. |
 | S2 | Sonnet | high | `godot render backend` | Wide but specified (six types, placement from the cases file); the most lines in the lane. |
-| S3 | Sonnet | medium | `godot backend` | Colours, a status line, Unfix, a glyph fix it confirms first. |
-| S4 | Sonnet | medium | `godot backend` | Make `_ghosts_raw` match the catalogue; the catalogue test decides it. |
+| S3+S4 | Sonnet | medium | `godot backend` | One session (section 5). S3: colours, a status line, Unfix, a glyph fix it confirms first. S4: make `_ghosts_raw` match the catalogue; the catalogue test decides it. |
 | S5 | Opus | high | `godot backend` | The interaction design: stick ownership against table engagement, step-back, the sticky sector; the most judgement in the plan. |
 | S6 | Sonnet | medium | `godot backend` | Label drag and edits on S5's machinery. |
-| S10 | Sonnet | high | `godot backend` | Wires S9's projector into S6's hold; the maths is already done and tested. Move to Opus if S9's handoff lists open branch-rule questions. |
+| S10 (+ S7 if it fits) | Sonnet | high | `godot backend` | Wires S9's projector into S6's hold; the maths is already done and tested. Move to Opus if S9's handoff lists open branch-rule questions. |
 | S7 | Sonnet | medium | `godot` | A refactor behind an intent layer, checked by re-running S5's tests through it. |
 | S9 | Opus | high | `godot` | A numerical port from a spec (derivatives, min-norm step, the walk); vectors decide pass or fail, but getting there needs the maths. |
 
