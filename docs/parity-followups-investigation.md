@@ -12,7 +12,7 @@ mid-size sketch built through the routes; what the solver reports for redundant 
 against a backend from 2026-11-11; the full `tests/ci_e2e.sh` list), `tests/session_marks_presenter.gd` 12 times, and (after the owner's answers) VR's `PointDrag` on shapes made through the real backend. Nothing was run on a
 headset or in the flat app's UI. "Read" below means checked by reading only.
 
-## Decisions (owner's answers, 2026-11-19)
+## Decisions (owner's answers, 2026-11-19: all answered)
 
 | # | Question | Answer |
 |---|---|---|
@@ -23,9 +23,9 @@ headset or in the flat app's UI. "Read" below means checked by reading only.
 | 5 | **A2** The selection drawer in a sketch | **(b), accepted**: breadcrumb and X only; the Properties panel is the one panel |
 | 6 | **C4** An ellipse axis dimension: semi or full value | **A toggle in both apps, like Radius / Diameter**: "Show full axis" / "Show semi-axis" on a selected axis dimension; the editor shows and accepts the value on show (design in C4) |
 | 7 | **C3** Shape drags | **Build now** (the owner asked why not; measured here: VR's shape drags drift today, see C3) |
-| 8 | **C6** Per-entity constraint colours in VR | **Open**, restated: VR turns the whole sketch green only when all of it is fully constrained; the flat app turns each line green as soon as that line is fixed. To do that in VR, either (a) the flat app's calculation is written up as a spec with test data and VR re-implements it (how the drag projector was done; works offline, every frame), or (b) the backend works it out and sends it with every solve (one implementation; a round trip per edit; the flat app keeps its own). Recommended (a) |
+| 8 | **C6** Per-entity constraint colours in VR | **(a), accepted**: DIDSA-CAD writes the flat app's calculation (`dof_analysis.dart`) as a spec with test vectors; VR re-implements it from the spec (as the drag projector was done) and colours each entity |
 | 9 | **D1** VR's e2e job | **(b), accepted**: also on push to `main` (same paths) and weekly |
-| 10 | (new, from 6) Is the Radius / Diameter and semi / full choice **saved**? | **Open.** Today the flat app's Radius / Diameter choice is session-only (CAD `sketch_controller.dart:9215-9236`) and VR's too (`toggle_diameter`, S6): after a reload a diameter dimension reads as a radius, and the two apps can show the same dimension differently. Recommended: save it in the dimension's label record (the same `PUT .../label` that saves its placement, a `show` field), so it survives a reload and both apps agree |
+| 10 | (new, from 6) Is the Radius / Diameter and semi / full choice saved? | **Yes, accepted**: saved in the dimension's label record (the `PUT .../label` that saves its placement, a `show` field), read and written by both apps, so it survives a reload and both apps show a dimension the same way |
 
 ## Summary
 
@@ -41,7 +41,7 @@ headset or in the flat app's UI. "Read" below means checked by reading only.
 | C3 Lines / shapes do not drag well; spline tangent unsupported | Confirmed; the flat app has a rigid line drag and closed-form shape proposals. **Measured: in VR a circle's centre drag resizes it, a rim drag moves its centre, a polygon vertex drag moves its centre, a rectangle corner drag moves the opposite corner** | Medium-high | Line S-M; shapes CAD S-M + VR M | Build both now (decision 7) | F6, F8 |
 | C4 Ellipse axes | Confirmed: an elliptical arc's axis saves no placement and a flat-app placement is read as none; the flat app's ribbon edits the half of what its canvas shows | Low | VR S-M, flat S-M | Draw the arc's axis radially; a semi / full toggle in both apps (decision 6) | F5, F4 |
 | C5 Existing dimension retyped | Confirmed for the two-line angle, point-to-line and line-to-line distance (the flat app updates those in place) | Medium: a refusal or a stacked duplicate | S | Patch the existing one, as the flat app does | F5 |
-| C6 Whole-sketch tint | Confirmed | Medium: no hint which line still needs a dimension | CAD S-M, VR M | Decision 8 (open) | F6, F7 |
+| C6 Whole-sketch tint | Confirmed | Medium: no hint which line still needs a dimension | CAD S-M, VR M | Port from a CAD spec (decision 8) | F6, F7 |
 | C7 `hand` hit sizes | Confirmed: guesses, nothing switches to them | None today | - | Leave until hand tracking; measure then | - |
 | C8 Flat take-back checks | Real solver checked here: a redundant but consistent constraint **converges** (`result_code` 5) and is kept by both apps; an inconsistent one fails and the failed list names it. CAD CI ran the full `flutter test` on `main`: green | Low | S | Pin the solver's answers in backend tests | F4 |
 | D1 CI on `main` | Headless, render and CAD client / store jobs green; **VR's e2e job never ran on the merge** (PRs and by hand only); run here: two stale S4 assertions, the known flaky outage line, and **a checker blind spot** (SMOKE lines cut to 200 characters before checking hide a long label's `false`) | Medium | S | Fix the stale lines and the cut; run e2e on push to `main` | F1 |
@@ -269,7 +269,7 @@ value (80) and stores half; the flat app draws 80 (CAD `sketch_canvas.dart:3082-
 - An elliptical arc's axis gets the same toggle with the radius-style layout (semi: centre to the arc's tip, radial placement kind `radius`;
   full: the circle-diameter style), so its placement is saved and the flat app's is read (S, F5).
 - Placement: the `ellipse_axis` kind `{offset, along}` is read on whichever line is drawn.
-- Whether the choice is saved (decision 10, open): recommended in the label record, for this toggle and for Radius / Diameter.
+- The choice is saved (decision 10): a `show` field in the label record, for this toggle and for Radius / Diameter, in both apps.
 Sizes: flat S-M (F4), VR S-M (F5).
 
 ### C5. Typing an existing angle, point-to-line or distance-to-circle dimension again
@@ -427,33 +427,33 @@ Needs decisions 4, 6 and 10. Read: A1, C4, C8.
 Tasks: backend `number` per entity / dimension / relation as in A1 (assigned at creation, kept, optional on create for undo, back-filled on
 load in stored order), in every response and export; backend error texts use names instead of ids; flat app: `selectionLabel` reads
 `number` (position rule as fallback), the take-back message drops the bracketed solver detail, the semi / full axis toggle of C4 in the ribbon (the editor edits the value on show);
-if decision 10 is yes, the backend keeps a `show` field in the label record and the flat app saves and reads both toggles there; backend
+the backend keeps a `show` field in the label record (decision 10) and the flat app saves and reads both toggles there; backend
 tests pinning C8's four answers.
 Exit: backend tests and the full `flutter test` + `flutter analyze lib` green; a reload keeps names; a delete leaves the others' names alone;
-the toggle round-trips (show full, edit 80, stored 40).
+the toggle round-trips (show full, edit 80, stored 40) and a reload keeps both toggles' choice.
 
 ### F5 - VR: dimension edits at parity and names (VR, M)
 Needs F4 (for names) and F2 (shared files). Read: A1, C4, C5; `sketch_session.gd` (`_ghosts_raw`, `_dimension_item`, `_distance_apply`,
 `confirm_ghost`), `selection_breadcrumbs.gd`, `cad_api.gd` `error_text`.
 Tasks: names from `number` in the breadcrumb, the status line and the sketch rung (the open sketch's feature name); C5's three in-place
-updates; C4's semi / full toggle (EDIT group, the pad edits the value on show, the saved choice read and written if decision 10 is yes) and the
+updates; C4's semi / full toggle (EDIT group, the pad edits the value on show, the saved `show` choice read and written, Radius / Diameter included) and the
 elliptical arc's radial axis with its placement saved and the flat app's placement read.
 Exit: logic tests; e2e: retype an existing angle and point-to-line distance (one constraint, new value), an elliptical arc's placed axis read
 back, a backend name shown in the breadcrumb. Headset checklist: breadcrumb readable.
 
-### F6 - CAD: projector stall, shape proposals and (if decision 8 is (a)) the rigidity contract (CAD docs + client tests, M-L)
+### F6 - CAD: projector stall, shape proposals and the rigidity contract (CAD docs + client tests, M-L)
 Read: B3, C3, C6; `docs/motion/sketch-projector-spec.md`, `docs/sketch-drag-hybrid.md`, `client/lib/sketch/projector/sketch_projector.dart`,
 `sketch_controller.dart` (`_closedForm*Geometry`, `_runHybridDragFrame`), `dof_analysis.dart` and its tests.
 Tasks: (1) the singular-start fix in the Dart projector (B3 b only), vectors regenerated, spec 7.4 / 12 rewritten; (2) a spec section for the
 seven shape proposals (which point is grabbed, every shape point's target, which provisional sizes switch on and at what value, the pre-grab
-rule) and exported vectors from the hybrid-drag tests; (3) if decision 8 is (a): `docs/sketch-rigidity-spec.md` and
+rule) and exported vectors from the hybrid-drag tests; (3) `docs/sketch-rigidity-spec.md` and
 `docs/sketch-rigidity-vectors.json` from `dof_analysis.dart`'s cases. Every export with `--check`.
 Exit: `scene-chain-20-nearly-straight` moves; the exports reproducible; full `flutter test` green. Stop and split at (1) | (2) | (3) if it
 overflows (the JSON does not count towards the size).
 
 ### F7 - VR: projector follow-up and per-entity colours (VR, M)
 Needs F6 (1) and (3), and F3. Read: F6's handoff and specs only (VR code is written from the spec). Tasks: port the stall fix, copy the vectors;
-if decision 8 is (a): `sketch_rigidity.gd` from the spec, per-entity colours in `sketch_view.gd`. Exit: all vectors pass; rigidity vectors pass; `ci.sh` green.
+`sketch_rigidity.gd` from the spec, per-entity colours in `sketch_view.gd`. Exit: all vectors pass; rigidity vectors pass; `ci.sh` green.
 Headset checklist: per-entity green on the slab and a white part.
 
 ### F8 - VR: line and shape drags (VR, M)
@@ -469,7 +469,7 @@ Exit: those pass; `ci.sh` green. Headset checklist: grabbing a line rather than 
 ```
 F1 (VR, any time; first, so every later session has working e2e and fixture checks)
 VR lane (shares table_editor.gd / sketch_session.gd): F2 -> F3 -> F5 (after F4) -> F8 (after F6 (2)) -> F7 (after F6)
-CAD lane: F4 (after decision 10) -> F6 ((3) after decision 8)
+CAD lane: F4 -> F6
 ```
 
 | Session | Model | Effort | Env pieces | Why |
