@@ -460,7 +460,7 @@ func _hover_sketch(origin: Vector3, dir: Vector3) -> void:
 		return
 	var uv: Variant = _sheet_hit(origin, dir)
 	if not _label_hold.is_empty():
-		_hold_move(uv) # F5 / F6: the trigger is held on a label or a point: the laser drags it
+		intent_drag_move(uv) # F5 / F6: the trigger is held on a label or a point: the laser drags it
 	if uv == null:
 		view.set_annotation_hover("")
 		view.set_cursor(null)
@@ -705,13 +705,12 @@ func _hover_edges(origin: Vector3, dir: Vector3) -> void:
 # --- The trigger ----------------------------------------------------------------------------
 
 func _on_right_pressed(action: String) -> void:
-	if action == "by_button" and not _label_hold.is_empty() and bool(_label_hold["dragging"]):
-		_cancel_label_hold() # B lets the dragged label or point go back where it was
-		return
+	if action == "by_button" and intent_cancel_drag():
+		return # B lets the dragged label or point go back where it was
 	if action == "by_button" and table.is_open() and table.drawer != null and table.drawer.shown:
 		clear_part_selection() # B closes the drawer, like its X
 		return
-	if action == "by_button" and table.is_open() and dimension_step_back():
+	if action == "by_button" and table.is_open() and intent_back():
 		return # F4: one step back in the dimension flow
 	if action == table.click_action and table.is_open() and not hovering and selection_first and state in ["pick_plane", "idle"] and (not part_selection.is_empty() or not _selected_build.is_empty()) \
 			and not table._right.get_meta("ui_hover", false):
@@ -729,7 +728,7 @@ func _on_right_pressed(action: String) -> void:
 			else:
 				await _pick_plane()
 		"sketch":
-			await _sketch_trigger()
+			await intent_select()
 		"pick_edges":
 			_toggle_edge()
 		"pick_vertices":
@@ -1901,7 +1900,10 @@ func point_dragging() -> bool:
 	return not _label_hold.is_empty() and str(_label_hold["kind"]) == "point" and bool(_label_hold["dragging"])
 
 
-func _hold_move(uv: Variant) -> void:
+func intent_drag_move(uv: Variant) -> void:
+	## INTENT drag_move: one frame of the hold in progress, the pointing ray at `uv` on the sheet (null: off it). A label or a point follows it.
+	if _label_hold.is_empty():
+		return
 	if str(_label_hold["kind"]) == "point":
 		_point_drag_move(uv)
 	elif uv != null:
@@ -1938,10 +1940,7 @@ func label_drag_move(uv: Vector2) -> void:
 
 func _on_right_released(action: String) -> void:
 	if action == table.click_action and not _label_hold.is_empty():
-		if str(_label_hold.get("kind", "label")) == "point":
-			await _end_point_hold()
-		else:
-			await _end_label_hold()
+		await intent_drag_end()
 
 
 func _end_label_hold() -> void:
@@ -2089,6 +2088,72 @@ func edit_dimension_typed(id: String, text: String) -> void:
 		UiFeedback.haptic(table._right, "error")
 
 
+func intent_select() -> void:
+	## INTENT select: the pointing ray's "pull" at what it rests on (a pick, a drop, a pad, a menu): the trigger today, a pinch for a hand. The ray is `_hover_sketch`'s.
+	await _sketch_trigger()
+
+
+func intent_drag_begin(hit: Dictionary) -> void:
+	## INTENT drag_begin: a hold starts on `hit` (a dimension label or a sketch point; anything else starts none). `intent_select` calls it for the pull's own hit; a
+	## hand's pinch-and-move reaches it the same way, since the pull below it is the plain one and the hold only becomes a drag in `intent_drag_move`.
+	match str(hit.get("kind", "")):
+		"point":
+			_begin_point_hold(hit)
+		"dimension", "constraint":
+			_begin_label_hold(hit)
+
+
+func intent_drag_end() -> void:
+	## INTENT drag_end: the pinch / trigger came up: a drag is dropped (saved), a hold that never moved was only a pull.
+	if _label_hold.is_empty():
+		return
+	if str(_label_hold.get("kind", "label")) == "point":
+		await _end_point_hold()
+	else:
+		await _end_label_hold()
+
+
+func intent_cancel_drag() -> bool:
+	## INTENT cancel (1 of 2): put a dragged label or point back where it was. False when nothing was being dragged.
+	if _label_hold.is_empty() or not bool(_label_hold["dragging"]):
+		return false
+	_cancel_label_hold()
+	return true
+
+
+func intent_back(from_button := false) -> bool:
+	## INTENT back (2 of 2): one step back in the dimension flow (the pad to the preview, the preview to picking). B is this with the laser on the sheet; a button is this
+	## with `from_button` (the laser is on the deck then, so the sheet need not be hovered). False when there was nothing to step back from.
+	return dimension_step_back(from_button)
+
+
+func intent_cancel() -> bool:
+	## INTENT cancel / back in one: the drag first, else the step back.
+	return intent_cancel_drag() or intent_back()
+
+
+func intent_step(step: int) -> bool:
+	## INTENT next (+1) / previous (-1): the previewed dimension kind steps, wrapping. False when no preview is live.
+	if session == null or table.active_tool != "dimension" or not dim_flow.live():
+		return false
+	var key := dim_flow.cycle(session, _hover_uv, step)
+	if key == "":
+		return false
+	UiFeedback.haptic(table._right, "press")
+	table.set_status("%s." % str(session.ghost(key).get("label", key)))
+	_dim_last_uv = null
+	_update_dimension_preview(_hover_uv)
+	_update_options()
+	return true
+
+
+func intent_adjust(x: float) -> bool:
+	## INTENT adjust: an analogue push left / right (the right stick; a hand's slider) steps the kind once per flick (-1 .. 1, back near the middle to re-arm).
+	## True when a step was taken.
+	var step := dim_flow.stick(x)
+	return step != 0 and intent_step(step)
+
+
 func _sketch_trigger() -> void:
 	if session == null or session.busy or _hover_uv == null:
 		return
@@ -2122,7 +2187,7 @@ func _sketch_trigger() -> void:
 	elif tool == "dimension" or tool == SELECT_TOOL:
 		var ghost: String = view.ghost_near(session.ghosts, _hover_uv, _reach_mm("ghost"))
 		if tool == SELECT_TOOL and ghost == "" and not _hover_annotation.is_empty():
-			_begin_label_hold(_hover_annotation) # the pull below is the plain one; if the trigger stays held and the laser moves, it becomes a drag (F5)
+			intent_drag_begin(_hover_annotation) # the pull below is the plain one; if the trigger stays held and the laser moves, it becomes a drag (F5)
 			await _pull_annotation(_hover_annotation)
 		elif ghost != "":
 			if bool(session.ghost(ghost).get("driven", false)):
@@ -2135,7 +2200,7 @@ func _sketch_trigger() -> void:
 				var other: Dictionary = session.stacked_alternative(picked, _reach_mm("pick") * 0.25)
 				if not other.is_empty():
 					picked = other # a second pull on a stack of points takes the other one
-				_begin_point_hold(picked) # F6: held and moved, a sketch point drags
+				intent_drag_begin(picked) # F6: held and moved, a sketch point drags
 			await session.select(picked)
 		else:
 			session.clear_selection()
@@ -2327,16 +2392,16 @@ func _drop_dimension() -> void:
 	_update_options()
 
 
-func dimension_owns_b() -> bool:
+func dimension_owns_b(from_button := false) -> bool:
 	## F4: B is "one step back" with the Dimension tool while the pad is open, or while something is picked and the laser is on the sheet.
 	if session == null or table.active_tool != "dimension":
 		return false
-	return dim_flow.stage == "pad" or (hovering and _hover_uv != null and not session.selection.is_empty())
+	return dim_flow.stage == "pad" or ((from_button or (hovering and _hover_uv != null)) and not session.selection.is_empty())
 
 
-func dimension_step_back() -> bool:
+func dimension_step_back(from_button := false) -> bool:
 	## B: the pad back to the preview (the pad closes), the preview back to picking (the pick is let go). False if there was nothing to step back from.
-	if not dimension_owns_b():
+	if not dimension_owns_b(from_button):
 		return false
 	var was := dim_flow.stage
 	var to := dim_flow.step_back(session)
@@ -2360,14 +2425,7 @@ func dimension_stick(stick: Vector2) -> bool:
 	if session == null or table.active_tool != "dimension" or not DimensionPreview.owns_stick(dim_flow.live(), hovering and _hover_uv != null, table.manip.grip_count() > 0):
 		dim_flow.stick(0.0)
 		return false
-	var step := dim_flow.stick(stick.x)
-	if step != 0:
-		var key := dim_flow.cycle(session, _hover_uv, step)
-		UiFeedback.haptic(table._right, "press")
-		table.set_status("%s." % str(session.ghost(key).get("label", key)))
-		_dim_last_uv = null
-		_update_dimension_preview(_hover_uv)
-		_update_options()
+	intent_adjust(stick.x)
 	return true
 
 
