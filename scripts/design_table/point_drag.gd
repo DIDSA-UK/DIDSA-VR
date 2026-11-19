@@ -10,7 +10,7 @@ extends RefCounted
 ## input (points as [x, y] floats, constraints, lines, anchors, pinned, the reference) and the latest wish, nothing from the scene tree. A finished result of a drag
 ## that is still live is the ACCEPTED frame: its points go over the reference and are the next call's `reference` (as [x, y] floats, never Vector2: S9's rule).
 ## A result of a drag that was cancelled or ended is thrown away. `synchronous` runs the same call on the calling thread (the vector-tested answers, deterministic).
-## `unsupported` (a spline tangent in the group): nothing moves during the drag; the drop still sends the wish and the backend's solve decides, as the flat app's fallback.
+## `finish()` solves the last wish synchronously if no call has run with it (C2). `unsupported` (a spline tangent in the group): nothing moves during the drag; the drop still sends the wish and the backend's solve decides, as the flat app's fallback.
 
 const SketchProjector := preload("res://scripts/motion/sketch_projector.gd")
 const MOVED_EPSILON := 1e-9 ## a point further than this (mm) from where the press found it is part of the wish
@@ -138,6 +138,11 @@ func finish() -> Dictionary:
 	if _task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_collect()
+	if live and _wish != _last_wish:
+		# C2: the laser moved on after the last call started (at most one is in flight), so its last frames were never solved: one synchronous call from the last accepted frame,
+		# and the point is dropped where the laser was at release, not a frame or more before it (about 0.5 ms; 10-20 ms for a 20-point group, once)
+		_last_wish = _wish
+		_accept(_run(_inputs(_wish)))
 	live = false
 	var updates: Dictionary = moved()
 	if unsupported:

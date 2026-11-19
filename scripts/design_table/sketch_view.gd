@@ -105,6 +105,21 @@ var ghosts_hidden := false ## S5: the Dimension tool previews one candidate at t
 var _line_material: ShaderMaterial
 var _tokens: Resource
 var _geo_state := {}
+var _geo_pieces: Dictionary = {} ## F3: "kind:id" -> [vertices, colours], one piece per drawn entity in draw order (the mesh is their concatenation; a point drag makes again only the pieces of moved points)
+var stats := {"passes": 0, "moved_passes": 0, "layouts": 0, "scans": 0, "labels_made": 0, "pieces_drawn": 0} ## F3: what the redraws did, counted (a test reads them; nothing else does): dimension passes, drag frames, layouts made, room scans, labels made, entities drawn
+var _geo_cache: Dictionary = {} ## "kind:id" -> [signature, piece]: the last full rebuild's pieces, kept while what an entity is drawn from (its points, how it is lit) is as it was
+var _geo_cache_key: Array = []
+var _geo_by_point: Dictionary = {} ## point id -> the piece keys drawn from it
+var _geo_ctx: Dictionary = {} ## what the pieces were drawn with: picks, hover, state colours (the last rebuild's)
+var _last_ghosts: Array = []
+var _dim_ctx: Dictionary = {} ## the last pass's picked labels
+var _glyph_slots: Dictionary = {} ## constraint id -> [[pool key, stack index], ...] in the order constraint_items() gave its glyphs
+var _glyph_hit: Dictionary = {} ## pool key -> the glyph's hit (the one _annotation_hits holds)
+var _drag_index: Dictionary = {} ## point id -> the constraint ids drawn from it (made at a drag's first frame)
+var _drag_index_ready := false
+var _dim_cache: Dictionary = {} ## "dimension:id" -> {spec, text, scale, stamp, layout, drawn, colour, v, c, hit}: a dimension's layout and strokes, kept while none of those changed
+var _dim_label_pool: Dictionary = {} ## the dimension (and candidate) labels, kept and updated in place: key -> Label3D
+var _glyph_label_pool: Dictionary = {}
 
 
 func setup(p_plane: Dictionary, p_window_m: Vector2, p_centre: Vector2, p_scale: float, tokens: Resource) -> void:
@@ -528,19 +543,21 @@ static func arc_points(centre: Vector2, start: Vector2, end: Vector2, segments: 
 
 # --- The drawing ---------------------------------------------------------------------
 
-func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
+func rebuild(session, highlight: Array = [], hover: Dictionary = {}, ghosts: Array = []) -> void:
 	## The origin's axes, then every entity of the session drawn as a drawing draws it: object lines heavy and solid, construction lines thin
 	## and chained, a centre mark on every circle, and the sketch's dimensions with their extension lines, arrows and text. `highlight` is a list
-	## of {kind, id} (the picked entities); `hover` the one under the laser.
+	## of {kind, id} (the picked entities); `hover` the one under the laser; `ghosts` the dimension candidates (drawn in the same pass as the dimensions:
+	## F3, the drawing is made once per refresh). Each entity is drawn into a piece of its own, kept in draw order, so a point drag redraws only the pieces
+	## whose points moved (redraw_moved).
 	_last_highlight = highlight
 	_last_hover = hover
-	var verts := PackedVector3Array()
-	var colors := PackedColorArray()
-	var accent: Color = _tokens.accent
-	var warn: Color = _tokens.warn
+	_geo_pieces.clear()
+	_geo_by_point.clear()
 	var origin_mark := 0.05 / canvas_scale ## the origin's cross reaches this far (about 5 cm of world) on each axis
-	_ribbon(verts, colors, Vector2.ZERO, Vector2(origin_mark, 0), LINE_WIDTH * 0.8, Color(1.0, 0.35, 0.35, 0.9), 0.7) # u axis
-	_ribbon(verts, colors, Vector2.ZERO, Vector2(0, origin_mark), LINE_WIDTH * 0.8, Color(0.4, 0.95, 0.5, 0.9), 0.7) # v axis
+	var axes := [PackedVector3Array(), PackedColorArray()]
+	_ribbon(axes[0], axes[1], Vector2.ZERO, Vector2(origin_mark, 0), LINE_WIDTH * 0.8, Color(1.0, 0.35, 0.35, 0.9), 0.7) # u axis
+	_ribbon(axes[0], axes[1], Vector2.ZERO, Vector2(0, origin_mark), LINE_WIDTH * 0.8, Color(0.4, 0.95, 0.5, 0.9), 0.7) # v axis
+	_geo_pieces["origin:"] = axes
 
 	if session != null:
 		var selected := {}
@@ -553,118 +570,241 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}) -> void:
 		if _annotation_hover != "":
 			selected.merge(session.constraint_held(_annotation_hover.substr(_annotation_hover.find(":") + 1)))
 		# the sketch's state: fully constrained geometry is tinted, what the solver says conflicts is red
-		var base_obj: Color = FULL_COLOUR if session.constraint_state() == "full" else OBJECT_COLOUR
-		var failed_e: Dictionary = session.failed_entity_ids()
-		var failed_p: Dictionary = session.failed_point_ids()
-		for id in session.lines:
+		_geo_ctx = {"selected": selected, "hovered": hovered, "warn": _tokens.warn, "accent": _tokens.accent,
+			"base_obj": FULL_COLOUR if session.constraint_state() == "full" else OBJECT_COLOUR, "failed_e": session.failed_entity_ids(), "failed_p": session.failed_point_ids()}
+		var cache_key := [canvas_scale, _geo_ctx["warn"], _geo_ctx["accent"], repick_point, _geo_ctx["base_obj"]]
+		if cache_key != _geo_cache_key:
+			_geo_cache_key = cache_key
+			_geo_cache.clear()
+		var kept := _geo_cache
+		_geo_cache = {}
+		for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text", "point"]:
+			for id in _source_of(session, kind):
+				_add_piece(session, kind, str(id), kept)
+	else:
+		_geo_cache.clear()
+	_assemble_geo()
+	if _refs != null and not is_equal_approx(_refs_scale, canvas_scale):
+		_rebuild_references()
+	_rebuild_dimensions(session, ghosts)
+
+
+func redraw_moved(session, moved: Array) -> void:
+	## F3: one frame of a point drag. `moved` are the ids whose place changed since the last redraw; the drawing is the last rebuild's (same picks, hover and colours), so only the
+	## pieces drawn from those points are made again, and the dimensions and glyphs are updated in place (a dimension no moved point touches keeps the place it was laid out in
+	## until the next full rebuild, which the drop makes). Falls back to a full rebuild when there is nothing to build on.
+	if session == null or session != _last_session or _geo_pieces.is_empty():
+		rebuild(session, _last_highlight, _last_hover, _last_ghosts)
+		return
+	var keys := {}
+	for id in moved:
+		for k in _geo_by_point.get(str(id), []):
+			keys[k] = true
+	for k in keys:
+		var colon: int = (k as String).find(":")
+		var piece := _entity_piece(session, (k as String).substr(0, colon), (k as String).substr(colon + 1))
+		if not piece.is_empty():
+			_geo_pieces[k] = piece
+	_assemble_geo()
+	if _last_ghosts.is_empty() or ghosts_hidden:
+		_redraw_dimensions_moved(session, moved)
+	else:
+		_rebuild_dimensions(session, _last_ghosts) # candidates are on show: the whole pass
+
+
+func invalidate_caches() -> void:
+	## Forget what the dimension and label caches know (the next pass lays out and styles everything afresh). For tests that compare a warm drawing with a cold one.
+	_dim_cache.clear()
+	for pool in [_dim_label_pool, _glyph_label_pool]:
+		for key in pool:
+			if (pool[key] as Label3D).has_meta("sig"):
+				(pool[key] as Label3D).remove_meta("sig")
+
+
+static func _source_of(session, kind: String) -> Dictionary:
+	match kind:
+		"line":
+			return session.lines
+		"circle":
+			return session.circles
+		"arc":
+			return session.arcs
+		"ellipse":
+			return session.ellipses
+		"ellipse_arc":
+			return session.ellipse_arcs
+		"spline":
+			return session.splines
+		"text":
+			return session.texts
+	return session.points
+
+
+static func _entity_point_ids(session, kind: String, id: String) -> Array:
+	## The points an entity's drawing is made from (a text's outlines are the backend's and do not follow an anchor).
+	var e: Dictionary = _source_of(session, kind).get(id, {}) if kind != "point" else {}
+	match kind:
+		"line":
+			return [e["a"], e["b"]]
+		"circle":
+			return [e["c"], e["p"]]
+		"arc":
+			return [e["c"], e["s"], e["e"]]
+		"ellipse":
+			return [e["c"], e["ma"], e["mi"]]
+		"ellipse_arc":
+			return [e["c"], e["ma"], e["mi"], e["s"], e["e"]]
+		"spline":
+			return (e.get("through", []) as Array) + (e.get("control", []) as Array)
+		"point":
+			return [id]
+	return []
+
+
+func _add_piece(session, kind: String, id: String, kept: Dictionary) -> void:
+	var key := "%s:%s" % [kind, id]
+	var sig := _piece_sig(session, kind, id, key)
+	var piece: Array = []
+	if not sig.is_empty() and kept.has(key) and (kept[key] as Array)[0] == sig:
+		piece = (kept[key] as Array)[1] # drawn the same last time: the same strokes
+	else:
+		piece = _entity_piece(session, kind, id)
+	if piece.is_empty():
+		return
+	if not sig.is_empty():
+		_geo_cache[key] = [sig, piece]
+	_geo_pieces[key] = piece
+	for pid in _entity_point_ids(session, kind, id):
+		var list: Array = _geo_by_point.get(str(pid), [])
+		list.append(key)
+		_geo_by_point[str(pid)] = list
+
+
+func _piece_sig(session, kind: String, id: String, key: String) -> Array:
+	## Everything one entity's drawing is made from besides the zoom and the theme (_geo_cache_key): how it is lit and its points. [] for a text (its outlines are the backend's).
+	if kind == "text":
+		return []
+	var selected: bool = (_geo_ctx["selected"] as Dictionary).has(key)
+	var sig: Array = [selected, key == _geo_ctx["hovered"] and not selected]
+	if kind == "point":
+		sig.append_array([session.points[id], (_geo_ctx["failed_p"] as Dictionary).has(id), session.is_reference(id), session.is_origin(id), session.reference_status(id), session.point_locked.get(id, false)])
+		return sig
+	sig.append_array([(_geo_ctx["failed_e"] as Dictionary).has(id), session.is_reference(id), _source_of(session, kind).get(id, {}).get("construction", false)])
+	for pid in _entity_point_ids(session, kind, id):
+		sig.append(session.points.get(pid))
+	return sig
+
+
+func _assemble_geo() -> void:
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for k in _geo_pieces:
+		var piece: Array = _geo_pieces[k]
+		verts.append_array(piece[0])
+		colors.append_array(piece[1])
+	_set_surface(_geo, verts, colors)
+
+
+func _entity_piece(session, kind: String, id: String) -> Array:
+	## One entity drawn as [vertices, colours] (empty: nothing to draw, a point of it is missing), in the picks, hover and colours of the last rebuild (_geo_ctx).
+	stats["pieces_drawn"] += 1
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var selected: Dictionary = _geo_ctx["selected"]
+	var hovered: String = _geo_ctx["hovered"]
+	var warn: Color = _geo_ctx["warn"]
+	var accent: Color = _geo_ctx["accent"]
+	var base_obj: Color = _geo_ctx["base_obj"]
+	var failed_e: Dictionary = _geo_ctx["failed_e"]
+	var failed_p: Dictionary = _geo_ctx["failed_p"]
+	var key := "%s:%s" % [kind, id]
+	var sel: bool = selected.has(key)
+	var hov: bool = key == hovered and not sel
+	match kind:
+		"line":
 			var l: Dictionary = session.lines[id]
 			if not session.points.has(l["a"]) or not session.points.has(l["b"]):
-				continue
+				return []
 			if session.is_reference(id):
 				# the sketch's plumbing to the part's own edge: no line of its own is drawn, the part's edge is lit instead
 				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.00056, REF_USED_COLOUR, 0.6)
-				continue
-			var key: String = "line:" + id
-			var sel: bool = selected.has(key)
-			var hov: bool = key == hovered and not sel
-			var lit: bool = sel
+				return [verts, colors]
 			var construction: bool = l.get("construction", false)
 			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
-			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, lit)
-		for id in session.circles:
+			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, sel)
+		"circle":
 			var c: Dictionary = session.circles[id]
 			if not session.points.has(c["c"]) or not session.points.has(c["p"]):
-				continue
+				return []
 			if session.is_reference(id):
 				var rim_centre: Vector2 = session.points[c["c"]]
 				_stroke(verts, colors, circle_points(rim_centre, rim_centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS), true, false, REF_USED_COLOUR, false)
-				continue # the part's hole is lit; no construction circle, no centre cross of its own
-			var key: String = "circle:" + id
-			var sel: bool = selected.has(key)
-			var hov: bool = key == hovered and not sel
-			var lit: bool = sel
+				return [verts, colors] # the part's hole is lit; no construction circle, no centre cross of its own
 			var construction: bool = c.get("construction", false)
 			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			var centre: Vector2 = session.points[c["c"]]
 			var radius := centre.distance_to(session.points[c["p"]])
-			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, lit)
+			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, sel)
 			# the centre mark: a pair of chain lines crossing at the centre and reaching a little past the circle
 			var reach := radius + 0.007 / canvas_scale
 			_dashed(verts, colors, [centre + Vector2(-reach, 0), centre + Vector2(reach, 0)], CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, false, 0.9)
 			_dashed(verts, colors, [centre + Vector2(0, -reach), centre + Vector2(0, reach)], CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, false, 0.9)
-		for id in session.arcs:
+		"arc":
 			var a: Dictionary = session.arcs[id]
 			if not session.points.has(a["c"]) or not session.points.has(a["s"]) or not session.points.has(a["e"]):
-				continue
+				return []
 			if session.is_reference(id):
 				_stroke(verts, colors, arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32), false, false, REF_USED_COLOUR, false)
-				continue
-			var key: String = "arc:" + id
-			var sel: bool = selected.has(key)
-			var hov: bool = key == hovered and not sel
-			var lit: bool = sel
+				return [verts, colors]
 			var construction: bool = a.get("construction", false)
 			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
-			_stroke(verts, colors, sweep, false, construction, colour, lit)
+			_stroke(verts, colors, sweep, false, construction, colour, sel)
 			var arm := 0.005 / canvas_scale # an arc's centre is marked with a small cross
 			var ac: Vector2 = session.points[a["c"]]
 			_ribbon(verts, colors, ac + Vector2(-arm, 0), ac + Vector2(arm, 0), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
 			_ribbon(verts, colors, ac + Vector2(0, -arm), ac + Vector2(0, arm), CONSTRUCTION_WIDTH, CONSTRUCTION_COLOUR, 0.9)
-		for kind in ["ellipse", "ellipse_arc", "spline"]:
-			var source: Dictionary = {"ellipse": session.ellipses, "ellipse_arc": session.ellipse_arcs, "spline": session.splines}[kind]
-			for id in source:
-				var outline: Array = session.outline_of(kind, id)
-				if outline.size() < 2:
-					continue
-				if session.is_reference(id):
-					_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
-					continue
-				var okey: String = "%s:%s" % [kind, id]
-				var osel: bool = selected.has(okey)
-				var ohov: bool = okey == hovered and not osel
-				var olit: bool = osel
-				var oconstruction: bool = source[id].get("construction", false)
-				var ocolour: Color = _look(osel, ohov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if oconstruction else base_obj), warn, accent)
-				_stroke(verts, colors, outline, kind == "ellipse", oconstruction, ocolour, olit)
-		for id in session.texts:
-			var tkey: String = "text:" + id
-			var tsel: bool = selected.has(tkey)
-			var thov: bool = tkey == hovered and not tsel
-			var tlit: bool = tsel
-			var tconstruction: bool = session.texts[id].get("construction", false)
-			var tcolour: Color = _look(tsel, thov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if tconstruction else base_obj), warn, accent)
+		"ellipse", "ellipse_arc", "spline":
+			var outline: Array = session.outline_of(kind, id)
+			if outline.size() < 2:
+				return []
+			if session.is_reference(id):
+				_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
+				return [verts, colors]
+			var construction: bool = _source_of(session, kind)[id].get("construction", false)
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			_stroke(verts, colors, outline, kind == "ellipse", construction, colour, sel)
+		"text":
+			var construction: bool = session.texts[id].get("construction", false)
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
 			for poly in session.text_outlines.get(id, []):
-				_stroke(verts, colors, poly, true, tconstruction, tcolour, tlit)
-		for id in session.points:
-			var key: String = "point:" + id
+				_stroke(verts, colors, poly, true, construction, colour, sel)
+		"point":
+			var spot: Vector2 = session.points[id]
 			if session.is_reference(id) and not session.is_origin(id):
 				# a corner or hole centre of the part the sketch uses: the part's own corner is lit; no sketch point of its own to see or pick
 				var flagged: String = session.reference_status(id)
 				if flagged != "lost" and flagged != "potentially_moved":
-					_marker(verts, colors, session.points[id], REF_POINT + 0.0018, UNDERLAY, 0.45)
-					_marker(verts, colors, session.points[id], REF_POINT, REF_USED_COLOUR, 0.5)
-					continue
+					_marker(verts, colors, spot, REF_POINT + 0.0018, UNDERLAY, 0.45)
+					_marker(verts, colors, spot, REF_POINT, REF_USED_COLOUR, 0.5)
+					return [verts, colors]
 			if session.is_origin(id):
 				# The sketch origin: a bigger, brighter marker than an ordinary point (it is where every dimension can start from).
-				var origin_colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), ORIGIN_COLOUR, warn, accent)
-				_marker(verts, colors, session.points[id], POINT_SIZE * 3.2, UNDERLAY, 1.3)
-				_marker(verts, colors, session.points[id], POINT_SIZE * 2.4, origin_colour, 1.6)
-				_marker(verts, colors, session.points[id], POINT_SIZE * 1.0, UNDERLAY, 1.9)
-				continue
-			var colour: Color = _look(selected.has(key), key == hovered and not selected.has(key), FAILED_COLOUR if failed_p.has(id) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3)), warn, accent)
+				var origin_colour: Color = _look(sel, hov, ORIGIN_COLOUR, warn, accent)
+				_marker(verts, colors, spot, POINT_SIZE * 3.2, UNDERLAY, 1.3)
+				_marker(verts, colors, spot, POINT_SIZE * 2.4, origin_colour, 1.6)
+				_marker(verts, colors, spot, POINT_SIZE * 1.0, UNDERLAY, 1.9)
+				return [verts, colors]
+			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_p.has(id) else (CONSTRUCTION_COLOUR if session.point_locked.get(id, false) else accent.lightened(0.3)), warn, accent)
 			var ref_state: String = session.reference_status(id)
 			if ref_state == "lost" or ref_state == "potentially_moved":
 				var flag: Color = LOST_COLOUR if ref_state == "lost" else MOVED_COLOUR
 				var big := 3.4 if id == repick_point else 2.6
-				_marker(verts, colors, session.points[id], POINT_SIZE * (big + 0.9), UNDERLAY, 1.0)
-				_marker(verts, colors, session.points[id], POINT_SIZE * big, flag, 1.1)
-			_marker(verts, colors, session.points[id], POINT_SIZE * 1.9, UNDERLAY, 1.3)
-			_marker(verts, colors, session.points[id], POINT_SIZE, colour, 1.6)
-	_set_surface(_geo, verts, colors)
-	if _refs != null and not is_equal_approx(_refs_scale, canvas_scale):
-		_rebuild_references()
-	_rebuild_dimensions(session)
+				_marker(verts, colors, spot, POINT_SIZE * (big + 0.9), UNDERLAY, 1.0)
+				_marker(verts, colors, spot, POINT_SIZE * big, flag, 1.1)
+			_marker(verts, colors, spot, POINT_SIZE * 1.9, UNDERLAY, 1.3)
+			_marker(verts, colors, spot, POINT_SIZE, colour, 1.6)
+	return [verts, colors]
 
 
 func _look(selected: bool, hovered: bool, base: Color, warn: Color, accent: Color) -> Color:
@@ -849,8 +989,8 @@ var _last_highlight: Array = []
 var _last_hover: Dictionary = {}
 
 
-func _dim_params(session) -> Dictionary:
-	## The sizes and the "which side is outside" a dimension is laid out with, for the zoom the part has now.
+func _dim_params(session, scan := true) -> Dictionary:
+	## The sizes and the "which side is outside" a dimension is laid out with, for the zoom the part has now. `scan` false: the sizes only (no obstacles, no centroid).
 	var k := 1.0 / canvas_scale
 	var text_h := float(LABEL_FONT) * LABEL_PIXEL * k
 	var lo := Vector2(INF, INF)
@@ -858,7 +998,7 @@ func _dim_params(session) -> Dictionary:
 	var obstacles: Array = []
 	var segments: Array = []
 	var interiors: Array = []
-	if session != null:
+	if session != null and scan:
 		for lid in session.lines:
 			var ln: Dictionary = session.lines[lid]
 			if session.points.has(ln["a"]) and session.points.has(ln["b"]):
@@ -890,13 +1030,86 @@ func _layout_for(spec: Dictionary, text: String, session) -> Dictionary:
 	return DimensionLayout.layout(spec, params)
 
 
+func _params_for(session, shared: Dictionary, scan: bool) -> Dictionary:
+	## The sizes (and, with `scan`, the room) a pass lays dimensions out with: worked out once per pass, on first use. A point drag's frame lays out without scanning (the side is kept).
+	var k := "scan" if scan else "bare"
+	if not shared.has(k):
+		stats["scans"] += 1 if scan else 0
+		shared[k] = _dim_params(session, scan)
+	return shared[k]
+
+
+static func _reads_room(spec: Dictionary) -> bool:
+	## True for the layouts that choose a side by the room there is (an unplaced linear, perpendicular, horizontal or vertical dimension); the others read only sizes.
+	return not spec.has("place") and ["linear", "perp", "horizontal", "vertical"].has(str(spec.get("kind", "")))
+
+
+func _layout_with(spec: Dictionary, text: String, session, shared: Dictionary, side_hint := 0.0) -> Dictionary:
+	## _layout_for, with the pass's sizes worked out once (`shared`; the room is scanned only for a layout that reads it and has no side to keep).
+	var params: Dictionary = _params_for(session, shared, side_hint == 0.0 and _reads_room(spec)).duplicate()
+	params["text_w"] = float(params["text_h"]) * 0.6 * float(maxi(text.length(), 1))
+	if side_hint != 0.0:
+		params["side_hint"] = side_hint
+	return DimensionLayout.layout(spec, params)
+
+
+func _dim_entry(session, item: Dictionary, akey: String, shared: Dictionary, quick: bool) -> Dictionary:
+	## One dimension's layout, kept while its spec, its text, the zoom and the sketch's revision are as they were (a point drag changes the spec only of the dimensions that touch
+	## a moved point), else laid out again. `quick` (a drag frame): the side the last layout chose is kept and nothing is scanned for room.
+	var spec: Dictionary = item["spec"]
+	var text := str(item["text"])
+	var stamp := [session.revision, session.points.size()]
+	var entry: Dictionary = _dim_cache.get(akey, {})
+	if not entry.is_empty() and entry["text"] == text and entry["scale"] == canvas_scale and entry["stamp"] == stamp and entry["spec"] == spec:
+		return entry
+	var hint := float((entry["layout"] as Dictionary).get("side", 0.0)) if quick and not entry.is_empty() else 0.0
+	stats["layouts"] += 1
+	var layout := _layout_with(spec, text, session, shared, hint)
+	var text_h: float = float(LABEL_FONT) * LABEL_PIXEL / canvas_scale # (_dim_params' own text height, without its obstacle scan)
+	var hit := {"kind": "dimension", "id": str(item["id"]), "uv": layout["text_uv"], "angle": float(layout["text_angle"]),
+		"half": Vector2(text_h * 0.6 * float(maxi(text.length(), 1)) * 0.5, text_h * 0.5)}
+	if not entry.is_empty():
+		(entry["hit"] as Dictionary).merge(hit, true) # the list of hits holds this one: it is changed in place
+		hit = entry["hit"]
+	return {"spec": spec, "text": text, "scale": canvas_scale, "stamp": stamp, "layout": layout, "colour": null, "hit": hit,
+		"drawn": not ((layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty())}
+
+
+func _dim_look(session, item: Dictionary, akey: String, selected_labels: Dictionary) -> Array:
+	## [colour, outline size, outline colour] of a dimension and its label: its own colour, red when the solve could not hold it, the picked and the hovered lit.
+	var item_colour: Color = DRIVEN_COLOUR if bool(item.get("driven", false)) else DIM_COLOUR
+	if session.failed_constraint_ids.has(str(item["id"])):
+		item_colour = FAILED_COLOUR
+	var asel: bool = selected_labels.has(akey)
+	var ahov: bool = akey == _annotation_hover and not asel
+	if asel:
+		item_colour = _tokens.warn
+	elif ahov:
+		item_colour = DIM_COLOUR.lerp(_tokens.accent, 0.65)
+	var lit := asel or ahov
+	return [item_colour, 18 if lit else 12, (_tokens.warn if asel else _tokens.accent) if lit else Color(0.02, 0.04, 0.08, 0.95)] # an outline in the accent: hovered; warn: selected
+
+
+func _dim_show(entry: Dictionary, akey: String, item: Dictionary, look: Array, used: Variant) -> void:
+	## Draws (once per colour) and writes the dimension: its strokes are kept in the entry, its label is the pooled one.
+	if entry["colour"] != look[0]:
+		var v := PackedVector3Array()
+		var c := PackedColorArray()
+		_draw_dimension(v, c, entry["layout"], look[0])
+		entry["v"] = v
+		entry["c"] = c
+		entry["colour"] = look[0]
+	_sheet_label(_dim_label_pool, _labels, akey, used, str(item["text"]), entry["layout"], look[0], look[1], look[2])
+
+
 func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 	## The drawn dimensions: each existing one in the dimension colour, each candidate for the picked entities (ghosts) in the warning colour,
-	## both with extension lines, a dimension line, arrowheads and the value written along the line.
+	## both with extension lines, a dimension line, arrowheads and the value written along the line. F3: one pass makes both, the labels are kept (a pool keyed by
+	## constraint id, updated in place and only where something changed), and a dimension's layout is kept while nothing it depends on changed (_dim_entry).
 	_last_session = session
-	for child in _labels.get_children():
-		_labels.remove_child(child)
-		child.queue_free()
+	_last_ghosts = ghosts
+	stats["passes"] += 1
+	_drag_index_ready = false
 	_ghost_text_uv.clear()
 	_annotation_hits.clear()
 	_dim_preview_params = {}
@@ -904,36 +1117,30 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 	if session != null:
 		for a in session.annotations:
 			selected_labels["%s:%s" % [a["kind"], a["id"]]] = true
+	_dim_ctx = {"selected": selected_labels}
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
-	for child in _constraint_labels.get_children():
-		_constraint_labels.remove_child(child)
-		child.queue_free()
+	var glyphs_used := {}
+	_glyph_slots.clear()
+	_glyph_hit.clear()
 	if session != null and show_constraints:
-		_draw_constraint_glyphs(session, selected_labels)
+		_draw_constraint_glyphs(session, selected_labels, glyphs_used)
+	_prune_pool(_glyph_label_pool, _constraint_labels, glyphs_used)
+	var shared := {}
+	var dims_used := {}
+	var cache := {}
 	if session != null and show_dimensions:
 		for item in session.dimension_items():
-			var layout := _layout_for(item["spec"], str(item["text"]), session)
-			if (layout["segments"] as Array).is_empty() and (layout["arcs"] as Array).is_empty() and (layout["arrows"] as Array).is_empty():
+			var akey := "dimension:" + str(item["id"])
+			var entry := _dim_entry(session, item, akey, shared, false)
+			cache[akey] = entry
+			if not bool(entry["drawn"]):
 				continue
-			var item_colour: Color = DRIVEN_COLOUR if bool(item.get("driven", false)) else DIM_COLOUR
-			if session.failed_constraint_ids.has(str(item["id"])):
-				item_colour = FAILED_COLOUR
-			var akey := "dimension:%s" % str(item["id"])
-			var asel: bool = selected_labels.has(akey)
-			var ahov: bool = akey == _annotation_hover and not asel
-			if asel:
-				item_colour = _tokens.warn
-			elif ahov:
-				item_colour = DIM_COLOUR.lerp(_tokens.accent, 0.65)
-			_draw_dimension(verts, colors, layout, item_colour)
-			var dim_label := _label_on_sheet(str(item["text"]), layout, item_colour)
-			if ahov or asel:
-				dim_label.outline_modulate = _tokens.accent if ahov else _tokens.warn # an outline in the accent: hovered; warn: selected
-				dim_label.outline_size = 18
-			var text_h: float = float(LABEL_FONT) * LABEL_PIXEL / canvas_scale # (_dim_params' own text height, without its obstacle scan)
-			_annotation_hits.append({"kind": "dimension", "id": str(item["id"]), "uv": layout["text_uv"], "angle": float(layout["text_angle"]),
-				"half": Vector2(text_h * 0.6 * float(maxi(str(item["text"]).length(), 1)) * 0.5, text_h * 0.5)})
+			_dim_show(entry, akey, item, _dim_look(session, item, akey, selected_labels), dims_used)
+			verts.append_array(entry["v"])
+			colors.append_array(entry["c"])
+			_annotation_hits.append(entry["hit"])
+	_dim_cache = cache
 	for g in ([] if ghosts_hidden else ghosts):
 		var spec: Dictionary = g.get("spec", {})
 		if spec.is_empty():
@@ -942,45 +1149,181 @@ func _rebuild_dimensions(session, ghosts: Array = []) -> void:
 		var text: String = session.dimension_text(kind, float(g["value"])) if session != null else str(g["value"])
 		if bool(g.get("driven", false)):
 			text = "(%s)" % text
-		var layout := _layout_for(spec, text, session)
+		var layout := _layout_with(spec, text, session, shared)
 		_draw_dimension(verts, colors, layout, _tokens.warn)
-		_label_on_sheet(text, layout, _tokens.warn)
+		_sheet_label(_dim_label_pool, _labels, "ghost:" + str(g["key"]), dims_used, text, layout, _tokens.warn, 12, Color(0.02, 0.04, 0.08, 0.95))
 		_ghost_text_uv[str(g["key"])] = layout["text_uv"]
+	_prune_pool(_dim_label_pool, _labels, dims_used)
 	_set_surface(_dims, verts, colors)
 
 
-func _draw_constraint_glyphs(session, selected_labels: Dictionary = {}) -> void:
-	## A short letter beside what each constraint holds (H, V, //, |_, =, T, F...), flat in the sketch plane, stacked when an entity has several.
-	var stacked := {}
-	var k := 1.0 / canvas_scale
-	for item in session.constraint_items():
-		var owner := str(item["owner"])
-		var n: int = int(stacked.get(owner, 0))
-		stacked[owner] = n + 1
-		var uv: Vector2 = item["uv"] + (item["normal"] as Vector2) * (GLYPH_OFFSET + GLYPH_STEP * n) * k
-		var label := Label3D.new()
-		label.text = str(item["text"])
-		label.font_size = LABEL_FONT
-		label.pixel_size = LABEL_PIXEL * 0.7 / canvas_scale
-		var gkey := "constraint:%s" % str(item["id"])
-		var gsel: bool = selected_labels.has(gkey)
-		var ghov: bool = gkey == _annotation_hover and not gsel
-		var glyph_colour: Color = FAILED_COLOUR if session.failed_constraint_ids.has(str(item["id"])) else CONSTRAINT_GLYPH_COLOUR
-		label.modulate = _tokens.warn if gsel else (glyph_colour.lerp(_tokens.accent, 0.65) if ghov else glyph_colour)
-		label.outline_size = 18 if (gsel or ghov) else 10
-		label.outline_modulate = Color(0.02, 0.04, 0.08, 0.95)
+func _redraw_dimensions_moved(session, moved: Array) -> void:
+	## A point drag's frame (redraw_moved): only the dimensions and glyphs a moved point touches are made again, each dimension keeping the side it stands on, and the dimensions'
+	## strokes are put together from the kept ones. Nothing is added, taken off or reordered: a drag changes where things are, not what there is.
+	stats["moved_passes"] += 1
+	if not _drag_index_ready:
+		_drag_index.clear()
+		for cid in session.constraints:
+			if not _dim_cache.has("dimension:" + str(cid)) and not _glyph_slots.has(str(cid)):
+				continue
+			for pid in session.constraint_point_ids(session.constraints[cid]):
+				var list: Array = _drag_index.get(str(pid), [])
+				list.append(str(cid))
+				_drag_index[str(pid)] = list
+		_drag_index_ready = true
+	var affected := {}
+	for pid in moved:
+		for cid in _drag_index.get(str(pid), []):
+			affected[cid] = true
+	var shared := {}
+	var selected_labels: Dictionary = _dim_ctx["selected"]
+	for cid in affected:
+		var akey := "dimension:" + str(cid)
+		if _dim_cache.has(akey):
+			_dim_moved(session, session.dimension_item_for(str(cid)), akey, shared, selected_labels)
+		if _glyph_slots.has(cid):
+			var items: Array = session.glyph_items_of(str(cid), session.constraints[cid])
+			var slots: Array = _glyph_slots[cid]
+			if items.size() == slots.size():
+				for i in items.size():
+					_glyph_write(session, items[i], slots[i], selected_labels)
+	if show_dimensions:
+		for item in session.driven_items(): # reference dimensions measure: their values follow the points
+			var akey := "dimension:" + str(item["id"])
+			if _dim_cache.has(akey):
+				_dim_moved(session, item, akey, shared, selected_labels)
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for akey in _dim_cache:
+		var entry: Dictionary = _dim_cache[akey]
+		if bool(entry["drawn"]) and entry["colour"] != null:
+			verts.append_array(entry["v"])
+			colors.append_array(entry["c"])
+	_set_surface(_dims, verts, colors)
+
+
+func _dim_moved(session, item: Dictionary, akey: String, shared: Dictionary, selected_labels: Dictionary) -> void:
+	if item.is_empty():
+		return
+	var entry := _dim_entry(session, item, akey, shared, true)
+	_dim_cache[akey] = entry # (the key is there: the order of the cache stays)
+	if bool(entry["drawn"]):
+		_dim_show(entry, akey, item, _dim_look(session, item, akey, selected_labels), null)
+
+
+func _prune_pool(pool: Dictionary, parent: Node3D, used: Dictionary) -> void:
+	## The labels a pass did not use are taken off (and freed).
+	for key in pool.keys():
+		if not used.has(key):
+			var label: Label3D = pool[key]
+			parent.remove_child(label)
+			label.queue_free()
+			pool.erase(key)
+
+
+func _pool_label(pool: Dictionary, parent: Node3D, key: String) -> Label3D:
+	## The pooled label for `key`, made on first use.
+	var label: Label3D = pool.get(key)
+	if label == null:
+		stats["labels_made"] += 1
+		label = Label3D.new()
 		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		label.double_sided = true
 		label.shaded = false
 		label.no_depth_test = true
+		label.font_size = LABEL_FONT
+		pool[key] = label
+		parent.add_child(label)
+	return label
+
+
+func _pool_take(pool: Dictionary, parent: Node3D, key: String, used: Variant) -> Label3D:
+	## The pooled label, moved to the next place among this pass's labels so the children stay in the order the pass drew them (`used` null: a drag's frame, nothing is reordered).
+	var label := _pool_label(pool, parent, key)
+	if used is Dictionary:
+		var at: int = (used as Dictionary).size()
+		if label.get_index() != at:
+			parent.move_child(label, at)
+		used[key] = true
+	return label
+
+
+func _sheet_label(pool: Dictionary, parent: Node3D, key: String, used: Variant, text: String, layout: Dictionary, colour: Color, outline_size: int, outline_colour: Color) -> void:
+	## A dimension's value written along its line, in the pooled label for `key`; nothing is set that is already as it should be.
+	var label := _pool_take(pool, parent, key, used)
+	var angle: float = float(layout["text_angle"])
+	var uv: Vector2 = layout["text_uv"]
+	# in the canvas's own space the sketch's u is x, v is y and the sheet's normal is z (the canvas node turns it onto the part's plane)
+	var xf := Transform3D(Basis(Vector3(cos(angle), sin(angle), 0.0), Vector3(-sin(angle), cos(angle), 0.0), Vector3(0, 0, 1)), canvas_point(uv, 3.0))
+	var shown := contains(uv) # a label can't be clipped by the line shader: it shows while its middle is in the window
+	if label.visible != shown:
+		label.visible = shown # (set_frame moves the window without a pass: the label's own state is what is compared, not the signature)
+	var sig := [text, colour, outline_size, outline_colour, xf, canvas_scale]
+	if label.has_meta("sig") and label.get_meta("sig") == sig:
+		return
+	label.set_meta("sig", sig)
+	label.text = text
+	label.pixel_size = LABEL_PIXEL / canvas_scale
+	label.modulate = colour
+	label.outline_size = outline_size
+	label.outline_modulate = outline_colour
+	label.render_priority = 5
+	label.transform = xf
+	label.set_meta("uv", uv)
+
+
+func _draw_constraint_glyphs(session, selected_labels: Dictionary, used: Dictionary) -> void:
+	## A short letter beside what each constraint holds (H, V, //, |_, =, T, F...), flat in the sketch plane, stacked when an entity has several. Pooled as the dimension labels are.
+	var stacked := {}
+	for item in session.constraint_items():
+		var owner := str(item["owner"])
+		var n: int = int(stacked.get(owner, 0))
+		stacked[owner] = n + 1
+		var gkey := "constraint:%s@%s#%d" % [str(item["id"]), owner, n]
+		var slot := [gkey, n]
+		var list: Array = _glyph_slots.get(str(item["id"]), [])
+		list.append(slot)
+		_glyph_slots[str(item["id"])] = list
+		_pool_take(_glyph_label_pool, _constraint_labels, gkey, used)
+		var hit := _glyph_write(session, item, slot, selected_labels)
+		_annotation_hits.append(hit)
+		_glyph_hit[gkey] = hit
+
+
+func _glyph_write(session, item: Dictionary, slot: Array, selected_labels: Dictionary) -> Dictionary:
+	## One glyph into its pooled label (where it stands, how it is lit), nothing set that is already as it should be; returns its hit {kind, id, uv, angle, half}, the one the list of
+	## hits holds (changed in place when the glyph moves).
+	var k := 1.0 / canvas_scale
+	var n: int = slot[1]
+	var uv: Vector2 = item["uv"] + (item["normal"] as Vector2) * (GLYPH_OFFSET + GLYPH_STEP * n) * k
+	var label: Label3D = _glyph_label_pool[slot[0]]
+	var ckey := "constraint:%s" % str(item["id"])
+	var gsel: bool = selected_labels.has(ckey)
+	var ghov: bool = ckey == _annotation_hover and not gsel
+	var glyph_colour: Color = FAILED_COLOUR if session.failed_constraint_ids.has(str(item["id"])) else CONSTRAINT_GLYPH_COLOUR
+	var colour: Color = _tokens.warn if gsel else (glyph_colour.lerp(_tokens.accent, 0.65) if ghov else glyph_colour)
+	var outline_size := 18 if (gsel or ghov) else 10
+	var outline_colour: Color = (_tokens.warn if gsel else _tokens.accent) if (gsel or ghov) else Color(0.02, 0.04, 0.08, 0.95)
+	var shown := contains(uv)
+	if label.visible != shown:
+		label.visible = shown
+	var xf := Transform3D(Basis.IDENTITY, canvas_point(uv, 3.0))
+	var sig := [str(item["text"]), colour, outline_size, outline_colour, xf, canvas_scale]
+	if not label.has_meta("sig") or label.get_meta("sig") != sig:
+		label.set_meta("sig", sig)
+		label.text = str(item["text"])
+		label.pixel_size = LABEL_PIXEL * 0.7 / canvas_scale
+		label.modulate = colour
+		label.outline_size = outline_size
+		label.outline_modulate = outline_colour
 		label.render_priority = 4
-		label.transform = Transform3D(Basis.IDENTITY, canvas_point(uv, 3.0))
+		label.transform = xf
 		label.set_meta("uv", uv)
-		label.visible = contains(uv)
-		if gsel or ghov:
-			label.outline_modulate = _tokens.warn if gsel else _tokens.accent
-		_constraint_labels.add_child(label)
-		_annotation_hits.append({"kind": "constraint", "id": str(item["id"]), "uv": uv, "angle": 0.0, "half": Vector2.ONE * InputSource.value(input_source, "glyph") / canvas_scale})
+	var hit: Dictionary = _glyph_hit.get(slot[0], {})
+	if hit.is_empty():
+		return {"kind": "constraint", "id": str(item["id"]), "uv": uv, "angle": 0.0, "half": Vector2.ONE * InputSource.value(input_source, "glyph") / canvas_scale}
+	hit["uv"] = uv
+	return hit
 
 
 func constraint_glyph_texts() -> Array:
@@ -988,7 +1331,8 @@ func constraint_glyph_texts() -> Array:
 
 
 func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> Label3D:
-	## The value, lying IN the sketch plane along its dimension line (upright: left to right or bottom to top), not a sign turned to face you.
+	## A new label: the value, lying IN the sketch plane along its dimension line (upright: left to right or bottom to top), not a sign turned to face you. (The
+	## dimensions' own labels are pooled, _sheet_label; this is the Dimension tool's one preview label.)
 	var label := Label3D.new()
 	label.text = text
 	label.font_size = LABEL_FONT
@@ -1005,7 +1349,7 @@ func _label_on_sheet(text: String, layout: Dictionary, colour: Color) -> Label3D
 	# in the canvas's own space the sketch's u is x, v is y and the sheet's normal is z (the canvas node turns it onto the part's plane)
 	label.transform = Transform3D(Basis(Vector3(cos(angle), sin(angle), 0.0), Vector3(-sin(angle), cos(angle), 0.0), Vector3(0, 0, 1)), canvas_point(layout["text_uv"], 3.0))
 	label.set_meta("uv", layout["text_uv"])
-	label.visible = contains(layout["text_uv"]) # a label can't be clipped by the line shader: it shows while its middle is in the window
+	label.visible = contains(layout["text_uv"])
 	_labels.add_child(label)
 	return label
 
@@ -1029,13 +1373,13 @@ func annotation_near(uv: Vector2, reach_mm: float) -> Dictionary:
 
 
 func set_annotation_hover(kind_id: String) -> void:
-	## "kind:id" of the label under the laser ("" = none): drawn with an accent outline, not the selected look. Redraws only when it changes.
+	## "kind:id" of the label under the laser ("" = none): drawn with an accent outline, not the selected look. Redraws only when it changes: the geometry the label holds is lit
+	## too, and the labels are restyled in place (none is made or freed).
 	if kind_id == _annotation_hover:
 		return
 	_annotation_hover = kind_id
 	if _last_session != null:
-		rebuild(_last_session, _last_highlight, _last_hover) # the geometry the label holds is lit too (and the labels redrawn)
-		_rebuild_dimensions(_last_session, _last_session.ghosts)
+		rebuild(_last_session, _last_highlight, _last_hover, _last_session.ghosts)
 	else:
 		_rebuild_dimensions(_last_session, [])
 

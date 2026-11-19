@@ -3484,37 +3484,43 @@ func constraint_items() -> Array:
 	## several on one line stack). Coincident points are left out (the shared point is the glyph) and dimensions are dimension_items()'s.
 	var out: Array = []
 	for id in constraints:
-		var c: Dictionary = constraints[id]
-		var type := str(c.get("type", ""))
-		if not CONSTRAINT_GLYPHS.has(type):
+		out.append_array(glyph_items_of(str(id), constraints[id]))
+	return out
+
+
+func glyph_items_of(id: String, c: Dictionary) -> Array:
+	## The glyphs of one constraint (constraint_items()'s rows for it, in its order): none for a dimension or a coincident pair.
+	var out: Array = []
+	var type := str(c.get("type", ""))
+	if not CONSTRAINT_GLYPHS.has(type):
+		return out
+	var text: String = CONSTRAINT_GLYPHS[type]
+	var owners: Array = []
+	match type:
+		"horizontal", "vertical":
+			owners = [str(c.get("line_id", ""))]
+		"parallel", "perpendicular", "equal_length", "collinear":
+			owners = [str(c.get("line1_id", "")), str(c.get("line2_id", ""))]
+		"concentric":
+			owners = [str(c.get("entity1_id", "")), str(c.get("entity2_id", ""))]
+		"equal_radius":
+			owners = [_curve_with_centre(str(c.get("center1_point_id", ""))), _curve_with_centre(str(c.get("center2_point_id", "")))]
+		"point_on_line", "at_midpoint", "point_on_circle", "point_on_ellipse":
+			owners = [str(c.get("point_id", ""))]
+		"tangent":
+			owners = [str(c.get("line_id", ""))]
+		"curve_tangent":
+			owners = [str(c.get("shared_point_id", ""))]
+		"spline_tangent":
+			owners = [str(c.get("segment_a_p3", ""))] # the join of the two segments
+		"fixed":
+			owners = _fix_owners(c.get("point_ids", []))
+	for owner in owners:
+		if str(owner) == "":
 			continue
-		var text: String = CONSTRAINT_GLYPHS[type]
-		var owners: Array = []
-		match type:
-			"horizontal", "vertical":
-				owners = [str(c.get("line_id", ""))]
-			"parallel", "perpendicular", "equal_length", "collinear":
-				owners = [str(c.get("line1_id", "")), str(c.get("line2_id", ""))]
-			"concentric":
-				owners = [str(c.get("entity1_id", "")), str(c.get("entity2_id", ""))]
-			"equal_radius":
-				owners = [_curve_with_centre(str(c.get("center1_point_id", ""))), _curve_with_centre(str(c.get("center2_point_id", "")))]
-			"point_on_line", "at_midpoint", "point_on_circle", "point_on_ellipse":
-				owners = [str(c.get("point_id", ""))]
-			"tangent":
-				owners = [str(c.get("line_id", ""))]
-			"curve_tangent":
-				owners = [str(c.get("shared_point_id", ""))]
-			"spline_tangent":
-				owners = [str(c.get("segment_a_p3", ""))] # the join of the two segments
-			"fixed":
-				owners = _fix_owners(c.get("point_ids", []))
-		for owner in owners:
-			if str(owner) == "":
-				continue
-			var spot := _glyph_spot(str(owner))
-			if not spot.is_empty():
-				out.append({"id": id, "text": text, "uv": spot["uv"], "normal": spot["normal"], "owner": owner})
+		var spot := _glyph_spot(str(owner))
+		if not spot.is_empty():
+			out.append({"id": id, "text": text, "uv": spot["uv"], "normal": spot["normal"], "owner": owner})
 	return out
 
 
@@ -3539,11 +3545,7 @@ func dimension_items() -> Array:
 	## draws them. A circle's / arc's own size dimension is a radius; a distance between two points is linear, horizontal or vertical; the part D types
 	## (arc length, two angles, three distances to circles) have their own. A saved label placement is honoured for every type; unplaced, the layout is automatic.
 	var out: Array = []
-	var radius_of := {}
-	for id in circles:
-		radius_of[str(circles[id].get("k", ""))] = ["circle", id]
-	for id in arcs:
-		radius_of[str(arcs[id].get("k", ""))] = ["arc", id]
+	var radius_of := _radius_owners()
 	for id in constraints:
 		var item := _dimension_item(str(id), constraints[id], radius_of)
 		if not item.is_empty():
@@ -3551,6 +3553,23 @@ func dimension_items() -> Array:
 	for item in driven_items():
 		out.append(item)
 	return out
+
+
+func dimension_item_for(id: String) -> Dictionary:
+	## One constraint's row of dimension_items() ({} when it is not a drawn dimension): what a point drag's frame asks for the dimensions a moved point touches.
+	if not constraints.has(id):
+		return {}
+	return _dimension_item(id, constraints[id], _radius_owners())
+
+
+func _radius_owners() -> Dictionary:
+	## radius constraint id -> ["circle" | "arc", id]
+	var radius_of := {}
+	for id in circles:
+		radius_of[str(circles[id].get("k", ""))] = ["circle", id]
+	for id in arcs:
+		radius_of[str(arcs[id].get("k", ""))] = ["arc", id]
+	return radius_of
 
 
 func _dimension_item(id: String, c: Dictionary, radius_of: Dictionary) -> Dictionary:
@@ -3799,11 +3818,11 @@ func drop_points(drop: Dictionary) -> Dictionary:
 	if updates.is_empty():
 		restore_points()
 		changed.emit()
-		return {"ok": true, "message": ""}
+		return {"ok": true, "message": "", "moved": false} # nothing moved: the editor says so rather than "Point moved."
 	if busy:
 		restore_points()
 		changed.emit()
-		return {"ok": false, "message": ""}
+		return {"ok": false, "message": "The sketch was busy: the point went back."}
 	busy = true
 	var before: Dictionary = point_xy.duplicate(true)
 	var wish: Array = []
@@ -3821,7 +3840,7 @@ func drop_points(drop: Dictionary) -> Dictionary:
 			back.append({"id": str(id), "x": before[id][0], "y": before[id][1]})
 	if not back.is_empty():
 		_undo.append({"label": "point move", "calls": [[HTTPClient.METHOD_POST, SKETCH + sketch_id + "/solve-and-refresh", {"anchor_point_ids": [], "point_updates": back}]]})
-	return {"ok": true, "message": "" if converged else "Moved, but the sketch no longer solves: the red parts say where. Undo puts it back."}
+	return {"ok": true, "moved": true, "message": "" if converged else "Moved, but the sketch no longer solves: the red parts say where. Undo puts it back."}
 
 
 func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dictionary:

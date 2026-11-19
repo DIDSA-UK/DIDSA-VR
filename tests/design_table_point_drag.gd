@@ -3,7 +3,8 @@ extends SceneTree
 ## first). With the Select tool (F6): a quick pull on a corner still only selects; the trigger held on it and the laser moved drags it (the projector runs, synchronous
 ## here), the corner and what hangs from it follow the laser with nothing sent yet; letting go sends ONE solve-and-refresh with the wish (`point_updates`) and the grabbed
 ## point as an anchor, and the backend's answer is what the sketch shows; Undo restores the positions; B during the drag puts the points back and sends nothing; a press on
-## the origin starts no drag; with a label and a point both under the laser the nearer wins (a tie goes to the point) and a line beside a label still gives way to it.
+## the origin starts no drag; with a label and a point both under the laser the nearer wins (a tie goes to the point) and a line beside a label still gives way to it. F3 (C2): a press while the sketch is busy starts no drag and says why; a drop that moved nothing
+## says "That point can't move that way."; a drop that finds the sketch busy puts the points back and says so.
 ## NOT checked: a real trigger held by a hand, the shake of a real laser, the feel of a constrained point sliding, the lag of a large group, the thread (sketch_point_drag.gd).
 ## Run: "$GODOT" --headless --path . --script res://tests/design_table_point_drag.gd  (see tests/README.md)
 
@@ -285,6 +286,60 @@ func _initialize() -> void:
 	r.button_released.emit("by_button")
 	r.button_released.emit("trigger_click")
 	await frames(3)
+
+	# --- C2 (F3): a press while the sketch is busy is refused and says why; so is a drag that would start while it is
+	sess.clear_selection()
+	await frames(2)
+	var cu: Vector2 = sess.points[corner] # (the dimension made above moved the rectangle)
+	var busy_solves := calls_to("/solve-and-refresh").size()
+	await aim_uv(cu)
+	sess.busy = true
+	r.button_pressed.emit("trigger_click")
+	await frames(2)
+	await aim_uv(cu + Vector2(9, 7))
+	_check(not ed.point_dragging() and table.ui.status_text().begins_with("The sketch is still saving"), "a press while the sketch is busy starts no drag, and the status line says why (%s)" % table.ui.status_text())
+	r.button_released.emit("trigger_click")
+	sess.busy = false
+	await frames(3)
+	await aim_uv(cu)
+	r.button_pressed.emit("trigger_click")
+	await frames(2)
+	sess.busy = true # the sketch took something on while the point was held
+	table.set_status("")
+	await aim_uv(cu + Vector2(9, 7))
+	_check(not ed.point_dragging() and table.ui.status_text().begins_with("The sketch is still saving"), "a hold that would become a drag while the sketch is busy waits and says why")
+	sess.busy = false
+	await aim_uv(cu + Vector2(10, 7))
+	_check(ed.point_dragging(), "...and drags once the sketch is free")
+	r.button_pressed.emit("by_button")
+	await frames(1)
+	r.button_released.emit("by_button")
+	r.button_released.emit("trigger_click")
+	await frames(3)
+	_check(not ed.point_dragging() and calls_to("/solve-and-refresh").size() == busy_solves, "...and B puts it back with nothing sent")
+
+	# --- C2 / B3 (b): a drop that moved nothing says so (no "Point moved.", the error buzz), and one that finds the sketch busy puts the points back and says that
+	await aim_uv(cu)
+	r.button_pressed.emit("trigger_click")
+	await frames(2)
+	await aim_uv(cu + Vector2(9, 7))
+	var held_drag: bool = ed.point_dragging()
+	ed.point_drag._accepted = ed.point_drag._start.duplicate(true) # the projector could not move it (a straight chain, a point the constraints hold)
+	r.button_released.emit("trigger_click")
+	await frames(3)
+	_check(held_drag and not ed.point_dragging() and table.ui.status_text() == "That point can't move that way." and calls_to("/solve-and-refresh").size() == busy_solves,
+		"a drop that moved nothing says \"That point can't move that way.\" and sends nothing (%s)" % table.ui.status_text())
+	await aim_uv(cu)
+	r.button_pressed.emit("trigger_click")
+	await frames(2)
+	await aim_uv(cu + Vector2(9, 7))
+	var held_again: bool = ed.point_dragging()
+	sess.busy = true # something else took the sketch while the point was held
+	r.button_released.emit("trigger_click")
+	await frames(3)
+	sess.busy = false
+	_check(held_again and table.ui.status_text() == "The sketch was busy: the point went back." and (sess.points[corner] as Vector2).distance_to(cu) < 1e-3 and calls_to("/solve-and-refresh").size() == busy_solves,
+		"a drop that finds the sketch busy puts the point back and says so (%s)" % table.ui.status_text())
 
 	ed.point_drag.wait_all()
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)

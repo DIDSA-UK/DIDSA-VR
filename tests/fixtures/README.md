@@ -115,3 +115,10 @@ for each of the 22 M0 scene variants (chain, bolted chain, frame, linkage; float
 A **copy** of DIDSA-CAD's `backend/tests/data/pattern_copy_pose_vectors.json` (= `client/test/fixtures/pattern_copy_pose_vectors.json`): 50 cases (every pattern kind x five source poses), the pose of each live copy
 as the BACKEND's `assembly.pattern_copy_pose` gives it, tolerance 1e-9, for `scripts/motion/pattern_copy_pose.gd` (`tests/pattern_copy_pose.gd`). Do not edit it here: regenerate it in DIDSA-CAD
 (`cd backend && python ../tools/motion_vectors/pattern_copy_pose_vectors.py`, with the backend's python: the backend is the reference) and copy it over.
+
+## From a real backend, not copied from DIDSA-CAD: `sketch_midsize_state.json`
+
+The answers of a local DIDSA-CAD backend for the sketch of parity follow-ups C1 (10 dimensioned rectangles with a circle each and a 20-point dimensioned chain):
+`state` (`POST .../solve-and-refresh`), `export` (`GET .../export`) and the origin's point id. Used by `tests/sketch_midsize_redraw.gd`. Made by
+`tests/helpers/make_sketch_midsize_fixture.gd` (the VR session's own taps and dimensions against a running backend, `secrets.cfg` pointing at it); the ids are the
+backend's UUIDs, so a rebuild changes every id but not the shape of the sketch. Nothing compares it with DIDSA-CAD: it is a snapshot, not a mirror.

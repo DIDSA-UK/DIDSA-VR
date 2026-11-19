@@ -28,7 +28,7 @@ extends RefCounted
 ##   angle / arc_length   label_a (radians, absolute): the label's place round the arc; angle's r and arc_length's `ra` (the dimension arc's radius) are the saved radii
 ## The label's centre is then exactly where it was saved (text_uv), the dimension line is broken round it or runs on out to it.
 ## params: offset (distance of the dimension line from the geometry), arrow (arrowhead length), gap (extension line gap), over (overshoot),
-## centroid (the middle of the sketch: with no better reason a dimension line goes away from it), obstacles (the sketch's points: the dimension line
+## side_hint (F3, optional: +-1, the side a layout chose before, kept without scanning for room; the layout's `side` says it), centroid (the middle of the sketch: with no better reason a dimension line goes away from it), obstacles (the sketch's points: the dimension line
 ## takes the side with more room), text_w / text_h (the text's size, to keep it clear of its leader).
 
 
@@ -147,10 +147,16 @@ static func _linear(a: Vector2, b: Vector2, params: Dictionary) -> Dictionary:
 	var off := float(params["offset"])
 	var gap := float(params["gap"])
 	var over := float(params["over"])
-	if n.dot((a + b) * 0.5 - centroid) < 0.0:
-		n = -n # (with nothing to tell the sides apart: away from the middle of the sketch)
-	if not prefer_first([a + n * off, b + n * off], [a - n * off, b - n * off], params, a, b, off):
-		n = -n
+	var left := n
+	if params.has("side_hint"):
+		# F3: a point drag keeps the side the dimension was laid out on (`side` of its last layout) and scans nothing for room
+		n = left * float(params["side_hint"])
+	else:
+		if n.dot((a + b) * 0.5 - centroid) < 0.0:
+			n = -n # (with nothing to tell the sides apart: away from the middle of the sketch)
+		if not prefer_first([a + n * off, b + n * off], [a - n * off, b - n * off], params, a, b, off):
+			n = -n
+	out["side"] = 1.0 if n.dot(left) > 0.0 else -1.0 # which side of a -> b the dimension line stands (+1: to its left)
 	var p1 := a + n * off
 	var p2 := b + n * off
 	out["segments"].append([a + n * gap, p1 + n * over])
@@ -182,7 +188,10 @@ static func _axis_aligned(a: Vector2, b: Vector2, params: Dictionary, horizontal
 		var high := [Vector2(a.x, y_high), Vector2(b.x, y_high)]
 		var mid_y := (a.y + b.y) * 0.5
 		var away_low := mid_y <= centroid.y
-		side = -1.0 if (prefer_first(low, high, params, a, b, off) if away_low else not prefer_first(high, low, params, a, b, off)) else 1.0
+		if params.has("side_hint"):
+			side = float(params["side_hint"])
+		else:
+			side = -1.0 if (prefer_first(low, high, params, a, b, off) if away_low else not prefer_first(high, low, params, a, b, off)) else 1.0
 		var y := y_low if side < 0.0 else y_high
 		p1 = Vector2(a.x, y)
 		p2 = Vector2(b.x, y)
@@ -195,7 +204,10 @@ static func _axis_aligned(a: Vector2, b: Vector2, params: Dictionary, horizontal
 		var right := [Vector2(x_high, a.y), Vector2(x_high, b.y)]
 		var mid_x := (a.x + b.x) * 0.5
 		var away_left := mid_x <= centroid.x
-		side = -1.0 if (prefer_first(left, right, params, a, b, off) if away_left else not prefer_first(right, left, params, a, b, off)) else 1.0
+		if params.has("side_hint"):
+			side = float(params["side_hint"])
+		else:
+			side = -1.0 if (prefer_first(left, right, params, a, b, off) if away_left else not prefer_first(right, left, params, a, b, off)) else 1.0
 		var x := x_low if side < 0.0 else x_high
 		p1 = Vector2(x, a.y)
 		p2 = Vector2(x, b.y)
@@ -210,6 +222,7 @@ static func _axis_aligned(a: Vector2, b: Vector2, params: Dictionary, horizontal
 	out["text_angle"] = angle
 	out["text_up"] = frame[1]
 	out["text_uv"] = (p1 + p2) * 0.5 + (frame[1] as Vector2) * (float(params["text_h"]) * 0.75)
+	out["side"] = side # (-1: the low / left side, +1: the high / right one)
 	return out
 
 

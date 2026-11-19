@@ -4,6 +4,7 @@ extends SceneTree
 ## main thread) and dropped with SketchSession.drop_points (ONE solve-and-refresh: point_updates + the anchor).
 ##   * Every frame of the drag keeps the width; the drop's positions are the backend's: its stored points equal the session's and the dimension still reads 40.
 ##   * Undo puts every point back (the backend's stored points are the old ones).
+##   * (F3, C2) The drop lands where the laser was at the release: a wish the thread never ran is solved at the drop, and the backend stores that point.
 ##   * A Fix on a corner pins it: a press on it starts no drag, and dragging another corner leaves it exactly where it was, in the backend too.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_sketch_point_drag.gd
 ## Needs secrets.cfg to point at a running backend (a throwaway CAD_API_KEY, see docs/status.md "How this has been worked on").
@@ -170,6 +171,30 @@ func _initialize() -> void:
 	var fixed_back: Dictionary = await backend_points()
 	_check(not (drop2["updates"] as Dictionary).has(a) and (fixed_back[a] as Vector2).distance_to(a_at) < 1e-6 and worst2 < 1e-3,
 		"dragging another corner leaves the fixed one exactly where it was, and the width held (%s)" % str(result2["ok"]))
+
+	# --- F3 / C2: the drop lands where the laser was at the release. A free end of a line is dragged on the thread: the first call is running when the laser moves on, so the
+	# later wish is stored, never run (the poke stands for a second step that found a task in flight); the drop solves it, and the backend's stored point is the release point
+	s.set_tool("line")
+	await s.tap({"uv": Vector2(70, 5)})
+	await s.tap({"uv": Vector2(95, 12)})
+	s.set_tool("select")
+	var free := corner_near(Vector2(95, 12))
+	_check(free != "" and not (free in PointDrag.pinned_ids(s)), "a free line end to drag (%s)" % free)
+	var d3 := PointDrag.new()
+	var from3: Vector2 = s.points[free]
+	d3.begin(s, free, from3)
+	var wish1 := from3 + Vector2(6, 4)
+	var release := from3 + Vector2(14, -9)
+	d3.step(wish1)
+	d3._wish = release
+	var drop3: Dictionary = d3.finish()
+	var at_release: Array = drop3["updates"].get(free, [INF, INF])
+	_check(Vector2(at_release[0], at_release[1]).distance_to(release) < 1e-6, "the drop carries the release point, not the first call's answer (%s for %s)" % [str(at_release), str(release)])
+	var result3: Dictionary = await s.drop_points(drop3)
+	var stored3: Dictionary = await backend_points()
+	_check(bool(result3["ok"]) and stored3.has(free) and (stored3[free] as Vector2).distance_to(release) < 1e-3 and (s.points[free] as Vector2).distance_to(release) < 1e-3,
+		"the backend stored the dragged point at the release point (%s for %s)" % [str(stored3.get(free)), str(release)])
+	d3.wait_all()
 
 	d.wait_all()
 	d2.wait_all()

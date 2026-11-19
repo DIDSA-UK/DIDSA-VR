@@ -136,6 +136,8 @@ var _dim_last_uv: Variant = null ## where the laser was when it was drawn (null:
 
 var _label_hold: Dictionary = {} ## the trigger held on something Select can drag: {kind: "label" (F5, S6: id, press (sketch mm), was_selected, dragging, place) | "point" (F6, S10: id, press, dragging, pinned)}; one pull and let go leaves it a plain pull
 var input_source := InputSource.DEFAULT ## S7: which source points (hit sizes: input_source.gd)
+const BUSY_NOTE := "The sketch is still saving: hold on a moment, then try again."
+var drag_redraw_ms: Array = [] ## F3: what each frame of the point drag in progress spent redrawing the sketch (ms, after the projector's answer was laid over the points; the headless number has no GPU cost in it)
 var point_drag := PointDrag.new() ## S10: the sketch-point drag in progress (its projector calls run off the main thread; `synchronous` for tests)
 var _hover_uv: Variant = null
 var _snap: Dictionary = {}
@@ -1831,9 +1833,8 @@ func _refresh_view() -> void:
 	view.show_dimensions = table.build.visibility.is_on(Visibility.DIMENSIONS) # the drawer's Dims / Constr. tiles: only this open sketch's own glyphs
 	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
 	dim_flow.sync(session)
-	view.rebuild(session, session.selection, _hover_entity)
 	view.ghosts_hidden = table.active_tool == "dimension" and not dim_flow.show_all # S5: the Dimension tool shows one candidate, at the laser
-	view.show_ghosts(session.ghosts)
+	view.rebuild(session, session.selection, _hover_entity, session.ghosts) # F3: the drawing and its dimensions, made once
 	_dim_last_uv = null
 	_update_dimension_preview(_hover_uv)
 	var keep_id: String = session.merge_keep_id() if table.active_tool == SELECT_TOOL else ""
@@ -2011,9 +2012,17 @@ func _point_drag_move(uv: Variant) -> void:
 				UiFeedback.haptic(table._right, "error")
 				table.set_status("That point is held in place (the origin, the part, or a Fix): it does not move.")
 			return
+		if session.busy:
+			# C2: the sketch is still saving something (the last drop's solve, say): a drag started now would be dropped with nothing said. Said once; the drag starts when it is free.
+			if not bool(_label_hold.get("busy_said", false)):
+				_label_hold["busy_said"] = true
+				UiFeedback.haptic(table._right, "error")
+				table.set_status(BUSY_NOTE)
+			return
 		if not point_drag.begin(session, str(_label_hold["id"]), _label_hold["press"]):
 			return
 		_label_hold["dragging"] = true
+		drag_redraw_ms = []
 		if table.keyboard_open():
 			table.close_keyboard()
 		_last_pull = {"key": "", "ms": 0}
@@ -2025,7 +2034,9 @@ func _point_drag_move(uv: Variant) -> void:
 	for id in changed:
 		var p: Array = point_drag.accepted_point(str(id))
 		session.points[str(id)] = Vector2(p[0], p[1])
-	_refresh_view()
+	var t0 := Time.get_ticks_usec()
+	view.redraw_moved(session, changed) # F3: only the drawing of the moved points (the drop's refresh redraws everything)
+	drag_redraw_ms.append(float(Time.get_ticks_usec() - t0) / 1000.0)
 
 
 func _end_point_hold() -> void:
@@ -2038,7 +2049,11 @@ func _end_point_hold() -> void:
 	var result: Dictionary = await session.drop_points(drop)
 	if session == null:
 		return
-	if bool(result["ok"]) and str(result["message"]) == "":
+	if bool(result["ok"]) and str(result["message"]) == "" and not bool(result.get("moved", true)):
+		# C2 / B3 (b): nothing moved (a straight chain, a point the constraints hold): no "Point moved." and no confirm buzz
+		UiFeedback.haptic(table._right, "error")
+		table.set_status("That point can't move that way.")
+	elif bool(result["ok"]) and str(result["message"]) == "":
 		UiFeedback.haptic(table._right, "confirm")
 		table.set_status("Point moved.")
 	else:
@@ -2155,7 +2170,13 @@ func intent_adjust(x: float) -> bool:
 
 
 func _sketch_trigger() -> void:
-	if session == null or session.busy or _hover_uv == null:
+	if session == null or _hover_uv == null:
+		return
+	if session.busy:
+		if table.active_tool == SELECT_TOOL:
+			# C2: a pull while the sketch is saving (the last drop's solve, say) used to do nothing, silently: say so
+			UiFeedback.haptic(table._right, "error")
+			table.set_status(BUSY_NOTE)
 		return
 	var tool: String = table.active_tool
 	if SKETCH_TOOLS.has(tool):

@@ -217,8 +217,65 @@ func _initialize() -> void:
 			print("SMOKE scene-chain-20-curled %s: %d calls, mean %.2f ms, worst %.2f ms (a 90 Hz frame is 11.1 ms; the call is on the main thread only when synchronous)" % [mode, d.frame_ms.size(), _mean(d.frame_ms), _max(d.frame_ms)])
 			_check(d.frame_ms.size() >= 1, "the 20-point chain ran through the drag (%s)" % mode)
 
+	# --- C2: the drop solves the laser's last wish. On the slow 20-point group the first call is still running when the laser moves on, so the second wish is stored, not run; before
+	# F3 the drop sent the first call's answer (the point a frame or more short of the release), now one synchronous call from that answer settles it, as a synchronous drag does
+	for case in fixture["cases"]:
+		if str(case["id"]) != "scene-chain-20-curled":
+			continue
+		var anchor2 := str(case["input"]["anchors"][0])
+		var first := Vector2(case["frames"][0]["wish"][anchor2][0], case["frames"][0]["wish"][anchor2][1])
+		var last := Vector2(case["frames"][-1]["wish"][anchor2][0], case["frames"][-1]["wish"][anchor2][1])
+		var start2: Dictionary = case["input"]["start"]
+		var at := Vector2(start2[anchor2][0], start2[anchor2][1])
+		var reference := PointDrag.new()
+		reference.synchronous = true
+		reference.begin(_chain_session(case), anchor2, at)
+		reference.step(first)
+		reference.step(last)
+		var late := PointDrag.new()
+		late.begin(_chain_session(case), anchor2, at)
+		late.step(first)
+		late.step(last)
+		var still_running: bool = late.in_flight()
+		var settled: Dictionary = late.finish()
+		var ref_drop: Dictionary = reference.finish()
+		var same_end := true
+		for id in (ref_drop["updates"] as Dictionary):
+			var a: Array = settled["updates"].get(id, [INF, INF])
+			var b: Array = ref_drop["updates"][id]
+			if absf(float(a[0]) - float(b[0])) > 1e-9 or absf(float(a[1]) - float(b[1])) > 1e-9:
+				same_end = false
+		_check(still_running, "the first call is still running when the laser moves on (the last wish is stored, not run)")
+		_check(same_end and (settled["updates"] as Dictionary).size() == (ref_drop["updates"] as Dictionary).size() and not (settled["updates"] as Dictionary).is_empty(),
+			"the drop settles the last wish: the same points at the same places as a drag that ran every wish (%d points)" % (settled["updates"] as Dictionary).size())
+		var only_first := PointDrag.new()
+		only_first.synchronous = true
+		only_first.begin(_chain_session(case), anchor2, at)
+		only_first.step(first)
+		var short: Array = only_first.finish()["updates"].get(anchor2, [INF, INF])
+		var end: Array = settled["updates"].get(anchor2, [INF, INF])
+		_check(Vector2(end[0], end[1]).distance_to(Vector2(short[0], short[1])) > 0.5, "...and that is not where the first call's answer would have dropped it (%s against %s)" % [str(Vector2(end[0], end[1])), str(Vector2(short[0], short[1]))])
+		late.wait_all()
+		reference.wait_all()
+
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)
 	quit(0 if failures == 0 else 1)
+
+
+func _chain_session(case: Dictionary) -> Object:
+	## The session of a vector case (S9's scene-chain-20-curled): its points, lines, constraints and pinned points.
+	var big = Session.new(Callable())
+	var start: Dictionary = case["input"]["start"]
+	for id in start:
+		big.points[id] = Vector2(start[id][0], start[id][1])
+		big.point_xy[id] = [float(start[id][0]), float(start[id][1])]
+		big.point_locked[id] = false
+	big.lines = case["input"]["lines"]
+	for c in case["input"]["constraints"]:
+		big.constraints[str(c["id"])] = c
+	for id in case["input"]["pinned"]:
+		big.point_locked[id] = true
+	return big
 
 
 func _worst2(drag: PointDrag) -> float:
