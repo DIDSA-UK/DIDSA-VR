@@ -17,6 +17,8 @@ extends RefCounted
 ## Returns {unsupported, converged, points (the group's only: id -> [x, y]), residual_inf,
 ## variable_points, rows, exit, walks, rejected_steps, iterations}.
 ##
+## `SketchProjector.mobility(points, constraints, lines, point_id, pinned)` is the mobility oracle of spec 13.6 (F7: the pre-grab rule's "can this point move at all"): 0, 1 or 2, or -1 with no answer.
+##
 ## Plain 64-bit floats throughout (Vector2 is 32-bit in a standard build); the
 ## Jacobian comes from forward-mode duals (a PackedFloat64Array [value, d/dq0..])
 ## over the 2k coordinates of each constraint's k points.
@@ -94,6 +96,108 @@ static func project(points: Dictionary, constraints: Array, lines: Dictionary, a
 		pinned: Array = [], stiff: Array = [], reference: Dictionary = {}, provisional: Dictionary = {}) -> Dictionary:
 	var p = (load("res://scripts/motion/sketch_projector.gd") as GDScript).new()
 	return p._project(points, constraints, lines, anchors, pinned, stiff, reference, provisional)
+
+
+static func mobility(points: Dictionary, constraints: Array, lines: Dictionary, point_id: String, pinned: Array = []) -> int:
+	## The mobility oracle (projector spec 13.6, `analyseSketchMobility`): how many directions (0, 1 or 2) the point can move at first order, given every constraint of its group
+	## at the current positions (no provisional sizes). -1 when there is no answer (the group holds a spline tangency or an unknown type: the caller's fallback, 13.5); 2 for
+	## a point outside the group (no constraint reaches it) or a pinned one.
+	var p = (load("res://scripts/motion/sketch_projector.gd") as GDScript).new()
+	p._mobility_only = true
+	var r: Dictionary = p._project(points, constraints, lines, [point_id], pinned, [], {}, {})
+	if bool(r.get("unsupported", false)):
+		return -1
+	return int(p._mobility_of.get(point_id, 2))
+
+
+## Mobility (13.6): the dense Jacobian at _x, Gauss-Jordan, the null space orthonormalised, then each group point's 2 x 2 Gram matrix over it.
+var _mobility_only := false
+var _mobility_of := {} ## point id -> 0 / 1 / 2
+
+
+func _mobility_solve() -> void:
+	_evaluate(true)
+	var n := 2 * _ids.size()
+	var rows: Array = [] ## PackedFloat64Array per residual row that has a variable column
+	var big := 0.0
+	for i in _m:
+		if _roff[i + 1] == _roff[i]:
+			continue
+		var row := PackedFloat64Array()
+		row.resize(n)
+		for e in range(_roff[i], _roff[i + 1]):
+			row[_jcol[e]] += _jv[e]
+			big = maxf(big, absf(_jv[e]))
+		rows.append(row)
+	var skip := 1e-8 * maxf(1.0, big)
+	var pivots: Array = [] ## [column, row] in row order after elimination
+	var is_pivot := {}
+	var r0 := 0
+	for c in n:
+		if r0 >= rows.size():
+			break
+		var best := r0
+		var best_abs := absf((rows[r0] as PackedFloat64Array)[c])
+		for i in range(r0 + 1, rows.size()):
+			var a := absf((rows[i] as PackedFloat64Array)[c])
+			if a > best_abs:
+				best_abs = a
+				best = i
+		if best_abs <= skip:
+			continue
+		var tmp: PackedFloat64Array = rows[r0]
+		rows[r0] = rows[best]
+		rows[best] = tmp
+		var pr: PackedFloat64Array = rows[r0]
+		var inv := 1.0 / pr[c]
+		for j in n:
+			pr[j] *= inv
+		for i in rows.size():
+			if i == r0:
+				continue
+			var ri: PackedFloat64Array = rows[i]
+			var f := ri[c]
+			if f != 0.0:
+				for j in n:
+					ri[j] -= f * pr[j]
+		pivots.append([c, r0])
+		is_pivot[c] = true
+		r0 += 1
+	var basis: Array = [] ## orthonormal null-space vectors
+	for f in n:
+		if is_pivot.has(f):
+			continue
+		var v := PackedFloat64Array()
+		v.resize(n)
+		v[f] = 1.0
+		for pv in pivots:
+			v[pv[0]] = -(rows[pv[1]] as PackedFloat64Array)[f]
+		for q: PackedFloat64Array in basis:
+			var dot := 0.0
+			for j in n:
+				dot += v[j] * q[j]
+			for j in n:
+				v[j] -= dot * q[j]
+		var norm := 0.0
+		for j in n:
+			norm += v[j] * v[j]
+		norm = sqrt(norm)
+		if norm < 1e-12:
+			continue
+		for j in n:
+			v[j] /= norm
+		basis.append(v)
+	for k in _ids.size():
+		var gxx := 0.0
+		var gxy := 0.0
+		var gyy := 0.0
+		for q: PackedFloat64Array in basis:
+			gxx += q[2 * k] * q[2 * k]
+			gxy += q[2 * k] * q[2 * k + 1]
+			gyy += q[2 * k + 1] * q[2 * k + 1]
+		var mid := (gxx + gyy) / 2.0
+		var rad := sqrt(((gxx - gyy) / 2.0) * ((gxx - gyy) / 2.0) + gxy * gxy)
+		_mobility_of[_ids[k]] = (1 if mid + rad > 1e-9 else 0) + (1 if mid - rad > 1e-9 else 0)
 
 
 static func _xy(v) -> PackedFloat64Array:
@@ -326,6 +430,9 @@ func _project(points: Dictionary, constraints: Array, lines: Dictionary, anchors
 		_terms.append(term)
 		_m += term.nrows
 	_pattern()
+	if _mobility_only:
+		_mobility_solve()
+		return _result(false, true, {}, 0.0, g, _m, "none", 0, 0, 0)
 
 	var walk := _walk(diag, tau)
 	var pts := {}

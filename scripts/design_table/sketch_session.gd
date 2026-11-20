@@ -29,6 +29,7 @@ const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 
 const ShapeProposals := preload("res://scripts/motion/shape_proposals.gd")
+const SketchRigidity := preload("res://scripts/design_table/sketch_rigidity.gd")
 const SKETCH := "/sketch/sketches/"
 const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
 const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3, "ellipse": 3, "ellipse_arc": 5, "spline": 9999, "text": 1} ## (a spline takes any number: Finish makes it)
@@ -4117,24 +4118,53 @@ func load_shape_structure(point_id: String) -> void:
 			shape_records[shape["id"]]["structural_constraint_ids"] = _structure[str(shape["id"])]
 
 
-func point_rigidity(_id: String) -> String:
-	## What the rigidity analysis says of a point: "free", "fully" (fully constrained), "pinned", "over" (over-constrained), or "" when it is not known.
-	return ""
+func rigidity() -> RefCounted:
+	## The topological rigidity count (sketch_rigidity.gd, F7) of the sketch as it is. Fixed = the origin, the locked points and the points of a Fix; trust = the last solve
+	## converged with dof >= 0 (so a redundant but consistent set is not called over-constrained). No geometry is read; recomputed per call (a refresh or a press makes a few).
+	var fixed := {}
+	if origin_id != "":
+		fixed[origin_id] = true
+	for id in point_locked:
+		if bool(point_locked[id]):
+			fixed[str(id)] = true
+	for cid in constraints:
+		var c: Dictionary = constraints[cid]
+		if str(c.get("type", "")) == "fixed":
+			for pid in constraint_point_ids(c):
+				fixed[str(pid)] = true
+	return SketchRigidity.analyse(points.keys(), fixed.keys(), lines, constraints.values(), converged and dof >= 0)
+
+
+func point_rigidity(id: String) -> String:
+	## What the rigidity count says of a point: "over", "pinned" (tied to a fixed point by coincident / concentric links), "fully" (fully constrained) or "free".
+	var r: RefCounted = rigidity()
+	if r.is_over(id):
+		return "over"
+	if r.is_pinned(id):
+		return "pinned"
+	return "fully" if r.is_fully(id) else "free"
 
 
 func sketch_grounded() -> bool:
-	## The rigidity analysis grounds at least one point (the pre-grab rule's whole-sketch case).
-	return true
+	## The rigidity count grounds at least one point (the pre-grab rule's whole-sketch case).
+	return (rigidity() as RefCounted).any_grounded
 
 
-func on_contradictory_line(point_id: String) -> bool:
-	## The point is on a line that is both horizontal and vertical, or on either of two lines that are both parallel and perpendicular (13.5 step 2).
-	var kinds := {} ## line id -> {type: true}; pairs: "a|b" -> {type: true}
+func contradictory_points() -> Dictionary:
+	## id -> true: the endpoints of a line that is both horizontal and vertical, or of either of two lines that are both parallel and perpendicular (forced over-constrained,
+	## rigidity spec 4 and projector spec 13.5).
+	var kinds := {} ## line id -> {type: true}; "a|b" -> {type: true} for a pair of lines
+	var by_ends := {} ## "start|end" -> line id (a Horizontal / Vertical made between two points names no line; the line they end is the one meant)
+	for lid in lines:
+		by_ends["%s|%s" % [lines[lid]["a"], lines[lid]["b"]]] = str(lid)
+		by_ends["%s|%s" % [lines[lid]["b"], lines[lid]["a"]]] = str(lid)
 	for cid in constraints:
 		var c: Dictionary = constraints[cid]
 		var t := str(c.get("type", ""))
 		if t == "horizontal" or t == "vertical":
 			var lid := str(c.get("line_id", ""))
+			if lid == "":
+				lid = str(by_ends.get("%s|%s" % [c.get("point_a_id", ""), c.get("point_b_id", "")], ""))
 			if lid != "":
 				kinds[lid] = kinds.get(lid, {})
 				kinds[lid][t] = true
@@ -4144,14 +4174,65 @@ func on_contradictory_line(point_id: String) -> bool:
 			kinds[key] = kinds.get(key, {})
 			kinds[key][t] = true
 			kinds[rev] = kinds[key]
+	var out := {}
 	for key in kinds:
 		var both: bool = (kinds[key].has("horizontal") and kinds[key].has("vertical")) or (kinds[key].has("parallel") and kinds[key].has("perpendicular"))
 		if not both:
 			continue
 		for lid in str(key).split("|"):
-			if lines.has(lid) and (str(lines[lid]["a"]) == point_id or str(lines[lid]["b"]) == point_id):
-				return true
-	return false
+			if lines.has(lid):
+				out[str(lines[lid]["a"])] = true
+				out[str(lines[lid]["b"])] = true
+	return out
+
+
+func on_contradictory_line(point_id: String) -> bool:
+	## The point is on a line that is both horizontal and vertical, or on either of two lines that are both parallel and perpendicular (13.5 step 2).
+	return contradictory_points().has(point_id)
+
+
+func entity_states() -> Dictionary:
+	## "kind:id" -> "over" | "fully" | "free" for every line, circle, arc, ellipse, elliptical arc, spline and text (F7, rigidity spec 4). Forced-over points = the points of
+	## a constraint the last solve reported failed, plus the endpoints of a line both horizontal and vertical or of two lines both parallel and perpendicular. Then the pair
+	## rule (over when a defining pair is over by the count or a defining point is forced; fully when every pair is fully constrained), then the whole-sketch override: a
+	## sketch fully constrained as a whole (converged, dof <= 0, geometry, something grounded) makes every entity that is not over fully constrained. Colours are the view's.
+	var r: RefCounted = rigidity()
+	var whole: bool = has_geometry() and converged and dof <= 0 and r.any_grounded
+	var forced := failed_point_ids()
+	forced.merge(contradictory_points())
+	var out := {}
+	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
+		var source: Dictionary = _entity_dict(kind)
+		for id in source:
+			var e: Dictionary = source[id]
+			var pts: Array = []
+			match kind:
+				"line":
+					pts = [e.get("a", ""), e.get("b", "")]
+				"circle":
+					pts = [e.get("c", ""), e.get("p", "")]
+				"arc":
+					pts = [e.get("c", ""), e.get("s", ""), e.get("e", "")]
+				"ellipse":
+					pts = [e.get("c", ""), e.get("ma", ""), e.get("mi", "")]
+				"ellipse_arc":
+					pts = [e.get("c", ""), e.get("ma", ""), e.get("mi", ""), e.get("s", ""), e.get("e", "")]
+				"spline":
+					pts = e.get("through", [])
+				"text":
+					pts = [e.get("anchor", "")]
+			var ids: Array = pts.map(func(v: Variant) -> String: return str(v)).filter(func(v: String) -> bool: return v != "")
+			var state := "free"
+			if ids.size() >= (1 if kind == "text" else 2):
+				state = r.entity_state(SketchRigidity.pairs_of(kind, ids))
+				for pid in ids:
+					if forced.has(pid):
+						state = "over"
+						break
+				if whole and state != "over":
+					state = "fully"
+			out["%s:%s" % [kind, id]] = state
+	return out
 
 
 func restore_points() -> void:

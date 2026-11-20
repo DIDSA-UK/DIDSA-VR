@@ -161,6 +161,10 @@ func _initialize() -> void:
 	s = _session("circle-centre")
 	s.dof = 0 # the backend says the whole sketch is fully constrained
 	d = PointDrag.new()
+	_check(not s.sketch_grounded() and d.begin(s, "point-1", s.points["point-1"]), "...but a sketch tied to nothing is not the whole-sketch case (F7: the rule needs a grounded point)")
+	d.cancel()
+	s.constraints["tie"] = {"id": "tie", "type": "distance", "point_a_id": "origin-1", "point_b_id": "point-1", "distance": 30.0, "orientation": "linear"}
+	d = PointDrag.new()
 	_check(not d.begin(s, "point-1", s.points["point-1"]) and d.refusal != "", "a fully constrained sketch refuses a circle's centre: %s" % d.refusal)
 	s = _session("circle-centre")
 	s.point_locked["point-3"] = true

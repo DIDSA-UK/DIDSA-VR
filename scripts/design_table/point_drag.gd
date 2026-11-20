@@ -93,8 +93,9 @@ static func shape_of(session, point_id: String) -> Dictionary:
 
 
 static func refusal_for(session, point_ids: Array, shape: Dictionary = {}) -> String:
-	## The pre-grab rule (spec 13.5): "" or the sentence that says why this grab does nothing. Rigidity (`session.point_rigidity`, F7) is "" while unknown; the mobility
-	## oracle of 13.6 is not ported, so a general point takes the rule's own fallback (fully constrained or pinned).
+	## The pre-grab rule (spec 13.5): "" or the sentence that says why this grab does nothing. Over-constrained = the rigidity count (`session.point_rigidity`, F7), the solve's
+	## failed list or a contradictory line; immobile = the mobility oracle of 13.6 says 0 (when it has no answer, the rule's own fallback: the whole sketch is fully constrained,
+	## or the count says fully constrained or pinned).
 	var pinned := pinned_ids(session)
 	for id in point_ids:
 		if id in pinned:
@@ -105,10 +106,12 @@ static func refusal_for(session, point_ids: Array, shape: Dictionary = {}) -> St
 		var state: String = session.point_rigidity(str(id))
 		var fully := whole_sketch_pinned or state == "fully" or state == "pinned"
 		var over: bool = state == "over" or failed.has(id) or session.on_contradictory_line(str(id))
+		var mobility: int = SketchProjector.mobility(_exact_points(session), session.constraints.values(), session.lines, str(id), pinned)
+		var immobile: bool = (mobility == 0) if mobility >= 0 else fully
 		if shape.is_empty():
 			if over:
 				return "That point is over-constrained: it does not move."
-			if fully:
+			if immobile:
 				return "That point is fully constrained: it does not move."
 			continue
 		var rec: Dictionary = shape["rec"]
@@ -127,7 +130,7 @@ static func refusal_for(session, point_ids: Array, shape: Dictionary = {}) -> St
 			return "That shape's centre is fixed and its size is dimensioned: this point does not move."
 		if kind == "arc" and r == "end" and (state == "fully" or state == "pinned"):
 			return "That point is fully constrained: it does not move."
-		if (over or state == "fully" or state == "pinned") and Shapes.is_hybrid(shape, session.constraints.values(), session.shape_records):
+		if (over or immobile) and Shapes.is_hybrid(shape, session.constraints.values(), session.shape_records):
 			return "That point is over-constrained or fully constrained: it does not move." # 13.5 step 4: a clamped drag has nothing to clamp to
 	return ""
 

@@ -569,9 +569,9 @@ func rebuild(session, highlight: Array = [], hover: Dictionary = {}, ghosts: Arr
 			selected.merge(session.constraint_held(str(a["id"])))
 		if _annotation_hover != "":
 			selected.merge(session.constraint_held(_annotation_hover.substr(_annotation_hover.find(":") + 1)))
-		# the sketch's state: fully constrained geometry is tinted, what the solver says conflicts is red
+		# the sketch's state: each entity is tinted when it is fully constrained (F7: by its own defining pairs, or the whole sketch), red when over-constrained or when the solver says it conflicts
 		_geo_ctx = {"selected": selected, "hovered": hovered, "warn": _tokens.warn, "accent": _tokens.accent,
-			"base_obj": FULL_COLOUR if session.constraint_state() == "full" else OBJECT_COLOUR, "failed_e": session.failed_entity_ids(), "failed_p": session.failed_point_ids()}
+			"base_obj": OBJECT_COLOUR, "states": session.entity_states(), "failed_e": session.failed_entity_ids(), "failed_p": session.failed_point_ids()}
 		var cache_key := [canvas_scale, _geo_ctx["warn"], _geo_ctx["accent"], repick_point, _geo_ctx["base_obj"]]
 		if cache_key != _geo_cache_key:
 			_geo_cache_key = cache_key
@@ -689,10 +689,20 @@ func _piece_sig(session, kind: String, id: String, key: String) -> Array:
 	if kind == "point":
 		sig.append_array([session.points[id], (_geo_ctx["failed_p"] as Dictionary).has(id), session.is_reference(id), session.is_origin(id), session.reference_status(id), session.point_locked.get(id, false)])
 		return sig
-	sig.append_array([(_geo_ctx["failed_e"] as Dictionary).has(id), session.is_reference(id), _source_of(session, kind).get(id, {}).get("construction", false)])
+	sig.append_array([(_geo_ctx["failed_e"] as Dictionary).has(id), (_geo_ctx["states"] as Dictionary).get(key, "free"), session.is_reference(id), _source_of(session, kind).get(id, {}).get("construction", false)])
 	for pid in _entity_point_ids(session, kind, id):
 		sig.append(session.points.get(pid))
 	return sig
+
+
+static func _object_colour(failed: bool, rigid: String, construction: bool, base: Color) -> Color:
+	## An entity's own colour (F7), in the flat app's order: over-constrained (the count, or the solver's failed list) red, then construction, then fully constrained green, else
+	## plain. So red shows on construction geometry and green does not. Points keep their own markers.
+	if failed or rigid == "over":
+		return FAILED_COLOUR
+	if construction:
+		return CONSTRUCTION_COLOUR
+	return FULL_COLOUR if rigid == "fully" else base
 
 
 func _assemble_geo() -> void:
@@ -718,6 +728,7 @@ func _entity_piece(session, kind: String, id: String) -> Array:
 	var failed_e: Dictionary = _geo_ctx["failed_e"]
 	var failed_p: Dictionary = _geo_ctx["failed_p"]
 	var key := "%s:%s" % [kind, id]
+	var rigid: String = (_geo_ctx["states"] as Dictionary).get(key, "free")
 	var sel: bool = selected.has(key)
 	var hov: bool = key == hovered and not sel
 	match kind:
@@ -730,7 +741,7 @@ func _entity_piece(session, kind: String, id: String) -> Array:
 				_ribbon(verts, colors, session.points[l["a"]], session.points[l["b"]], REF_WIDTH + 0.00056, REF_USED_COLOUR, 0.6)
 				return [verts, colors]
 			var construction: bool = l.get("construction", false)
-			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			var colour: Color = _look(sel, hov, _object_colour(failed_e.has(id), rigid, construction, base_obj), warn, accent)
 			_stroke(verts, colors, [session.points[l["a"]], session.points[l["b"]]], false, construction, colour, sel)
 		"circle":
 			var c: Dictionary = session.circles[id]
@@ -741,7 +752,7 @@ func _entity_piece(session, kind: String, id: String) -> Array:
 				_stroke(verts, colors, circle_points(rim_centre, rim_centre.distance_to(session.points[c["p"]]), CIRCLE_SEGMENTS), true, false, REF_USED_COLOUR, false)
 				return [verts, colors] # the part's hole is lit; no construction circle, no centre cross of its own
 			var construction: bool = c.get("construction", false)
-			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			var colour: Color = _look(sel, hov, _object_colour(failed_e.has(id), rigid, construction, base_obj), warn, accent)
 			var centre: Vector2 = session.points[c["c"]]
 			var radius := centre.distance_to(session.points[c["p"]])
 			_stroke(verts, colors, circle_points(centre, radius, CIRCLE_SEGMENTS), true, construction, colour, sel)
@@ -757,7 +768,7 @@ func _entity_piece(session, kind: String, id: String) -> Array:
 				_stroke(verts, colors, arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32), false, false, REF_USED_COLOUR, false)
 				return [verts, colors]
 			var construction: bool = a.get("construction", false)
-			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			var colour: Color = _look(sel, hov, _object_colour(failed_e.has(id), rigid, construction, base_obj), warn, accent)
 			var sweep := arc_points(session.points[a["c"]], session.points[a["s"]], session.points[a["e"]], 32)
 			_stroke(verts, colors, sweep, false, construction, colour, sel)
 			var arm := 0.005 / canvas_scale # an arc's centre is marked with a small cross
@@ -772,11 +783,11 @@ func _entity_piece(session, kind: String, id: String) -> Array:
 				_stroke(verts, colors, outline, kind == "ellipse", false, REF_USED_COLOUR, false) # the part's own elliptical edge: quiet, like a hole's rim
 				return [verts, colors]
 			var construction: bool = _source_of(session, kind)[id].get("construction", false)
-			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			var colour: Color = _look(sel, hov, _object_colour(failed_e.has(id), rigid, construction, base_obj), warn, accent)
 			_stroke(verts, colors, outline, kind == "ellipse", construction, colour, sel)
 		"text":
 			var construction: bool = session.texts[id].get("construction", false)
-			var colour: Color = _look(sel, hov, FAILED_COLOUR if failed_e.has(id) else (CONSTRUCTION_COLOUR if construction else base_obj), warn, accent)
+			var colour: Color = _look(sel, hov, _object_colour(failed_e.has(id), rigid, construction, base_obj), warn, accent)
 			for poly in session.text_outlines.get(id, []):
 				_stroke(verts, colors, poly, true, construction, colour, sel)
 		"point":

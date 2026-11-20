@@ -103,14 +103,10 @@ func _initialize() -> void:
 	drag.synchronous = true
 	_check(not drag.begin(s, "A", Vector2(10, 10)) and not drag.live, "a press on a locked point starts no drag")
 	_check(not drag.begin(s, "O", Vector2(0, 0)), "...nor on the origin")
-	_check(drag.begin(s, "C", Vector2(50, 30)), "a free corner of a shape with a pinned corner still starts one")
-	for uv in _path(Vector2(50, 30), Vector2(70, 44), 10):
-		drag.step(uv)
-	var pa: Array = drag.accepted_point("A")
-	_check(pa[0] == 10.0 and pa[1] == 10.0 and _worst(drag) < 1e-4, "the locked corner stayed, the dimensions held (the rectangle cannot go anywhere: it is rigid and pinned)")
-	var pc: Array = drag.accepted_point("C")
-	_check(Vector2(pc[0], pc[1]).distance_to(Vector2(50, 30)) < 1e-3, "...so the grabbed corner stays too")
-	drag.cancel()
+	# F7: the rigidity count now answers the pre-grab rule. A rectangle with a locked corner and all its dimensions has nothing left to move, so a press on another corner is
+	# refused with a reason (before F7 the press started a drag that went nowhere).
+	_check(not drag.begin(s, "C", Vector2(50, 30)) and not drag.live and drag.refusal.contains("fully constrained"), "a corner of a rectangle that is pinned at one corner and fully dimensioned is refused as fully constrained: %s" % drag.refusal)
+	_check(s.point_rigidity("C") == "fully", "...by the rigidity count (not by a dof)")
 	s.point_locked["A"] = false
 
 	# --- a free corner of a loosened shape moves alone along its freedom (drop the width dimension)

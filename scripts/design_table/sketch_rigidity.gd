@@ -68,7 +68,11 @@ static func points_of(c: Dictionary, lines: Dictionary) -> Array:
 			out = [c.get("vertex_point_id"), c.get("point1_id"), c.get("point2_id")]
 		"line_circle_distance":
 			out = [c.get("line_start_id"), c.get("line_end_id"), c.get("center_point_id"), c.get("radius_point_id")]
-	return out.filter(func(v: Variant) -> bool: return v != null and str(v) != "").map(func(v: Variant) -> String: return str(v))
+	var named: Array = [] # (a loop, not filter / map: this runs for every constraint on every refresh)
+	for v in out:
+		if v != null and str(v) != "":
+			named.append(str(v))
+	return named
 
 
 static func analyse(point_ids: Array, fixed: Array, lines: Dictionary, constraints: Array, trust_converged_solve: bool) -> RefCounted:
