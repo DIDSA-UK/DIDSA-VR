@@ -21,6 +21,10 @@ var hand
 var window
 var calls: Array = []
 var occurrences := {}
+var notfound_once := false ## the next tree call answers 404 "Part not found" (a backend that has the call)
+var status_fails := false ## the ?status=true call fails
+var null_children := false ## part nodes carry "children": null
+var truncated := false
 var mode := "tree" ## "tree": the fake serves the tree call; "404": it does not
 const PART_NAMES := {"R": "Rig", "S": "Drive", "K": "Bracket", "B": "Bolt"}
 const TOP_STATUS := {"s1": {"status": "fixed", "dof": 0}, "s2": {"status": "under_constrained", "dof": 2}}
@@ -51,7 +55,12 @@ func answer(method: int, path: String, body) -> Dictionary:
 	var bits := path.trim_prefix("/parts/").split("/")
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1].begins_with("assembly-tree"):
 		if mode == "404":
-			return {"ok": false, "json": null, "code": 404, "error": "404"}
+			return {"ok": false, "json": null, "code": 404, "detail": "Not Found", "error": "{ \"detail\": \"Not Found\" }"} # (the framework's answer for an unknown route)
+		if notfound_once:
+			notfound_once = false
+			return {"ok": false, "json": null, "code": 404, "detail": "Part not found", "error": "{ \"detail\": \"Part not found\" }"}
+		if status_fails and bits[1].contains("status=true"):
+			return {"ok": false, "json": null, "code": 0, "error": ""}
 		return {"ok": true, "json": tree_response(bits[1].contains("status=true")), "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "occurrences":
 		return {"ok": true, "json": occurrences.get(bits[0], []), "error": ""}
@@ -86,7 +95,7 @@ func tree_nodes(part: String, prefix: Array, with_status: bool) -> Array:
 			"mates": {"count": 0, "suppressed": 0, "broken": 0, "near": 0, "held": 0, "lost": 0} if is_assembly and with_status else ({"count": 0, "suppressed": 0, "broken": null, "near": null, "held": null, "lost": null} if is_assembly else null),
 			"patterns": {"count": 0, "suppressed": 0} if is_assembly else null,
 			"problems": {"missing": 0, "cycles": 0, "broken": 0, "over_constrained": 0, "near": 0} if is_assembly and with_status else null,
-			"children": tree_nodes(str(resolved), node_path, with_status) if is_assembly else [],
+			"children": tree_nodes(str(resolved), node_path, with_status) if is_assembly else (null if null_children else []),
 		})
 	return out
 
@@ -97,7 +106,7 @@ func tree_response(with_status: bool) -> Dictionary:
 		"mates": {"count": 0, "suppressed": 0, "broken": 0, "near": 0, "held": 0, "lost": 0}, "patterns": {"count": 0, "suppressed": 0},
 		"problems": {"missing": 0, "cycles": 0, "broken": 0, "over_constrained": 0, "near": 0},
 		"children": tree_nodes("R", [], with_status), "truncated": false, "node_count": 0, "max_depth": 32, "max_nodes": 10000,
-		"truncated_depth": false, "truncated_nodes": false, "status_failed": false, "status_incomplete": false,
+		"truncated_depth": truncated, "truncated_nodes": false, "status_failed": false, "status_incomplete": false,
 	}
 
 
@@ -266,8 +275,73 @@ func run_mode(which: String) -> void:
 		spec = Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), [])
 		check("A5: the switch turns grouping off: the four are listed one by one, and the setting is what main saved", spec.filter(func(r): return r["kind"] == "group").is_empty() and not main.tree_grouping())
 		window._set_grouping(true)
-		check("...and on again", main.tree_grouping() and spec.size() > 0)
+		spec = Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), []) # (rebuilt after the switch: the list from before it has no group)
+		check("...and on again: the setting is saved and the four fold into one row again", main.tree_grouping() and spec.filter(func(r): return r["kind"] == "group").size() == 1)
+		window._open_groups.clear()
+		await window._reveal(["extra3"])
+		check("a reveal of a row inside a group opens that group (its key is #group:<first member>)", window._open_groups.has("#group:b0") and Model.visible_rows(window._resp, window._spec_open_keys(), true, []).any(func(r): return r["key"] == "extra3"))
 		window._on_row_selected(Model.find_row(window._tree, ["extra3"]))
-		check("a member of a group still selects by its own path (the group is opened to show it)", window._has_selected and window._selected == ["extra3"])
+		check("a member of a group still selects by its own path", window._has_selected and window._selected == ["extra3"])
+		await extra_checks()
 	main.queue_free()
 	await frames(3)
+
+
+func settle() -> void:
+	for i in 80:
+		await process_frame
+
+
+func extra_checks() -> void:
+	## Review fixes of A5: Fix / Float shows at once and survives a failed status call; a "Part not found" is not "an older backend"; a missing route falls back on a
+	## refresh and the flag clears with the document; a node with "children": null; the status failure's words.
+	var row_s2: Dictionary = Model.find_row(window._tree, ["s2"])
+	check("(before) the under-constrained row wears the open lock", Model.state_icon(row_s2) == "lock_open" and row_s2["state"] == "under_constrained")
+	var real_mates = main._mates_tool
+	var mates := FakeMates.new()
+	mates.command_stack = main.command_stack
+	mates.backend_url = "http://example.invalid"
+	mates.api_key = "k"
+	main.add_child(mates)
+	await process_frame
+	mates._nested_states["R"] = {"occurrences": {"s2": {"fixed": false}}, "mated": {}}
+	main._mates_tool = mates
+	await window._on_bar_action("fix", row_s2, {})
+	row_s2 = Model.find_row(window._tree, ["s2"])
+	check("Fix on an under-constrained row: its icon is the pin at once (before any refresh)", row_s2["state"] == "fixed" and Model.state_icon(row_s2) == "pin")
+	occurrences["R"][1]["fixed"] = true # (the server now says so too)
+	status_fails = true
+	truncated = true
+	await settle()
+	row_s2 = Model.find_row(window._tree, ["s2"])
+	check("...and with the status call failing afterwards it stays a pin (the old status is not carried over a changed flag)", row_s2["state"] == "fixed" and Model.state_icon(row_s2) == "pin")
+	check("the status failure says why (a reason even when the error is empty) and keeps the truncation note", window._status_label.text.contains("Constraint states unavailable: no answer") and window._status_label.text.contains("cut off"))
+	status_fails = false
+	truncated = false
+	main._mates_tool = real_mates
+	mates.queue_free()
+
+	null_children = true
+	window.request_refresh()
+	await settle()
+	var leaf_node: Dictionary = (window._resp["children"] as Array)[3]
+	check("a node with \"children\": null is read as no children (rows, bubbles and the walk all cope)", leaf_node["children"] is Array and (leaf_node["children"] as Array).is_empty() and window._tree[0]["children"].size() >= 4 and Model.visible_rows(window._resp, [], true, []).size() > 4)
+	null_children = false
+
+	notfound_once = true
+	window._stale = true
+	await window._refresh_root()
+	check("a 404 'Part not found' is an answer, not an older backend: the call is still used and the failure is shown", not window._endpoint_missing and window._status_label.text.contains("Part not found") and window._fold_button.visible)
+	await window._refresh_root()
+	check("...and the next refresh reads the tree normally", not window._endpoint_missing and not window._resp.is_empty() and not window._stale)
+
+	mode = "404"
+	occurrences["R"].append({"id": "late", "resolved_part_id": "B"})
+	window.request_refresh()
+	await settle()
+	check("the route going missing mid-session: the refresh falls back to the per-level read and the new row still arrives", window._endpoint_missing and window._resp.is_empty() and not Model.find_row(window._tree, ["late"]).is_empty())
+	check("...and the Fold x4 button is hidden while the fallback is in use", not window._fold_button.visible)
+	mode = "tree"
+	window.mark_stale()
+	await settle()
+	check("a new document clears the flag: the tree call is used again and the button is back", not window._endpoint_missing and not window._resp.is_empty() and window._fold_button.visible)

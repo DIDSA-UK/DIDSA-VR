@@ -94,6 +94,7 @@ func configure_backend(url: String, key: String) -> void:
 	backend_url = url
 	api_key = key
 	_endpoint_missing = false
+	_sync_fold_button()
 
 
 func mark_stale() -> void:
@@ -108,6 +109,8 @@ func mark_stale() -> void:
 	_has_selected = false
 	_selected = []
 	_resp = {}
+	_endpoint_missing = false # (a new document: ask the tree call again)
+	_sync_fold_button()
 	_open_groups.clear()
 	_constraint.clear()
 	if is_open():
@@ -195,6 +198,7 @@ func _apply_part_names(rows: Array) -> void:
 				if row["id"] == "" or not bool(row.get("override", false)):
 					row["base_name"] = part_name
 					row["name"] = part_name
+					row["placeholder"] = false
 				row["named"] = true
 				changed = true
 		if row["children"] != null:
@@ -444,7 +448,7 @@ func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = nu
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
 	_tint_state(name_button, row)
-	if int(row.get("set_slot", -1)) >= 0:
+	if int(row.get("set_slot", -1)) >= 0 and Model.state_level(str(row.get("state", ""))) == "":
 		name_button.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
 	if bool(row.get("suppressed", false)) or _row_view_hidden(row):
 		name_button.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
@@ -624,11 +628,12 @@ func _load_endpoint(token: int) -> bool:
 	if token != _refresh_token:
 		return true
 	if not result["ok"]:
-		if int(result.get("code", 0)) == 404:
-			_endpoint_missing = true
+		if _route_missing(result):
+			_endpoint_missing = true # an older backend: no such route (not "Part not found", which is an answer from a backend that has the call)
 			_resp = {}
+			_sync_fold_button()
 			return false
-		_set_status("Couldn't load the assembly tree: %s" % result["error"])
+		_set_status("Couldn't load the assembly tree: %s" % _reason(result))
 		return true
 	if not (result["json"] is Dictionary):
 		_set_status("Couldn't load the assembly tree: unexpected answer.")
@@ -645,8 +650,23 @@ func _load_endpoint(token: int) -> bool:
 		_set_status(_tree_note(true))
 		_rebuild_rows()
 	else:
-		_set_status("Constraint states unavailable: %s" % with_status["error"])
+		_set_status((_tree_note(false) + " Constraint states unavailable: %s" % _reason(with_status)).strip_edges())
 	return true
+
+
+static func _route_missing(result: Dictionary) -> bool:
+	## The framework's own 404 for an unknown route ({"detail": "Not Found"}); the backend's "Part not found" is a real answer and says nothing about the route.
+	return int(result.get("code", 0)) == 404 and str(result.get("detail", "")) == "Not Found"
+
+
+static func _reason(result: Dictionary) -> String:
+	var text := str(result.get("error", ""))
+	return text if text != "" else ("no answer (HTTP %d)" % int(result.get("code", 0)) if int(result.get("code", 0)) > 0 else "no answer")
+
+
+func _sync_fold_button() -> void:
+	if _fold_button != null:
+		_fold_button.visible = _uses_tree_endpoint() # (grouping is the tree call's: the per-level fallback has nothing to fold)
 
 
 func _tree_note(status_done: bool) -> String:
@@ -662,6 +682,7 @@ func _tree_note(status_done: bool) -> String:
 
 func _adopt_response(resp: Dictionary) -> void:
 	## Takes a tree answer as the current one and rebuilds the rows from it, keeping what was open (spec section 8).
+	Model.normalise_tree(resp)
 	if not bool(resp.get("status_included", false)):
 		Model.carry_status(resp, _resp)
 	_resp = resp
@@ -775,6 +796,8 @@ func _on_bar_action(action_id: String, row: Dictionary, room: Dictionary) -> voi
 			var mates = _main.get("_mates_tool")
 			if mates != null and await mates.toggle_fixed_occurrence(owner, occ, label):
 				row["fixed"] = mates.group_fixed(owner, occ)
+				if _endpoint_active():
+					Model.set_node_fixed(_resp, path, bool(row["fixed"])) # (the row's state is worked out from the held answer: pin at once, even if no status follows)
 				_rebuild_rows()
 				request_refresh()
 		"hide":
@@ -876,8 +899,9 @@ func _refresh_levels() -> void:
 	_stale_levels = false
 	if _endpoint_active():
 		_refresh_token += 1 # (the whole tree is one call: re-read it in place; what is open and selected stays)
-		await _load_endpoint(_refresh_token)
-		return
+		if await _load_endpoint(_refresh_token):
+			return
+		# the backend turned out not to have the call: the rows already here are re-read a level at a time below
 	_levels_token += 1
 	var token := _levels_token
 	await _refresh_row_level(_tree[0], token)
@@ -980,4 +1004,4 @@ func _request_json(method: int, path: String, body) -> Dictionary:
 		return {"ok": false, "json": null, "code": 0, "error": "network error (result %d)" % result_code}
 	var parsed = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
 	var ok: bool = response_code >= 200 and response_code < 300
-	return {"ok": ok, "json": (parsed if ok else null), "code": response_code, "error": ("" if ok else str(parsed))}
+	return {"ok": ok, "json": (parsed if ok else null), "code": response_code, "detail": (str(parsed.get("detail", "")) if parsed is Dictionary else ""), "error": ("" if ok else str(parsed))}

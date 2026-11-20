@@ -36,6 +36,7 @@ static func rows_from_occurrences(occurrences: Array, parent_path: Array) -> Arr
 			"base_name": label,
 			"override": named, # the user gave this placement its own name: never renamed "<n>"
 			"named": named, # false = still the placeholder; the Part's own name replaces it once read
+			"placeholder": not named, # base_name is "Component N", not a name: it is never given an "<n>" suffix
 			"resolved_part_id": resolved,
 			"children": null,
 			"expanded": false,
@@ -54,8 +55,8 @@ static func apply_instance_names(rows: Array) -> void:
 	## once keeps its plain name. Run again whenever the Part names arrive.
 	var by_part := {}
 	for row in rows:
-		if bool(row.get("override", false)) or str(row.get("resolved_part_id", "")) == "":
-			continue
+		if bool(row.get("override", false)) or str(row.get("resolved_part_id", "")) == "" or bool(row.get("placeholder", false)):
+			continue # (a placeholder "Component N" is not numbered "<n>": it is not a name yet)
 		by_part[row["resolved_part_id"]] = (by_part.get(row["resolved_part_id"], []) as Array) + [row]
 	for part_id in by_part:
 		var group: Array = by_part[part_id]
@@ -207,6 +208,7 @@ static func merge_children(old_rows: Array, fresh: Array) -> Array:
 				row["base_name"] = old["base_name"]
 				row["name"] = old["base_name"]
 				row["named"] = true
+				row["placeholder"] = false
 	return fresh
 
 
@@ -402,7 +404,7 @@ static func _n(value) -> int:
 static func unsaved_below(node: Dictionary, unsaved: Array) -> int:
 	## Rows below `node` (not suppressed, not under a suppressed row, not missing) whose Part is unsaved.
 	var count := 0
-	for child in node.get("children", []):
+	for child in children_of(node):
 		if bool(child.get("suppressed", false)):
 			continue
 		count += _unsaved_self(child, unsaved) + unsaved_below(child, unsaved)
@@ -504,7 +506,7 @@ static func visible_rows(response: Dictionary, open: Array, grouping: bool, unsa
 	var rows: Array = []
 	var root_unsaved := unsaved_part_ids.has(str(response.get("part_id", "")))
 	rows.append(_row("", "root", 0, str(response.get("part_name", "")), "unsaved" if root_unsaved else "none", null, false, true, null, [], false, false))
-	_list_level(response.get("children", []), "", 1, open, grouping, unsaved_part_ids, features, rows)
+	_list_level(children_of(response), "", 1, open, grouping, unsaved_part_ids, features, rows)
 	var mates = response.get("mates")
 	if mates is Dictionary and int(mates.get("count", 0)) > 0:
 		rows.append(_row("#mates", "mates_folder", 1, "Mates", "none", folder_bubble(mates), true, open.has("#mates"), int(mates["count"]), null, false, false))
@@ -524,8 +526,14 @@ static func _add_features(owner_key: String, depth: int, features: Dictionary, r
 		rows.append(_row("%s#feature:%s" % [owner_key, str(f["id"])], "feature", depth, str(f["label"]), "none", null, false, false, null, null, false, false))
 
 
+static func children_of(node: Dictionary) -> Array:
+	## A node's children as an Array: the field missing, null or anything else is no children (one place for it: every walk of a response goes through here).
+	var c = node.get("children")
+	return c if c is Array else []
+
+
 static func node_expandable(node: Dictionary) -> bool:
-	return str(node.get("kind", "")) != "missing" and (not (node.get("children", []) as Array).is_empty() or _n(node.get("feature_count")) > 0)
+	return str(node.get("kind", "")) != "missing" and (not children_of(node).is_empty() or _n(node.get("feature_count")) > 0)
 
 
 static func _occurrence_row(node: Dictionary, label: String, depth: int, open: Array, unsaved: Array) -> Dictionary:
@@ -565,7 +573,7 @@ static func _list_node(node: Dictionary, label: String, depth: int, open: Array,
 	var row := _occurrence_row(node, label, depth, open, unsaved)
 	rows.append(row)
 	if bool(row["open"]):
-		_list_level(node.get("children", []), str(row["key"]), depth + 1, open, grouping, unsaved, features, rows)
+		_list_level(children_of(node), str(row["key"]), depth + 1, open, grouping, unsaved, features, rows)
 		_add_features(str(row["key"]), depth + 1, features, rows)
 
 
@@ -574,7 +582,7 @@ static func _list_node(node: Dictionary, label: String, depth: int, open: Array,
 static func reveal_keys(response: Dictionary, path: Array, grouping: bool) -> Array:
 	## The keys to open so the row at `path` is listed: for each level, its group (when grouping puts that node in one) and then the ancestor.
 	var keys: Array = []
-	var siblings: Array = response.get("children", [])
+	var siblings: Array = children_of(response)
 	for i in path.size():
 		var node: Dictionary = {}
 		for s in siblings:
@@ -590,7 +598,7 @@ static func reveal_keys(response: Dictionary, path: Array, grouping: bool) -> Ar
 					break
 		if i < path.size() - 1:
 			keys.append(node_key(path.slice(0, i + 1)))
-		siblings = node.get("children", [])
+		siblings = children_of(node)
 	return keys
 
 
@@ -614,7 +622,7 @@ static func rows_from_tree(nodes: Array, parent_path: Array, parent_part_id: Str
 			"override": _has_text(n.get("name_override")),
 			"named": true,
 			"resolved_part_id": resolved,
-			"children": rows_from_tree(n.get("children", []), parent_path + [id], resolved, bool(n.get("status_failed", false)), unsaved),
+			"children": rows_from_tree(children_of(n), parent_path + [id], resolved, bool(n.get("status_failed", false)), unsaved),
 			"expanded": false,
 			"fixed": bool(n.get("fixed", false)),
 			"backend_hidden": bool(n.get("hidden", false)),
@@ -667,15 +675,15 @@ static func carry_status(fresh: Dictionary, old: Dictionary) -> void:
 	if old.is_empty():
 		return
 	var old_by_path := {}
-	_index_nodes(old.get("children", []), old_by_path)
+	_index_nodes(children_of(old), old_by_path)
 	_carry_into(fresh, old)
-	_carry_nodes(fresh.get("children", []), old_by_path)
+	_carry_nodes(children_of(fresh), old_by_path)
 
 
 static func _index_nodes(nodes: Array, out: Dictionary) -> void:
 	for n in nodes:
 		out[node_key(n["path"])] = n
-		_index_nodes(n.get("children", []), out)
+		_index_nodes(children_of(n), out)
 
 
 static func _carry_nodes(nodes: Array, old_by_path: Dictionary) -> void:
@@ -683,12 +691,12 @@ static func _carry_nodes(nodes: Array, old_by_path: Dictionary) -> void:
 		var o: Dictionary = old_by_path.get(node_key(n["path"]), {})
 		if not o.is_empty():
 			_carry_into(n, o)
-		_carry_nodes(n.get("children", []), old_by_path)
+		_carry_nodes(children_of(n), old_by_path)
 
 
 static func _carry_into(n: Dictionary, o: Dictionary) -> void:
-	if n.get("constraint") == null and o.get("constraint") != null:
-		n["constraint"] = o["constraint"]
+	if n.get("constraint") == null and o.get("constraint") != null and bool(n.get("fixed", false)) == bool(o.get("fixed", false)):
+		n["constraint"] = o["constraint"] # (not when `fixed` changed since: that old status describes the old state)
 	if n.get("problems") == null and o.get("problems") != null:
 		n["problems"] = o["problems"]
 	if n.get("mates") is Dictionary and o.get("mates") is Dictionary:
@@ -697,3 +705,30 @@ static func _carry_into(n: Dictionary, o: Dictionary) -> void:
 				n["mates"][k] = o["mates"].get(k)
 	if bool(o.get("status_failed", false)):
 		n["status_failed"] = true
+
+
+static func normalise_tree(response: Dictionary) -> void:
+	## Makes every `children` of a response (the root's and each node's) an Array, so nothing downstream has to ask.
+	response["children"] = children_of(response)
+	for n in response["children"]:
+		if n is Dictionary:
+			normalise_tree(n)
+
+
+static func set_node_fixed(response: Dictionary, path: Array, fixed: bool) -> void:
+	## A Fix / Float done here, written into the held response at once: the flag changes and the old constraint (which describes the old state) is dropped, so the
+	## row reads pin / nothing until a fresh status says more, even if that status never comes.
+	var nodes: Array = children_of(response)
+	for i in path.size():
+		var hit: Dictionary = {}
+		for n in nodes:
+			if str(n.get("occurrence_id", "")) == str(path[i]):
+				hit = n
+				break
+		if hit.is_empty():
+			return
+		if i == path.size() - 1:
+			hit["fixed"] = fixed
+			hit["constraint"] = null
+			return
+		nodes = children_of(hit)
