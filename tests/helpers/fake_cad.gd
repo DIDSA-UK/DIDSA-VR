@@ -321,7 +321,10 @@ func handle(method: int, path: String, body) -> Dictionary:
 	if path.contains("/constraints/") and path.ends_with("/label") and verb == "DELETE":
 		var dk: String = path.get_base_dir().get_file()
 		if cons.has(dk):
+			var kept_show: Variant = (cons[dk].get("label", {}) as Dictionary).get("show") if cons[dk].get("label") is Dictionary else null
 			cons[dk].erase("label")
+			if kept_show != null:
+				cons[dk]["label"] = {"show": kept_show} # DELETE .../label clears the placement and keeps the saved reading (F4, decision 10)
 		return _ok({})
 	if verb == "DELETE":
 		var tail: String = path.get_file()
@@ -384,7 +387,16 @@ func handle(method: int, path: String, body) -> Dictionary:
 		var lk: String = path.get_base_dir().get_file()
 		if not cons.has(lk):
 			return {"ok": false, "code": 404, "json": {"detail": "no such constraint"}, "error": "no such constraint"}
-		cons[lk]["label"] = (body as Dictionary).duplicate()
+		# the real backend (F4): the placement numbers and `show` are independent: a PUT with one of them keeps the other
+		var merged: Dictionary = (cons[lk].get("label", {}) as Dictionary).duplicate() if cons[lk].get("label") is Dictionary else {}
+		if (body as Dictionary).has("show") and not ((body as Dictionary).has("offset") or (body as Dictionary).has("along") or (body as Dictionary).has("angle") or (body as Dictionary).has("leg") or (body as Dictionary).has("radius")):
+			merged["show"] = body["show"]
+		else:
+			var show_kept: Variant = merged.get("show")
+			merged = (body as Dictionary).duplicate()
+			if show_kept != null and not merged.has("show"):
+				merged["show"] = show_kept
+		cons[lk]["label"] = merged
 		return _ok({})
 	if path.contains("/constraints/") and verb == "PATCH":
 		var k: String = path.get_file()

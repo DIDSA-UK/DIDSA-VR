@@ -150,12 +150,14 @@ func _initialize() -> void:
 	await s.confirm_ghost("diameter", 30.0)
 	print("SMOKE a circle's Diameter 30 stores the radius 15: ", absf(float(s.constraints[k].get("distance", 0.0)) - 15.0) < 1e-6)
 	var before := await backend_constraint(k)
-	s.toggle_diameter(k)
+	# (F5: a dimension made with the Diameter candidate already reads as a diameter, and that choice is saved with it)
+	await wait_for(func() -> bool: return not s.show_writes_pending())
 	var after := await backend_constraint(k)
-	print("SMOKE the switch reads it as a diameter and changes nothing on the backend: ", str(s.dimension_items().filter(func(it): return str(it["id"]) == k)[0]["text"]).begins_with("⌀") and float(after["distance"]) == float(before["distance"]))
+	print("SMOKE it reads as a diameter (the choice is saved in the label record) and the radius is unchanged on the backend: ", str(s.dimension_items().filter(func(it): return str(it["id"]) == k)[0]["text"]).begins_with("⌀") and float(after["distance"]) == float(before["distance"]) and str((after.get("label", {}) as Dictionary).get("show", "")) == "diameter")
 	await s.edit_dimension(k, 20.0)
 	print("SMOKE an edit of the shown diameter 20 stores the radius 10: ", absf(float((await backend_constraint(k))["distance"]) - 10.0) < 1e-6 and s.converged)
 	s.toggle_diameter(k)
+	await wait_for(func() -> bool: return not s.show_writes_pending())
 
 	# --- an angle's side
 	var la: String = await line(Vector2(100, 0), Vector2(160, 0))

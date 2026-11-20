@@ -26,10 +26,12 @@ static func entity_name(e: Dictionary) -> String:
 			return "%s %d" % [k.capitalize(), int(e.get("index", 0)) + 1]
 		"body":
 			return "Body"
-		"line", "point", "circle", "arc", "ellipse", "spline", "text":
-			return "%s %s" % [k.capitalize(), str(e.get("label", e.get("id", "")))]
+		"line", "point", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text":
+			if str(e.get("name", "")) != "":
+				return str(e["name"]) # a sketch session names its picks from the backend's numbers (F5): `Line 3`, `Origin`
+			return "%s %s" % [k.capitalize(), str(e.get("label", ""))] if str(e.get("label", "")) != "" else k.replace("_", " ").capitalize() # (never the id)
 		"dimension", "constraint":
-			return str(e.get("label", k.capitalize()))
+			return str(e.get("name", e.get("label", k.capitalize())))
 		"sketch":
 			return str(e.get("name", "Sketch"))
 		"feature":

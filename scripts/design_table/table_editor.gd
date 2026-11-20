@@ -819,9 +819,13 @@ func current_selection() -> Array:
 	if session != null:
 		var out: Array = []
 		for e in session.selection:
-			out.append(e)
+			var named: Dictionary = (e as Dictionary).duplicate()
+			named["name"] = session.name_of(str(e["kind"]), str(e["id"])) # F5 (A1): the backend's number, never the id
+			out.append(named)
 		for a in session.annotations:
-			out.append(a)
+			var named_a: Dictionary = (a as Dictionary).duplicate()
+			named_a["name"] = session.name_of(str(a["kind"]), str(a["id"]))
+			out.append(named_a)
 		return out
 	if not _selected_build.is_empty():
 		return [_selected_build]
@@ -839,6 +843,10 @@ func _drawer_context() -> Dictionary:
 				feature_names[fid] = table.build.name_of_feature(fid)
 	var sketch_name := "Sketch"
 	var sketch_feature := ""
+	if session != null and session.feature_id != "": # the open sketch's own feature name ("Sketch 2"), not the word "Sketch"
+		sketch_feature = session.feature_id
+		if table.build != null and table.build.index_of(sketch_feature) >= 0:
+			sketch_name = table.build.name_of_feature(sketch_feature)
 	return {"body_names": BuildTree.body_names(ids), "feature_names": feature_names, "part_name": table.build.part_name() if table.build != null else "Part",
 		"sketch_name": sketch_name, "sketch_feature_id": sketch_feature, "surface_bodies": [], "has_face_extrude": false}
 
@@ -1878,7 +1886,7 @@ func _pull_annotation(hit: Dictionary) -> void:
 		return
 	_last_pull = {"key": key, "ms": now}
 	session.toggle_annotation(str(hit["kind"]), str(hit["id"]))
-	table.set_status("%s selected: Edit value or Delete in the options row." % ("Dimension" if str(hit["kind"]) == "dimension" else "Constraint") if session.is_annotation_selected(str(hit["kind"]), str(hit["id"])) else "Let go.")
+	table.set_status("%s selected: Edit value or Delete in the options row." % session.name_of(str(hit["kind"]), str(hit["id"])) if session.is_annotation_selected(str(hit["kind"]), str(hit["id"])) else "Let go.")
 
 
 # --- F5 (S6): a label moved by holding the trigger on it ----------------------------------------------------------------
@@ -2631,6 +2639,11 @@ func on_option(option_id: String) -> void:
 		return
 	if option_id == "diameter_toggle" and session != null and session.annotations.size() == 1:
 		session.toggle_diameter(str(session.annotations[0]["id"])) # the flat app's Radius / Diameter switch: a way of reading the same radius
+		_refresh_view()
+		_update_options()
+		return
+	if option_id == "axis_toggle" and session != null and session.annotations.size() == 1:
+		session.toggle_axis(str(session.annotations[0]["id"])) # semi / full: the same stored semi-axis, read the other way; saved in the label's `show`
 		_refresh_view()
 		_update_options()
 		return

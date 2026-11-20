@@ -118,6 +118,8 @@ static func annotation_options(annotations: Array, selection: Array, session = n
 			out.append({"id": "edit_value", "text": "Edit value", "group": G_EDIT})
 			if session != null and session.is_size_dimension(str(annotations[0]["id"])):
 				out.append({"id": "diameter_toggle", "text": "Show radius" if bool(session.diameter_shown.get(str(annotations[0]["id"]), false)) else "Show diameter", "group": G_EDIT})
+			if session != null and session.is_axis_dimension(str(annotations[0]["id"])):
+				out.append({"id": "axis_toggle", "text": "Show semi-axis" if session.shows_full_axis(str(annotations[0]["id"])) else "Show full axis", "group": G_EDIT})
 			if session != null and str((session.constraints.get(str(annotations[0]["id"]), {}) as Dictionary).get("type", "")) in ["angle", "horizontal_angle", "point_angle"]:
 				out.append({"id": "angle_side", "text": "Other side", "group": G_EDIT})
 	out.append({"id": "delete", "text": TEXT["delete"], "group": G_EDIT})

@@ -77,7 +77,11 @@ func backend_label(cid: String) -> Variant:
 
 
 func same_place(got: Variant, want: Dictionary) -> bool:
-	if not (got is Dictionary) or (got as Dictionary).size() != want.size():
+	if not (got is Dictionary):
+		return false
+	var placement := (got as Dictionary).duplicate()
+	placement.erase("show") # (F5: the saved reading, Radius / Diameter, semi / full, lives in the same record but is not the placement)
+	if placement.size() != want.size():
 		return false
 	for k in want:
 		if not (got as Dictionary).has(k) or absf(float(got[k]) - float(want[k])) > 1e-4:

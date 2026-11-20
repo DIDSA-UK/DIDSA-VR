@@ -78,7 +78,9 @@ var dof := -1
 var converged := true
 var failed_constraint_ids: Array = [] ## the backend's `solver_reported_failed_constraint_ids` of the last solve: only ever filled when the solve did not converge (a conflict that came later, or one the user kept)
 var label_override: Dictionary = {} ## constraint id -> a placement being dragged (S6): drawn instead of the saved one until the drop saves it (or the drag is let go)
-var diameter_shown: Dictionary = {} ## constraint id -> true: a circle's / arc's size dimension read as a diameter (the flat app's R / diameter toggle: a view choice, the stored value stays the radius, nothing is sent)
+var diameter_shown: Dictionary = {} ## constraint id -> true: a circle's / arc's size dimension read as a diameter (the flat app's R / diameter toggle; the stored value stays the radius). Saved in the label's `show`
+var axis_semi: Dictionary = {} ## constraint id -> true (semi) | false (full): an ellipse axis dimension's saved reading (`show`), absent when none is saved (default_show)
+var _show_writes: Dictionary = {} ## constraint id -> PUTs of `show` in flight
 var _state_sketch := "" ## the sketch the last state below belongs to
 var _last_state := ""
 
@@ -196,6 +198,103 @@ func is_open() -> bool:
 	return not sketch_id.is_empty()
 
 
+# --- Names (parity follow-ups F5, A1) ------------------------------------------------------------------------------------------------
+# The backend numbers everything at creation and keeps the number (DIDSA-CAD backend/app/sketch/numbering.py): `Line 3`, `Point 12`, `D4`, `Coincident 2`. Points, constraints
+# and reference dimensions carry `number` in the solve-and-refresh state, the other entities are in the export's `numbers` map (id -> number). An older backend sends none:
+# then the name falls back to the thing's place in its kind (the flat app's rule), so it never shows an id.
+
+const ENTITY_LABELS := {"point": "Point", "line": "Line", "circle": "Circle", "arc": "Arc", "ellipse": "Ellipse", "ellipse_arc": "Ellipse Arc", "polygon": "Polygon", "slot": "Slot", "rectangle": "Rectangle", "spline": "Spline", "text": "Text"}
+const RELATION_LABELS := {"horizontal": "Horizontal", "vertical": "Vertical", "coincident": "Coincident", "parallel": "Parallel", "perpendicular": "Perpendicular", "equal_length": "Equal length",
+	"tangent": "Tangent", "curve_tangent": "Curve tangent", "equal_radius": "Equal radius", "concentric": "Concentric", "collinear": "Collinear", "at_midpoint": "Midpoint",
+	"spline_tangent": "Spline tangent", "point_on_line": "Point on line", "point_on_circle": "Point on circle", "point_on_ellipse": "Point on ellipse", "fixed": "Fixed"}
+const DIMENSION_TYPES := ["distance", "angle", "line_distance", "point_line_distance", "arc_length", "horizontal_angle", "point_angle", "point_circle_distance", "circle_distance", "line_circle_distance"]
+
+var numbers := {} ## id -> the backend's number (points, entities, constraints, reference dimensions); an id the backend has not numbered is absent
+var hole_points := {} ## id -> true: the reference points that track a hole's centre (named `Hole centre n`; the others are `Part corner n`)
+
+
+func number_of(id: String) -> int:
+	## The backend's number of a point, entity, dimension or relation; -1 when it has none (the origin, shape glue, an older backend).
+	return int(numbers[id]) if numbers.has(id) and numbers[id] != null else -1
+
+
+func _note_number(id: String, value: Variant) -> void:
+	if value != null and (value is float or value is int) and float(value) >= 1.0:
+		numbers[id] = int(value)
+
+
+func _position_number(kind: String, id: String) -> int:
+	## The flat app's fallback (an older backend): 1 + the place among the things of its kind, in the order the backend sent them.
+	var keys: Array = []
+	match kind:
+		"point":
+			for pid in points:
+				if not is_origin(str(pid)) and not is_reference(str(pid)):
+					keys.append(pid)
+		"line": keys = lines.keys()
+		"circle": keys = circles.keys()
+		"arc": keys = arcs.keys()
+		"ellipse": keys = ellipses.keys()
+		"ellipse_arc": keys = ellipse_arcs.keys()
+		"spline": keys = splines.keys()
+		"text": keys = texts.keys()
+		"dimension":
+			for cid in constraints:
+				if str((constraints[cid] as Dictionary).get("type", "")) in DIMENSION_TYPES:
+					keys.append(cid)
+		"constraint":
+			for cid in constraints:
+				if str((constraints[cid] as Dictionary).get("type", "")) not in DIMENSION_TYPES:
+					keys.append(cid)
+	var i := keys.find(id)
+	return i + 1 if i >= 0 else -1
+
+
+func name_of(kind: String, id: String) -> String:
+	## What a person calls a selected thing: `Line 3`, `Point 12`, `Origin`, `Part corner 2`, `D4 Length 40`, `Coincident 2`. Never an id ("" when it names nothing known).
+	var n := number_of(id)
+	match kind:
+		"point":
+			if is_origin(id):
+				return "Origin"
+			if is_reference(id):
+				return "%s %d" % ["Hole centre" if hole_points.has(id) else "Part corner", maxi(n, 1)]
+			n = n if n > 0 else _position_number("point", id)
+			return "Point %d" % n if n > 0 else "Point"
+		"dimension":
+			n = n if n > 0 else _position_number("dimension", id)
+			var word := _dimension_word(id)
+			var v := dimension_value(id)
+			var shown := "" if not bool(v.get("ok", false)) else " %s" % format_value(float(v["value"]))
+			return ("D%d" % n if n > 0 else "Dimension") + ((" " + word) if word != "" else "") + shown
+		"constraint":
+			var label := str(RELATION_LABELS.get(str((constraints.get(id, {}) as Dictionary).get("type", "")), "Relation"))
+			n = n if n > 0 else _position_number("constraint", id)
+			return "%s %d" % [label, n] if n > 0 else label
+	var base := str(ENTITY_LABELS.get(kind, kind.replace("_", " ").capitalize()))
+	n = n if n > 0 else _position_number(kind, id)
+	return "%s %d" % [base, n] if n > 0 else base
+
+
+func _dimension_word(id: String) -> String:
+	## The kind of a dimension in a word, for its name (`D4 Length 40`).
+	var c: Dictionary = constraints.get(id, {})
+	if is_size_dimension(id):
+		return "Diameter" if bool(diameter_shown.get(id, false)) else "Radius"
+	if not ellipse_axis_line(id).is_empty():
+		return "Axis"
+	match str(c.get("type", "")):
+		"distance":
+			return "Length"
+		"angle", "horizontal_angle", "point_angle":
+			return "Angle"
+		"arc_length":
+			return "Arc length"
+		"line_distance", "point_line_distance", "point_circle_distance", "circle_distance", "line_circle_distance":
+			return "Distance"
+	return ""
+
+
 # --- Reading the backend's answer --------------------------------------------------------
 
 func refresh(with_entities: bool = true, solve_body: Variant = null) -> bool:
@@ -225,6 +324,7 @@ func _ingest_state(json: Dictionary) -> void:
 		points[str(p["id"])] = Vector2(float(p["x"]), float(p["y"]))
 		point_xy[str(p["id"])] = [float(p["x"]), float(p["y"])]
 		point_locked[str(p["id"])] = bool(p.get("is_locked", false))
+		_note_number(str(p["id"]), p.get("number"))
 		if bool(p.get("is_reference", false)):
 			reference_ids[str(p["id"])] = true
 		else:
@@ -232,7 +332,12 @@ func _ingest_state(json: Dictionary) -> void:
 	constraints.clear()
 	for c in json.get("constraints", []):
 		constraints[str(c["id"])] = c
+		_note_number(str(c["id"]), c.get("number"))
+		if c.get("label") is Dictionary and (c["label"] as Dictionary).has("show") and int(_show_writes.get(str(c["id"]), 0)) == 0:
+			_note_show(str(c["id"]), str((c["label"] as Dictionary)["show"])) # the saved reading (radius / diameter / semi / full), both apps' alike
 	ref_dims = json.get("reference_dimensions", [])
+	for d in ref_dims:
+		_note_number(str((d as Dictionary).get("id", "")), (d as Dictionary).get("number"))
 	var solve: Dictionary = json.get("solve", {})
 	dof = int(solve.get("dof", -1))
 	converged = bool(solve.get("converged", true))
@@ -253,6 +358,20 @@ func _ingest_entities(json: Dictionary) -> void:
 	reference_ids.clear()
 	for id in json.get("reference_ids", []):
 		reference_ids[str(id)] = true
+	var nums: Variant = json.get("numbers", {})
+	if nums is Dictionary:
+		for nid in nums:
+			_note_number(str(nid), nums[nid])
+	hole_points.clear()
+	var refs: Variant = json.get("external_references", [])
+	if refs is Array:
+		for r in refs:
+			if r is Dictionary and str(r.get("kind", "")) == "circle_centre":
+				hole_points[str(r.get("point_id", r.get("id", "")))] = true
+	elif refs is Dictionary:
+		for rid in refs:
+			if refs[rid] is Dictionary and str(refs[rid].get("kind", "")) == "circle_centre":
+				hole_points[str(rid)] = true
 	for e in json.get("entities", []):
 		var id := str(e.get("id", ""))
 		match str(e.get("type", "")):
@@ -2278,13 +2397,62 @@ func dimension_value(id: String) -> Dictionary:
 
 
 func value_scale(id: String) -> float:
-	## How many times the stored value the label shows: 2 for a full ellipse's axis (stored centre to tip, drawn tip to tip, as the flat app) and for a circle's / arc's
-	## size dimension read as a diameter (the toggle); else 1. dimension_value multiplies by it and edit_dimension divides.
-	if not ellipse_axis_line(id).is_empty():
-		return 2.0
+	## How many times the stored value the label shows: 2 for an ellipse's axis read as the full axis (tip to tip) and for a circle's / arc's size dimension read as a
+	## diameter (the toggles, saved in the label's `show`); else 1. dimension_value multiplies by it and edit_dimension divides: "show full, type 80" stores 40.
+	if is_axis_dimension(id):
+		return 2.0 if shows_full_axis(id) else 1.0
 	if bool(diameter_shown.get(id, false)) and is_size_dimension(id):
 		return 2.0
 	return 1.0
+
+
+func is_axis_dimension(id: String) -> bool:
+	## An ellipse's axis dimension (a full ellipse's size constraint, or an elliptical arc's centre-to-tip distance): what the semi / full toggle flips.
+	return not ellipse_axis_line(id).is_empty() or not ellipse_arc_axis(id).is_empty()
+
+
+func shows_full_axis(id: String) -> bool:
+	## Whether an axis dimension reads as the full axis: the saved choice, else the default (a full ellipse's axis reads full, tip to tip, as both apps draw it;
+	## an elliptical arc's axis keeps reading centre to tip, the stored value, as it did before there was a choice).
+	if axis_semi.has(id):
+		return not bool(axis_semi[id])
+	return not ellipse_axis_line(id).is_empty()
+
+
+func default_show(id: String) -> String:
+	## What a dimension reads as when no choice is saved: "radius" (a circle's or arc's size), "full" or "semi" (an axis); "" for any other.
+	if is_size_dimension(id):
+		return "radius"
+	if not ellipse_axis_line(id).is_empty():
+		return "full"
+	if not ellipse_arc_axis(id).is_empty():
+		return "semi"
+	return ""
+
+
+func show_of(id: String) -> String:
+	## The reading a size or axis dimension has now: "radius" | "diameter" | "semi" | "full", "" when it has none.
+	if is_size_dimension(id):
+		return "diameter" if bool(diameter_shown.get(id, false)) else "radius"
+	if is_axis_dimension(id):
+		return "full" if shows_full_axis(id) else "semi"
+	return ""
+
+
+func ellipse_arc_axis(constraint_id: String) -> Dictionary:
+	## {arc, axis ("major" | "minor"), c, tip} (point ids) when `constraint_id` is the plain distance from an elliptical arc's centre to one of its axis points, else {}.
+	var c: Dictionary = constraints.get(constraint_id, {})
+	if str(c.get("type", "")) != "distance" or str(c.get("orientation", "linear")) != "linear":
+		return {}
+	for aid in ellipse_arcs:
+		var a: Dictionary = ellipse_arcs[aid]
+		var pa := str(c.get("point_a_id", ""))
+		var pb := str(c.get("point_b_id", ""))
+		for axis in ["major", "minor"]:
+			var tip := str(a["ma"] if axis == "major" else a["mi"])
+			if (pa == a["c"] and pb == tip) or (pb == a["c"] and pa == tip):
+				return {"arc": aid, "axis": axis, "c": str(a["c"]), "tip": tip}
+	return {}
 
 
 func is_size_dimension(id: String) -> bool:
@@ -2299,16 +2467,62 @@ func is_size_dimension(id: String) -> bool:
 
 
 func toggle_diameter(id: String) -> bool:
-	## The flat app's Radius / Diameter toggle for an existing circle or arc dimension: the same stored radius, read the other way (R5 <-> diameter 10). A view choice for
-	## this open sketch, as there: nothing is sent. False when `id` is not a size dimension.
+	## The flat app's Radius / Diameter toggle for an existing circle or arc dimension: the same stored radius, read the other way (R5 <-> diameter 10). The choice is
+	## saved in the dimension's label record (`show`, F5 / decision 10) so a reload and the flat app show it the same way. False when `id` is not a size dimension.
 	if not is_size_dimension(id):
 		return false
-	if bool(diameter_shown.get(id, false)):
-		diameter_shown.erase(id)
-	else:
-		diameter_shown[id] = true
-	changed.emit()
+	_set_show(id, "radius" if bool(diameter_shown.get(id, false)) else "diameter")
 	return true
+
+
+func toggle_axis(id: String) -> bool:
+	## The semi / full toggle of an ellipse's axis dimension: the stored value is always the semi-axis, the choice is how it is read (full: tip to tip, twice the value;
+	## semi: centre to tip, the value). Saved as `show`. False when `id` is not an axis dimension.
+	if not is_axis_dimension(id):
+		return false
+	_set_show(id, "semi" if shows_full_axis(id) else "full")
+	return true
+
+
+func _set_show(id: String, show: String) -> void:
+	_note_show(id, show)
+	var label: Dictionary = (constraints.get(id, {}).get("label", {}) as Dictionary).duplicate() if constraints.get(id, {}).get("label") is Dictionary else {}
+	label["show"] = show
+	if constraints.has(id):
+		constraints[id]["label"] = label
+	changed.emit()
+	_write_show(id, show)
+
+
+func _note_show(id: String, show: String) -> void:
+	## Takes a reading choice: a diameter flag for a circle / arc size, a semi flag for an axis; anything else is ignored.
+	match show:
+		"diameter":
+			diameter_shown[id] = true
+		"radius":
+			diameter_shown.erase(id)
+		"semi":
+			axis_semi[id] = true
+		"full":
+			axis_semi[id] = false
+
+
+func _write_show(id: String, show: String) -> void:
+	## PUT .../constraints/{id}/label with `show` ALONE: the backend keeps the placement a show-only PUT leaves out (and a placement-only PUT keeps the show), so
+	## neither wipes the other. In-flight writes are counted so a refresh does not overwrite the choice with an older one.
+	_show_writes[id] = int(_show_writes.get(id, 0)) + 1
+	var r: Dictionary = await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + id + "/label", {"show": show})
+	_show_writes[id] = int(_show_writes.get(id, 1)) - 1
+	if not bool(r["ok"]):
+		status.emit("Couldn't save how that dimension is shown: %s" % str(r["error"]))
+	changed.emit()
+
+
+func show_writes_pending() -> bool:
+	for id in _show_writes:
+		if int(_show_writes[id]) > 0:
+			return true
+	return false
 
 
 func ellipse_axis_line(constraint_id: String) -> Dictionary:
@@ -2458,6 +2672,9 @@ func delete_annotations() -> Dictionary:
 		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + cid, null)
 		if r["ok"]:
 			c.erase("id")
+			c.erase("number")
+			if number_of(cid) > 0:
+				c["number"] = number_of(cid) # an undo that re-creates a thing restores its name (D4 stays D4): every create route takes the old number (F4)
 			var saved_place: Variant = c.get("label")
 			c.erase("label")
 			if saved_place is Dictionary and not (saved_place as Dictionary).is_empty():
@@ -2596,6 +2813,8 @@ func _single_ghosts(first: Dictionary) -> Array:
 				var r: float = points[c["c"]].distance_to(points[rim])
 				var radius := _cand("radius", "Radius", "mm", r, points[c["c"]] + Vector2(r * 0.5, 0), {"patch_id": c["k"], "factor": 1.0}, circle_spec("radius", id), "radius", "radius")
 				var diameter := _cand("diameter", "Diameter", "mm", r * 2.0, points[c["c"]] + Vector2(-r * 0.5, 0), {"patch_id": c["k"], "factor": 0.5}, circle_spec("diameter", id), "diameter", "diameter")
+				radius["show"] = "radius"
+				diameter["show"] = "diameter"
 				out.append_array([diameter, radius] if str(first["kind"]) == "circle" else [radius, diameter]) # a circle is dimensioned by its diameter first
 				if str(first["kind"]) == "arc":
 					var length := _arc_length(id)
@@ -2606,6 +2825,34 @@ func _single_ghosts(first: Dictionary) -> Array:
 		"ellipse", "ellipse_arc":
 			out = _ellipse_ghosts(first)
 	return out
+
+
+func _line_pair_apply(type: String, l1: String, l2: String, value_key: String) -> Dictionary:
+	## Typing a two-line angle or a line-to-line distance again updates the one already between those lines (either order), as the flat app does (C5); else makes one.
+	## The create body stays beside the patch so the angle's side (quadrant, dimension_preview.with_side) still has something to set.
+	var apply: Dictionary = {"create": {"type": type, "line1_id": l1, "line2_id": l2}, "factor": 1.0, "value_key": value_key}
+	for id in constraints:
+		var c: Dictionary = constraints[id]
+		if str(c.get("type", "")) != type:
+			continue
+		var a := str(c.get("line1_id", ""))
+		var b := str(c.get("line2_id", ""))
+		if (a == l1 and b == l2) or (a == l2 and b == l1):
+			apply["patch_id"] = id
+			apply["swapped"] = a != l1 # the constraint's own line order is the other way round: its quadrant's two flip bits swap
+			break
+	return apply
+
+
+func _point_line_apply(pt: String, ln: String) -> Dictionary:
+	## A point's perpendicular distance to a line typed again updates the existing one (C5).
+	var apply: Dictionary = {"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}
+	for id in constraints:
+		var c: Dictionary = constraints[id]
+		if str(c.get("type", "")) == "point_line_distance" and str(c.get("point_id", "")) == pt and str(c.get("line_id", "")) == ln:
+			apply["patch_id"] = id
+			break
+	return apply
 
 
 func _constraint_where(type: String, field: String, value: String) -> String:
@@ -2650,18 +2897,23 @@ func _ellipse_ghosts(first: Dictionary) -> Array:
 			radius_apply = _distance_apply(str(el["c"]), tip_id, "linear")
 			diameter_apply = _distance_apply(str(el["c"]), tip_id, "linear")
 			diameter_apply["factor"] = 0.5
-		# A full ellipse's axis is drawn tip to tip, as the flat app draws it once made (ellipse_axis_line), so a placement dropped on the candidate is the one
-		# that dimension reads. An elliptical arc has no far tip: its axis is a distance from the centre.
+		# A full ellipse's axis is a straight dimension: semi (the Radius candidate) centre to tip, full (the Diameter candidate) tip to tip, as the flat app draws it once
+		# made, so a placement dropped on the candidate is the one that dimension reads (kind `ellipse_axis`, {offset, along}). An elliptical arc's axis is laid out radially
+		# (kind `radius`, {angle, leg}): a radius leader for the semi-axis, the circle-diameter style for the full one. Each candidate carries the `show` it makes: a new
+		# dimension reads as it was chosen (F5, C4; the choice is saved with it).
 		var far: Vector2 = cc * 2.0 - tip
 		if is_full:
 			var far_id := str(el.get("man", "") if axis == "major" else el.get("mnn", ""))
 			if far_id != "" and points.has(far_id):
 				far = points[far_id]
-		out.append(_cand("%sradius" % axis, "%s radius" % axis.capitalize(), "mm", r, cc + (tip - cc) * 0.5, radius_apply, {"kind": "linear", "a": far if is_full else cc, "b": tip}, "radius"))
-		out.append(_cand("%sdiameter" % axis, "%s diameter" % axis.capitalize(), "mm", r * 2.0, cc + (tip - cc) * 0.5, diameter_apply, {"kind": "linear", "a": far, "b": tip}, "diameter"))
-		if not is_full:
-			out[-2]["place_unsaved"] = true # the flat app lays an elliptical arc's axis out radially (placement kind `radius`): its saved placement is read differently, so it is not written from here
-			out[-1]["place_unsaved"] = true
+		var semi_spec: Dictionary = {"kind": "linear", "a": cc, "b": tip} if is_full else radial_spec("radius", cc, tip)
+		var full_spec: Dictionary = {"kind": "linear", "a": far, "b": tip} if is_full else radial_spec("diameter", cc, tip)
+		var semi_cand := _cand("%sradius" % axis, "%s radius" % axis.capitalize(), "mm", r, cc + (tip - cc) * 0.5, radius_apply, semi_spec, "radius")
+		var full_cand := _cand("%sdiameter" % axis, "%s diameter" % axis.capitalize(), "mm", r * 2.0, cc + (tip - cc) * 0.5, diameter_apply, full_spec, "diameter")
+		semi_cand["show"] = "semi"
+		full_cand["show"] = "full"
+		out.append(semi_cand)
+		out.append(full_cand)
 	return out
 
 
@@ -2758,11 +3010,11 @@ func _line_pair_ghosts(l1: String, l2: String) -> Array:
 		var spec := line_distance_spec(l1, l2)
 		var d1: Vector2 = (points[p1[1]] - points[p1[0]]).normalized()
 		var dist: float = absf((points[p2[0]] - points[p1[0]]).cross(d1))
-		return [_cand("lineDistance", "Distance", "mm", dist, mid, {"create": {"type": "line_distance", "line1_id": l1, "line2_id": l2}, "factor": 1.0, "value_key": "distance"}, spec, "line_distance", "distance")]
+		return [_cand("lineDistance", "Distance", "mm", dist, mid, _line_pair_apply("line_distance", l1, l2, "distance"), spec, "line_distance", "distance")]
 	var d1n: Vector2 = (points[p1[1]] - points[p1[0]]).normalized()
 	var d2n: Vector2 = (points[p2[1]] - points[p2[0]]).normalized()
 	var ang := rad_to_deg(acos(clampf(d1n.dot(d2n), -1.0, 1.0)))
-	return [_cand("angle", "Angle", "deg", ang, mid, {"create": {"type": "angle", "line1_id": l1, "line2_id": l2}, "factor": 1.0, "value_key": "angle_degrees"}, angle_spec(l1, l2), "angle", "angle", "pointer")]
+	return [_cand("angle", "Angle", "deg", ang, mid, _line_pair_apply("angle", l1, l2, "angle_degrees"), angle_spec(l1, l2), "angle", "angle", "pointer")]
 
 
 func _point_line_ghosts(pt: String, ln: String, perpendicular_label: String, with_axes: bool) -> Array:
@@ -2773,7 +3025,7 @@ func _point_line_ghosts(pt: String, ln: String, perpendicular_label: String, wit
 		return []
 	var perp := perp_spec(pt, ln)
 	var out: Array = [_cand("perpendicular", perpendicular_label, "mm", _spec_value(perp), ((perp["a"] + perp["b"]) * 0.5) if not perp.is_empty() else points[pt],
-		{"create": {"type": "point_line_distance", "point_id": pt, "line_id": ln}, "factor": 1.0, "value_key": "distance"}, perp, "point_line_distance", "distance")]
+		_point_line_apply(pt, ln), perp, "point_line_distance", "distance")]
 	if with_axes:
 		var near: String = lp[0] if points[pt].distance_squared_to(points[lp[0]]) <= points[pt].distance_squared_to(points[lp[1]]) else lp[1]
 		var pa: Vector2 = points[pt]
@@ -2970,8 +3222,11 @@ func circle_spec(kind: String, id: String, place := {}) -> Dictionary:
 	var rim: String = c.get("p", c.get("s", ""))
 	if not points.has(c.get("c", "")) or not points.has(rim):
 		return {}
-	var centre: Vector2 = points[c["c"]]
-	var rim_pt: Vector2 = points[rim]
+	return radial_spec(kind, points[c["c"]], points[rim], place)
+
+
+static func radial_spec(kind: String, centre: Vector2, rim_pt: Vector2, place := {}) -> Dictionary:
+	## circle_spec's layout from a centre and a point on the rim (an elliptical arc's axis is laid out the same way from its centre and its tip, F5 / C4).
 	var u := rim_pt - centre
 	var r := u.length()
 	var rim_angle := u.angle()
@@ -3430,8 +3685,12 @@ func unfix_selection() -> Dictionary:
 		var c: Dictionary = (constraints.get(cid, {}) as Dictionary).duplicate(true)
 		var r: Dictionary = await api.call(HTTPClient.METHOD_DELETE, SKETCH + sketch_id + "/constraints/" + cid, null)
 		if r["ok"]:
-			for owner in _fix_owners(c.get("point_ids", [])): # (undo fixes the same thing again: the entity those points make up, else each point)
-				calls.append([HTTPClient.METHOD_POST, SKETCH + sketch_id + "/constraints", {"type": "fixed", "entity_id": str(owner)}])
+			var owners: Array = _fix_owners(c.get("point_ids", []))
+			for owner in owners: # (undo fixes the same thing again: the entity those points make up, else each point)
+				var body := {"type": "fixed", "entity_id": str(owner)}
+				if owners.size() == 1 and number_of(cid) > 0:
+					body["number"] = number_of(cid) # the one Fix it makes again keeps its name
+				calls.append([HTTPClient.METHOD_POST, SKETCH + sketch_id + "/constraints", body])
 		else:
 			failed = str(r["error"])
 	selection.clear()
@@ -3589,12 +3848,23 @@ func _dimension_item(id: String, c: Dictionary, radius_of: Dictionary) -> Dictio
 				spec = circle_spec("diameter" if shown_diameter else "radius", str((radius_of[id] as Array)[1]), place)
 				text = dimension_text("diameter" if shown_diameter else "radius", value * (2.0 if shown_diameter else 1.0))
 			elif not axis.is_empty():
-				# a full ellipse's axis, as the flat app draws it: tip to tip, the number twice the stored (centre to tip) value
-				spec = {"kind": "linear", "a": axis["a"], "b": axis["b"]}
+				# a full ellipse's axis: read as the full axis (the default, as the flat app draws it) it runs tip to tip and the number is twice the stored (centre to tip)
+				# value; read as the semi-axis it runs centre to tip and the number is the stored value (F5, C4). Placement kind `ellipse_axis` {offset, along} either way.
+				var full_axis := shows_full_axis(id)
+				spec = {"kind": "linear", "a": axis["a"] if full_axis else ((axis["a"] as Vector2) + (axis["b"] as Vector2)) * 0.5, "b": axis["b"]}
 				var axis_place := _linear_place(place)
 				if not axis_place.is_empty():
 					spec["place"] = axis_place
-				text = dimension_text("linear", value * 2.0)
+				text = dimension_text("linear", value * (2.0 if full_axis else 1.0))
+			elif not ellipse_arc_axis(id).is_empty():
+				# an elliptical arc's axis, laid out radially as the flat app does (placement kind `radius`, {angle, leg}): semi is a radius leader from the centre to the
+				# arc's tip, full the circle-diameter style through the centre (F5, C4)
+				var arc_axis := ellipse_arc_axis(id)
+				var full_axis := shows_full_axis(id)
+				var tip_pt: Vector2 = points.get(arc_axis["tip"], Vector2.ZERO)
+				var centre_pt: Vector2 = points.get(arc_axis["c"], Vector2.ZERO)
+				spec = radial_spec("diameter" if full_axis else "radius", centre_pt, tip_pt, place)
+				text = dimension_text("diameter" if full_axis else "radius", value * (2.0 if full_axis else 1.0))
 			elif points.has(str(c.get("point_a_id", ""))) and points.has(str(c.get("point_b_id", ""))):
 				spec = {"kind": str(c.get("orientation", "linear")), "a": points[c["point_a_id"]], "b": points[c["point_b_id"]]}
 				var p := _linear_place(place)
@@ -3775,12 +4045,19 @@ func save_label(id: String, place: Dictionary) -> Dictionary:
 	if id == "" or place.is_empty() or not constraints.has(id):
 		return {"ok": false, "message": ""}
 	var old: Dictionary = _place_of(constraints[id]).duplicate()
+	var kept_show: Variant = old.get("show") # the saved reading (Radius / Diameter, semi / full) is not part of the placement: Undo's PUT of `old` must not re-send it, and this PUT does not lose it (the backend keeps it)
+	old.erase("show")
 	var saved: Dictionary = await api.call(HTTPClient.METHOD_PUT, SKETCH + sketch_id + "/constraints/" + id + "/label", place)
 	if not saved["ok"]:
 		var message := "Couldn't save the label's place: %s" % str(saved["error"])
 		status.emit(message)
 		return {"ok": false, "message": message}
-	constraints[id]["label"] = place.duplicate() # drawn there at once (the next solve brings it back from the backend too)
+	var now: Dictionary = place.duplicate() # drawn there at once (the next solve brings it back from the backend too)
+	if kept_show != null and not now.has("show"):
+		now["show"] = kept_show
+	if now.has("show"):
+		_note_show(id, str(now["show"]))
+	constraints[id]["label"] = now
 	label_override.erase(id)
 	changed.emit()
 	return {"ok": true, "message": "", "old": old}
@@ -3867,7 +4144,12 @@ func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dicti
 	var r: Dictionary
 	var calls: Array = []
 	if apply.has("patch_id"):
-		r = await api.call(HTTPClient.METHOD_PATCH, SKETCH + sketch_id + "/constraints/" + str(apply["patch_id"]), {"value": stored})
+		var patch: Dictionary = {"value": stored}
+		var q: Variant = (apply.get("create", {}) as Dictionary).get("quadrant")
+		if q != null:
+			var qi := int(q)
+			patch["quadrant"] = ((qi & 1) << 1) | ((qi & 2) >> 1) if bool(apply.get("swapped", false)) else qi # the side the laser chose, in the constraint's own line order
+		r = await api.call(HTTPClient.METHOD_PATCH, SKETCH + sketch_id + "/constraints/" + str(apply["patch_id"]), patch)
 	else:
 		var body: Dictionary = (apply["create"] as Dictionary).duplicate()
 		body[str(apply.get("value_key", "distance"))] = stored
@@ -3890,9 +4172,16 @@ func confirm_ghost(key: String, value: float, dropped: Dictionary = {}) -> Dicti
 		busy = true
 		status.emit("That size conflicts with the other constraints, so it wasn't added.")
 	var place: Dictionary = g.get("place", {})
-	if kept and not place.is_empty() and not bool(g.get("place_unsaved", false)):
-		var cid := str(apply["patch_id"]) if apply.has("patch_id") else made_id
-		await save_label(cid, place)
+	var cid := str(apply["patch_id"]) if apply.has("patch_id") else made_id
+	if kept and cid != "":
+		# the placement it was dropped at and the reading it was made with (Radius / Diameter, semi / full) go in one PUT: both are the dimension's label record. A reading
+		# that is what the dimension reads anyway is not sent, so a dimension keeps the choice already saved on it.
+		var body: Dictionary = place.duplicate() if not place.is_empty() and not bool(g.get("place_unsaved", false)) else {}
+		var chosen := str(g.get("show", ""))
+		if chosen != "" and chosen != show_of(cid):
+			body["show"] = chosen
+		if not body.is_empty():
+			await save_label(cid, body)
 	selection.clear()
 	ghosts.clear()
 	busy = false
