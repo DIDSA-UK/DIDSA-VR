@@ -11,9 +11,9 @@ extends SceneTree
 ##   f  a rigid-set part that is over-constrained: the red tint wins over the set colour (the set ids are SYNTHETIC, see _patch_rigid_sets)
 ##   g  an older backend (a stand-in that answers the framework's 404 for the call): no Fold button, one level per request
 ##   h  a generated tree of 2,000 occurrences: the window open and scrolled; the time the rows took to build is printed as "SMOKE TIMING ..." (a number, not an assertion)
-## Pictures: TREE_RENDER_DIR=/some/dir  xvfb-run -a "$GODOT" --path . --script res://tests/e2e_assembly_tree_render.gd   (Mesa software GL, the GL-compatibility
+## Pictures: TREE_RENDER_DIR=/some/dir  xvfb-run -a "$GODOT" --path . --script res://tools/assembly_tree_render_check/assembly_tree_render_check.gd   (Mesa software GL, the GL-compatibility
 ## driver, not the project's mobile renderer). <name>.png is the window's own pixels (what the panel texture holds), <name>_wide.png the view from eye height with
-## the model, <name>.txt the rows as text. Under --headless (tests/ci_e2e.sh) there is nothing to draw: only the SMOKE lines on the rows are checked.
+## the model, <name>.txt the rows as text. Under --headless (a headless run) there is nothing to draw: only the SMOKE lines on the rows are checked.
 ## Needs secrets.cfg (backend url + api_key) pointing at a running backend (tools/start_backend.sh); the run replaces the backend's document. Settings: set
 ## DIDSA_SETTINGS_PATH=user://settings_test.cfg (the CI scripts do) so the "Fold x4" switch does not touch the real settings.
 ## A Mesa picture on Xvfb is layout, text, colours and state. It is not legibility at arm's length, reach, feel or the Quest's frame rate.
