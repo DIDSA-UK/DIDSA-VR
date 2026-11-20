@@ -1835,11 +1835,17 @@ func _on_session_changed() -> void:
 			table.set_status(_sketch_hint()) # the status line carries the DOF
 
 
+func refresh_sketch_view() -> void:
+	## The sketch drawn again (a drawing setting changed: the deck's Colours switch).
+	_refresh_view()
+
+
 func _refresh_view() -> void:
 	if view == null or session == null:
 		return
 	view.show_dimensions = table.build.visibility.is_on(Visibility.DIMENSIONS) # the drawer's Dims / Constr. tiles: only this open sketch's own glyphs
 	view.show_constraints = table.build.visibility.is_on(Visibility.CONSTRAINTS)
+	session.exact_colours = table.exact_colours
 	dim_flow.sync(session)
 	view.ghosts_hidden = table.active_tool == "dimension" and not dim_flow.show_all # S5: the Dimension tool shows one candidate, at the laser
 	view.rebuild(session, session.selection, _hover_entity, session.ghosts) # F3: the drawing and its dimensions, made once

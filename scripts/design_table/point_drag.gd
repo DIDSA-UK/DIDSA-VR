@@ -51,21 +51,7 @@ var _wish := Vector2(INF, INF) ## the latest laser move since the press
 static func pinned_ids(session) -> Array:
 	## The points a drag never moves: the origin, the sketch's reference points, the points the part holds (locked), and every point a Fix holds (a `fixed` constraint is
 	## not something the projector skips by its own choice: the caller pins its points).
-	var out := {}
-	if session.origin_id != "":
-		out[session.origin_id] = true
-	for id in session.reference_ids:
-		if session.points.has(id):
-			out[id] = true
-	for id in session.point_locked:
-		if bool(session.point_locked[id]):
-			out[id] = true
-	for cid in session.constraints:
-		var c: Dictionary = session.constraints[cid]
-		if str(c.get("type", "")) == "fixed":
-			for id in session.constraint_point_ids(c):
-				out[id] = true
-	return out.keys()
+	return session.pinned_point_ids()
 
 
 static func _exact_points(session) -> Dictionary:

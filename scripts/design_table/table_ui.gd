@@ -31,6 +31,7 @@ signal undo_pressed
 signal redo_pressed ## "Redo": puts back the feature (or Build-tree edit) Undo just took back
 signal reset_pressed ## "Reset": the part back to the middle of the slab at its fitted size, sketch plane flat
 signal part_lock_toggled(locked: bool) ## "Orbit lock On / Off" while a sketch is open: Locked keeps the tilt and the plane (grips slide the part under the sketch window and zoom it), Free lets them move, turn and scale the part anywhere
+signal exact_colours_toggled(on: bool) ## "Colours: Exact / Structure" while a sketch is open: each line is coloured by its own points (Exact) or by its whole connected structure, as the flat app does (Structure)
 signal new_sketch_pressed ## "New sketch": asks for a plane or flat face to start a sketch on (only offered when no sketch is open)
 signal done_pressed ## "Exit sketch": leave the open sketch (the part is refreshed if it was changed)
 signal fit_pressed ## "Fit": slide and zoom the part so the sketch fills the sketch window
@@ -96,6 +97,7 @@ var _close_button: Button
 var _reset_button: Button
 var _return_button: Button
 var _lock_button: Button
+var _colours_button: Button
 var _fit_button: Button
 var _done_button: Button
 var _active_chip: Label
@@ -313,6 +315,17 @@ func _build_shell() -> void:
 		feedback.emit("press")
 		part_lock_toggled.emit(on))
 	lock_row.add_child(_lock_button)
+	_colours_button = _utility("lock", "Colours: Structure", true)
+	_colours_button.icon = null
+	_colours_button.custom_minimum_size.x = GENERIC_LABEL_BUTTON.x * 2.0 + tokens.gap
+	_colours_button.tooltip_text = "Colours: Structure colours a whole connected shape green only when all of it is fully constrained (as the flat app does). Exact colours each line by its own points, so it shows which line still needs a dimension."
+	_colours_button.disabled = true
+	_colours_button.visible = false
+	_colours_button.toggled.connect(func(on: bool) -> void:
+		_colours_button.text = "Colours: Exact" if on else "Colours: Structure"
+		feedback.emit("press")
+		exact_colours_toggled.emit(on))
+	lock_row.add_child(_colours_button)
 
 	_tint_glyphs()
 	_style_frame()
@@ -614,12 +627,18 @@ func set_sketching(on: bool) -> void:
 	_sketching = on
 	_refresh_sketch_state()
 	_lock_button.visible = on ## the sketch's own buttons only exist while a sketch is open
+	_colours_button.visible = on
+	_colours_button.disabled = not on
 	_fit_button.visible = on
 
 
 func set_part_locked(on: bool) -> void:
 	_lock_button.set_pressed_no_signal(on)
 	_lock_button.text = "Orbit lock: On" if on else "Orbit lock: Off"
+
+
+func colours_button() -> Button:
+	return _colours_button
 
 
 func lock_button() -> Button:

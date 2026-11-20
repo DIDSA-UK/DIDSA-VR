@@ -231,8 +231,7 @@ func _initialize() -> void:
 		"dimensioned circle centre drag: hybrid, the clamp keeps %.3f mm to the origin (%.4f) and the centre did not go the whole (10, 5)" % [dist0, d9])
 	await undo_restores("dimensioned circle centre", r9["before"])
 
-	# 7. slot end centre: the other centre stays. A slot of its own sketch: any rectangle drawn in a sketch with a slot made this backend report "not converged" with nothing
-	# failed (found writing this test; a backend question, not looked into: docs/status.md)
+	# 7. slot end centre: the other centre stays. A slot in a sketch of its own (an older backend reported "not converged" with a rectangle beside it; see the check at the end)
 	await table.new_part()
 	await wait_for(func() -> bool: return ed.state == "pick_plane")
 	opened = await ed.begin_sketch({"fixed": "XY"})
@@ -249,6 +248,13 @@ func _initialize() -> void:
 		var r7 := await drag_drop("slot end centre", str(slot["center1_point_id"]))
 		_check(r7.get("kind", "") == "slot" and stayed([slot["center2_point_id"]], r7["before"], r7["after"]) and shifted([slot["center1_point_id"]], r7["before"], r7["after"], MOVE), "slot end-centre drag: the other centre stays, this one went by (10, 5)")
 		await undo_restores("slot end centre", r7["before"])
+		# the backend finding of F8, fixed in DIDSA-CAD (a rectangle's centre AtMidpoint is trusted by id): a rectangle drawn in the slot's sketch still solves
+		s.set_tool("rectangle")
+		s.rect_method = "centre"
+		await s.tap({"uv": Vector2(30, 30)})
+		await s.tap({"uv": Vector2(45, 40)})
+		s.set_tool("select")
+		_check(not record_of("rectangle").is_empty() and s.converged and s.failed_constraint_ids.is_empty(), "a slot and a rectangle in one sketch solve (the backend reported not converged with nothing failed before the fix)")
 
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)
 	quit(0 if failures == 0 else 1)

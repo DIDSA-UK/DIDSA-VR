@@ -110,6 +110,39 @@ static func mobility(points: Dictionary, constraints: Array, lines: Dictionary, 
 	return int(p._mobility_of.get(point_id, 2))
 
 
+static func mobility_map(points: Dictionary, constraints: Array, lines: Dictionary, pinned: Array = []) -> Dictionary:
+	## Every point's mobility (0 / 1 / 2, or -1 with no answer) in one pass: a pinned point 0, a point no constraint reaches 2, and each connected group solved ONCE for all of
+	## its points (`mobility` asks for one point of the same system). F7's exact colours read this.
+	var out := {}
+	var named := {}
+	for c in constraints:
+		if c is Dictionary:
+			var list = _point_list(c, lines)
+			if list != null:
+				for id in list:
+					named[str(id)] = true
+	for id in pinned:
+		out[str(id)] = 0
+	for key in points:
+		var id := str(key)
+		if out.has(id):
+			continue
+		if not named.has(id):
+			out[id] = 2
+			continue
+		var p = (load("res://scripts/motion/sketch_projector.gd") as GDScript).new()
+		p._mobility_only = true
+		var r: Dictionary = p._project(points, constraints, lines, [id], pinned, [], {}, {})
+		if bool(r.get("unsupported", false)):
+			out[id] = -1
+			continue
+		for gid in p._mobility_of:
+			out[gid] = p._mobility_of[gid]
+		if not out.has(id):
+			out[id] = 2
+	return out
+
+
 ## Mobility (13.6): the dense Jacobian at _x, Gauss-Jordan, the null space orthonormalised, then each group point's 2 x 2 Gram matrix over it.
 var _mobility_only := false
 var _mobility_of := {} ## point id -> 0 / 1 / 2

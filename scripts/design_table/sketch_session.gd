@@ -4150,6 +4150,48 @@ func sketch_grounded() -> bool:
 	return (rigidity() as RefCounted).any_grounded
 
 
+func pinned_point_ids() -> Array:
+	## The points a drag never moves: the origin, the sketch's reference points, the points the part holds (locked), and every point a Fix holds.
+	var out := {}
+	if origin_id != "":
+		out[origin_id] = true
+	for id in reference_ids:
+		if points.has(id):
+			out[id] = true
+	for id in point_locked:
+		if bool(point_locked[id]):
+			out[id] = true
+	for cid in constraints:
+		var c: Dictionary = constraints[cid]
+		if str(c.get("type", "")) == "fixed":
+			for id in constraint_point_ids(c):
+				out[id] = true
+	return out.keys()
+
+
+func point_mobility() -> Dictionary:
+	## id -> 0 / 1 / 2 / -1: how many directions each point can still move at first order (SketchProjector.mobility_map, projector spec 13.6), -1 = no answer.
+	var exact := {}
+	for id in points:
+		var here: Vector2 = points[id]
+		var kept: Variant = point_xy.get(id)
+		exact[str(id)] = [float(kept[0]), float(kept[1])] if kept is Array and absf(float(kept[0]) - here.x) < 1e-3 and absf(float(kept[1]) - here.y) < 1e-3 else [float(here.x), float(here.y)]
+	return (load("res://scripts/motion/sketch_projector.gd") as GDScript).mobility_map(exact, constraints.values(), lines, pinned_point_ids())
+
+
+func _exact_state(ids: Array, mobility: Dictionary, counted: String) -> String:
+	## The exact colour of one entity (an opt-in refinement of the count's verdict `counted`): fully when none of its defining points can move, free when one can; an
+	## entity with a point the oracle had no answer for keeps the count's verdict.
+	var all_still := true
+	for pid in ids:
+		var m := int(mobility.get(str(pid), -1))
+		if m < 0:
+			return counted
+		if m > 0:
+			all_still = false
+	return "fully" if all_still else "free"
+
+
 func contradictory_points() -> Dictionary:
 	## id -> true: the endpoints of a line that is both horizontal and vertical, or of either of two lines that are both parallel and perpendicular (forced over-constrained,
 	## rigidity spec 4 and projector spec 13.5).
@@ -4191,6 +4233,7 @@ func on_contradictory_line(point_id: String) -> bool:
 	return contradictory_points().has(point_id)
 
 
+var exact_colours := false ## F7 (opt-in): colour a line by whether ITS OWN points can still move (the mobility oracle) instead of by its whole connected structure (the flat app's count)
 var _states_key: Array = [] ## what entity_states() last answered for (revision, counts of what the count reads) and the answer; a solve (`revision`) or an added entity invalidates it
 var _states_cache := {}
 
@@ -4200,13 +4243,14 @@ func entity_states() -> Dictionary:
 	## a constraint the last solve reported failed, plus the endpoints of a line both horizontal and vertical or of two lines both parallel and perpendicular. Then the pair
 	## rule (over when a defining pair is over by the count or a defining point is forced; fully when every pair is fully constrained), then the whole-sketch override: a
 	## sketch fully constrained as a whole (converged, dof <= 0, geometry, something grounded) makes every entity that is not over fully constrained. Colours are the view's.
-	var key := [revision, dof, converged, points.size(), constraints.size(), lines.size(), circles.size(), arcs.size(), ellipses.size(), ellipse_arcs.size(), splines.size(), texts.size(), failed_constraint_ids.size()]
+	var key := [exact_colours, revision, dof, converged, points.size(), constraints.size(), lines.size(), circles.size(), arcs.size(), ellipses.size(), ellipse_arcs.size(), splines.size(), texts.size(), failed_constraint_ids.size()]
 	if key == _states_key:
 		return _states_cache # nothing the count reads has changed since the last pass (a hover or a pick redraws without a solve): not recomputed
 	var r: RefCounted = rigidity()
 	var whole: bool = has_geometry() and converged and dof <= 0 and r.any_grounded
 	var forced := failed_point_ids()
 	forced.merge(contradictory_points())
+	var mobility: Dictionary = point_mobility() if exact_colours else {}
 	var out := {}
 	for kind in ["line", "circle", "arc", "ellipse", "ellipse_arc", "spline", "text"]:
 		var source: Dictionary = _entity_dict(kind)
@@ -4232,6 +4276,8 @@ func entity_states() -> Dictionary:
 			var state := "free"
 			if ids.size() >= (1 if kind == "text" else 2):
 				state = r.entity_state(SketchRigidity.pairs_of(kind, ids))
+				if exact_colours and state != "over":
+					state = _exact_state(ids, mobility, state)
 				for pid in ids:
 					if forced.has(pid):
 						state = "over"

@@ -233,6 +233,37 @@ func _initialize() -> void:
 	s.lines["extra"] = {"a": "f", "b": "g"}
 	_check(_states(s).has("extra"), "...and a line added without a solve")
 
+	# --- exact colours (opt-in): each line by its own points, from the mobility oracle
+	var Projector2 := load("res://scripts/motion/sketch_projector.gd")
+	s = _sketch(_rect_constraints(true, false), 5)
+	st = _states(s)
+	s.exact_colours = true
+	var ex := _states(s)
+	_check(_rect_is(st, "free") and ex["ab"] == "fully" and ex["bc"] == "free" and ex["cd"] == "free" and ex["da"] == "free" and ex["F"] == "free", "exact colours: the rectangle without its height - the structure count says every line is free, the exact one says only the line held at both ends (ab) is fully constrained: %s" % str(ex))
+	s = _sketch(_rect_constraints(true, true), 4)
+	s.exact_colours = true
+	ex = _states(s)
+	_check(_rect_is(ex, "fully") and ex["F"] == "free", "...with the height too all four are fully constrained and the free line is not: %s" % str(ex))
+	var pm: Dictionary = s.point_mobility()
+	_check(pm["O"] == 0 and pm["C"] == 0 and pm["f"] == 2 and pm["g"] == 2, "point_mobility: the origin 0, a corner of the rigid rectangle 0, a free line's ends 2")
+	_check(Projector2.mobility_map({"a": [0.0, 0.0], "b": [10.0, 0.0], "c": [3.0, 3.0]}, [_dist("d", "a", "b", 10.0)], {}, ["a"]) == {"a": 0, "b": 1, "c": 2}, "mobility_map: a pinned point 0, a point on a circle round it 1, a point no constraint reaches 2")
+	s = _sketch(_rect_constraints(true, false), 5)
+	_check(_states(s)["ab"] == "free", "(the structure count first)")
+	s.exact_colours = true
+	_check(_states(s)["ab"] == "fully", "...the switch is part of what entity_states keeps: turning it on is not answered from the structure count's kept result")
+	s.exact_colours = false
+	_check(_states(s)["ab"] == "free", "...and turning it off gives the structure count back")
+	s = _sketch(tangent, 5)
+	var counted := _states(s)
+	s.exact_colours = true
+	_check(_states(s) == counted and _mobility(Projector2, s, "C") == -1, "an entity whose points the oracle cannot answer for (a spline tangency in the group) keeps the count's verdict: %s" % str(counted))
+	s = _sketch(_rect_constraints(true, false), 0, true)
+	s.exact_colours = true
+	_check(_rect_is(_states(s), "fully"), "the whole-sketch override still turns everything fully constrained (dof 0, converged, grounded)")
+	s = _sketch(both, 1)
+	s.exact_colours = true
+	_check(_states(s)["ab"] == "over", "an over-constrained line stays over")
+
 	# --- the view
 	var view = View.new()
 	root.add_child(view)

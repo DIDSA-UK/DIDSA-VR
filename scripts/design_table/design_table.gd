@@ -107,6 +107,7 @@ var ui: Control ## table_ui.gd
 var surface ## LaserSurface for the tool deck
 var handle ## PanelHandle on the slab's front edge
 var snap_enabled := true
+var exact_colours := false ## the deck's "Colours: Exact": lines coloured by their own points (the mobility oracle) instead of their whole structure; per table session
 var infer_enabled := true ## the Infer switch beside Snap: on, the sketcher adds the relationships it infers (axis, parallel, tangent...); sticky for the table session
 var api ## cad_api.gd: the serial line to the backend
 var editor ## table_editor.gd: the editing session on the seated part
@@ -261,6 +262,12 @@ func setup(left: XRController3D, right: XRController3D, camera: XRCamera3D, main
 	ui.part_lock_toggled.connect(func(on: bool) -> void:
 		part_locked = on
 		set_status("The part keeps its tilt: one hand slides it under the sketch window, two hands zoom it." if on else "The part is free: your hands move, turn and scale it anywhere, the stick spins it. Reset puts the tilt back."))
+	ui.exact_colours_toggled.connect(func(on: bool) -> void:
+		exact_colours = on
+		if editor != null:
+			editor.refresh_sketch_view()
+		set_status("Exact colours: a line is green when its own points cannot move." if on else "Structure colours: a connected shape is green only when all of it is fully constrained.")
+	)
 	ui.fit_pressed.connect(fit_sketch)
 	ui.new_sketch_pressed.connect(func() -> void: editor.new_sketch())
 	ui.done_pressed.connect(func() -> void: editor.finish_sketch())
