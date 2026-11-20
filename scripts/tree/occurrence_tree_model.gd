@@ -422,7 +422,7 @@ static func state_hint_short(state: String, dof: int = -1) -> String:
 		"fully_constrained":
 			return "full"
 		"pending":
-			return "..."
+			return "updating"
 	return ""
 
 
@@ -738,6 +738,13 @@ static func _carry_into(n: Dictionary, o: Dictionary) -> void:
 				n["mates"][k] = o["mates"].get(k)
 	if bool(o.get("status_failed", false)):
 		n["status_failed"] = true
+
+
+static func clear_pending(response: Dictionary) -> void:
+	## Drops every `pending` mark (the status call that was to settle them failed): the rows go back to the flag-based state.
+	for n in children_of(response):
+		n["pending"] = false
+		clear_pending(n)
 
 
 static func normalise_tree(response: Dictionary) -> void:

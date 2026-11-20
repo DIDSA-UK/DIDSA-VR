@@ -16,6 +16,7 @@ const NODES := [
 	["d", "Drive plate assembly", "over_constrained", 0, false, false],
 	["e", "Spacer", "fully_constrained", 0, false, false],
 	["f", "Housing cover with a long name", "under_constrained", 12, false, false],
+	["g", "Gearbox assembly", "under_constrained", 2, false, false], # (an assembly with problems below it: wears a count bubble beside its name)
 ]
 
 
@@ -27,12 +28,17 @@ func tree() -> Dictionary:
 	var kids: Array = []
 	for n in NODES:
 		var missing: bool = n[5]
+		var is_asm: bool = n[0] == "g"
 		kids.append({
 			"occurrence_id": n[0], "path": [n[0]], "external_ref": "x.didsa" if missing else null, "ref_part_id": null if missing else "P" + n[0], "resolved_part_id": null if missing else "P" + n[0],
-			"part_name": null if missing else n[1], "name_override": n[1] if missing else null, "kind": "missing" if missing else "part",
+			"part_name": null if missing else n[1], "name_override": n[1] if missing else null, "kind": "missing" if missing else ("assembly" if is_asm else "part"),
 			"fixed": n[2] == "fixed", "hidden": false, "suppressed": false, "color": null,
 			"constraint": null if missing else {"status": n[2], "dof": n[3], "rigid_set": null, "broken_mates": 0, "near_mates": 0},
-			"feature_count": 0, "placements": 1, "cycle": false, "truncated": false, "status_failed": false, "mates": null, "patterns": null, "problems": null, "children": [],
+			"feature_count": 0, "placements": 1, "cycle": false, "truncated": false, "status_failed": false, "mates": null, "patterns": null,
+			"problems": {"missing": 3, "cycles": 0, "broken": 0, "over_constrained": 0, "near": 0} if is_asm else null,
+			"children": [{"occurrence_id": "g1", "path": ["g", "g1"], "external_ref": null, "ref_part_id": "PGx", "resolved_part_id": "PGx", "part_name": "Gear", "name_override": null, "kind": "part",
+				"fixed": false, "hidden": false, "suppressed": false, "color": null, "constraint": null, "feature_count": 0, "placements": 1, "cycle": false, "truncated": false,
+				"status_failed": false, "mates": null, "patterns": null, "problems": null, "children": []}] if is_asm else [],
 		})
 	return {
 		"part_id": "R", "part_name": "Test rig", "kind": "assembly", "feature_count": 0, "status_included": true,
@@ -69,6 +75,26 @@ func clipped(b: Button) -> bool:
 	return w + icon_w + pad > b.size.x
 
 
+func table_tree_rows() -> void:
+	## The design table's PARTS tab (table_tree_window.gd, a subclass: per-level rows, with Table / Bring buttons beside each name): the hint must fit what is left.
+	var table = main.design_table
+	table.open()
+	await process_frame
+	table.tree._tree = [{"id": "", "name": "Asm", "named": true, "resolved_part_id": "ASM", "expanded": true, "path": [], "children": [
+		{"id": "o1", "name": "Bracket left long", "named": true, "resolved_part_id": "P1", "children": null, "expanded": false, "path": ["o1"], "status": "under_constrained", "dof": 2},
+		{"id": "o2", "name": "Cylinder", "named": true, "resolved_part_id": "P2", "children": null, "expanded": false, "path": ["o2"], "status": "fixed", "dof": 0}]}]
+	table.tree._rebuild_rows()
+	for i in 10:
+		await process_frame
+	var found: Array = []
+	for b in table.tree._viewport.find_children("*", "Button", true, false):
+		if (b as Button).theme_type_variation == &"ButtonRail":
+			found.append(b)
+	var cut := found.filter(func(b): return clipped(b) and b.text.contains("  · "))
+	check("the design table's tree: rows beside the Table / Bring buttons have no hint cut off (%s)" % ", ".join(found.map(func(b): return b.text)), found.size() >= 2 and cut.is_empty())
+	table.close()
+
+
 func shoot(name: String) -> void:
 	var dir := OS.get_environment("TREE_RENDER_DIR")
 	if dir == "":
@@ -92,7 +118,7 @@ func _initialize() -> void:
 	for i in 30:
 		await process_frame
 	var buttons := rail_buttons()
-	check("(setup) the rows are drawn (root and six parts)", buttons.size() == 7)
+	check("(setup) the rows are drawn (root and seven parts; one wears a problem bubble)", buttons.size() == 8 and window._rows_box.find_children("*", "Label", true, false).any(func(l): return l.text == "3"))
 	await process_frame
 	await RenderingServer.frame_post_draw
 	shoot("tree_rows")
@@ -101,6 +127,9 @@ func _initialize() -> void:
 	var long_alone := buttons.filter(func(b): return b.text == "Housing cover with a long name")
 	check("a name too long even alone drops the hint (the bar has it) and ends in an ellipsis rather than being cut mid-letter", long_alone.size() == 1 and long_alone[0].text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS)
 	check("the missing file's row reads name first, then 'missing'", buttons.any(func(b): return b.text == "lost_bracket  · missing"))
+	var gearbox: Array = buttons.filter(func(b): return b.text.begins_with("Gearbox assembly"))
+	check("the row with a problem bubble beside it: its hint is whole or left out, never cut (%s)" % (gearbox[0].text if gearbox.size() == 1 else "?"), gearbox.size() == 1 and (not clipped(gearbox[0])) and gearbox[0].text.begins_with("Gearbox assembly"))
+	await table_tree_rows()
 	window._on_row_selected(Model.find_row(window._tree, ["c"]))
 	for i in 5:
 		await process_frame

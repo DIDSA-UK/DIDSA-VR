@@ -71,8 +71,7 @@ func setup_tree(left: XRController3D, right: XRController3D, camera: XRCamera3D,
 	if main != null and main.get("room_manager") != null:
 		main.room_manager.rooms_changed.connect(_on_rooms_changed) # a row's Room button reads Close while its room is open
 	if main != null and main.get("_mates_tool") != null:
-		main._mates_tool.mates_changed.connect(request_refresh) # V-7: live, without losing what is open
-		main._mates_tool.document_changed.connect(request_refresh)
+		watch_mates(main._mates_tool)
 	for hand_name in ["LeftController", "RightController"]:
 		var hand = left if hand_name == "LeftController" else right
 		if hand != null and hand.has_signal("selection_changed"):
@@ -367,7 +366,6 @@ func _build_content() -> Control:
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 4)
 	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows_box.resized.connect(_on_rows_resized)
 	rows_scroll.add_child(_rows_box)
 
 	if _uses_action_bar():
@@ -388,17 +386,6 @@ func _build_content() -> Control:
 func _uses_action_bar() -> bool:
 	## The world tree has the bottom action bar; the design table's PARTS tab keeps its own inline Table / Bring buttons until phase T2 moves it onto the bar.
 	return true
-
-
-var _rows_width := 0.0
-
-
-func _on_rows_resized() -> void:
-	## The rows' text is fitted to their width, which is only known after the first layout (and changes when the panel is resized): draw them again then.
-	if absf(_rows_box.size.x - _rows_width) < 1.0:
-		return
-	_rows_width = _rows_box.size.x
-	_rebuild_rows.call_deferred()
 
 
 func _rebuild_rows() -> void:
@@ -456,9 +443,8 @@ func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = nu
 	var icon_name := Model.state_icon(row)
 	if icon_name != "":
 		name_button.icon = UiIcons.texture(icon_name, 28)
-	# the room the name has: the rows' width less the indent, the arrow's slot, the icon and the button's own padding
-	var room := _rows_box.size.x - depth * INDENT_PX - 44.0 - 8.0 - (36.0 if icon_name != "" else 0.0) - 28.0
-	name_button.text = _row_text(row, room if _rows_box.size.x > 100.0 else -1.0)
+	name_button.text = str(row["name"]) # (the extras are added by _fit_row_text once the button has been laid out)
+	name_button.resized.connect(_fit_row_text.bind(name_button, row))
 	name_button.clip_text = true
 	name_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS # (a name too long even alone ends in "...", not mid-letter)
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -645,7 +631,11 @@ func _load_endpoint(token: int) -> bool:
 	if token != _refresh_token:
 		return true
 	if seq != _mutation_seq:
-		request_refresh() # (a Fix / Float was done while this was in flight: this answer may predate it. Read again; never show it.)
+		# (a Fix / Float was done while this was in flight: this answer may predate it. Read again; never show it.)
+		if _tree.is_empty():
+			_refresh_root.call_deferred() # (nothing is shown yet, so request_refresh would do nothing: start the load again)
+		else:
+			request_refresh()
 		return true
 	if not result["ok"]:
 		if _route_missing(result):
@@ -674,6 +664,8 @@ func _load_endpoint(token: int) -> bool:
 		_set_status(_tree_note(true))
 		_rebuild_rows()
 	else:
+		Model.clear_pending(_resp) # (no fresh status is coming: fall back to the flag-based state rather than "updating" for good)
+		_rebuild_rows()
 		_set_status((_tree_note(false) + " Constraint states unavailable: %s" % _reason(with_status)).strip_edges())
 	return true
 
@@ -723,10 +715,10 @@ func _adopt_response(resp: Dictionary) -> void:
 	}]
 
 
-func _row_text(row: Dictionary, room_px: float = -1.0) -> String:
-	## The name first, then short extras in order of importance (state, hidden, rigid-set note, no status), each only while it still fits in `room_px` (-1 = no
-	## limit). A 480 px panel clips the end of a row, so the name is never pushed out by what follows it; whatever is left out is in the bottom bar when the row is
-	## selected (_row_detail), and the icon and tint still show the state.
+func _row_text(row: Dictionary, button: Button = null) -> String:
+	## The name first, then short extras in order of importance (state, hidden, rigid-set note, no status). With a `button`, each extra is added only while the text
+	## still fits that button as laid out (its real width, its own theme font, icon and padding: so the problem bubble and any row buttons beside it are already
+	## taken out); without one, all of them. What is left out is in the bottom bar when the row is selected (_row_detail), and the icon and tint still show the state.
 	var text := str(row["name"])
 	var hint := _legacy_hint_short(row)
 	if row.has("state") and not bool(row.get("suppressed", false)):
@@ -744,16 +736,32 @@ func _row_text(row: Dictionary, room_px: float = -1.0) -> String:
 		if str(extra) == "":
 			continue
 		var longer: String = text + "  · %s" % str(extra)
-		if room_px >= 0.0 and _text_width(longer) > room_px:
+		if button != null and _text_width(longer, button) > _text_room(button):
 			break # (in priority order: once one does not fit, the rest are left for the bar)
 		text = longer
 	return text
 
 
-func _text_width(text: String) -> float:
-	var font := _rows_box.get_theme_font("font", "Button") if _rows_box != null else ThemeDB.fallback_font
-	var size := _rows_box.get_theme_font_size("font_size", "Button") if _rows_box != null else ThemeDB.fallback_font_size
-	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+static func _text_room(button: Button) -> float:
+	## The width the button's text can use: its size less the stylebox's padding and the icon with its gap.
+	var room := button.size.x - button.get_theme_stylebox("normal").get_minimum_size().x
+	if button.icon != null:
+		room -= button.icon.get_width() + button.get_theme_constant("h_separation")
+	return room
+
+
+static func _text_width(text: String, button: Button) -> float:
+	return button.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x
+
+
+func _fit_row_text(button: Button, row: Dictionary) -> void:
+	## Once the button has its real size (and again when it changes: the panel is resized), the extras are fitted to it. The text change does not change the size
+	## (the button expands to fill and clips), so this settles at once.
+	if button.size.x < 40.0:
+		return
+	var text := _row_text(row, button)
+	if text != button.text:
+		button.text = text
 
 
 static func _legacy_hint_short(row: Dictionary) -> String:
@@ -885,6 +893,29 @@ func _on_bar_action(action_id: String, row: Dictionary, room: Dictionary) -> voi
 				_main.room_manager.toggle_room(room["part_id"], room["label"], room["parent_part_id"], room["occurrence_id"])
 		"delete":
 			_on_delete_pressed(row)
+
+
+func watch_mates(tool) -> void:
+	## Live without losing what is open (V-7), and every Fix / Float the tool makes, from wherever (this window's bar, the tablet, an undo or a redo).
+	tool.mates_changed.connect(request_refresh)
+	tool.document_changed.connect(request_refresh)
+	if tool.has_signal("occurrence_fixed_changed"):
+		tool.occurrence_fixed_changed.connect(_on_occurrence_fixed)
+
+
+func _on_occurrence_fixed(owner_part_id: String, occurrence_id: String, fixed: bool) -> void:
+	## Every row of that occurrence (a sub-assembly placed twice shows it twice) is marked as the bar's Fix / Float marks it.
+	var paths: Array = []
+	if not _tree.is_empty():
+		for row in Model.index_rows(_tree[0]["children"] as Array).values():
+			if str(row.get("id", "")) == occurrence_id and str(row.get("parent_part_id", "")) == owner_part_id:
+				paths.append(row["path"])
+	if paths.is_empty():
+		_mutation_seq += 1 # (not shown here: any read in flight still predates it)
+		request_refresh()
+		return
+	for path in paths:
+		note_fixed_changed(path, fixed)
 
 
 func note_fixed_changed(path: Array, fixed: bool) -> void:
