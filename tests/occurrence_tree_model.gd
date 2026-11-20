@@ -23,6 +23,79 @@ func action(actions: Array, id: String) -> Dictionary:
 	return {}
 
 
+func same(a, b) -> bool:
+	## Deep equality that treats 1 and 1.0 alike (the vectors come from JSON).
+	if a is Dictionary and b is Dictionary:
+		if a.size() != b.size():
+			return false
+		for k in a:
+			if not b.has(k) or not same(a[k], b[k]):
+				return false
+		return true
+	if a is Array and b is Array:
+		if a.size() != b.size():
+			return false
+		for i in a.size():
+			if not same(a[i], b[i]):
+				return false
+		return true
+	if (a is int or a is float) and (b is int or b is float):
+		return float(a) == float(b)
+	return typeof(a) == typeof(b) and a == b
+
+
+func first_difference(got: Array, want: Array) -> String:
+	for i in maxi(got.size(), want.size()):
+		if i >= got.size() or i >= want.size() or not same(got[i], want[i]):
+			return "row %d: got %s want %s" % [i, JSON.stringify(got[i]) if i < got.size() else "(none)", JSON.stringify(want[i]) if i < want.size() else "(none)"]
+	return ""
+
+
+func run_robustness() -> void:
+	## A response that is not quite the spec's shape must not crash the walks: "children": null (or absent) is no children.
+	var tree := {"part_id": "r", "part_name": "R", "kind": "assembly", "children": [
+		{"occurrence_id": "a", "path": ["a"], "kind": "part", "resolved_part_id": "p", "children": null, "feature_count": 0, "fixed": false, "suppressed": false, "hidden": false},
+		{"occurrence_id": "b", "path": ["b"], "kind": "assembly", "resolved_part_id": "q", "feature_count": 0, "fixed": false, "suppressed": false, "hidden": false,
+			"children": [{"occurrence_id": "c", "path": ["b", "c"], "kind": "part", "resolved_part_id": "p", "children": null, "fixed": false, "suppressed": false, "hidden": false}]}]}
+	var rows: Array = Model.visible_rows(tree, ["b"], true, ["p"])
+	var again: Array = Model.visible_rows(tree, [], false, [])
+	check("a node with children null or absent: visible_rows lists it with no chevron, bubbles and unsaved counts still work", rows.size() == 4 and not rows[1]["expandable"] and rows[1]["bubble"] == null and rows[2]["expandable"] and rows[2]["open"] and rows[3]["state"] == "unsaved")
+	check("...reveal, the row builder, the status carry and normalise cope too", Model.reveal_keys(tree, ["b", "c"], true) == ["b"] and Model.rows_from_tree(Model.children_of(tree), [], "r", false, []).size() == 2 and again.size() == 3)
+	Model.normalise_tree(tree)
+	check("normalise_tree makes every children an Array", tree["children"][0]["children"] is Array and tree["children"][1]["children"][0]["children"] is Array)
+	var old := {"children": [{"occurrence_id": "a", "path": ["a"], "fixed": false, "constraint": {"status": "under_constrained"}, "children": []}]}
+	var fresh := {"children": [{"occurrence_id": "a", "path": ["a"], "fixed": true, "constraint": null, "children": null}]}
+	Model.carry_status(fresh, old)
+	check("the status carried into a structure-only answer is dropped for a node whose fixed flag changed", fresh["children"][0]["constraint"] == null and Model.state_of(fresh["children"][0], []) == "fixed")
+	Model.set_node_fixed(old, ["a"], true)
+	check("a local Fix writes the flag into the held answer and drops the old constraint", old["children"][0]["fixed"] and old["children"][0]["constraint"] == null and Model.state_of(old["children"][0], []) == "fixed")
+
+
+func run_vectors() -> void:
+	## tests/fixtures/assembly_tree_vectors.json: DIDSA-CAD's golden vectors for docs/assembly-tree/spec.md, copied unchanged (tests/fixtures/README.md).
+	var f := FileAccess.open("res://tests/fixtures/assembly_tree_vectors.json", FileAccess.READ)
+	var doc: Dictionary = JSON.parse_string(f.get_as_text())
+	check("the vectors file is the version this model implements, with the same state order", int(doc["version"]) == 1 and doc["states"] == Model.STATES)
+	var failed := 0
+	for c in doc["cases"]:
+		var tree: Dictionary = doc["trees"][c["tree"]]
+		var ok := false
+		var diff := ""
+		if c["kind"] == "rows":
+			var got: Array = Model.visible_rows(tree, c["open"], bool(c["grouping"]), c["unsaved_part_ids"], c["features"])
+			diff = first_difference(got, c["expected"])
+			ok = diff == ""
+		else:
+			var keys: Array = Model.reveal_keys(tree, c["path"], bool(c["grouping"]))
+			ok = same(keys, c["expected"])
+			diff = "got %s want %s" % [JSON.stringify(keys), JSON.stringify(c["expected"])]
+		if not ok:
+			failed += 1
+			print("VECTOR FAILED ", c["name"], ": ", diff)
+		check("vector %s" % c["name"], ok)
+	check("every one of the %d vector cases passes" % doc["cases"].size(), failed == 0 and doc["cases"].size() >= 36)
+
+
 func _initialize() -> void:
 	var occ := [
 		{"id": "a1", "resolved_part_id": "BOLT", "name_override": null, "fixed": false, "hidden": false, "suppressed": false},
@@ -32,11 +105,16 @@ func _initialize() -> void:
 	]
 	var rows: Array = Model.rows_from_occurrences(occ, ["s1"])
 	check("rows keep the order, the flags and a path under their parent's", ids(rows) == ["a1", "a2", "a3", "a4"] and rows[1]["fixed"] and rows[2]["backend_hidden"] and rows[3]["suppressed"] and rows[0]["path"] == ["s1", "a1"])
-	check("a name override is the name; otherwise a placeholder until the Part's name arrives", rows[2]["name"] == "Base plate" and rows[2]["named"] and rows[0]["name"] == "Occurrence a1" and not rows[0]["named"])
+	check("a name override is the name; otherwise a placeholder until the Part's name arrives", rows[2]["name"] == "Base plate" and rows[2]["named"] and rows[0]["name"] == "Component 1" and not rows[0]["named"])
 	check("an occurrence with no resolved Part is a missing-file row", rows[3]["missing"] and not rows[0]["missing"])
 
+	var unnamed: Array = Model.rows_from_occurrences([occ[0], occ[1]], [])
+	Model.apply_instance_names(unnamed)
+	check("two placements of a Part whose name is not known yet keep their placeholders without an <n> suffix", unnamed[0]["name"] == "Component 1" and unnamed[1]["name"] == "Component 2")
 	rows[0]["base_name"] = "Bolt"
 	rows[1]["base_name"] = "Bolt"
+	rows[0]["placeholder"] = false
+	rows[1]["placeholder"] = false
 	Model.apply_instance_names(rows)
 	check("the same Part placed twice is told apart: Bolt <1>, Bolt <2>", rows[0]["name"] == "Bolt <1>" and rows[1]["name"] == "Bolt <2>")
 	check("...a named or single placement keeps its plain name", rows[2]["name"] == "Base plate")
@@ -45,6 +123,7 @@ func _initialize() -> void:
 	check("...two placements the user named themselves keep their own names", two_named[0]["name"] == "Left" and two_named[1]["name"] == "Right")
 	var single: Array = Model.rows_from_occurrences([occ[0]], [])
 	single[0]["base_name"] = "Bolt"
+	single[0]["placeholder"] = false
 	single[0]["name"] = "Bolt <1>" # (stale from an earlier list)
 	Model.apply_instance_names(single)
 	check("...a Part now placed once goes back to its plain name", single[0]["name"] == "Bolt")
@@ -89,4 +168,6 @@ func _initialize() -> void:
 
 	check("ancestors to expand for a path: the root and each level above it", Model.ancestors_paths(["s1", "k1", "kb"]) == [[], ["s1"], ["s1", "k1"]] and Model.ancestors_paths([]).is_empty())
 	check("a path's key", Model.path_key(["s1", "k1"]) == "s1/k1" and Model.path_key([]) == "")
+	run_robustness()
+	run_vectors()
 	quit(0)

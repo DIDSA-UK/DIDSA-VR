@@ -1,101 +1,140 @@
 extends SceneTree
-## Talks to a real backend - LOCAL ONLY, same caveat as e2e_colour_group.gd
-## (never run this in CI or against a shared backend). Instantiates
-## main.tscn against the real secrets.cfg, lets it load assembly.didsa for
-## real, then drives assembly_tree_window.gd's real client to
-## GET /parts/{id}/occurrences against assembly.didsa's own real root
-## Occurrences, confirms a real leaf occurrence's tap-to-select actually
-## selects the matching rendered part (main.gd's new
-## select_part_by_occurrence_id() -> controller.gd's new select_external()).
-## Run: "$GODOT" --headless --path . --script res://tests/e2e_assembly_tree.gd
-## Requires secrets.cfg to point at a running backend.
+## Talks to a real backend (DIDSA-CAD main, with GET /parts/{id}/assembly-tree; tests/ci_e2e.sh runs it, it is in tests/e2e_ci_list.txt). The Assembly Tree window against a
+## real two-level assembly (A5 of docs/assembly-tree-overhaul-scope.md; "e2e_assembly_tree.gd" of docs/feature-tree-review-2026-11-11.md):
+##   a STEP file with a two-level assembly (tests/fixtures/assembly_two_level.step: a top with a part, two placements of a sub-assembly and a mirrored part; a pin inside the
+##   sub-assembly) is imported as an assembly; the window reads the whole hierarchy with the tree call (the structure, then ?status=true), the nested rows exist under BOTH
+##   placements of the sub-assembly; a nested part is fixed from the tree (the bottom bar's Fix, PATCHed on the sub-assembly's own Part), the tree shows it fixed under both
+##   placements after its refresh, the backend agrees, and a grip on that part is refused with the "Part is fixed" words.
+## Writes nothing to disk but the throwaway secrets copy under user://.
+## Run: DIDSA_NO_LANDING=1 DIDSA_SETTINGS_PATH=user://settings_test.cfg "$GODOT" --headless --path . --script res://tests/e2e_assembly_tree.gd
+## Needs secrets.cfg (backend url + api_key) pointing at a running backend (tools/start_backend.sh).
+
+const BackendSession := preload("res://scripts/backend_session.gd")
+const Model := preload("res://scripts/tree/occurrence_tree_model.gd")
+const FIXTURE := "res://tests/fixtures/assembly_two_level.step"
 
 var main
 var window
+var url := ""
+var key := ""
+
+
+func _api(method: int, path: String) -> Dictionary:
+	var req := HTTPRequest.new()
+	root.add_child(req)
+	req.request(url + "/document" + path, BackendSession.headers(key), method)
+	var result: Array = await req.request_completed
+	req.queue_free()
+	var text := (result[3] as PackedByteArray).get_string_from_utf8()
+	return {"code": int(result[1]), "json": JSON.parse_string(text) if text != "" else null}
+
+
+func _wait_for(cond: Callable, timeout_ms: int = 90000) -> bool:
+	var started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < timeout_ms:
+		if cond.call():
+			return true
+		await process_frame
+	return false
+
+
+func check(what: String, ok: bool) -> void:
+	print("SMOKE ", what, ": ", ok)
+
+
+func _nested_rows() -> Array:
+	var out: Array = []
+	var index := Model.index_rows(window._tree[0]["children"] as Array)
+	for k in index:
+		var row: Dictionary = index[k]
+		if (row["path"] as Array).size() == 2 and not bool(row["missing"]):
+			out.append(row)
+	return out
 
 
 func _initialize() -> void:
 	if not FileAccess.file_exists("res://secrets.cfg"):
-		print("SMOKE SKIPPED: no secrets.cfg — this test needs a running local backend, see tests/README.md")
+		print("SMOKE SKIPPED: needs secrets.cfg (a running backend)")
 		quit()
 		return
-	if not FileAccess.file_exists("res://assembly.didsa"):
-		print("SMOKE SKIPPED: no assembly.didsa in the project root")
-		quit()
-		return
-
-	var packed: PackedScene = load("res://scenes/main.tscn")
-	main = packed.instantiate()
-	main.secrets_file_path = "res://secrets.cfg" # the one test allowed to
-	var started_ms := Time.get_ticks_msec()
+	var secrets := ConfigFile.new()
+	secrets.load("res://secrets.cfg")
+	url = str(secrets.get_value("backend", "url", ""))
+	key = str(secrets.get_value("backend", "api_key", ""))
+	secrets.save("user://e2e_assembly_tree_secrets.cfg")
+	await process_frame
+	main = load("res://scenes/main.tscn").instantiate()
+	main.secrets_file_path = "user://e2e_assembly_tree_secrets.cfg"
 	root.add_child(main)
 	await process_frame
+	await _wait_for(func() -> bool: return main.status_text.begins_with("Loaded ") or main.status_text.contains("failed")) # (the start-up import of assembly.didsa first)
+	var step_path := ProjectSettings.globalize_path(FIXTURE)
+	main._import_external_file(step_path, "step")
+	await _wait_for(func() -> bool: return not main.pending_import.is_empty())
+	await main.resolve_import_choice("assembly")
+	await _wait_for(func() -> bool: return main.status_text.contains("Imported ") or main.status_text.contains("failed") or main.status_text.contains("Couldn't"))
+	check("the two-level assembly is imported (%s)" % main.status_text, main.status_text.begins_with("Imported 3 of 3 parts as an assembly"))
+	var root_id: String = main.current_root_part_id()
+	main.document_dirty = false
 
-	var loaded := false
-	var timeout_ms := 60000
-	while not loaded and Time.get_ticks_msec() - started_ms < timeout_ms:
-		await process_frame
-		var status: String = main.status_text
-		if status.begins_with("Loaded ") or status.contains("failed") or status.contains("Couldn't parse"):
-			loaded = true
-	if not loaded or not main.status_text.begins_with("Loaded "):
-		print("SMOKE FAILED: model didn't load — status: ", main.status_text)
-		quit(1)
-		return
-	print("SMOKE model loaded: ", main.status_text)
-
+	# --- the tree: one call, then the same with status
 	window = main._assembly_tree_window
-	print("SMOKE root part id is available for the tree to query: ", main.current_root_part_id() != "")
-
 	window.open()
-	var tree_started_ms := Time.get_ticks_msec()
-	while window._stale and Time.get_ticks_msec() - tree_started_ms < 20000:
-		await process_frame
-	print("SMOKE the tree finished a real GET .../occurrences fetch: ", not window._stale)
-	print("SMOKE assembly.didsa's real root occurrences came back non-empty: ", not window._tree.is_empty() and window._tree[0]["children"] != null and not window._tree[0]["children"].is_empty())
+	await _wait_for(func() -> bool: return not window._stale and bool(window._resp.get("status_included", false)))
+	check("the window read the tree call (not the per-level fallback): the structure, then the status merged in", not window._endpoint_missing and not window._resp.is_empty() and bool(window._resp.get("status_included", false)))
+	var top_rows: Array = window._tree[0]["children"]
+	var subs := top_rows.filter(func(r): return r["node_kind"] == "assembly")
+	check("the top lists its placed occurrences: a part, two placements of the sub-assembly (told apart as <1> and <2>), and the mirrored part", top_rows.size() == 4 and subs.size() == 2 and str(subs[0]["name"]).ends_with("<1>") and str(subs[1]["name"]).ends_with("<2>"))
+	var live: Dictionary = (await _api(HTTPClient.METHOD_GET, "/parts/%s/assembly-tree" % root_id))["json"]
+	check("the window's tree is what the backend answers (same occurrences at every depth)", live is Dictionary and (live["children"] as Array).size() == top_rows.size() and not (live["children"][1]["children"] as Array).is_empty())
 
-	# Tap-to-select: find a row whose occurrence_id matches a currently
-	# rendered leaf part (mesh_identity.gd-tagged), same lookup
-	# select_part_by_occurrence_id() itself does, so this test knows in
-	# advance which row should actually succeed.
-	var target_occurrence_id := ""
-	for node in main.get_tree().get_nodes_in_group("grabbable_parts"):
-		if node.has_meta("occurrence_id") and node.get_meta("occurrence_id") != "" and node.visible:
-			target_occurrence_id = node.get_meta("occurrence_id")
-			break
-	if target_occurrence_id == "":
-		print("SMOKE FAILED: no rendered leaf occurrence found to test tap-to-select against")
+	# --- the nested rows under both placements, then Fix from the tree
+	var nested := _nested_rows()
+	var target: Dictionary = nested[0] if not nested.is_empty() else {}
+	var twins := nested.filter(func(r): return not target.is_empty() and r["id"] == target["id"] and r["path"] != target["path"])
+	check("rows exist below the sub-assembly at depth 2, under each placement: distinct paths, the same occurrence id", not target.is_empty() and twins.size() == 1)
+	if twins.size() != 1:
 		quit(1)
 		return
+	var other: Dictionary = twins[0]
+	for r in subs:
+		r["expanded"] = true
+	window._rebuild_rows()
+	window._on_row_selected(target)
+	await process_frame
+	check("a nested row selects by its path (the bar acts on it)", window._has_selected and window._selected == target["path"])
+	var owner := str(target["parent_part_id"])
+	var was_fixed := bool(target["fixed"])
+	await window._on_bar_action("fix", target, {})
+	var occ_after: Dictionary = await _api(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner)
+	var fixed_on_server := false
+	for o in (occ_after["json"] if occ_after["json"] is Array else []):
+		if str(o.get("id", "")) == str(target["id"]):
+			fixed_on_server = bool(o.get("fixed", false))
+	check("Fix PATCHed the occurrence on the sub-assembly's own Part: the backend holds it fixed (it was not before)", not was_fixed and fixed_on_server)
+	await _wait_for(func() -> bool:
+		var t: Dictionary = Model.find_row(window._tree, target["path"])
+		return not t.is_empty() and bool(t["fixed"]) and bool(window._resp.get("status_included", false)), 20000)
+	var t1: Dictionary = Model.find_row(window._tree, target["path"])
+	var t2: Dictionary = Model.find_row(window._tree, other["path"])
+	check("after the refresh both placements show it fixed (one occurrence, two placements), as a pin", not t1.is_empty() and not t2.is_empty() and t1["state"] == "fixed" and t2["state"] == "fixed" and Model.state_icon(t1) == "pin")
+	check("the refresh kept what was open and the selection", bool(Model.find_row(window._tree, [str(subs[0]["id"])])["expanded"]) and window._has_selected and window._selected == target["path"])
 
-	# The tree's single top row is the root Part itself; its placed Occurrences
-	# are that row's children.
-	var found_row := false
-	for top in window._tree:
-		for row in (top["children"] if top["children"] != null else []):
-			if row["id"] == target_occurrence_id:
-				found_row = true
-	# Real Part names, not "Occurrence <uuid>" placeholders, once the names resolve:
-	var names_deadline := Time.get_ticks_msec() + 10000
-	var all_named := false
-	while not all_named and Time.get_ticks_msec() < names_deadline:
-		await process_frame
-		all_named = true
-		for top in window._tree:
-			for row in (top["children"] if top["children"] != null else []):
-				if row["name"].begins_with("Occurrence"):
-					all_named = false
-	print("SMOKE every occurrence row was relabelled with its real Part name: ", all_named)
-	print("SMOKE the tree includes a row for a real rendered occurrence: ", found_row)
+	# --- a grip on that part is refused
+	var node: Node3D = null
+	for n in get_nodes_in_group("grabbable_parts"):
+		if (n.get_meta("group_path", []) as Array) == target["path"]:
+			node = n
+			break
+	check("the part is in the world under that path", node != null)
+	var hand = main.get_node("XROrigin3D/RightController")
+	if hand.mates_tool == null:
+		hand.mates_tool = main._mates_tool
+	var refusal: Dictionary = hand.refusal_for({"depth": (target["path"] as Array).size(), "prefix": target["path"], "label": str(target["name"])}, node) if node != null else {}
+	check("a grip on the part just fixed in the tree is refused with the 'Part is fixed' words (%s)" % str(refusal.get("short", "")), str(refusal.get("short", "")).begins_with("Part is fixed"))
 
-	var selected: bool = main.select_part_by_occurrence_id(target_occurrence_id)
-	print("SMOKE tap-to-select finds and selects the matching rendered part: ", selected)
-	var right: XRController3D = main.get_node("XROrigin3D/RightController")
-	print("SMOKE the right controller's own selection actually changed: ", right.selected_node != null and right.selected_node.get_meta("occurrence_id") == target_occurrence_id)
-
-	# Re-tapping the same row deselects it, matching laser-select's own toggle.
-	main.select_part_by_occurrence_id(target_occurrence_id)
-	print("SMOKE tapping the same row again deselects it (toggle, matching laser-select): ", right.selected_node == null)
-
-	print("SMOKE PASSED: real GET occurrences -> real tree -> real tap-to-select against a real rendered part, against a real backend")
-	quit()
+	# --- Float again from the tree: the refusal goes
+	await window._on_bar_action("fix", Model.find_row(window._tree, target["path"]), {})
+	var refusal_after: Dictionary = hand.refusal_for({"depth": (target["path"] as Array).size(), "prefix": target["path"], "label": str(target["name"])}, node) if node != null else {"short": "no node"}
+	check("Float from the tree lifts the refusal", str(refusal_after.get("short", "")) == "")
+	quit(0)

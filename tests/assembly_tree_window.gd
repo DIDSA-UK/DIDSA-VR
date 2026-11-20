@@ -21,8 +21,8 @@ func _initialize() -> void:
 
 	print("SMOKE three rows built: ", rows.size() == 3)
 	print("SMOKE a named occurrence keeps its own name: ", rows[0]["name"] == "Bracket")
-	print("SMOKE an unnamed occurrence falls back to a short id-based label: ", rows[1]["name"] == "Occurrence ABCDEFGH")
-	print("SMOKE an empty-string name_override also falls back: ", rows[2]["name"] == "Occurrence QRSTUVWX")
+	print("SMOKE an unnamed occurrence falls back to a Component N label (spec section 3, rule 1.4; it was an id-based placeholder before A5): ", rows[1]["name"] == "Component 2")
+	print("SMOKE an empty-string name_override also falls back: ", rows[2]["name"] == "Component 3")
 	print("SMOKE a resolved_part_id marks a row expandable: ", rows[0]["resolved_part_id"] == "part-b" and rows[1]["resolved_part_id"] == "part-c")
 	print("SMOKE no resolved_part_id means nothing to expand: ", rows[2]["resolved_part_id"] == "")
 	print("SMOKE every row starts unexpanded with children not yet fetched: ", not rows[0]["expanded"] and rows[0]["children"] == null)

@@ -407,6 +407,15 @@ func set_room_glass(on: bool) -> void:
 	room_manager.set_glass(on)
 
 
+func tree_grouping() -> bool:
+	## The Assembly Tree's "fold repeats" switch (saved with the other user settings, app_settings.gd).
+	return _settings.tree_group_repeats
+
+
+func set_tree_grouping(on: bool) -> void:
+	_settings.set_tree_group_repeats(on)
+
+
 func world_preview_auto() -> bool:
 	return _settings.world_preview_auto
 

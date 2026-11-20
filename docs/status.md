@@ -200,6 +200,19 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 - **Changed:** C8 and the F4 row corrected here; the test fix (the take-back contract both apps rely on, with no `result_code` pinned, including the untested kept-conflict path that reads the failed list; it found that on arm64 every new constraint was taken back while a conflict was kept, fixed in `solver.py` in the same PR) is DIDSA-CAD branch `ccr-bfe722e3-jz5ask` (#386) (CAD `docs/status.md`, 2026-11-20 entry). No VR code changed.
 - **Not verified:** the arm64 take-back and red in either app's UI (read from the code, not run); the test fix itself until CAD CI's amd64 and arm64 legs finish on that branch.
 
+## 2026-11-20: Tree A5, VR adopts the assembly-tree call (DIDSA-CAD `docs/assembly-tree-overhaul-scope.md` section 9.6 A5; branch `ccr-1446b69f-mr9ice`)
+
+What was built (headless and against a live backend; nothing here has been checked on a headset):
+- `scripts/assembly_tree_window.gd` reads `GET /parts/{id}/assembly-tree` **once** for the whole hierarchy (the structure first, drawn at once, then the same call with `?status=true`, merged in place) instead of one `/occurrences` plus one `/constraint-status` per level. A 404 (an older backend) is remembered and the window falls back to the per-level reads it had. The design table's PARTS tab (a subclass without the action bar) keeps the per-level reads untouched.
+- `scripts/tree/occurrence_tree_model.gd` follows the spec (`DIDSA-CAD docs/assembly-tree/spec.md`) as pure functions: names (override, Part name, file name, `Component N`; `Bolt <2>`; generated names skipped), grouping (4 or more identical siblings fold into `Bolt M4 x4`, on by default), the one state slot (missing > cycle > broken > over-constrained > near > unsaved > under-constrained > fixed > fully constrained), problem counts and one bubble per row, `visible_rows`, `reveal_keys`. The window draws the spec's rows: state icon and red / amber tint, a count on collapsed rows (errors, "near", unsaved), group rows that open to their members, the Mates / Patterns folders as count lines, "status unavailable" on the children of a level whose status failed, a note for `status_incomplete` and for the depth / node caps.
+- The grouping switch ("Fold x4") is in the window's title bar and is saved with the other user settings (`app_settings.gd` `tree_group_repeats`, section `[tree]`).
+- Kept from T1: selection by path (B1), the pulse, the bottom bar, world -> tree reveal (it also opens the group a row sits in), refresh in place (open rows and selection kept; the previous status stays on screen until the new one arrives).
+- `tests/fixtures/assembly_tree_vectors.json` is DIDSA-CAD's `vectors.json` unchanged (source commit in `tests/fixtures/README.md`).
+
+Tests: `tests/occurrence_tree_model.gd` (every one of the 36 vector cases), `tests/occurrence_tree_actions.gd` (the whole scenario against a fake backend that serves the call and against one that 404s), `tests/e2e_assembly_tree.gd` (rewritten; live backend from DIDSA-CAD `main`: opens a two-level assembly, fixes a nested part from the tree, checks the refusal of a grip; in `tests/e2e_ci_list.txt`).
+
+Not verified: how the rows, bubbles and the switch look and feel in a headset; a tree of thousands of rows (the window builds every row of an open level; no scroll test at 2,000 rows here); `unsaved` is only the whole-document flag, so it marks the root row (the client has no per-Part unsaved set); features of a part are not listed (a later phase; a part row only opens when it has child occurrences); the Mates / Patterns folders show count and health but do not open (Phase C).
+
 ## Cross-repo
 
 Backend and flat client: `DIDSA-UK/DIDSA-CAD` (roadmap in its `docs/roadmap.md`). Mates, measure, occurrences, import-features and the
