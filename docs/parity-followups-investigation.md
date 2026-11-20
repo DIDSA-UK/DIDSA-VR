@@ -326,7 +326,9 @@ between runs (why is not known: it never varied in over 2 000 local amd64 solves
 vary in any run. CAD branch `ccr-bfe722e3-jz5ask` (DIDSA-CAD#386) replaces the four pinned answers with the take-back contract both
 apps rely on, with no `result_code` pinned: a redundant constraint converges and is not named; a contradiction on a converged sketch is named; while
 a conflict is kept, an unrelated constraint is not named and a further contradiction is (that path reads the failed list and was untested); taking back
-the contradiction leaves the sketch converged (CAD `docs/status.md`, 2026-11-20 entry). The single culprit on amd64 was the exception: CAD's Stage 2b had already recorded
+the contradiction leaves the sketch converged (CAD `docs/status.md`, 2026-11-20 entry). That test found a real bug on arm64: with a conflict kept, py-slvs
+named a Horizontal on an unrelated line too, so both apps took back every new constraint on the Pi until the conflict was resolved. #386 fixes it in
+`solver.py`: the failed list keeps only constraints whose own independent group of geometry cannot be solved. The single culprit on amd64 was the exception: CAD's Stage 2b had already recorded
 that py-slvs's failed list names every constraint of an inconsistent system.
 
 ## D. Test health and repo hygiene
