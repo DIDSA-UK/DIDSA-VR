@@ -8,6 +8,8 @@ extends SceneTree
 ##   bar: Fix / Float PATCHes the occurrence on its parent Part, updates the state at any depth, one undo step; Hide / Show and Isolate are view-only and undoable
 ##        (the backend's `hidden` flag is never written); Rename PATCHes name_override, undoably; Delete on a nested row warns that it edits every placement (B3)
 ##   refresh keeps what was expanded and the selection (B4); and a fix made from the tree makes the V-1 refusal fire on a grip
+## It runs twice: against a fake backend that serves GET /parts/{id}/assembly-tree (A5: one call for the whole tree, then ?status=true merged in; no per-level
+## /occurrences reads), and against one that answers 404 to it (an older backend: the per-level fallback). Every check holds in both modes.
 ## NOT covered: how any of it looks or feels in the headset (the pulse, the bar's reach and size).
 ## Run: "$GODOT" --headless --path . --script res://tests/occurrence_tree_actions.gd  (see tests/README.md)
 
@@ -19,6 +21,9 @@ var hand
 var window
 var calls: Array = []
 var occurrences := {}
+var mode := "tree" ## "tree": the fake serves the tree call; "404": it does not
+const PART_NAMES := {"R": "Rig", "S": "Drive", "K": "Bracket", "B": "Bolt"}
+const TOP_STATUS := {"s1": {"status": "fixed", "dof": 0}, "s2": {"status": "under_constrained", "dof": 2}}
 
 
 class FakeMates extends "res://scripts/mates_tool.gd":
@@ -44,15 +49,56 @@ func frames(n: int = 3) -> void:
 func answer(method: int, path: String, body) -> Dictionary:
 	calls.append({"method": method, "path": path, "body": body})
 	var bits := path.trim_prefix("/parts/").split("/")
+	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1].begins_with("assembly-tree"):
+		if mode == "404":
+			return {"ok": false, "json": null, "code": 404, "error": "404"}
+		return {"ok": true, "json": tree_response(bits[1].contains("status=true")), "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "occurrences":
 		return {"ok": true, "json": occurrences.get(bits[0], []), "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "constraint-status":
 		return {"ok": true, "json": {"s1": {"status": "fixed", "dof": 0}, "s2": {"status": "under_constrained", "dof": 2}} if bits[0] == "R" else {}, "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 1:
-		return {"ok": true, "json": {"name": {"R": "Rig", "S": "Drive", "K": "Bracket", "B": "Bolt"}.get(bits[0], bits[0])}, "error": ""}
+		return {"ok": true, "json": {"name": PART_NAMES.get(bits[0], bits[0])}, "error": ""}
 	if method == HTTPClient.METHOD_PATCH:
+		var pb := path.trim_prefix("/parts/").split("/") # (a rename is kept, so a refresh that follows it still shows it)
+		if pb.size() == 3 and body is Dictionary and body.has("name_override"):
+			for o in occurrences.get(pb[0], []):
+				if o["id"] == pb[2]:
+					o["name_override"] = body["name_override"] if str(body["name_override"]) != "" else null
 		return {"ok": true, "json": {}, "error": ""}
 	return {"ok": false, "json": null, "error": "404"}
+
+
+func tree_nodes(part: String, prefix: Array, with_status: bool) -> Array:
+	var out: Array = []
+	for o in occurrences.get(part, []):
+		var resolved = o.get("resolved_part_id")
+		var is_assembly: bool = resolved != null and occurrences.has(resolved)
+		var node_path: Array = prefix + [o["id"]]
+		var constraint = TOP_STATUS.get(o["id"]) if with_status and part == "R" and resolved != null else null
+		out.append({
+			"occurrence_id": o["id"], "path": node_path, "external_ref": null, "ref_part_id": resolved, "resolved_part_id": resolved,
+			"part_name": PART_NAMES.get(resolved, resolved) if resolved != null else null, "name_override": o.get("name_override"),
+			"kind": "missing" if resolved == null else ("assembly" if is_assembly else "part"),
+			"fixed": bool(o.get("fixed", false)), "hidden": bool(o.get("hidden", false)), "suppressed": bool(o.get("suppressed", false)), "color": null,
+			"constraint": {"status": constraint["status"], "dof": constraint["dof"], "rigid_set": null, "broken_mates": 0, "near_mates": 0} if constraint != null else null,
+			"feature_count": 0 if resolved != null else null, "placements": 1, "cycle": false, "truncated": false, "status_failed": false,
+			"mates": {"count": 0, "suppressed": 0, "broken": 0, "near": 0, "held": 0, "lost": 0} if is_assembly and with_status else ({"count": 0, "suppressed": 0, "broken": null, "near": null, "held": null, "lost": null} if is_assembly else null),
+			"patterns": {"count": 0, "suppressed": 0} if is_assembly else null,
+			"problems": {"missing": 0, "cycles": 0, "broken": 0, "over_constrained": 0, "near": 0} if is_assembly and with_status else null,
+			"children": tree_nodes(str(resolved), node_path, with_status) if is_assembly else [],
+		})
+	return out
+
+
+func tree_response(with_status: bool) -> Dictionary:
+	return {
+		"part_id": "R", "part_name": "Rig", "kind": "assembly", "feature_count": 0, "status_included": with_status,
+		"mates": {"count": 0, "suppressed": 0, "broken": 0, "near": 0, "held": 0, "lost": 0}, "patterns": {"count": 0, "suppressed": 0},
+		"problems": {"missing": 0, "cycles": 0, "broken": 0, "over_constrained": 0, "near": 0},
+		"children": tree_nodes("R", [], with_status), "truncated": false, "node_count": 0, "max_depth": 32, "max_nodes": 10000,
+		"truncated_depth": false, "truncated_nodes": false, "status_failed": false, "status_incomplete": false,
+	}
 
 
 func leaf(owner: String, occ: String, path: Array, parts: Array, at: Vector3) -> MeshInstance3D:
@@ -73,6 +119,15 @@ func leaf(owner: String, occ: String, path: Array, parts: Array, at: Vector3) ->
 
 
 func _initialize() -> void:
+	await run_mode("tree")
+	await run_mode("404")
+	quit(0)
+
+
+func run_mode(which: String) -> void:
+	mode = which
+	calls = []
+	print("--- fake backend mode: ", which)
 	main = load("res://scenes/main.tscn").instantiate()
 	main.secrets_file_path = "res://__nonexistent__.cfg"
 	root.add_child(main)
@@ -101,7 +156,12 @@ func _initialize() -> void:
 	check("the root row is the assembly and its children are the placed occurrences", window._tree[0]["name"] == "Rig" and rows.size() == 4)
 	check("two placements of one Part are told apart: Drive <1>, Drive <2>", rows[0]["name"] == "Drive <1>" and rows[1]["name"] == "Drive <2>" and rows[3]["name"] == "Bolt")
 	check("the state icon: pin from the constraint status 'fixed', open lock for under-constrained, a warning for a missing file, none for a free part", Model.state_icon(rows[0]) == "pin" and Model.state_icon(rows[1]) == "lock_open" and Model.state_icon(rows[2]) == "warning" and Model.state_icon(rows[3]) == "")
-	check("the status was read once for the level", calls.filter(func(c): return str(c["path"]) == "/parts/R/constraint-status").size() >= 1)
+	if mode == "tree":
+		var tree_calls: Array = calls.filter(func(c): return str(c["path"]).contains("/assembly-tree"))
+		check("A5: the tree is one call for the structure, then one with ?status=true; no per-level /occurrences read at all", tree_calls.size() == 2 and not str(tree_calls[0]["path"]).contains("status") and str(tree_calls[1]["path"]).ends_with("?status=true") and calls.filter(func(c): return str(c["path"]).ends_with("/occurrences")).is_empty())
+		check("A5: the missing file is its own state (a red warning), and the root row is open and does not collapse", rows[2]["state"] == "missing" and rows[2]["missing"] and window._tree[0]["expanded"])
+	else:
+		check("an older backend: the 404 is remembered and the tree is read a level at a time (occurrences + constraint-status)", window._endpoint_missing and window._resp.is_empty() and calls.filter(func(c): return str(c["path"]).ends_with("/occurrences")).size() >= 1 and calls.filter(func(c): return str(c["path"]) == "/parts/R/constraint-status").size() >= 1)
 
 	# --- tree -> world
 	await window._expand_row(rows[0])
@@ -191,4 +251,23 @@ func _initialize() -> void:
 	for i in 80:
 		await process_frame
 	check("B4: after a change the open rows stay open, the new row appears, the selection stays", window._tree[0]["children"].size() == 5 and bool(Model.find_row(window._tree, ["s2"])["expanded"]) and not Model.find_row(window._tree, ["s2", "k1", "kb"]).is_empty() and window._has_selected and window._selected == ["s2", "k1", "kb"])
-	quit(0)
+
+	if mode == "tree":
+		# --- A5: grouping (4 or more identical siblings fold into one row), the switch, and what a refresh keeps
+		occurrences["R"].append({"id": "extra2", "resolved_part_id": "B"})
+		occurrences["R"].append({"id": "extra3", "resolved_part_id": "B"})
+		window.request_refresh()
+		for i in 80:
+			await process_frame
+		var spec := Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), [])
+		var group_rows := spec.filter(func(r): return r["kind"] == "group")
+		check("A5: four Bolts at one level fold into one 'Bolt x4' row (grouping is on by default), the rest of the level stays", group_rows.size() == 1 and group_rows[0]["label"] == "Bolt x4" and group_rows[0]["count"] == 4 and spec.filter(func(r): return r["key"] == "s1").size() == 1)
+		window._set_grouping(false)
+		spec = Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), [])
+		check("A5: the switch turns grouping off: the four are listed one by one, and the setting is what main saved", spec.filter(func(r): return r["kind"] == "group").is_empty() and not main.tree_grouping())
+		window._set_grouping(true)
+		check("...and on again", main.tree_grouping() and spec.size() > 0)
+		window._on_row_selected(Model.find_row(window._tree, ["extra3"]))
+		check("a member of a group still selects by its own path (the group is opened to show it)", window._has_selected and window._selected == ["extra3"])
+	main.queue_free()
+	await frames(3)

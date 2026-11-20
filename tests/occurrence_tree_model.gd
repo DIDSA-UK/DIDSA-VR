@@ -23,6 +23,59 @@ func action(actions: Array, id: String) -> Dictionary:
 	return {}
 
 
+func same(a, b) -> bool:
+	## Deep equality that treats 1 and 1.0 alike (the vectors come from JSON).
+	if a is Dictionary and b is Dictionary:
+		if a.size() != b.size():
+			return false
+		for k in a:
+			if not b.has(k) or not same(a[k], b[k]):
+				return false
+		return true
+	if a is Array and b is Array:
+		if a.size() != b.size():
+			return false
+		for i in a.size():
+			if not same(a[i], b[i]):
+				return false
+		return true
+	if (a is int or a is float) and (b is int or b is float):
+		return float(a) == float(b)
+	return typeof(a) == typeof(b) and a == b
+
+
+func first_difference(got: Array, want: Array) -> String:
+	for i in maxi(got.size(), want.size()):
+		if i >= got.size() or i >= want.size() or not same(got[i], want[i]):
+			return "row %d: got %s want %s" % [i, JSON.stringify(got[i]) if i < got.size() else "(none)", JSON.stringify(want[i]) if i < want.size() else "(none)"]
+	return ""
+
+
+func run_vectors() -> void:
+	## tests/fixtures/assembly_tree_vectors.json: DIDSA-CAD's golden vectors for docs/assembly-tree/spec.md, copied unchanged (tests/fixtures/README.md).
+	var f := FileAccess.open("res://tests/fixtures/assembly_tree_vectors.json", FileAccess.READ)
+	var doc: Dictionary = JSON.parse_string(f.get_as_text())
+	check("the vectors file is the version this model implements, with the same state order", int(doc["version"]) == 1 and doc["states"] == Model.STATES)
+	var failed := 0
+	for c in doc["cases"]:
+		var tree: Dictionary = doc["trees"][c["tree"]]
+		var ok := false
+		var diff := ""
+		if c["kind"] == "rows":
+			var got: Array = Model.visible_rows(tree, c["open"], bool(c["grouping"]), c["unsaved_part_ids"], c["features"])
+			diff = first_difference(got, c["expected"])
+			ok = diff == ""
+		else:
+			var keys: Array = Model.reveal_keys(tree, c["path"], bool(c["grouping"]))
+			ok = same(keys, c["expected"])
+			diff = "got %s want %s" % [JSON.stringify(keys), JSON.stringify(c["expected"])]
+		if not ok:
+			failed += 1
+			print("VECTOR FAILED ", c["name"], ": ", diff)
+		check("vector %s" % c["name"], ok)
+	check("every one of the %d vector cases passes" % doc["cases"].size(), failed == 0 and doc["cases"].size() >= 36)
+
+
 func _initialize() -> void:
 	var occ := [
 		{"id": "a1", "resolved_part_id": "BOLT", "name_override": null, "fixed": false, "hidden": false, "suppressed": false},
@@ -32,7 +85,7 @@ func _initialize() -> void:
 	]
 	var rows: Array = Model.rows_from_occurrences(occ, ["s1"])
 	check("rows keep the order, the flags and a path under their parent's", ids(rows) == ["a1", "a2", "a3", "a4"] and rows[1]["fixed"] and rows[2]["backend_hidden"] and rows[3]["suppressed"] and rows[0]["path"] == ["s1", "a1"])
-	check("a name override is the name; otherwise a placeholder until the Part's name arrives", rows[2]["name"] == "Base plate" and rows[2]["named"] and rows[0]["name"] == "Occurrence a1" and not rows[0]["named"])
+	check("a name override is the name; otherwise a placeholder until the Part's name arrives", rows[2]["name"] == "Base plate" and rows[2]["named"] and rows[0]["name"] == "Component 1" and not rows[0]["named"])
 	check("an occurrence with no resolved Part is a missing-file row", rows[3]["missing"] and not rows[0]["missing"])
 
 	rows[0]["base_name"] = "Bolt"
@@ -89,4 +142,5 @@ func _initialize() -> void:
 
 	check("ancestors to expand for a path: the root and each level above it", Model.ancestors_paths(["s1", "k1", "kb"]) == [[], ["s1"], ["s1", "k1"]] and Model.ancestors_paths([]).is_empty())
 	check("a path's key", Model.path_key(["s1", "k1"]) == "s1/k1" and Model.path_key([]) == "")
+	run_vectors()
 	quit(0)

@@ -46,6 +46,7 @@ var group_deadzone: int = 1 ## the dead zone when you grip a part inside a sub-a
 var sandbox_ghosts: bool = false ## Relax all mates: a see-through copy of each moved part where it goes back to (mates_tool.gd)
 var sandbox_lines: bool = false ## Relax all mates: a thin line from each moved part to where it goes back to
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
+var tree_group_repeats: bool = true ## the Assembly Tree folds 4 or more identical siblings into one "Bolt M4 x4" row (docs/assembly-tree spec section 4; the header switch of assembly_tree_window.gd)
 var show_landing: bool = true ## the landing (logo, rocket garden, launcher) on every start; off: the old start-up import
 var show_tips: bool = true ## the landing's tips reel
 var paint_recent: Array = [] ## the Appearance tool's recent colours ("#RRGGBB", newest first, appearance_tool.gd RECENT_MAX)
@@ -68,6 +69,7 @@ func load_from_disk() -> void:
 	wheel_enabled = bool(config.get_value("comfort", "wheel_enabled", wheel_enabled))
 	max_rooms = clampi(int(config.get_value("rooms", "max_rooms", max_rooms)), 1, 16)
 	room_glass = bool(config.get_value("rooms", "glass", room_glass))
+	tree_group_repeats = bool(config.get_value("tree", "group_repeats", tree_group_repeats))
 	world_preview_auto = bool(config.get_value("rooms", "preview_auto", world_preview_auto))
 	world_preview_pulse = bool(config.get_value("rooms", "preview_pulse", world_preview_pulse))
 	group_deadzone = clampi(int(config.get_value("rooms", "group_deadzone", group_deadzone)), 0, 2)
@@ -107,6 +109,7 @@ func save_to_disk() -> void:
 	config.set_value("comfort", "wheel_enabled", wheel_enabled)
 	config.set_value("rooms", "max_rooms", max_rooms)
 	config.set_value("rooms", "glass", room_glass)
+	config.set_value("tree", "group_repeats", tree_group_repeats)
 	config.set_value("rooms", "group_deadzone", group_deadzone)
 	config.set_value("rooms", "preview_auto", world_preview_auto)
 	config.set_value("rooms", "preview_pulse", world_preview_pulse)
@@ -238,6 +241,11 @@ func set_sandbox_lines(on: bool) -> void:
 
 func set_room_glass(on: bool) -> void:
 	room_glass = on
+	save_to_disk()
+
+
+func set_tree_group_repeats(on: bool) -> void:
+	tree_group_repeats = on
 	save_to_disk()
 
 

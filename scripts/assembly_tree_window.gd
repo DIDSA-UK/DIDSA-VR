@@ -50,6 +50,11 @@ var _bar_hint: Label
 var _refresh_timer: SceneTreeTimer = null
 var _levels_token := 0
 var _rename_keyboard_row: Dictionary = {}
+var _resp: Dictionary = {} ## A5: the last GET /parts/{id}/assembly-tree answer (the structure, then the same with ?status=true merged in); {} when the per-level fallback is in use
+var _endpoint_missing := false ## the backend answered 404 to the tree call (an older backend): read one level at a time instead
+var _open_groups: Dictionary = {} ## group row key -> true (a "Bolt M4 x4" row that is open)
+var _grouping_local := true ## the "fold repeats" switch when there is no main (tests); with a main it lives in app_settings.gd
+var _fold_button: Button
 
 const INDENT_PX := 24.0
 const DELETE_CONFIRM_MS := 4000 ## how long a first press on Delete waits for its second
@@ -77,11 +82,18 @@ func setup_tree(left: XRController3D, right: XRController3D, camera: XRCamera3D,
 	open_distance = 0.55
 	open_lateral_offset = -0.22
 	super.setup(left, right, camera)
+	if _uses_tree_endpoint():
+		# The grouping switch (spec section 4) lives in the window header, between the title and the close button; saved with the other user settings.
+		_fold_button = add_header_button("Fold x4", func() -> void: _set_grouping(not _grouping()), false)
+		_fold_button.toggle_mode = true
+		_fold_button.set_pressed_no_signal(_grouping())
+		_header.move_child(_fold_button, _header.get_child_count() - 2)
 
 
 func configure_backend(url: String, key: String) -> void:
 	backend_url = url
 	api_key = key
+	_endpoint_missing = false
 
 
 func mark_stale() -> void:
@@ -95,6 +107,8 @@ func mark_stale() -> void:
 	_tree = []
 	_has_selected = false
 	_selected = []
+	_resp = {}
+	_open_groups.clear()
 	_constraint.clear()
 	if is_open():
 		_refresh_root()
@@ -116,6 +130,11 @@ func _refresh_root() -> void:
 		_set_status("No assembly loaded yet.")
 		return
 	_set_status("Loading...")
+	if _uses_tree_endpoint():
+		if await _load_endpoint(token):
+			return
+		if token != _refresh_token:
+			return
 	var result := await _list_occurrences(_root_part_id)
 	if token != _refresh_token:
 		return # a newer refresh started while this one was in flight
@@ -197,8 +216,7 @@ static func _row_label(occ: Dictionary) -> String:
 	var override_name = occ.get("name_override")
 	if override_name != null and str(override_name) != "":
 		return str(override_name)
-	var occ_id: String = str(occ.get("id", ""))
-	return "Occurrence %s" % occ_id.substr(0, 8)
+	return "Component" # (the placeholder before a Part's name arrives is "Component N" with N the place among its siblings: occurrence_tree_model.gd)
 
 
 func _expand_row(row: Dictionary) -> void:
@@ -296,6 +314,10 @@ func _reveal(path: Array) -> void:
 	## Expands every fetched-or-fetchable row above `path` (a level at a time), then redraws with the row marked and in view.
 	if _tree.is_empty():
 		return
+	if _endpoint_active():
+		for key in Model.reveal_keys(_resp, path, _grouping()):
+			if str(key).contains("#group:"):
+				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below)
 	for ancestor in Model.ancestors_paths(path):
 		var row := Model.find_row(_tree, ancestor)
 		if row.is_empty():
@@ -369,7 +391,10 @@ func _rebuild_rows() -> void:
 		_rows_box.remove_child(child)
 		child.queue_free()
 	_row_controls.clear()
-	_add_rows(_tree, 0, "")
+	if _endpoint_active():
+		_add_spec_rows()
+	else:
+		_add_rows(_tree, 0, "")
 	if _tree.is_empty():
 		var none := Label.new()
 		none.text = "Nothing to show."
@@ -378,55 +403,279 @@ func _rebuild_rows() -> void:
 
 
 func _add_rows(rows: Array, depth: int, parent_part_id: String) -> void:
+	## The per-level fallback's rendering (an older backend without the tree call, and the design table's PARTS tab): a row opens when it has a Part.
 	for row in rows:
 		row["parent_part_id"] = parent_part_id # the Part that holds this occurrence: how a room finds the world's copy
 		var is_expandable: bool = row["resolved_part_id"] != ""
-		var path: Array = row.get("path", [])
-		var selected := _has_selected and _selected == path
-		var line := HBoxContainer.new()
-		line.add_theme_constant_override("separation", 4)
-		line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-		var spacer := Control.new()
-		spacer.custom_minimum_size = Vector2(depth * INDENT_PX, 0)
-		line.add_child(spacer)
-		if is_expandable:
-			var arrow := Button.new()
-			arrow.icon = UiIcons.texture("back", 24)
-			arrow.rotation_degrees = 0.0
-			arrow.text = "v" if row["expanded"] else ">" # (a text expander still: the drawn icon only marks the state, below)
-			arrow.icon = null
-			arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
-			arrow.pressed.connect(_expand_row.bind(row))
-			line.add_child(arrow)
-		else:
-			var pad := Control.new()
-			pad.custom_minimum_size = Vector2(44, 0)
-			line.add_child(pad)
-		var name_button := Button.new()
-		name_button.toggle_mode = true
-		name_button.set_pressed_no_signal(selected)
-		name_button.theme_type_variation = &"ButtonRail"
-		name_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var icon_name := Model.state_icon(row)
-		if icon_name != "":
-			name_button.icon = UiIcons.texture(icon_name, 28)
-		name_button.text = _row_text(row)
-		name_button.clip_text = true
-		name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-		if bool(row.get("missing", false)):
-			name_button.add_theme_color_override("font_color", tokens.warn) # amber: the file is missing
-		if int(row.get("set_slot", -1)) >= 0:
-			name_button.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
-		if bool(row.get("suppressed", false)) or _row_view_hidden(row):
-			name_button.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
-		name_button.pressed.connect(_on_row_selected.bind(row))
-		line.add_child(name_button)
-		_row_controls[Model.path_key(path)] = line
-		_add_row_actions(line, row, is_expandable)
-		_rows_box.add_child(line)
+		_add_row_line(row, depth, is_expandable)
 		if is_expandable and row["expanded"] and row["children"] != null:
 			_add_rows(row["children"], depth + 1, row["resolved_part_id"])
+
+
+func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = null, show_arrow: bool = true) -> void:
+	var path: Array = row.get("path", [])
+	var selected := _has_selected and _selected == path
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 4)
+	line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(depth * INDENT_PX, 0)
+	line.add_child(spacer)
+	if is_expandable and show_arrow:
+		var arrow := Button.new()
+		arrow.text = "v" if row["expanded"] else ">" # (a text expander: the state icon is on the name)
+		arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
+		arrow.pressed.connect(_expand_row.bind(row))
+		line.add_child(arrow)
+	else:
+		var pad := Control.new()
+		pad.custom_minimum_size = Vector2(44, 0)
+		line.add_child(pad)
+	var name_button := Button.new()
+	name_button.toggle_mode = true
+	name_button.set_pressed_no_signal(selected)
+	name_button.theme_type_variation = &"ButtonRail"
+	name_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var icon_name := Model.state_icon(row)
+	if icon_name != "":
+		name_button.icon = UiIcons.texture(icon_name, 28)
+	name_button.text = _row_text(row)
+	name_button.clip_text = true
+	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	_tint_state(name_button, row)
+	if int(row.get("set_slot", -1)) >= 0:
+		name_button.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
+	if bool(row.get("suppressed", false)) or _row_view_hidden(row):
+		name_button.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
+	name_button.pressed.connect(_on_row_selected.bind(row))
+	line.add_child(name_button)
+	_add_bubble(line, bubble)
+	_row_controls[Model.path_key(path)] = line
+	_add_row_actions(line, row, is_expandable)
+	_rows_box.add_child(line)
+
+
+func _tint_state(button: Button, row: Dictionary) -> void:
+	## Red for an error state, amber for "near", from the spec's state slot; the per-level fallback only knows a missing file (amber, as before).
+	if row.has("state"):
+		match Model.state_level(str(row["state"])):
+			"error":
+				button.add_theme_color_override("font_color", tokens.danger)
+			"warning":
+				button.add_theme_color_override("font_color", tokens.warn)
+	elif bool(row.get("missing", false)):
+		button.add_theme_color_override("font_color", tokens.warn)
+
+
+func _add_bubble(line: HBoxContainer, bubble) -> void:
+	## The one problem count a row wears (spec section 6): red for errors, amber for "near", dim for unsaved.
+	if not (bubble is Dictionary):
+		return
+	var label := Label.new()
+	label.text = str(int(bubble["count"]))
+	label.custom_minimum_size = Vector2(40, 0)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	match str(bubble["level"]):
+		"error":
+			label.add_theme_color_override("font_color", tokens.danger)
+		"warning":
+			label.add_theme_color_override("font_color", tokens.warn)
+		_:
+			label.theme_type_variation = &"LabelDim"
+	line.add_child(label)
+
+
+# --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), drawn with the same lines as above ---------------------------------------------
+
+func _add_spec_rows() -> void:
+	var spec_rows := Model.visible_rows(_resp, _spec_open_keys(), _grouping(), _unsaved_part_ids())
+	var index := Model.index_rows(_tree[0]["children"] as Array)
+	for srow in spec_rows:
+		var depth := int(srow["depth"])
+		match str(srow["kind"]):
+			"root":
+				_tree[0]["state"] = srow["state"]
+				_add_row_line(_tree[0], 0, false, null)
+			"group":
+				_add_group_line(srow)
+			"mates_folder", "patterns_folder":
+				_add_folder_line(srow)
+			"feature":
+				pass # (features of a part are the design table's and a later phase's: not fetched here)
+			_:
+				var row: Dictionary = index.get(str(srow["key"]), {})
+				if row.is_empty():
+					continue
+				row["state"] = srow["state"] # (drawn from the latest unsaved set, not the one the row was built with)
+				var has_children := not (row["children"] as Array).is_empty()
+				_add_row_line(row, depth, bool(srow["expandable"]) and has_children, srow["bubble"])
+
+
+func _add_group_line(srow: Dictionary) -> void:
+	## A "Bolt M4 x4" row: opens to its members (spec section 4); pressing the name does the same, it is not a selection.
+	var key := str(srow["key"])
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 4)
+	line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(int(srow["depth"]) * INDENT_PX, 0)
+	line.add_child(spacer)
+	var toggle := func() -> void:
+		if _open_groups.has(key):
+			_open_groups.erase(key)
+		else:
+			_open_groups[key] = true
+		_rebuild_rows()
+	var arrow := Button.new()
+	arrow.text = "v" if bool(srow["open"]) else ">"
+	arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
+	arrow.pressed.connect(toggle)
+	line.add_child(arrow)
+	var b := Button.new()
+	b.theme_type_variation = &"ButtonRail"
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var icon_name := Model.state_icon_for(str(srow["state"]))
+	if icon_name != "":
+		b.icon = UiIcons.texture(icon_name, 28)
+	b.text = str(srow["label"])
+	var hint := Model.state_hint_for(str(srow["state"]))
+	if hint != "":
+		b.text += "  · %s" % hint
+	b.clip_text = true
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	_tint_state(b, {"state": srow["state"]})
+	if bool(srow["suppressed"]) or bool(srow["hidden"]):
+		b.modulate = Color(1, 1, 1, 0.5)
+	b.pressed.connect(toggle)
+	line.add_child(b)
+	_add_bubble(line, srow["bubble"])
+	_rows_box.add_child(line)
+
+
+func _add_folder_line(srow: Dictionary) -> void:
+	## The Mates / Patterns folders after the root's rows (spec section 7): their count and health. What is inside them is a later phase's, so the row is a label.
+	var line := HBoxContainer.new()
+	line.custom_minimum_size = Vector2(0, ROW_HEIGHT * 0.8)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(int(srow["depth"]) * INDENT_PX + 48, 0)
+	line.add_child(pad)
+	var label := Label.new()
+	label.text = "%s (%d)" % [str(srow["label"]), int(srow["count"])]
+	label.theme_type_variation = &"LabelDim"
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(label)
+	_add_bubble(line, srow["bubble"])
+	_rows_box.add_child(line)
+
+
+func _spec_open_keys() -> Array:
+	## The open row keys the spec lists rows for: every expanded occurrence row (its key is its path), and every open group.
+	var keys: Array = []
+	_collect_open(_tree[0]["children"] as Array, keys)
+	for k in _open_groups:
+		keys.append(k)
+	return keys
+
+
+func _collect_open(rows: Array, keys: Array) -> void:
+	for row in rows:
+		if bool(row.get("expanded", false)):
+			keys.append(Model.path_key(row["path"]))
+		if row.get("children") != null:
+			_collect_open(row["children"], keys)
+
+
+func _unsaved_part_ids() -> Array:
+	## Spec "unsaved" is client state. This client only knows the whole document is unsaved, so that marks the root Part (the root row), not every row.
+	return [_root_part_id] if _main != null and bool(_main.get("document_dirty")) and _root_part_id != "" else []
+
+
+func _grouping() -> bool:
+	return _main.tree_grouping() if _main != null and _main.has_method("tree_grouping") else _grouping_local
+
+
+func _set_grouping(on: bool) -> void:
+	if _main != null and _main.has_method("set_tree_grouping"):
+		_main.set_tree_grouping(on)
+	_grouping_local = on
+	if _fold_button != null:
+		_fold_button.set_pressed_no_signal(on)
+	_rebuild_rows()
+
+
+func _uses_tree_endpoint() -> bool:
+	## The world tree reads the whole hierarchy in one call. The design table's PARTS tab (a subclass without the action bar) keeps reading one level at a time.
+	return _uses_action_bar() and not _endpoint_missing
+
+
+func _endpoint_active() -> bool:
+	return not _resp.is_empty() and not _tree.is_empty()
+
+
+func _load_endpoint(token: int) -> bool:
+	## GET /parts/{id}/assembly-tree: the structure first (fast at any size), drawn at once, then the same call with ?status=true merged in (spec section 2).
+	## True = handled (loaded, or an error shown); false = the backend has no such call (404): the caller falls back to one request per level.
+	var base := "/parts/%s/assembly-tree" % _root_part_id
+	var result := await _get_json(base)
+	if token != _refresh_token:
+		return true
+	if not result["ok"]:
+		if int(result.get("code", 0)) == 404:
+			_endpoint_missing = true
+			_resp = {}
+			return false
+		_set_status("Couldn't load the assembly tree: %s" % result["error"])
+		return true
+	if not (result["json"] is Dictionary):
+		_set_status("Couldn't load the assembly tree: unexpected answer.")
+		return true
+	_adopt_response(result["json"])
+	_stale = false
+	_set_status(_tree_note(false))
+	_rebuild_rows()
+	var with_status := await _get_json(base + "?status=true")
+	if token != _refresh_token or _tree.is_empty():
+		return true
+	if with_status["ok"] and with_status["json"] is Dictionary:
+		_adopt_response(with_status["json"])
+		_set_status(_tree_note(true))
+		_rebuild_rows()
+	else:
+		_set_status("Constraint states unavailable: %s" % with_status["error"])
+	return true
+
+
+func _tree_note(status_done: bool) -> String:
+	var notes: PackedStringArray = []
+	if (_resp.get("children", []) as Array).is_empty():
+		notes.append("This assembly has no placed occurrences.")
+	if bool(_resp.get("truncated_depth", false)) or bool(_resp.get("truncated_nodes", false)):
+		notes.append("The tree is cut off at %d parts / %d levels; counts cover what is listed." % [int(_resp.get("max_nodes", 0)), int(_resp.get("max_depth", 0))])
+	if status_done and bool(_resp.get("status_incomplete", false)):
+		notes.append("Some levels' constraint states could not be read (marked on their rows).")
+	return " ".join(notes)
+
+
+func _adopt_response(resp: Dictionary) -> void:
+	## Takes a tree answer as the current one and rebuilds the rows from it, keeping what was open (spec section 8).
+	if not bool(resp.get("status_included", false)):
+		Model.carry_status(resp, _resp)
+	_resp = resp
+	var old_children: Array = (_tree[0]["children"] as Array) if not _tree.is_empty() and _tree[0].get("children") != null else []
+	var rows := Model.merge_expanded(old_children, Model.rows_from_tree(resp.get("children", []), [], _root_part_id, bool(resp.get("status_failed", false)), _unsaved_part_ids()))
+	var root_name := str(resp.get("part_name", ""))
+	if root_name == "":
+		root_name = str(_part_names.get(_root_part_id, "Assembly"))
+	_part_names[_root_part_id] = root_name
+	_tree = [{
+		"id": "", "name": root_name, "base_name": root_name, "override": false, "named": true, "resolved_part_id": _root_part_id,
+		"children": rows, "expanded": true, "fixed": false, "backend_hidden": false, "suppressed": false, "missing": false,
+		"path": [], "status": "", "state": "none", "parent_part_id": "",
+	}]
 
 
 func _row_text(row: Dictionary) -> String:
@@ -438,6 +687,8 @@ func _row_text(row: Dictionary) -> String:
 		text += "  · hidden"
 	if hint != "" and not bool(row.get("missing", false)):
 		text += "  · %s" % hint
+	if bool(row.get("status_unavailable", false)):
+		text += "  · status unavailable"
 	if str(row.get("set_note", "")) != "":
 		text += "  · %s" % str(row["set_note"])
 	return text
@@ -571,7 +822,10 @@ func _apply_rename(row: Dictionary, owner: String, occ: String, text: String, pr
 				if await _set_name_override(owner, occ, text):
 					request_refresh(),
 			true)
-	Model.apply_instance_names(_siblings_of(row))
+	if _endpoint_active():
+		request_refresh() # (the spec's names and groups are worked out from the answer: "Bolt <n>" renumber there)
+	else:
+		Model.apply_instance_names(_siblings_of(row))
 	_rebuild_rows()
 
 
@@ -620,6 +874,10 @@ func _refresh_levels() -> void:
 	if _tree.is_empty() or _root_part_id == "":
 		return
 	_stale_levels = false
+	if _endpoint_active():
+		_refresh_token += 1 # (the whole tree is one call: re-read it in place; what is open and selected stays)
+		await _load_endpoint(_refresh_token)
+		return
 	_levels_token += 1
 	var token := _levels_token
 	await _refresh_row_level(_tree[0], token)
@@ -705,21 +963,21 @@ func _request_json(method: int, path: String, body) -> Dictionary:
 	## Same fresh-HTTPRequest-per-call pattern as appearance_tool.gd/mates_tool.gd's
 	## own _api_request - see either for the docstring this mirrors.
 	if backend_url.is_empty() or api_key.is_empty(): # the server was switched away while a fetch was still going
-		return {"ok": false, "json": null, "error": "no backend configured"}
+		return {"ok": false, "json": null, "code": 0, "error": "no backend configured"}
 	var req := HTTPRequest.new()
 	add_child(req)
 	var headers := BackendSession.headers(api_key, body != null)
 	var err := req.request(backend_url + API_PREFIX + path, headers, method, JSON.stringify(body) if body != null else "")
 	if err != OK:
 		req.queue_free()
-		return {"ok": false, "json": null, "error": "request failed to start (error %d)" % err}
+		return {"ok": false, "json": null, "code": 0, "error": "request failed to start (error %d)" % err}
 	var result: Array = await req.request_completed
 	req.queue_free()
 	var result_code: int = result[0]
 	var response_code: int = result[1]
 	var raw: PackedByteArray = result[3]
 	if result_code != HTTPRequest.RESULT_SUCCESS:
-		return {"ok": false, "json": null, "error": "network error (result %d)" % result_code}
+		return {"ok": false, "json": null, "code": 0, "error": "network error (result %d)" % result_code}
 	var parsed = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
 	var ok: bool = response_code >= 200 and response_code < 300
-	return {"ok": ok, "json": (parsed if ok else null), "error": ("" if ok else str(parsed))}
+	return {"ok": ok, "json": (parsed if ok else null), "code": response_code, "error": ("" if ok else str(parsed))}

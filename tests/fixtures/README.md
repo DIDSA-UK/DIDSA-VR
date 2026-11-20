@@ -124,3 +124,12 @@ The answers of a local DIDSA-CAD backend for the sketch of parity follow-ups C1 
 `state` (`POST .../solve-and-refresh`), `export` (`GET .../export`) and the origin's point id. Used by `tests/sketch_midsize_redraw.gd`. Made by
 `tests/helpers/make_sketch_midsize_fixture.gd` (the VR session's own taps and dimensions against a running backend, `secrets.cfg` pointing at it); the ids are the
 backend's UUIDs, so a rebuild changes every id but not the shape of the sketch. Nothing compares it with DIDSA-CAD: it is a snapshot, not a mirror.
+
+## `assembly_tree_vectors.json` — golden vectors for the assembly tree's rules
+
+A **byte-for-byte copy** of DIDSA-CAD's `docs/assembly-tree/vectors.json` (the contract of the assembly tree overhaul, `docs/assembly-tree-overhaul-scope.md` section 9.2; the rules are
+`docs/assembly-tree/spec.md`). Source commit: DIDSA-CAD `cc96da0eda2926941980916eeab3de5daed01140` (the last commit that changed the file; copied from `main` at `6bea778`, the merge of PR #388, Tree A1).
+36 cases over 13 trees: `rows` (the visible rows for a set of open keys, grouping on or off, unsaved Part ids and fetched features: key, kind, depth, label, state, bubble, expandable, open, count,
+path, hidden, suppressed) and `reveal` (the keys to open to list a row). Used by `tests/occurrence_tree_model.gd`, which requires every case to match exactly. The file is generated in DIDSA-CAD
+(`tools/assembly_tree_vectors/generate.py`): **never edit it here**; when the contract changes the manager changes it in both repos and it is copied over again (and this commit note updated).
+
