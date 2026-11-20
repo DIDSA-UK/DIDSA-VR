@@ -52,6 +52,7 @@ signal picks_changed()
 signal sandbox_changed(on: bool) ## Relax all mates turned on (the sandbox) or off (the parts went home): the tablet's toggle and the wheel follow it
 signal document_changed() ## a mate was made or deleted, or a part grounded / floated: what a save would write is different
 signal mates_changed()
+signal occurrence_fixed_changed(owner_part_id: String, occurrence_id: String, fixed: bool) ## a Fix / Float was made (the tablet, the tree's bar, an undo or a redo): the Assembly Tree marks the row
 signal highlight_changed() ## a mate was selected on the tablet (or the selection went): what it lights changed (T3)
 signal enforce_finished(result: Dictionary) ## enforce_all() ended: {ok, solved, problems}
 
@@ -2653,6 +2654,7 @@ func set_occurrence_fixed(owner_part_id: String, occurrence_id: String, fixed: b
 		return false
 	var was := not fixed
 	_remember_fixed(owner_part_id, occurrence_id, fixed)
+	occurrence_fixed_changed.emit(owner_part_id, occurrence_id, fixed)
 	document_changed.emit()
 	_report("%s is now %s." % [label, "grounded (fixed)" if fixed else "floating (free to move)"])
 	if record and command_stack != null:

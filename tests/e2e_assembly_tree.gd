@@ -137,4 +137,18 @@ func _initialize() -> void:
 	await window._on_bar_action("fix", Model.find_row(window._tree, target["path"]), {})
 	var refusal_after: Dictionary = hand.refusal_for({"depth": (target["path"] as Array).size(), "prefix": target["path"], "label": str(target["name"])}, node) if node != null else {"short": "no node"}
 	check("Float from the tree lifts the refusal", str(refusal_after.get("short", "")) == "")
+	var floated: Dictionary = Model.find_row(window._tree, target["path"])
+	check("Tree A5.1: straight after the Float the row is not a pin and not a guess (it says 'updating' until status arrives)", not bool(floated["fixed"]) and floated["state"] != "fixed")
+	await _wait_for(func() -> bool:
+		var t: Dictionary = Model.find_row(window._tree, target["path"])
+		return not t.is_empty() and t["state"] != "pending" and bool(window._resp.get("status_included", false)), 20000)
+	for i in 120: # (long enough for any read that was already in flight to land: a stale one must not put the pin back)
+		await process_frame
+	var occ_float: Dictionary = await _api(HTTPClient.METHOD_GET, "/parts/%s/occurrences" % owner)
+	var floating_on_server := false
+	for o in (occ_float["json"] if occ_float["json"] is Array else []):
+		if str(o.get("id", "")) == str(target["id"]):
+			floating_on_server = not bool(o.get("fixed", false))
+	var settled: Dictionary = Model.find_row(window._tree, target["path"])
+	check("Tree A5.1: the backend says floating and the settled row agrees: no pin, a real state from the fresh status (%s)" % str(settled.get("state")), floating_on_server and settled["state"] != "fixed" and settled["state"] != "pending")
 	quit(0)
