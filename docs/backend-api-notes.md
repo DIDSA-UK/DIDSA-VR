@@ -777,3 +777,15 @@ For live sessions the backend mints a **read-only view token** that lets an obse
   left-handed: x cross y = -normal) and `aligned_x_axis` / `aligned_y_axis` (the anchor axes after the alignment, before flip / turns). A point at (u, v) is at
   `resolved_frame_origin + u * resolved_x_axis + v * resolved_y_axis`. `resolved_origin` keeps its old meaning (set only for a stored origin that resolves). A lost alignment reports
   `x_axis_ref.edge_ref` / `x_axis_ref.sketch_entity_ref` in `lost_references` and the frame is the unaligned one.
+
+## Added 2026-11-20 (parity follow-ups F8: shape drags; DIDSA-CAD `docs/motion/sketch-projector-spec.md` section 13)
+
+- **`structural_constraint_ids` is on the per-family list routes only.** `GET /sketch/sketches/{id}/circles | arcs | ellipses | ellipse-arcs | rectangles | polygons | slots`
+  carry it (the shape's own constraints: its provisional size, cardinal ties, a rectangle's H / V and midpoint, ...), but the entities in the sketch state (`solve-and-refresh`,
+  the export) do not. The hybrid shape drag needs it to tell the user's constraints from the shape's, so a press on a shape point does one GET of that family's list
+  (`SketchSession.load_shape_structure`, kept in `_structure` across refreshes). A failed GET leaves it out and the drag is plain (the spec's fallback).
+- **A VR rectangle is always `axis_aligned: true` with a centre point and a diagonal**, whichever of the three rectangle methods drew it (read from the routes the tools use), so
+  every rectangle corner is a shape point for the proposals.
+- **A sketch with a slot and a rectangle reports `converged: false` with nothing failed** (seen while writing `tests/e2e_sketch_shape_drag.gd`: a slot alone, a rectangle alone, a
+  slot with a circle or a hexagon all solve; a rectangle added to a sketch with a slot, or the reverse, does not). A backend question, not looked into: the e2e test draws the slot in a
+  sketch of its own.

@@ -242,8 +242,7 @@ func finish() -> Dictionary:
 	## The drop: waits for a task in flight (its answer counts, the drag is still live), then returns what to send: {updates: id -> [x, y], anchors, old: id -> [x, y] of
 	## the press, unsupported}. With `unsupported` the wish itself (the grabbed points at the laser) is what goes, and the backend's solve decides.
 	if _task >= 0:
-		WorkerThreadPool.wait_for_task_completion(_task)
-		_collect()
+		_collect() # (waits for the task itself; waiting here as well made the second wait an "Invalid Task ID")
 	if live and _wish != _last_wish:
 		# C2: the laser moved on after the last call started (at most one is in flight), so its last frames were never solved: one synchronous call from the last accepted frame,
 		# and the point is dropped where the laser was at release, not a frame or more before it (about 0.5 ms; 10-20 ms for a 20-point group, once)

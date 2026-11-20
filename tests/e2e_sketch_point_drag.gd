@@ -5,6 +5,8 @@ extends SceneTree
 ##   * Every frame of the drag keeps the width; the drop's positions are the backend's: its stored points equal the session's and the dimension still reads 40.
 ##   * Undo puts every point back (the backend's stored points are the old ones).
 ##   * (F3, C2) The drop lands where the laser was at the release: a wish the thread never ran is solved at the drop, and the backend stores that point.
+##   * (F8) A rectangle's corner is a shape point now: its width dimension is a user constraint, so the drag is hybrid (the proposal clamped by the projector); `load_shape_structure` is
+##     the editor's press-time fetch of the shape's structural constraint ids.
 ##   * A Fix on a corner pins it: a press on it starts no drag, and dragging another corner leaves it exactly where it was, in the backend too.
 ## Run: "$GODOT" --headless --path . --script res://tests/e2e_sketch_point_drag.gd
 ## Needs secrets.cfg to point at a running backend (a throwaway CAD_API_KEY, see docs/status.md "How this has been worked on").
@@ -127,6 +129,7 @@ func _initialize() -> void:
 	var pinned: Array = PointDrag.pinned_ids(s)
 	var d := PointDrag.new()
 	var start_c: Vector2 = s.points[c]
+	await s.load_shape_structure(c) # F8: the rectangle is a shape now; the editor's press fetches its structural constraint ids, which tell the user's width from the shape's own
 	_check(d.begin(s, c, start_c), "a press on a free corner starts a drag (pinned: %s)" % str(pinned))
 	var target := start_c + Vector2(18, 12)
 	var worst: float = await drag(d, c, target, a, b)
@@ -145,7 +148,10 @@ func _initialize() -> void:
 	_check(absf(w - width_now) < 1e-3, "the backend's width still reads what it did (%.4f)" % w)
 	var c_end: Vector2 = after_backend[c]
 	print("SMOKE the grabbed corner went from %s to %s for a wish of %s" % [str(start_c), str(c_end), str(target)])
-	_check(c_end.distance_to(target) < 0.5, "the dragged corner is where it was dropped (the backend's answer)")
+	# F8: the corner is a shape point now and the width is the user's: the hybrid clamp (spec 13.4) takes the rectangle's proposal for the other corners as stiff and lets the
+	# unproposed opposite corner give way, so the whole rectangle slides with the corner and the corner ends within 1 mm of the wish (0.54 mm short on this backend; the plain
+	# projector of S10 ended within 0.5)
+	_check(c_end.distance_to(target) < 1.0, "the dragged corner is where it was dropped, within 1 mm (the backend's answer)")
 	_check(s.dof >= 0 and s.constraint_state() != "over", "the DOF state is the backend's (dof %d, %s)" % [s.dof, s.constraint_state()])
 	_check(s.can_undo() and s.undo_label() == "point move", "the drop is one Undo step")
 	await s.undo()
@@ -164,6 +170,7 @@ func _initialize() -> void:
 	_check(bool(fx["ok"]) and a in pinned and not press.begin(s, a, s.points[a]), "a Fix on a corner pins it: a press on it starts no drag")
 	var a_at: Vector2 = s.points[a]
 	var d2 := PointDrag.new()
+	await s.load_shape_structure(c)
 	d2.begin(s, c, s.points[c])
 	var worst2: float = await drag(d2, c, (s.points[c] as Vector2) + Vector2(10, 10), a, b)
 	var drop2: Dictionary = d2.finish()
@@ -186,7 +193,7 @@ func _initialize() -> void:
 	var wish1 := from3 + Vector2(6, 4)
 	var release := from3 + Vector2(14, -9)
 	d3.step(wish1)
-	d3._wish = release
+	d3._wish = release - from3 # (the wish is the laser's move since the press)
 	var drop3: Dictionary = d3.finish()
 	var at_release: Array = drop3["updates"].get(free, [INF, INF])
 	_check(Vector2(at_release[0], at_release[1]).distance_to(release) < 1e-6, "the drop carries the release point, not the first call's answer (%s for %s)" % [str(at_release), str(release)])
