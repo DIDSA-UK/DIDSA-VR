@@ -4191,11 +4191,18 @@ func on_contradictory_line(point_id: String) -> bool:
 	return contradictory_points().has(point_id)
 
 
+var _states_key: Array = [] ## what entity_states() last answered for (revision, counts of what the count reads) and the answer; a solve (`revision`) or an added entity invalidates it
+var _states_cache := {}
+
+
 func entity_states() -> Dictionary:
 	## "kind:id" -> "over" | "fully" | "free" for every line, circle, arc, ellipse, elliptical arc, spline and text (F7, rigidity spec 4). Forced-over points = the points of
 	## a constraint the last solve reported failed, plus the endpoints of a line both horizontal and vertical or of two lines both parallel and perpendicular. Then the pair
 	## rule (over when a defining pair is over by the count or a defining point is forced; fully when every pair is fully constrained), then the whole-sketch override: a
 	## sketch fully constrained as a whole (converged, dof <= 0, geometry, something grounded) makes every entity that is not over fully constrained. Colours are the view's.
+	var key := [revision, dof, converged, points.size(), constraints.size(), lines.size(), circles.size(), arcs.size(), ellipses.size(), ellipse_arcs.size(), splines.size(), texts.size(), failed_constraint_ids.size()]
+	if key == _states_key:
+		return _states_cache # nothing the count reads has changed since the last pass (a hover or a pick redraws without a solve): not recomputed
 	var r: RefCounted = rigidity()
 	var whole: bool = has_geometry() and converged and dof <= 0 and r.any_grounded
 	var forced := failed_point_ids()
@@ -4232,6 +4239,8 @@ func entity_states() -> Dictionary:
 				if whole and state != "over":
 					state = "fully"
 			out["%s:%s" % [kind, id]] = state
+	_states_key = key
+	_states_cache = out
 	return out
 
 

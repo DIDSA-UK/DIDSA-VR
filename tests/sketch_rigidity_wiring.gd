@@ -219,6 +219,20 @@ func _initialize() -> void:
 	_check(d.begin(s, "C", Vector2(50, 20)), "...with an answer the oracle decides: the half-dimensioned rectangle's corner moves even if the backend's dof says 0")
 	d.cancel()
 
+	# --- entity_states is kept between redraws and recomputed when a solve or an edit changes what it reads
+	s = _sketch(_rect_constraints(true, false), 5)
+	var first: Dictionary = s.entity_states()
+	_check(s.entity_states() == first and is_same(s.entity_states(), first), "entity_states: a second pass with nothing changed is the kept answer (a hover redraw does not recount)")
+	var pts_now: Array = []
+	for id in s.points:
+		pts_now.append({"id": id, "x": s.points[id].x, "y": s.points[id].y, "is_locked": false})
+	s._ingest_state({"points": pts_now, "constraints": _rect_constraints(true, true), "solve": {"dof": 4, "converged": true, "solver_reported_failed_constraint_ids": []}})
+	_check(_rect_is(_states(s), "fully"), "...and a new solve's state (the height added) is counted afresh: the rectangle turns fully constrained")
+	s._ingest_state({"points": pts_now, "constraints": _rect_constraints(true, true), "solve": {"dof": 4, "converged": false, "solver_reported_failed_constraint_ids": ["w"]}})
+	_check(_states(s)["ab"] == "over", "...also a failed list")
+	s.lines["extra"] = {"a": "f", "b": "g"}
+	_check(_states(s).has("extra"), "...and a line added without a solve")
+
 	# --- the view
 	var view = View.new()
 	root.add_child(view)
