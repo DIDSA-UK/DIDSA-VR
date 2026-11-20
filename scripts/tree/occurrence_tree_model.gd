@@ -225,7 +225,7 @@ static func ancestors_paths(path: Array) -> Array:
 # A "node" is one dict of the endpoint's response (section 1); the response itself is the root. Nothing here touches a scene or the network.
 # =====================================================================================================================================================
 
-const STATES := ["missing", "cycle", "broken", "over_constrained", "near", "unsaved", "under_constrained", "fixed", "fully_constrained", "none"] ## section 5, most severe first
+const STATES := ["missing", "cycle", "broken", "over_constrained", "near", "unsaved", "under_constrained", "fixed", "fully_constrained", "none"] ## section 5, most severe first (the contract's order). The client-only state "pending" (a Float whose fresh status has not arrived) is not in it and ranks last
 const GROUP_MIN := 4 ## section 4: this many siblings that share an instance key become one group row
 
 static var _uuid_re: RegEx = null
@@ -324,6 +324,8 @@ static func state_of(node: Dictionary, unsaved: Array) -> String:
 		return "missing"
 	if bool(node.get("cycle", false)):
 		return "cycle"
+	if bool(node.get("pending", false)) and not (node.get("constraint") is Dictionary):
+		return "pending" # (a Float done here: what the part is now is not known until the next status answer; never show a guess)
 	var c = node.get("constraint")
 	var cs := ""
 	if c is Dictionary:
@@ -392,6 +394,35 @@ static func state_hint_for(state: String, dof: int = -1) -> String:
 			return "fixed"
 		"fully_constrained":
 			return "fully constrained"
+		"pending":
+			return "updating"
+	return ""
+
+
+static func state_hint_short(state: String, dof: int = -1) -> String:
+	## The row's own hint: a few characters, so it never pushes the name out of a 480 px panel (the icon and colour say the rest). The full words are state_hint_for(),
+	## shown in the bottom bar when the row is selected.
+	match state:
+		"missing":
+			return "missing"
+		"cycle":
+			return "loop"
+		"broken":
+			return "broken"
+		"over_constrained":
+			return "over"
+		"near":
+			return "near"
+		"unsaved":
+			return "unsaved"
+		"under_constrained":
+			return "under" + (" %d" % dof if dof >= 0 else "")
+		"fixed":
+			return "fixed"
+		"fully_constrained":
+			return "full"
+		"pending":
+			return "..."
 	return ""
 
 
@@ -697,6 +728,8 @@ static func _carry_nodes(nodes: Array, old_by_path: Dictionary) -> void:
 static func _carry_into(n: Dictionary, o: Dictionary) -> void:
 	if n.get("constraint") == null and o.get("constraint") != null and bool(n.get("fixed", false)) == bool(o.get("fixed", false)):
 		n["constraint"] = o["constraint"] # (not when `fixed` changed since: that old status describes the old state)
+	if n.get("constraint") == null and not bool(n.get("fixed", false)) and (bool(o.get("pending", false)) or bool(o.get("fixed", false))):
+		n["pending"] = true # (a structure-only answer for a part that was just floated: its old status is not carried, and "none" would be a guess)
 	if n.get("problems") == null and o.get("problems") != null:
 		n["problems"] = o["problems"]
 	if n.get("mates") is Dictionary and o.get("mates") is Dictionary:
@@ -716,8 +749,9 @@ static func normalise_tree(response: Dictionary) -> void:
 
 
 static func set_node_fixed(response: Dictionary, path: Array, fixed: bool) -> void:
-	## A Fix / Float done here, written into the held response at once: the flag changes and the old constraint (which describes the old state) is dropped, so the
-	## row reads pin / nothing until a fresh status says more, even if that status never comes.
+	## A Fix / Float done here, written into the held response at once: the flag changes and the old constraint (which describes the old state) is dropped.
+	## Fixed reads as a pin (a fixed part is fixed whatever its mates). Floated is marked `pending`: the row says "updating" until a fresh status says what it is
+	## now (it may be under-constrained, fully constrained, or free), never a blank that reads as "free and unmated".
 	var nodes: Array = children_of(response)
 	for i in path.size():
 		var hit: Dictionary = {}
@@ -730,5 +764,6 @@ static func set_node_fixed(response: Dictionary, path: Array, fixed: bool) -> vo
 		if i == path.size() - 1:
 			hit["fixed"] = fixed
 			hit["constraint"] = null
+			hit["pending"] = not fixed
 			return
 		nodes = children_of(hit)

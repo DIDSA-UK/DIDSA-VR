@@ -34,6 +34,7 @@ var _root_part_id := ""
 var _tree: Array = [] ## top-level rows: [{id, name, resolved_part_id, children: Array|null, expanded: bool}, ...]
 var _stale := true
 var _busy := false
+var _mutation_seq := 0 ## bumped by every Fix / Float made here: a tree answer to a request sent before one describes the old document and is dropped (a fresh read follows)
 var _refresh_token := 0 ## bumped by every _refresh_root(), so a slower earlier fetch can't overwrite a newer one (mark_stale() + _on_opened() can both fire)
 var _part_names: Dictionary = {} ## resolved_part_id -> the Part's own name (GET /parts/{id}), so rows read "Assy Test Peg" instead of "Occurrence d3c102e0"
 
@@ -366,6 +367,7 @@ func _build_content() -> Control:
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 4)
 	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rows_box.resized.connect(_on_rows_resized)
 	rows_scroll.add_child(_rows_box)
 
 	if _uses_action_bar():
@@ -386,6 +388,17 @@ func _build_content() -> Control:
 func _uses_action_bar() -> bool:
 	## The world tree has the bottom action bar; the design table's PARTS tab keeps its own inline Table / Bring buttons until phase T2 moves it onto the bar.
 	return true
+
+
+var _rows_width := 0.0
+
+
+func _on_rows_resized() -> void:
+	## The rows' text is fitted to their width, which is only known after the first layout (and changes when the panel is resized): draw them again then.
+	if absf(_rows_box.size.x - _rows_width) < 1.0:
+		return
+	_rows_width = _rows_box.size.x
+	_rebuild_rows.call_deferred()
 
 
 func _rebuild_rows() -> void:
@@ -443,8 +456,11 @@ func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = nu
 	var icon_name := Model.state_icon(row)
 	if icon_name != "":
 		name_button.icon = UiIcons.texture(icon_name, 28)
-	name_button.text = _row_text(row)
+	# the room the name has: the rows' width less the indent, the arrow's slot, the icon and the button's own padding
+	var room := _rows_box.size.x - depth * INDENT_PX - 44.0 - 8.0 - (36.0 if icon_name != "" else 0.0) - 28.0
+	name_button.text = _row_text(row, room if _rows_box.size.x > 100.0 else -1.0)
 	name_button.clip_text = true
+	name_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS # (a name too long even alone ends in "...", not mid-letter)
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
 	_tint_state(name_button, row)
@@ -544,7 +560,7 @@ func _add_group_line(srow: Dictionary) -> void:
 	if icon_name != "":
 		b.icon = UiIcons.texture(icon_name, 28)
 	b.text = str(srow["label"])
-	var hint := Model.state_hint_for(str(srow["state"]))
+	var hint := Model.state_hint_short(str(srow["state"]))
 	if hint != "":
 		b.text += "  · %s" % hint
 	b.clip_text = true
@@ -624,8 +640,12 @@ func _load_endpoint(token: int) -> bool:
 	## GET /parts/{id}/assembly-tree: the structure first (fast at any size), drawn at once, then the same call with ?status=true merged in (spec section 2).
 	## True = handled (loaded, or an error shown); false = the backend has no such call (404): the caller falls back to one request per level.
 	var base := "/parts/%s/assembly-tree" % _root_part_id
+	var seq := _mutation_seq
 	var result := await _get_json(base)
 	if token != _refresh_token:
+		return true
+	if seq != _mutation_seq:
+		request_refresh() # (a Fix / Float was done while this was in flight: this answer may predate it. Read again; never show it.)
 		return true
 	if not result["ok"]:
 		if _route_missing(result):
@@ -642,8 +662,12 @@ func _load_endpoint(token: int) -> bool:
 	_stale = false
 	_set_status(_tree_note(false))
 	_rebuild_rows()
+	seq = _mutation_seq
 	var with_status := await _get_json(base + "?status=true")
 	if token != _refresh_token or _tree.is_empty():
+		return true
+	if seq != _mutation_seq:
+		request_refresh()
 		return true
 	if with_status["ok"] and with_status["json"] is Dictionary:
 		_adopt_response(with_status["json"])
@@ -699,20 +723,70 @@ func _adopt_response(resp: Dictionary) -> void:
 	}]
 
 
-func _row_text(row: Dictionary) -> String:
-	var hint := Model.state_hint(row, int(row.get("dof", -1)))
+func _row_text(row: Dictionary, room_px: float = -1.0) -> String:
+	## The name first, then short extras in order of importance (state, hidden, rigid-set note, no status), each only while it still fits in `room_px` (-1 = no
+	## limit). A 480 px panel clips the end of a row, so the name is never pushed out by what follows it; whatever is left out is in the bottom bar when the row is
+	## selected (_row_detail), and the icon and tint still show the state.
 	var text := str(row["name"])
+	var hint := _legacy_hint_short(row)
+	if row.has("state") and not bool(row.get("suppressed", false)):
+		hint = Model.state_hint_short(str(row["state"]), int(row.get("dof", -1)))
 	if bool(row.get("missing", false)):
-		text = "missing file: %s" % text
-	elif _row_view_hidden(row):
-		text += "  · hidden"
-	if hint != "" and not bool(row.get("missing", false)):
-		text += "  · %s" % hint
-	if bool(row.get("status_unavailable", false)):
-		text += "  · status unavailable"
+		hint = "missing"
+	var extras: Array = [hint]
+	if not bool(row.get("missing", false)) and _row_view_hidden(row):
+		extras.append("hidden")
 	if str(row.get("set_note", "")) != "":
-		text += "  · %s" % str(row["set_note"])
+		extras.append(str(row["set_note"]))
+	if bool(row.get("status_unavailable", false)):
+		extras.append("no status")
+	for extra in extras:
+		if str(extra) == "":
+			continue
+		var longer: String = text + "  · %s" % str(extra)
+		if room_px >= 0.0 and _text_width(longer) > room_px:
+			break # (in priority order: once one does not fit, the rest are left for the bar)
+		text = longer
 	return text
+
+
+func _text_width(text: String) -> float:
+	var font := _rows_box.get_theme_font("font", "Button") if _rows_box != null else ThemeDB.fallback_font
+	var size := _rows_box.get_theme_font_size("font_size", "Button") if _rows_box != null else ThemeDB.fallback_font_size
+	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+
+
+static func _legacy_hint_short(row: Dictionary) -> String:
+	## The per-level fallback's rows carry no `state`: the same short words from the constraint status.
+	if bool(row.get("suppressed", false)):
+		return "suppressed"
+	match str(row.get("status", "")):
+		"fixed":
+			return "fixed"
+		"fully_constrained":
+			return "full"
+		"under_constrained":
+			return "under" + (" %d" % int(row.get("dof", -1)) if int(row.get("dof", -1)) >= 0 else "")
+		"over_constrained":
+			return "over"
+	return "fixed" if bool(row.get("fixed", false)) else ""
+
+
+func _row_detail(row: Dictionary) -> String:
+	## The whole reason, for the bottom bar: "missing file: lost_bracket", "under-constrained (2 DOF)", "hidden in the view", the rigid set's note, and so on.
+	var parts: PackedStringArray = []
+	var hint := Model.state_hint(row, int(row.get("dof", -1)))
+	if bool(row.get("missing", false)):
+		parts.append("missing file") # (the bar's line starts with the name)
+	elif hint != "":
+		parts.append(hint)
+	if _row_view_hidden(row):
+		parts.append("hidden in the view")
+	if bool(row.get("status_unavailable", false)):
+		parts.append("constraint status unavailable")
+	if str(row.get("set_note", "")) != "":
+		parts.append(str(row["set_note"]))
+	return ", ".join(parts)
 
 
 func _row_view_hidden(row: Dictionary) -> bool:
@@ -775,7 +849,8 @@ func _rebuild_bar() -> void:
 			greyed.append("%s: %s" % [action["label"], action["why"]])
 		b.pressed.connect(_on_bar_action.bind(str(action["id"]), row, room))
 		_bar_buttons.add_child(b)
-	_bar_hint.text = "%s%s" % [str(row["name"]), ("  ·  " + "; ".join(greyed)) if not greyed.is_empty() else ""]
+	var detail := _row_detail(row)
+	_bar_hint.text = "%s%s%s" % [str(row["name"]), ("  ·  " + detail) if detail != "" else "", ("  ·  " + "; ".join(greyed)) if not greyed.is_empty() else ""]
 
 
 func _bar_label(action: Dictionary, row: Dictionary) -> String:
@@ -796,10 +871,7 @@ func _on_bar_action(action_id: String, row: Dictionary, room: Dictionary) -> voi
 			var mates = _main.get("_mates_tool")
 			if mates != null and await mates.toggle_fixed_occurrence(owner, occ, label):
 				row["fixed"] = mates.group_fixed(owner, occ)
-				if _endpoint_active():
-					Model.set_node_fixed(_resp, path, bool(row["fixed"])) # (the row's state is worked out from the held answer: pin at once, even if no status follows)
-				_rebuild_rows()
-				request_refresh()
+				note_fixed_changed(path, bool(row["fixed"]))
 		"hide":
 			_main.set_tree_row_visible(path, _main.tree_row_hidden(path), label)
 			_rebuild_rows()
@@ -813,6 +885,19 @@ func _on_bar_action(action_id: String, row: Dictionary, room: Dictionary) -> voi
 				_main.room_manager.toggle_room(room["part_id"], room["label"], room["parent_part_id"], room["occurrence_id"])
 		"delete":
 			_on_delete_pressed(row)
+
+
+func note_fixed_changed(path: Array, fixed: bool) -> void:
+	## A Fix / Float the backend has accepted: shown at once (a pin, or "updating" for a Float until fresh status says what the part is now), any tree read still in
+	## flight is made stale (it may predate this), and a fresh read is queued.
+	_mutation_seq += 1
+	if _endpoint_active():
+		Model.set_node_fixed(_resp, path, fixed)
+	var row := Model.find_row(_tree, path)
+	if not row.is_empty():
+		row["fixed"] = fixed
+	_rebuild_rows()
+	request_refresh()
 
 
 func _rename(row: Dictionary) -> void:
