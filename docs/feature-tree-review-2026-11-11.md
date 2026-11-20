@@ -10,6 +10,8 @@ Code was read on branch `ccr-dec7d67f-ipq5rn`. Nothing was run.
 `docs/assembly-tree-overhaul-scope.md`. It keeps T1-T3 as the VR plan and adds how rooms show the assembly above them (a
 context strip and "used N x"), problem counts on collapsed rows, one instance-name format shared with the flat app, and a
 proposed backend call that returns the whole hierarchy at once.
+The owner answered its questions the same day: one tree with features under parts, instance names `Bolt <2>` (as here),
+the hierarchy call is approved, and repeated parts are grouped by default ("Bolt M4 x4") with a switch to turn it off.
 
 **Decided by the owner (11 Nov):** Fix / Float is done from the tree (not the mates wheel). **Hide in the tree is view-only**: it
 never writes the backend's `hidden` flag and is not saved.
