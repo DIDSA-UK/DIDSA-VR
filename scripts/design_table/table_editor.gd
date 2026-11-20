@@ -2003,7 +2003,24 @@ func _begin_point_hold(hit: Dictionary) -> void:
 	## Called by the Select pull on a sketch point (not the part's own corner, which is not the sketch's). The pull itself is the plain one. A point that is pinned (the origin,
 	## a reference, a point the part or a Fix holds) gets a hold that says so if it is dragged and moves nothing.
 	if _label_hold.is_empty() and str(hit.get("kind", "")) == "point" and not hit.has("ref") and session != null and session.points.has(str(hit["id"])) and _hover_uv != null:
-		_label_hold = {"kind": "point", "id": str(hit["id"]), "press": _hover_uv, "dragging": false, "pinned": str(hit["id"]) in PointDrag.pinned_ids(session), "said": false}
+		_label_hold = {"kind": "point", "id": str(hit["id"]), "press": _hover_uv, "dragging": false, "pinned": str(hit["id"]) in PointDrag.pinned_ids(session), "said": false, "structure": "pending"}
+		_prefetch_structure(str(hit["id"]), _label_hold)
+
+
+func _prefetch_structure(point_id: String, hold: Dictionary) -> void:
+	## F8: a shape point's drag is clamped only when a user constraint touches the shape, which needs the shape's structural constraint ids; the sketch state does not carry them,
+	## so one GET at the press fetches them. The drag waits for it (it is a few milliseconds, and the laser has to move past a pick's reach first).
+	var s = session
+	await s.load_shape_structure(point_id)
+	hold["structure"] = "ready"
+
+
+func _begin_line_hold(hit: Dictionary) -> void:
+	## F8: the Select pull on a sketch line (not a reference). The pull itself is the plain one (it selects the line); if the trigger stays held and the laser moves, both ends
+	## move together (a rigid drag; a polygon edge or a slot side drags its first point, as the flat app does).
+	if _label_hold.is_empty() and str(hit.get("kind", "")) == "line" and not hit.has("ref") and session != null and session.lines.has(str(hit["id"])) and _hover_uv != null:
+		_label_hold = {"kind": "point", "id": str(hit["id"]), "line": str(hit["id"]), "press": _hover_uv, "dragging": false, "pinned": false, "said": false, "structure": "pending"}
+		_prefetch_structure(str(session.lines[str(hit["id"])]["a"]), _label_hold)
 
 
 func _point_drag_move(uv: Variant) -> void:
@@ -2035,7 +2052,8 @@ func _point_drag_move(uv: Variant) -> void:
 			table.close_keyboard()
 		_last_pull = {"key": "", "ms": 0}
 		UiFeedback.haptic(table._right, "press")
-		table.set_status("Moving the point: let go of the trigger to drop it, B to put it back.")
+		var what := "line" if _label_hold.has("line") and point_drag.grabbed.size() == 2 else ("shape" if point_drag.shape_kind != "" else "point")
+		table.set_status("Moving the %s: let go of the trigger to drop it, B to put it back." % what)
 	var changed: Array = point_drag.step(uv)
 	if changed.is_empty():
 		return
@@ -2060,10 +2078,10 @@ func _end_point_hold() -> void:
 	if bool(result["ok"]) and str(result["message"]) == "" and not bool(result.get("moved", true)):
 		# C2 / B3 (b): nothing moved (a straight chain, a point the constraints hold): no "Point moved." and no confirm buzz
 		UiFeedback.haptic(table._right, "error")
-		table.set_status("That point can't move that way.")
+		table.set_status("That %s can't move that way." % ("line" if hold.has("line") else "point"))
 	elif bool(result["ok"]) and str(result["message"]) == "":
 		UiFeedback.haptic(table._right, "confirm")
-		table.set_status("Point moved.")
+		table.set_status("Line moved." if hold.has("line") and point_drag.grabbed.size() == 2 else ("Shape moved." if point_drag.shape_kind != "" else "Point moved."))
 	else:
 		UiFeedback.haptic(table._right, "error")
 		if str(result["message"]) != "":
@@ -2122,6 +2140,8 @@ func intent_drag_begin(hit: Dictionary) -> void:
 	match str(hit.get("kind", "")):
 		"point":
 			_begin_point_hold(hit)
+		"line":
+			_begin_line_hold(hit) # F8
 		"dimension", "constraint":
 			_begin_label_hold(hit)
 

@@ -44,6 +44,7 @@ CAD-side drift fails there. After a change lands on DIDSA-CAD `main`, refresh th
 | Copy here | Copy command | Test |
 |---|---|---|
 | `sketch_vectors.json` | `cp ../DIDSA-CAD/docs/motion/sketch-vectors.json tests/fixtures/sketch_vectors.json` | `sketch_projector_vectors` |
+| `sketch_shape_vectors.json` | `cp ../DIDSA-CAD/docs/motion/sketch-shape-vectors.json tests/fixtures/sketch_shape_vectors.json` | `sketch_shape_vectors` |
 | `sketch_dimension_catalogue.json` | `cp ../DIDSA-CAD/docs/sketch-dimension-catalogue.json tests/fixtures/sketch_dimension_catalogue.json` | `sketch_dimension_catalogue` |
 | `sketch_label_placement_cases.json` | `cp ../DIDSA-CAD/docs/sketch-label-placement-cases.json tests/fixtures/sketch_label_placement_cases.json` | `sketch_label_placement` |
 | `motion_vectors.json` | `cp ../DIDSA-CAD/docs/motion/vectors.json tests/fixtures/motion_vectors.json` | `motion_vectors` |

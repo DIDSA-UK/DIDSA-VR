@@ -2,7 +2,11 @@ extends RefCounted
 ## S10 of docs/dimension-constraint-parity-plan.md: one sketch-point drag (F6), the part of it that needs no scene tree. table_editor.gd owns the trigger, the laser and the
 ## redraw; this owns what the drag may move, the per-frame call of SketchProjector and its thread, and what the drop sends.
 ##
-##   begin(session, point_id, press_uv)  -> false when the point is pinned (the origin, a reference, a point the part or a Fix holds): no drag starts
+##   begin(session, point_id, press_uv)  -> false when the grab is refused (`refusal` says why: the origin, a reference, a point the part or a Fix holds, the pre-grab rule of
+##                                          spec 13.5): no drag starts. A point of an intact circle, arc, ellipse, ellipse arc, rectangle, polygon or slot drags the WHOLE
+##                                          shape by that shape's closed-form proposal, clamped by the projector when a user constraint touches it (F8, shape_proposals.gd)
+##   begin_line(session, line_id, press_uv) -> a rigid line drag: both ends take the same delta (two anchors, one offset); a polygon edge or a slot side is the drag of its
+##                                          first point, as the flat app does it
 ##   step(uv)                            -> the ids whose accepted position changed this frame (the editor lays them over session.points and redraws)
 ##   finish() / cancel()                 -> the drop's payload / the drag let go
 ##
@@ -13,16 +17,23 @@ extends RefCounted
 ## `finish()` solves the last wish synchronously if no call has run with it (C2). `unsupported` (a spline tangent in the group): nothing moves during the drag; the drop still sends the wish and the backend's solve decides, as the flat app's fallback.
 
 const SketchProjector := preload("res://scripts/motion/sketch_projector.gd")
+const Shapes := preload("res://scripts/motion/shape_proposals.gd")
 const MOVED_EPSILON := 1e-9 ## a point further than this (mm) from where the press found it is part of the wish
 
 var synchronous := false
 var live := false
 var unsupported := false ## the last frame's answer: the projector cannot do this group
 var grabbed: Array = [] ## the point ids held (anchors)
+var refusal := "" ## why the last begin / begin_line returned false ("" when it started)
+var shape_kind := "" ## the family of the shape being dragged ("" for a plain point or a line)
+var hybrid := false ## a shape drag clamped by the projector (a user constraint touches the shape)
 var frame_ms: Array = [] ## how long each finished projector call took, ms (the call itself, wherever it ran)
 var frames_run := 0
 
-var _offset := Vector2.ZERO ## where the point is minus where the laser was at the press: the drag keeps it, so the point does not jump to the laser
+var _press := Vector2.ZERO ## where the laser was at the press
+var _anchor_start: Dictionary = {} ## grabbed id -> Vector2: where each held point was at the press; the wish is that plus the laser's move (so nothing jumps to the laser)
+var _shape: Dictionary = {} ## shape_proposals.gd `locate`'s answer for the grabbed point ({} = no shape)
+var _records: Dictionary = {}
 var _start: Dictionary = {} ## id -> [x, y] at the press, all of the sketch's points (Undo, and what "moved" is measured from)
 var _accepted: Dictionary = {} ## id -> [x, y]: the last accepted frame, all points (the next call's reference)
 var _constraints: Array = [] ## what the thread may read are copies of these, taken at each start
@@ -33,8 +44,8 @@ var _box: Dictionary = {} ## the task's shared answer {result, ms}; read only on
 var _box_epoch := 0
 var _epoch := 0 ## a new number for every drag: an answer from an older one is dropped
 var _stale: Array = [] ## task ids of cancelled drags, waited for later (a task must always be waited for)
-var _last_wish := Vector2(INF, INF) ## the wish the task in flight (or the last one) ran with
-var _wish := Vector2(INF, INF) ## the latest laser wish
+var _last_wish := Vector2(INF, INF) ## the laser move (the delta) the task in flight (or the last one) ran with
+var _wish := Vector2(INF, INF) ## the latest laser move since the press
 
 
 static func pinned_ids(session) -> Array:
@@ -57,33 +68,128 @@ static func pinned_ids(session) -> Array:
 	return out.keys()
 
 
-func begin(session, point_id: String, press_uv: Vector2) -> bool:
-	## Starts a drag of one point. False (and nothing started) when it cannot move.
-	cancel()
-	_reap()
-	if session == null or not session.points.has(point_id):
-		return false
-	_pinned = pinned_ids(session)
-	if point_id in _pinned:
-		return false
-	_start = {}
+static func _exact_points(session) -> Dictionary:
+	## id -> [x, y] floats: the backend's 64-bit numbers when the session still holds them (a Vector2 is 32-bit: about 1e-5 off at 100 mm, above the projector's tolerance).
+	var out := {}
 	for id in session.points:
 		var exact: Variant = session.point_xy.get(id)
 		var here: Vector2 = session.points[id]
-		# the backend's 64-bit numbers when the session still holds them (a Vector2 is 32-bit: about 1e-5 off at 100 mm, above the projector's tolerance)
-		_start[str(id)] = [float(exact[0]), float(exact[1])] if exact is Array and absf(float(exact[0]) - here.x) < 1e-3 and absf(float(exact[1]) - here.y) < 1e-3 else [float(here.x), float(here.y)]
+		out[str(id)] = [float(exact[0]), float(exact[1])] if exact is Array and absf(float(exact[0]) - here.x) < 1e-3 and absf(float(exact[1]) - here.y) < 1e-3 else [float(here.x), float(here.y)]
+	return out
+
+
+static func _exists(session) -> Dictionary:
+	var out := {}
+	for id in session.lines:
+		out[str(id)] = true
+	for id in session.arcs:
+		out[str(id)] = true
+	return out
+
+
+static func shape_of(session, point_id: String) -> Dictionary:
+	## The intact closed-form shape the point belongs to (shape_proposals.gd `locate`), {} for a plain point.
+	return Shapes.locate(session.shape_records, _exact_points(session), _exists(session), point_id)
+
+
+static func refusal_for(session, point_ids: Array, shape: Dictionary = {}) -> String:
+	## The pre-grab rule (spec 13.5): "" or the sentence that says why this grab does nothing. Rigidity (`session.point_rigidity`, F7) is "" while unknown; the mobility
+	## oracle of 13.6 is not ported, so a general point takes the rule's own fallback (fully constrained or pinned).
+	var pinned := pinned_ids(session)
+	for id in point_ids:
+		if id in pinned:
+			return "That point is held in place (the origin, the part, or a Fix): it does not move."
+	var failed: Dictionary = session.failed_point_ids()
+	var whole_sketch_pinned: bool = session.dof == 0 and session.converged and session.points.size() > 1 and session.sketch_grounded()
+	for id in point_ids:
+		var state: String = session.point_rigidity(str(id))
+		var fully := whole_sketch_pinned or state == "fully" or state == "pinned"
+		var over: bool = state == "over" or failed.has(id) or session.on_contradictory_line(str(id))
+		if shape.is_empty():
+			if over:
+				return "That point is over-constrained: it does not move."
+			if fully:
+				return "That point is fully constrained: it does not move."
+			continue
+		var rec: Dictionary = shape["rec"]
+		var role: Dictionary = shape["role"]
+		var centre_id := str(rec.get("center_point_id", rec.get("center1_point_id", "")))
+		var centre_state: String = session.point_rigidity(centre_id)
+		var centre_pinned := whole_sketch_pinned or centre_state == "fully" or centre_state == "pinned"
+		var kind: String = shape["kind"]
+		var r: String = role["r"]
+		var why: String = Shapes.grab_refusal(shape, session.constraints.values(), session.shape_records)
+		if why != "":
+			return why
+		if r == "centre" and kind in ["circle", "arc", "polygon"] and centre_pinned:
+			return "That shape's centre is fully constrained: it does not move."
+		if kind in ["circle", "arc"] and r in ["rim", "end"] and Shapes.size_of(shape, "radius", session.constraints.values(), session.shape_records) != null and centre_pinned:
+			return "That shape's centre is fixed and its size is dimensioned: this point does not move."
+		if kind == "arc" and r == "end" and (state == "fully" or state == "pinned"):
+			return "That point is fully constrained: it does not move."
+		if (over or state == "fully" or state == "pinned") and Shapes.is_hybrid(shape, session.constraints.values(), session.shape_records):
+			return "That point is over-constrained or fully constrained: it does not move." # 13.5 step 4: a clamped drag has nothing to clamp to
+	return ""
+
+
+func begin(session, point_id: String, press_uv: Vector2) -> bool:
+	## Starts a drag of one point (the whole shape when it belongs to one). False (and nothing started; `refusal` says why) when it cannot move.
+	cancel()
+	_reap()
+	refusal = ""
+	if session == null or not session.points.has(point_id):
+		return false
+	var shape := shape_of(session, point_id)
+	refusal = refusal_for(session, [point_id], shape)
+	if refusal != "":
+		return false
+	return _begin_with(session, [point_id], press_uv, shape)
+
+
+func begin_line(session, line_id: String, press_uv: Vector2) -> bool:
+	## Starts a rigid drag of a line: both ends move by the same delta (the drop's solve settles the rest). A polygon edge or a slot side drags its first point instead
+	## (the flat app's redirect: a chord's translation fights the equal-radius chain).
+	cancel()
+	_reap()
+	refusal = ""
+	if session == null or not session.lines.has(line_id):
+		return false
+	var l: Dictionary = session.lines[line_id]
+	var a := str(l["a"])
+	var b := str(l["b"])
+	if not session.points.has(a) or not session.points.has(b):
+		return false
+	var first := shape_of(session, a)
+	if not first.is_empty() and first["kind"] in ["polygon", "slot"]:
+		return begin(session, a, press_uv)
+	refusal = refusal_for(session, [a, b])
+	if refusal != "":
+		return false
+	return _begin_with(session, [a, b], press_uv, {})
+
+
+func _begin_with(session, ids: Array, press_uv: Vector2, shape: Dictionary) -> bool:
+	_pinned = pinned_ids(session)
+	_start = _exact_points(session)
 	_accepted = _start.duplicate(true)
 	_constraints = (session.constraints.values() as Array).duplicate(true)
 	_lines = (session.lines as Dictionary).duplicate(true)
-	grabbed = [point_id]
-	var at: Array = _start[point_id]
-	_offset = Vector2(at[0], at[1]) - press_uv
+	_records = (session.shape_records as Dictionary).duplicate(true)
+	_shape = shape
+	shape_kind = str(shape.get("kind", ""))
+	hybrid = not shape.is_empty() and Shapes.is_hybrid(shape, _constraints, _records)
+	grabbed = ids.duplicate()
+	_anchor_start = {}
+	for id in ids:
+		var at: Array = _start[id]
+		_anchor_start[id] = Vector2(at[0], at[1])
+	_press = press_uv
 	unsupported = false
 	frame_ms = []
 	frames_run = 0
 	_epoch += 1
 	_last_wish = Vector2(INF, INF)
-	_wish = press_uv + _offset
+	_wish = Vector2.ZERO
 	live = true
 	return true
 
@@ -95,7 +201,7 @@ func step(uv: Variant) -> Array:
 		return []
 	_reap()
 	if uv is Vector2:
-		_wish = (uv as Vector2) + _offset
+		_wish = (uv as Vector2) - _press
 	var changed: Array = []
 	if synchronous:
 		if _wish != _last_wish:
@@ -148,7 +254,7 @@ func finish() -> Dictionary:
 	if unsupported:
 		updates = {}
 		for id in grabbed:
-			updates[id] = [_wish.x, _wish.y]
+			updates[id] = [_anchor_start[id].x + _wish.x, _anchor_start[id].y + _wish.y]
 	var old := {}
 	for id in updates:
 		old[id] = _start[id]
@@ -162,6 +268,14 @@ func cancel() -> void:
 		_task = -1
 	live = false
 	_epoch += 1
+
+
+func wait_all_frames() -> void:
+	## Waits for the task in flight and takes its answer in (a test that drives the thread path one frame at a time).
+	if _task >= 0:
+		while not WorkerThreadPool.is_task_completed(_task):
+			OS.delay_usec(200)
+		_collect() # (it waits for the finished task and takes its answer)
 
 
 func wait_all() -> void:
@@ -179,14 +293,27 @@ func wait_all() -> void:
 func _inputs(wish: Vector2) -> Dictionary:
 	var points: Dictionary = _accepted.duplicate(true)
 	for id in grabbed:
-		points[id] = [wish.x, wish.y]
-	return {"points": points, "constraints": _constraints.duplicate(true), "lines": _lines.duplicate(true), "anchors": grabbed.duplicate(),
+		var at: Vector2 = _anchor_start[id] + wish
+		points[id] = [at.x, at.y]
+	var inputs := {"points": points, "constraints": _constraints.duplicate(true), "lines": _lines.duplicate(true), "anchors": grabbed.duplicate(),
 		"pinned": _pinned.duplicate(), "reference": _accepted.duplicate(true)}
+	if not _shape.is_empty():
+		# F8: a shape point takes the shape's proposal (the target is the grabbed point's own wish), clamped when `hybrid`
+		var at: Array = points[grabbed[0]]
+		inputs["shape"] = {"shape": _shape, "grabbed": str(grabbed[0]), "target": [at[0], at[1]], "records": _records, "hybrid": hybrid}
+	return inputs
 
 
 static func _run(inputs: Dictionary) -> Dictionary:
 	var t0 := Time.get_ticks_usec()
-	var result: Dictionary = SketchProjector.project(inputs["points"], inputs["constraints"], inputs["lines"], inputs["anchors"], inputs["pinned"], [], inputs["reference"])
+	var result: Dictionary
+	if inputs.has("shape"):
+		var sh: Dictionary = inputs["shape"]
+		var f: Dictionary = Shapes.frame(sh["shape"], sh["grabbed"], inputs["reference"], sh["target"], inputs["constraints"], inputs["lines"], inputs["pinned"], sh["records"], sh["hybrid"])
+		# nothing moves this frame when the proposal is none or the clamp is rejected: an empty result, a converged answer that changes no point
+		result = {"unsupported": false, "converged": true, "points": f["result"], "clamp": f["clamp"]}
+	else:
+		result = SketchProjector.project(inputs["points"], inputs["constraints"], inputs["lines"], inputs["anchors"], inputs["pinned"], [], inputs["reference"])
 	result["ms"] = float(Time.get_ticks_usec() - t0) / 1000.0
 	return result
 

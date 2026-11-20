@@ -67,3 +67,4 @@ e2e_sketch_dimension_options
 e2e_sketch_label_edit
 e2e_sketch_dimension_edits
 e2e_sketch_point_drag
+e2e_sketch_shape_drag

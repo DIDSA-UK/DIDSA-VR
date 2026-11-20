@@ -90,6 +90,12 @@ func handle(method: int, path: String, body) -> Dictionary:
 		return _restore_state(body)
 	if fail != "" and path.contains(fail) and (verb == "POST" or verb == "PATCH"):
 		return {"ok": false, "code": 422, "json": {"detail": "nope"}, "error": "nope"}
+	if verb == "GET" and path.contains("/sketch/sketches/"):
+		# F8: the per-family shape lists (the real routes carry structural_constraint_ids; this fake keeps none, so a drag is plain)
+		var families := {"circles": "circle", "arcs": "arc", "ellipses": "ellipse", "ellipse-arcs": "ellipse_arc", "rectangles": "rectangle", "polygons": "polygon", "slots": "slot"}
+		for route in families:
+			if path.ends_with("/" + route):
+				return _ok(entities.filter(func(e): return str(e.get("type", "")) == families[route]).map(func(e): return e.duplicate(true)))
 	if verb == "GET" and path.ends_with("/features"):
 		var listed: Array = feature_rows.get(path.get_slice("/", 3), [])
 		return _ok(listed.duplicate(true) if track_rows else listed) # (the real backend answers with a fresh list: a tracking fake must not hand out the one it appends to)

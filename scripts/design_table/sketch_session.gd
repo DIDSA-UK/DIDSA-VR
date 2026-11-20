@@ -28,6 +28,7 @@ signal fully_constrained ## a solve has just brought the sketch (the same one, a
 const SketchMath := preload("res://scripts/design_table/sketch_math.gd")
 const SketchSelection := preload("res://scripts/design_table/sketch_selection.gd")
 
+const ShapeProposals := preload("res://scripts/motion/shape_proposals.gd")
 const SKETCH := "/sketch/sketches/"
 const SELECT := "select" ## the tool that picks entities for the contextual menu (no limit on how many)
 const TAPS_NEEDED := {"line": 2, "rectangle": 2, "circle": 2, "arc": 3, "polygon": 2, "point": 1, "slot": 3, "ellipse": 3, "ellipse_arc": 5, "spline": 9999, "text": 1} ## (a spline takes any number: Finish makes it)
@@ -71,6 +72,8 @@ var text_size := 10.0
 var text_rotation := 0.0
 var arcs := {} ## id -> {c, s, e, k, construction}
 var shapes := {} ## rectangle / polygon id -> {kind, point_ids}
+var _structure := {} ## shape id -> its structural constraint ids, as the last press read them (kept across refreshes, which rebuild `shape_records`)
+var shape_records := {} ## id -> the backend's whole entity dictionary plus "kind", for the seven closed-form shape families (F8: shape_proposals.gd reads these, including every circle / arc)
 var constraints := {} ## id -> the backend's constraint dictionary
 var profile_status := ""
 var profile_open_chain := false ## no closed profile but exactly one open chain of lines / arcs (the backend's `open_chain`): a thin Revolve can use it
@@ -355,6 +358,7 @@ func _ingest_entities(json: Dictionary) -> void:
 	splines.clear()
 	texts.clear()
 	shapes.clear()
+	shape_records.clear()
 	reference_ids.clear()
 	for id in json.get("reference_ids", []):
 		reference_ids[str(id)] = true
@@ -374,6 +378,12 @@ func _ingest_entities(json: Dictionary) -> void:
 				hole_points[str(rid)] = true
 	for e in json.get("entities", []):
 		var id := str(e.get("id", ""))
+		if str(e.get("type", "")) in ["circle", "arc", "ellipse", "ellipse_arc", "rectangle", "polygon", "slot"]:
+			var rec: Dictionary = (e as Dictionary).duplicate(true)
+			rec["kind"] = str(e["type"])
+			if _structure.has(id):
+				rec["structural_constraint_ids"] = _structure[id]
+			shape_records[id] = rec
 		match str(e.get("type", "")):
 			"line":
 				lines[id] = {"a": str(e["start_point_id"]), "b": str(e["end_point_id"]), "construction": bool(e.get("construction", false))}
@@ -4078,6 +4088,70 @@ func move_label(id: String, place: Dictionary) -> Dictionary:
 		label_override.erase(id)
 		changed.emit()
 	return saved
+
+
+const SHAPE_LIST_ROUTES := {"circle": "circles", "arc": "arcs", "ellipse": "ellipses", "ellipse_arc": "ellipse-arcs", "rectangle": "rectangles", "polygon": "polygons", "slot": "slots"}
+
+
+func load_shape_structure(point_id: String) -> void:
+	## F8: the sketch state's entities do not carry `structural_constraint_ids` (only the per-family GET routes do), and the hybrid drag needs them to tell the shape's own
+	## constraints from the user's. One GET of the family's list, at the press, for the shape the point belongs to; its entry in `shape_records` gets the list. A failed GET
+	## leaves the record without it (the spec's "structural ids unknown": a plain drag).
+	var exact := {}
+	for id in points:
+		exact[str(id)] = [points[id].x, points[id].y]
+	var exists := {}
+	for id in lines:
+		exists[str(id)] = true
+	for id in arcs:
+		exists[str(id)] = true
+	var shape: Dictionary = ShapeProposals.locate(shape_records, exact, exists, point_id)
+	if shape.is_empty() or not SHAPE_LIST_ROUTES.has(shape["kind"]):
+		return
+	var r: Dictionary = await api.call(HTTPClient.METHOD_GET, SKETCH + sketch_id + "/" + str(SHAPE_LIST_ROUTES[shape["kind"]]), null)
+	if not bool(r.get("ok", false)) or not (r.get("json") is Array):
+		return
+	for e in r["json"]:
+		if e is Dictionary and str(e.get("id", "")) == str(shape["id"]) and e.has("structural_constraint_ids") and shape_records.has(shape["id"]):
+			_structure[str(shape["id"])] = _strings(e["structural_constraint_ids"])
+			shape_records[shape["id"]]["structural_constraint_ids"] = _structure[str(shape["id"])]
+
+
+func point_rigidity(_id: String) -> String:
+	## What the rigidity analysis says of a point: "free", "fully" (fully constrained), "pinned", "over" (over-constrained), or "" when it is not known.
+	return ""
+
+
+func sketch_grounded() -> bool:
+	## The rigidity analysis grounds at least one point (the pre-grab rule's whole-sketch case).
+	return true
+
+
+func on_contradictory_line(point_id: String) -> bool:
+	## The point is on a line that is both horizontal and vertical, or on either of two lines that are both parallel and perpendicular (13.5 step 2).
+	var kinds := {} ## line id -> {type: true}; pairs: "a|b" -> {type: true}
+	for cid in constraints:
+		var c: Dictionary = constraints[cid]
+		var t := str(c.get("type", ""))
+		if t == "horizontal" or t == "vertical":
+			var lid := str(c.get("line_id", ""))
+			if lid != "":
+				kinds[lid] = kinds.get(lid, {})
+				kinds[lid][t] = true
+		elif t == "parallel" or t == "perpendicular":
+			var key := "|".join(PackedStringArray([str(c.get("line1_id", "")), str(c.get("line2_id", ""))]))
+			var rev := "|".join(PackedStringArray([str(c.get("line2_id", "")), str(c.get("line1_id", ""))]))
+			kinds[key] = kinds.get(key, {})
+			kinds[key][t] = true
+			kinds[rev] = kinds[key]
+	for key in kinds:
+		var both: bool = (kinds[key].has("horizontal") and kinds[key].has("vertical")) or (kinds[key].has("parallel") and kinds[key].has("perpendicular"))
+		if not both:
+			continue
+		for lid in str(key).split("|"):
+			if lines.has(lid) and (str(lines[lid]["a"]) == point_id or str(lines[lid]["b"]) == point_id):
+				return true
+	return false
 
 
 func restore_points() -> void:
