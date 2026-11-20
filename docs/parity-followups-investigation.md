@@ -323,8 +323,10 @@ both distances of a kept conflict show red; and on a sketch that was already not
 as often. F4 pinned the amd64 answers exactly, which turned CAD `main`'s arm64 leg red. It is not only the architecture: on DIDSA-CAD#386 an amd64
 run gave code 1 for the Horizontal triple, where every other amd64 run gave 5, for the same code, so py-slvs's verdict on a redundant constraint varies
 between runs (why is not known: it never varied in over 2 000 local amd64 solves). `converged` and the failed list naming the new constraint did not
-vary in any run. CAD branch `ccr-bfe722e3-jz5ask` (DIDSA-CAD#386) pins no code for a redundant case, and the 12 in the failed list (CAD
-`docs/status.md`, 2026-11-20 entry). The single culprit on amd64 was the exception: CAD's Stage 2b had already recorded
+vary in any run. CAD branch `ccr-bfe722e3-jz5ask` (DIDSA-CAD#386) replaces the four pinned answers with the take-back contract both
+apps rely on, with no `result_code` pinned: a redundant constraint converges and is not named; a contradiction on a converged sketch is named; while
+a conflict is kept, an unrelated constraint is not named and a further contradiction is (that path reads the failed list and was untested); taking back
+the contradiction leaves the sketch converged (CAD `docs/status.md`, 2026-11-20 entry). The single culprit on amd64 was the exception: CAD's Stage 2b had already recorded
 that py-slvs's failed list names every constraint of an inconsistent system.
 
 ## D. Test health and repo hygiene
