@@ -6,7 +6,7 @@ extends SceneTree
 ##   a  a two-level assembly just opened: the structure only (status held back), then after ?status=true has merged in
 ##   b  a collapsed parent with a missing file and an over-constrained part below it: the count bubble (then open)
 ##   c  one Part placed 4 times in a level: "Peg x4" closed, open, and with "Fold x4" off
-##   d  a part fixed from the tree: the pin straight after Fix, after the refresh, then after Float
+##   d  a part fixed from the tree: the pin straight after Fix, after the refresh, then after Float ('updating' until the fresh status arrives, then the open lock)
 ##   e  a part selected in the world: the tree opens down to it through a folded group
 ##   f  a rigid-set part that is over-constrained: the red tint wins over the set colour (the set ids are SYNTHETIC, see _patch_rigid_sets)
 ##   g  an older backend (a stand-in that answers the framework's 404 for the call): no Fold button, one level per request
@@ -454,12 +454,11 @@ func scenario_d() -> void:
 	var server_fixed: bool = bool((child_of(await tree_of("fix-part", false), "peg1")).get("fixed", false))
 	check("d: after the refresh it is still a pin (the backend agrees), and the selection stayed", refreshed["state"] == "fixed" and server_fixed and window._has_selected and window._selected == ["peg1"])
 	await shot("d2_fix_refreshed", true)
-	await create_timer(1.5).timeout # (let every refresh the Fix asked for land first: a Float pressed while one is still in flight can be overwritten by its older answer, seen once in six runs, see the report)
 	window._resp["_marker"] = true
 	await window._on_bar_action("fix", refreshed, {})
 	var floated: Dictionary = Model.find_row(window._tree, ["peg1"])
-	check("d: straight after Float the pin is gone (the status of the held answer is stale until the refresh: it reads as the node's own flag)", floated["state"] != "fixed")
 	await shot("d3_float_straight_after", true)
+	check("d: straight after Float (hints are fitted a frame after the rows are built) the row shows the 'updating' state (not a pin, not blank)", str(line_with("Peg <1>").get("text", "")).contains("updating") and not str(line_with("Peg <1>").get("text", "")).contains("fixed"))
 	await wait_for(func() -> bool: return not window._resp.has("_marker") and bool(window._resp.get("status_included", false)), 20000)
 	await frames(2)
 	var after: Dictionary = Model.find_row(window._tree, ["peg1"])
