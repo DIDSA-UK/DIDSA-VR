@@ -201,7 +201,53 @@ func _initialize() -> void:
 	await rig.frames(2)
 	# Information, not an assertion: a line's whole menu (ten items, three captions) needs more than the scroll area shows (the area is what is left of the 688 px panel under the
 	# title, the hint and the Selected list), so a long Select menu scrolls (the scroll is the last resort the brief keeps). The KIND lists above are asserted to fit.
-	print("SMOKE (info) the picked line's whole Select menu needs %.0f px, the panel's scroll area shows %.0f px" % [props._rows.size.y, props._scroll.size.y])
+	_check(_fits(), "a picked line's whole Select menu (%d items, 3 captions) fits the panel without scrolling: it needs %.0f px, the scroll area shows %.0f" % [select_ids.size(), props._rows.size.y, props._scroll.size.y])
+	# the biggest menus the session can offer: every kind of selection, with five dimension candidates (the catalogue's most) and a six-figure value
+	var sess = ed_session
+	var line_ids: Array = sess.lines.keys()
+	var point_ids: Array = []
+	for id in sess.points:
+		if not sess.is_origin(str(id)):
+			point_ids.append(str(id))
+	var five: Array = []
+	for o in most["options"]: # the catalogue's biggest entry: its real labels with a four-digit value
+		five.append({"key": str(o["key"]), "label": str(o["label"]), "value": 1234.56})
+	var picks := {
+		"a line": [["line", line_ids[0]]], "two lines": [["line", line_ids[0]], ["line", line_ids[1]]], "a line and a point": [["line", line_ids[0]], ["point", point_ids[0]]],
+		"two points": [["point", point_ids[0]], ["point", point_ids[1]]], "three points": [["point", point_ids[0]], ["point", point_ids[1]], ["point", point_ids[2]]],
+		"three lines": [["line", line_ids[0]], ["line", line_ids[1]], ["line", line_ids[2]]]}
+	var worst_need := 0.0
+	var worst_name := ""
+	var all_menus_fit := true
+	for name in picks:
+		var sel: Array = []
+		for pair in picks[name]:
+			sel.append({"kind": pair[0], "id": pair[1]})
+		var menu: Array = SketchSelection.options(sel, sess, five)
+		props.set_options(menu)
+		await rig.frames(2)
+		var need: float = props._rows.size.y
+		if need > worst_need:
+			worst_need = need
+			worst_name = "%s (%d items)" % [name, menu.size()]
+		all_menus_fit = all_menus_fit and _fits()
+		var whole := true
+		for o in menu:
+			var b: Button = props.option_button(str(o["id"]))
+			whole = whole and b != null and not _clipped(b)
+		all_menus_fit = all_menus_fit and whole
+	_check(all_menus_fit, "every kind of selection's whole Select menu with five dimension candidates fits the panel, every label whole; the biggest is %s: %.0f px of the %.0f the scroll area shows" % [worst_name, worst_need, props._scroll.size.y])
+	# a long menu drops the tool's idle instruction from the tip; a phrase in front of it, or a message of its own, stays
+	var idle: String = props._tool_hint
+	props.set_options(SketchSelection.options([{"kind": "line", "id": line_ids[0]}], sess, five))
+	props.set_tip("3 DOF left.  " + idle)
+	_check(idle != "" and props.tip_text() == "3 DOF left.", "a long menu: the status phrase stays, the tool's idle instruction goes: [%s]" % props.tip_text())
+	props.set_tip("Couldn't do that: the sketch would not solve.")
+	_check(props.tip_text() == "Couldn't do that: the sketch would not solve." and props._hint.visible, "...a message of its own stays whole")
+	props.set_tip(idle)
+	_check(props.tip_text() == "" and not props._hint.visible, "...the bare instruction is gone and the line with it")
+	props.set_options([{"id": "a", "text": "A"}, {"id": "b", "text": "B"}])
+	_check(props.tip_text() == idle, "...a short list keeps the instruction")
 	_check(table.drawer.shown and table.drawer.actions.is_empty() and table.drawer.button_named("Close") != null and table.drawer.button_named("More") == null, "the drawer in a sketch shows the breadcrumb and the X only")
 
 	print("SMOKE PASSED" if failures == 0 else "SMOKE FAILED (%d)" % failures)

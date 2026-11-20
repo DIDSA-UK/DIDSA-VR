@@ -14,8 +14,9 @@ signal option_pressed(option_id: String)
 ## longer than HALF_LINE_CHARS always take a whole line. A toggle may carry "per_row": n: the run of toggles is then a grid n to a line at 1/n of the
 ## panel's width (a KIND list, whose labels must be readable: a 110 px chip clips "Horizontal length"), not chips that wrap. Not verified on a headset: the
 ## row height is about 2.6 cm on the 0.40 m panel.
-const ROW_HEIGHT := 44.0
-const ROW_GAP := 6
+const ROW_HEIGHT := 38.0 ## 2.2 cm on the 0.30 m panel (it was 44: with 6 px gaps a picked line's Select menu needed 361 px of the 263 the scroll area had)
+const ROW_GAP := 4
+const LONG_MENU := 8 ## a menu of this many captioned options (the Select menu; Extrude and the like are not) drops the tool's idle instruction from the tip (a status phrase, a warning or an error stays): the list is what the panel is for then
 const CHIP_WIDTH := 110.0
 const HALF_LINE_CHARS := 24
 
@@ -150,12 +151,23 @@ func set_wanted(wanted: bool) -> void:
 		close()
 
 
+func _grouped_count() -> int:
+	var n := 0
+	for o in _options:
+		if str(o.get("group", "")) != "":
+			n += 1
+	return n
+
+
 func _show_tool() -> void:
 	if _title == null:
 		return
 	_title.text = _tool_title
-	_hint.text = _tip if _tip != "" else _tool_hint
-	_hint.visible = _hint.text != ""
+	var text := _tip if _tip != "" else _tool_hint
+	if _grouped_count() >= LONG_MENU and _tool_hint != "" and text.ends_with(_tool_hint):
+		text = text.substr(0, text.length() - _tool_hint.length()).strip_edges() # the idle instruction goes (the editor puts it after the status phrase); a phrase or a warning in front of it stays
+	_hint.text = text
+	_hint.visible = text != ""
 	_show_selection()
 
 

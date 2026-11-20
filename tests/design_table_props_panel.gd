@@ -56,7 +56,7 @@ func _initialize() -> void:
 	print("SMOKE layout: two short buttons share a line: ", props.option_button("a").get_parent() == props.option_button("b").get_parent() and props.option_button("a").get_parent() is HBoxContainer)
 	print("SMOKE ...a long label and a `wide` option each take a whole line: ", props.option_button("c").get_parent() == props._rows and props.option_button("d").get_parent() == props._rows)
 	print("SMOKE ...pairing restarts after a wide one: One and Two share a line, Three starts the next: ", props.option_button("e").get_parent() == props.option_button("f").get_parent() and props.option_button("g").get_parent() != props.option_button("f").get_parent())
-	print("SMOKE ...toggles are chips in one flow group and rows are 44 px: ", props.option_button("t1").get_parent() == props.option_button("t2").get_parent() and props.option_button("t1").get_parent() is HFlowContainer and props.option_button("a").custom_minimum_size.y == 44.0 and props.option_button("t1").custom_minimum_size.x == 110.0)
+	print("SMOKE ...toggles are chips in one flow group and rows are ROW_HEIGHT px: ", props.option_button("t1").get_parent() == props.option_button("t2").get_parent() and props.option_button("t1").get_parent() is HFlowContainer and props.option_button("a").custom_minimum_size.y == props.ROW_HEIGHT and props.option_button("t1").custom_minimum_size.x == 110.0)
 	print("SMOKE ...a `group` puts a caption over the run, and every option is still listed and routes: ", _captions(props) == ["DRAFT"] and props.option_ids().size() == 12)
 	var got: Array = []
 	props.option_pressed.connect(func(id: String) -> void: got.append(id))
