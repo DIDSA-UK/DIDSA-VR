@@ -994,14 +994,17 @@ func _restore(saved: Array) -> void:
 
 # ---- 7.1: the minimum-norm step (scaled), and 9: Gaussian elimination with partial pivoting ------
 
-func _step(y0: PackedFloat64Array) -> PackedFloat64Array:
-	_ensure_jac()
+## uniform: every s_c = 1 (the rescue's metric, 7.3.1); reuse_jac: keep _jv as it is (the rescue's second-order
+## correction pairs the SAVED point's Jacobian with the trial point's residual values).
+func _step(y0: PackedFloat64Array, uniform := false, reuse_jac := false) -> PackedFloat64Array:
+	if not reuse_jac:
+		_ensure_jac()
 	var m := _m
 	var nnz := _jcol.size()
 	var A := PackedFloat64Array() # A = J S⁻¹
 	A.resize(nnz)
 	for e in nnz:
-		A[e] = _jv[e] / _s[_jcol[e]]
+		A[e] = _jv[e] if uniform else _jv[e] / _s[_jcol[e]]
 	var M := PackedFloat64Array()
 	M.resize(m * m)
 	M.fill(0.0)
@@ -1099,6 +1102,47 @@ func _corrector() -> bool:
 	return false
 
 
+# ---- 7.3.1: the rescue step (a singular start; F6) -----------------------------------------------
+
+## Retries a rejected attempt from `saved` (the caller restores nothing: this does). True when the rescued x is accepted.
+func _rescue(saved: Array, f: float, n0: float, radius: float, tau: float, scale1: float) -> bool:
+	var nv := _x.size()
+	_restore(saved)
+	_ensure_jac()
+	var jv_saved := _jv
+	var base := _x.duplicate()
+	var pull := PackedFloat64Array()
+	pull.resize(nv)
+	for c in nv:
+		pull[c] = _w[c] - base[c]
+	var u := _step(pull, true)
+	var big := 0.0
+	for c in nv:
+		big = maxf(big, absf(u[c]))
+	if big < ARRIVED * scale1:
+		return false
+	var cap: float = radius / (big * f) if big * f > radius else 1.0
+	for c in nv:
+		_x[c] = base[c] + f * cap * u[c]
+	_evaluate(false)
+	_jv = jv_saved
+	var zero := PackedFloat64Array()
+	zero.resize(nv)
+	zero.fill(0.0)
+	var v := _step(zero, true, true)
+	var t := _x.duplicate()
+	for c in nv:
+		_x[c] = t[c] + v[c]
+	_evaluate(false)
+	iterations += 1
+	var corr := 0
+	while corr < CORRECTORS and _inf_norm() > tau:
+		corr += 1
+		if not _corrector():
+			break
+	return _inf_norm() <= tau and _wish_distance() < n0 * (1.0 - CLOSER_RATIO)
+
+
 # ---- 7.3: the walk ---------------------------------------------------------------------------------
 
 func _walk(diag: float, tau: float) -> Dictionary:
@@ -1175,6 +1219,9 @@ func _walk(diag: float, tau: float) -> Dictionary:
 				break
 			if _inf_norm() > tau:
 				infeasible = true
+			if walks == 0 and _rescue(saved, f, n0, radius, tau, scale1):
+				accepted = true
+				break
 			_restore(saved)
 		if not accepted:
 			prev = PackedFloat64Array()
