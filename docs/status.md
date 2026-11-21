@@ -200,6 +200,16 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 - **Changed:** C8 and the F4 row corrected here; the test fix (the take-back contract both apps rely on, with no `result_code` pinned, including the untested kept-conflict path that reads the failed list; it found that on arm64 every new constraint was taken back while a conflict was kept, fixed in `solver.py` in the same PR) is DIDSA-CAD branch `ccr-bfe722e3-jz5ask` (#386) (CAD `docs/status.md`, 2026-11-20 entry). No VR code changed.
 - **Not verified:** the arm64 take-back and red in either app's UI (read from the code, not run); the test fix itself until CAD CI's amd64 and arm64 legs finish on that branch.
 
+## 2026-11-21: Tree B6, the Assembly Tree draws only the rows on screen (DIDSA-CAD `docs/assembly-tree-overhaul-scope.md` section 10.6 B6)
+
+Headless and Mesa renders only; nothing here has been checked on a headset.
+- **Built:** `scripts/assembly_tree_window.gd` lists the open rows first (`_descs`: cheap, no controls) and draws only the visible ones through a pool of row controls (`_layout_pool`): fixed row height (`ROW_HEIGHT`, so a Mates / Patterns folder line is now a full row, not 0.8 of one), the visible rows plus 3 above and below, two spacers standing in for the rest so the scroll bar is still the whole list's. A scroll of k rows re-binds k controls (the ones that left one end go to the other). Every control is fully re-bound every time (`_bind_line`: text, icon, font tint, dimming, selection, bubble, indent, the measured-width hint via `_fit_row_text`, inline buttons of a subclass's `_add_row_actions`), so a reused row shows nothing of its previous row. Reveal (`_reveal`) now scrolls by the row's index (`_scroll_to_row`), not by its control.
+- **Kept:** `_refresh_token`, `_mutation_seq`, the `pending` row state and `_row_text`'s fit are untouched; a refresh redraws in place at the same scroll. The model, rooms, the design table's PARTS tab (it inherits the pool; its inline Table / Bring buttons are added when a row is drawn) and DIDSA-CAD are unchanged.
+- **API for tests:** `row_count()` (rows listed), `pool_size()` (controls that exist), `visible_lines()` (controls showing). `_rows_box.get_children()` is no longer one control per row: `tests/assembly_tree_render.gd` and `tools/assembly_tree_render_check/` now read these.
+- **Timing, scenario h (2,002 rows, every Module open; `_rebuild_rows`, then the two frames after it):** Mesa (Xvfb, llvmpipe): 848 ms + 321 ms before, 81 ms + 88 ms after; headless: 521 ms + 144 ms before, 73 ms + 3 ms after. CPU software numbers on a cloud box, not Quest numbers.
+- **Tests:** `tests/assembly_tree_pool.gd` (new, headless, in `run_all.sh`), the render check's eight scenarios on Mesa.
+- **Not verified:** scroll feel and the thumbstick scroll on a headset; that the pool's 3-row margin hides re-binding at Quest frame rates (a re-bind is a few controls per scrolled row, not measured on device); the design table's PARTS tab by eye.
+
 ## 2026-11-20: Tree A5.1, the tree after a Float and its row hints (follow-up to A5; branch `ccr-3c81d0be-cjezxc`)
 
 Found by a render check of `main` (342c3b8) against a live backend. Headless and Mesa renders only; nothing here has been checked on a headset.

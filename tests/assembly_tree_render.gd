@@ -58,9 +58,9 @@ func answer(method: int, path: String, _body) -> Dictionary:
 
 func rail_buttons() -> Array:
 	var out: Array = []
-	for line in window._rows_box.get_children():
+	for line in window.visible_lines():
 		for c in line.get_children():
-			if c is Button and c.theme_type_variation == &"ButtonRail":
+			if c is Button and c.visible and c.theme_type_variation == &"ButtonRail":
 				out.append(c)
 	return out
 

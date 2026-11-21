@@ -44,7 +44,7 @@ var _selected: Array = [] ## V-7: the path of the selected row (the occurrence i
 var _has_selected := false ## ... valid only while this is true
 const SET_COLOURS := [Color(0.35, 0.65, 1.0), Color(1.0, 0.55, 0.35), Color(0.45, 0.8, 0.5), Color(0.75, 0.5, 0.9), Color(0.95, 0.85, 0.3), Color(0.3, 0.8, 0.85)]
 var _constraint: Dictionary = {} ## Part id -> {occurrence id: {status, dof}} from GET /parts/{id}/constraint-status
-var _row_controls: Dictionary = {} ## path key -> the row's Control, for scrolling a selection into view
+var _row_controls: Dictionary = {} ## path key -> the row's Control, for the rows now drawn (B6: only the visible ones exist)
 var _bar: Control ## the bottom action bar (never scrolls away)
 var _bar_buttons: HBoxContainer
 var _bar_hint: Label
@@ -331,10 +331,32 @@ func _reveal(path: Array) -> void:
 		elif not bool(row["expanded"]):
 			row["expanded"] = true
 	_rebuild_rows()
-	await get_tree().process_frame
-	var ctrl = _row_controls.get(Model.path_key(path))
-	if ctrl != null and is_instance_valid(ctrl) and scroll_target != null:
-		scroll_target.ensure_control_visible(ctrl)
+	await get_tree().process_frame # (the list's height settles: the spacers stand in for the rows that are not drawn)
+	_scroll_to_row(path)
+
+
+func _scroll_to_row(path: Array) -> void:
+	## Brings the row at `path` into view (the least scrolling that shows it, with a row of context) and draws it. Rows are a fixed height, so no control is needed to know where it is.
+	if scroll_target == null:
+		return
+	var key := Model.path_key(path)
+	var index := -1
+	for i in _descs.size():
+		var d: Dictionary = _descs[i]
+		if str(d["kind"]) == "row" and Model.path_key((d["row"] as Dictionary).get("path", [])) == key:
+			index = i
+			break
+	if index < 0:
+		return
+	var step := ROW_HEIGHT + ROW_SEPARATION
+	var top := index * step
+	var view := _view_height()
+	var now := float(scroll_target.scroll_vertical)
+	if top < now:
+		scroll_target.scroll_vertical = int(maxf(0.0, top - step))
+	elif top + ROW_HEIGHT > now + view:
+		scroll_target.scroll_vertical = int(top + ROW_HEIGHT - view + step)
+	_layout_pool()
 
 
 func _set_status(text: String) -> void:
@@ -367,6 +389,18 @@ func _build_content() -> Control:
 	_rows_box.add_theme_constant_override("separation", 4)
 	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows_scroll.add_child(_rows_box)
+	_top_spacer = Control.new() # B6: stand in for the rows above and below the drawn ones, so the scroll bar is the whole list's (rows are a fixed height)
+	_top_spacer.visible = false
+	_rows_box.add_child(_top_spacer)
+	_bottom_spacer = Control.new()
+	_bottom_spacer.visible = false
+	_rows_box.add_child(_bottom_spacer)
+	_none_label = Label.new()
+	_none_label.text = "Nothing to show."
+	_none_label.visible = false
+	_rows_box.add_child(_none_label)
+	rows_scroll.get_v_scroll_bar().value_changed.connect(_on_scrolled)
+	rows_scroll.resized.connect(_on_list_resized)
 
 	if _uses_action_bar():
 		_bar = VBoxContainer.new()
@@ -389,21 +423,32 @@ func _uses_action_bar() -> bool:
 
 
 func _rebuild_rows() -> void:
+	## B6: lists what the open rows are (_descs, cheap: no controls), then draws only the rows on screen (_layout_pool).
 	if _rows_box == null:
 		return
-	for child in _rows_box.get_children():
-		_rows_box.remove_child(child)
-		child.queue_free()
-	_row_controls.clear()
+	_descs.clear()
 	if _endpoint_active():
 		_add_spec_rows()
 	else:
 		_add_rows(_tree, 0, "")
-	if _tree.is_empty():
-		var none := Label.new()
-		none.text = "Nothing to show."
-		_rows_box.add_child(none)
+	_none_label.visible = _tree.is_empty()
+	_layout_pool(true)
 	_rebuild_bar()
+
+
+func row_count() -> int:
+	## How many rows the open levels list (drawn or not).
+	return _descs.size()
+
+
+func pool_size() -> int:
+	## How many row controls exist (the visible rows plus a margin, however long the list is).
+	return _pool.size() + _spare.size()
+
+
+func visible_lines() -> Array:
+	## The row controls now showing, top to bottom.
+	return _pool.duplicate()
 
 
 func _add_rows(rows: Array, depth: int, parent_part_id: String) -> void:
@@ -417,49 +462,261 @@ func _add_rows(rows: Array, depth: int, parent_part_id: String) -> void:
 
 
 func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = null, show_arrow: bool = true) -> void:
-	var path: Array = row.get("path", [])
-	var selected := _has_selected and _selected == path
+	_descs.append({"kind": "row", "row": row, "depth": depth, "expandable": is_expandable and show_arrow, "bubble": bubble})
+
+
+# --- the row pool (B6): fixed-height rows, only the visible ones (plus a margin) exist as controls, reused as the list scrolls ------------------------------------
+
+const ROW_SEPARATION := 4
+const POOL_MARGIN := 3 ## rows kept above and below the visible ones
+const DEFAULT_VIEW_H := 900.0 ## the list's height before it has been laid out
+const LINE_BASE := 5 ## spacer, arrow, name, bubble, folder label: anything after these on a line is a subclass's inline button (_add_row_actions)
+
+var _descs: Array = [] ## what the open rows are, in order: {kind: "row" | "group" | "folder", ...}
+var _pool: Array = [] ## the row controls in use, in display order; _pool[i] shows _descs[_first + i]
+var _spare: Array = [] ## controls the list no longer needs (hidden, kept for when it grows again)
+var _first := 0
+var _top_spacer: Control
+var _bottom_spacer: Control
+var _none_label: Label
+
+
+func _make_line() -> HBoxContainer:
 	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 4)
+	line.add_theme_constant_override("separation", ROW_SEPARATION)
 	line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(depth * INDENT_PX, 0)
-	line.add_child(spacer)
-	if is_expandable and show_arrow:
-		var arrow := Button.new()
-		arrow.text = "v" if row["expanded"] else ">" # (a text expander: the state icon is on the name)
-		arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
-		arrow.pressed.connect(_expand_row.bind(row))
-		line.add_child(arrow)
-	else:
-		var pad := Control.new()
-		pad.custom_minimum_size = Vector2(44, 0)
-		line.add_child(pad)
+	line.add_child(Control.new()) # 0: the indent
+	var arrow := Button.new()
+	arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
+	arrow.pressed.connect(_on_line_arrow.bind(line))
+	line.add_child(arrow) # 1
 	var name_button := Button.new()
-	name_button.toggle_mode = true
-	name_button.set_pressed_no_signal(selected)
 	name_button.theme_type_variation = &"ButtonRail"
 	name_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	var icon_name := Model.state_icon(row)
-	if icon_name != "":
-		name_button.icon = UiIcons.texture(icon_name, 28)
-	name_button.text = str(row["name"]) # (the extras are added by _fit_row_text once the button has been laid out)
-	name_button.resized.connect(_fit_row_text.bind(name_button, row))
 	name_button.clip_text = true
 	name_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS # (a name too long even alone ends in "...", not mid-letter)
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-	_tint_state(name_button, row)
-	if int(row.get("set_slot", -1)) >= 0 and Model.state_level(str(row.get("state", ""))) == "":
-		name_button.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
-	if bool(row.get("suppressed", false)) or _row_view_hidden(row):
-		name_button.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
-	name_button.pressed.connect(_on_row_selected.bind(row))
-	line.add_child(name_button)
-	_add_bubble(line, bubble)
-	_row_controls[Model.path_key(path)] = line
-	_add_row_actions(line, row, is_expandable)
-	_rows_box.add_child(line)
+	name_button.pressed.connect(_on_line_name.bind(line))
+	name_button.resized.connect(_on_line_resized.bind(line))
+	line.add_child(name_button) # 2
+	var bubble := Label.new()
+	bubble.custom_minimum_size = Vector2(40, 0)
+	bubble.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bubble.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(bubble) # 3
+	var folder := Label.new()
+	folder.theme_type_variation = &"LabelDim"
+	folder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	folder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(folder) # 4
+	return line
+
+
+func _view_height() -> float:
+	var h := scroll_target.size.y if scroll_target != null else 0.0
+	return h if h > 1.0 else DEFAULT_VIEW_H
+
+
+func _layout_pool(force: bool = false) -> void:
+	## Draws the rows that are on screen: the pool is as long as the visible rows plus a margin, and each control is re-bound to the row now at its place.
+	## A scroll of k rows re-binds k controls (the ones that left one end are moved to the other); `force` (a rebuild, a resize) re-binds them all.
+	if _rows_box == null or _top_spacer == null:
+		return
+	var n := _descs.size()
+	var step := ROW_HEIGHT + ROW_SEPARATION
+	var need := mini(n, int(ceil(_view_height() / step)) + 1 + 2 * POOL_MARGIN)
+	var scroll := scroll_target.scroll_vertical if scroll_target != null else 0
+	var first := clampi(int(floor(scroll / step)) - POOL_MARGIN, 0, maxi(0, n - need))
+	if need != _pool.size():
+		force = true
+	if not force and first == _first:
+		return
+	if force or absi(first - _first) >= need:
+		while _pool.size() < need:
+			var line: HBoxContainer
+			if _spare.is_empty():
+				line = _make_line()
+				_rows_box.add_child(line)
+			else:
+				line = _spare.pop_back()
+				line.visible = true
+			_rows_box.move_child(line, _bottom_spacer.get_index())
+			_pool.append(line)
+		while _pool.size() > need:
+			var gone: HBoxContainer = _pool.pop_back()
+			_forget_line(gone)
+			gone.visible = false
+			_rows_box.move_child(gone, _rows_box.get_child_count() - 1)
+			_spare.append(gone)
+		for i in need:
+			_bind_line(_pool[i], first + i)
+	elif first > _first:
+		for j in first - _first:
+			var line: HBoxContainer = _pool.pop_front()
+			_pool.append(line)
+			_rows_box.move_child(line, _pool.size())
+			_bind_line(line, first + need - (first - _first) + j)
+	else:
+		for j in _first - first:
+			var line: HBoxContainer = _pool.pop_back()
+			_pool.push_front(line)
+			_rows_box.move_child(line, 1)
+			_bind_line(line, _first - 1 - j)
+	_first = first
+	_top_spacer.visible = first > 0
+	_top_spacer.custom_minimum_size.y = maxf(0.0, first * step - ROW_SEPARATION)
+	var rest := n - first - need
+	_bottom_spacer.visible = rest > 0
+	_bottom_spacer.custom_minimum_size.y = maxf(0.0, rest * step - ROW_SEPARATION)
+
+
+func _on_scrolled(_value: float) -> void:
+	_layout_pool()
+
+
+func _on_list_resized() -> void:
+	_layout_pool()
+
+
+func _forget_line(line: Control) -> void:
+	var old := str(line.get_meta("key", ""))
+	if old != "" and _row_controls.get(old) == line:
+		_row_controls.erase(old)
+	line.set_meta("key", "")
+	line.set_meta("desc", {}) # (unbound)
+
+
+func _bind_line(line: HBoxContainer, index: int) -> void:
+	## Everything a row shows is set here, every time: a re-used control keeps nothing of the row it showed before (text, icon, tint, dimming, selection, bubble, hint, inline buttons).
+	_forget_line(line)
+	while line.get_child_count() > LINE_BASE:
+		var extra := line.get_child(LINE_BASE)
+		line.remove_child(extra)
+		extra.queue_free()
+	var d: Dictionary = _descs[index]
+	line.set_meta("desc", d)
+	var arrow: Button = line.get_child(1)
+	var nb: Button = line.get_child(2)
+	var folder: Label = line.get_child(4)
+	nb.remove_theme_color_override("font_color")
+	nb.modulate = Color.WHITE
+	nb.icon = null
+	nb.tooltip_text = ""
+	match str(d["kind"]):
+		"folder":
+			var srow: Dictionary = d["srow"]
+			(line.get_child(0) as Control).custom_minimum_size.x = int(srow["depth"]) * INDENT_PX + 48
+			arrow.visible = false
+			nb.visible = false
+			folder.visible = true
+			folder.text = "%s (%d)" % [str(srow["label"]), int(srow["count"])]
+			_bind_bubble(line, srow["bubble"])
+		"group":
+			var srow: Dictionary = d["srow"]
+			(line.get_child(0) as Control).custom_minimum_size.x = int(srow["depth"]) * INDENT_PX
+			_show_arrow(arrow, true, bool(srow["open"]))
+			folder.visible = false
+			nb.visible = true
+			nb.toggle_mode = false
+			nb.set_pressed_no_signal(false)
+			var icon_name := Model.state_icon_for(str(srow["state"]))
+			if icon_name != "":
+				nb.icon = UiIcons.texture(icon_name, 28)
+			nb.text = str(srow["label"])
+			var hint := Model.state_hint_short(str(srow["state"]))
+			if hint != "":
+				nb.text += "  · %s" % hint
+			_tint_state(nb, {"state": srow["state"]})
+			if bool(srow["suppressed"]) or bool(srow["hidden"]):
+				nb.modulate = Color(1, 1, 1, 0.5)
+			_bind_bubble(line, srow["bubble"])
+		_:
+			var row: Dictionary = d["row"]
+			var path: Array = row.get("path", [])
+			(line.get_child(0) as Control).custom_minimum_size.x = int(d["depth"]) * INDENT_PX
+			_show_arrow(arrow, bool(d["expandable"]), bool(row["expanded"]))
+			folder.visible = false
+			nb.visible = true
+			nb.toggle_mode = true
+			nb.set_pressed_no_signal(_has_selected and _selected == path)
+			var icon_name := Model.state_icon(row)
+			if icon_name != "":
+				nb.icon = UiIcons.texture(icon_name, 28)
+			nb.text = str(row["name"]) # (the extras are added by _fit_row_text, now if the button has been laid out, and again when it is resized)
+			_tint_state(nb, row)
+			if int(row.get("set_slot", -1)) >= 0 and Model.state_level(str(row.get("state", ""))) == "":
+				nb.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
+			if bool(row.get("suppressed", false)) or _row_view_hidden(row):
+				nb.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
+			_bind_bubble(line, d["bubble"])
+			var key := Model.path_key(path)
+			line.set_meta("key", key)
+			_row_controls[key] = line
+			_fit_row_text(nb, row)
+			_add_row_actions(line, row, bool(d["expandable"]))
+
+
+func _show_arrow(arrow: Button, expandable: bool, open: bool) -> void:
+	## A row that cannot open keeps the arrow's width, invisible and inert (the names stay in line).
+	arrow.visible = true
+	arrow.text = ("v" if open else ">") if expandable else "" # (a text expander: the state icon is on the name)
+	arrow.modulate = Color.WHITE if expandable else Color(1, 1, 1, 0)
+	arrow.mouse_filter = Control.MOUSE_FILTER_STOP if expandable else Control.MOUSE_FILTER_IGNORE
+	arrow.focus_mode = Control.FOCUS_ALL if expandable else Control.FOCUS_NONE
+
+
+func _bind_bubble(line: HBoxContainer, bubble) -> void:
+	## The one problem count a row wears (spec section 6): red for errors, amber for "near", dim for unsaved.
+	var label: Label = line.get_child(3)
+	label.remove_theme_color_override("font_color")
+	label.theme_type_variation = &""
+	if not (bubble is Dictionary):
+		label.visible = false
+		return
+	label.visible = true
+	label.text = str(int(bubble["count"]))
+	match str(bubble["level"]):
+		"error":
+			label.add_theme_color_override("font_color", tokens.danger)
+		"warning":
+			label.add_theme_color_override("font_color", tokens.warn)
+		_:
+			label.theme_type_variation = &"LabelDim"
+
+
+func _on_line_arrow(line: HBoxContainer) -> void:
+	var d: Dictionary = line.get_meta("desc", {})
+	if d.is_empty():
+		return
+	if str(d["kind"]) == "row":
+		_expand_row(d["row"])
+	elif str(d["kind"]) == "group":
+		_toggle_group(str(d["srow"]["key"]))
+
+
+func _on_line_name(line: HBoxContainer) -> void:
+	var d: Dictionary = line.get_meta("desc", {})
+	if d.is_empty():
+		return
+	if str(d["kind"]) == "row":
+		_on_row_selected(d["row"])
+	elif str(d["kind"]) == "group":
+		_toggle_group(str(d["srow"]["key"])) # (a group's name opens it too: it is not a selection)
+
+
+func _on_line_resized(line: HBoxContainer) -> void:
+	var d: Dictionary = line.get_meta("desc", {})
+	if not d.is_empty() and str(d["kind"]) == "row":
+		_fit_row_text(line.get_child(2), d["row"])
+
+
+func _toggle_group(key: String) -> void:
+	if _open_groups.has(key):
+		_open_groups.erase(key)
+	else:
+		_open_groups[key] = true
+	_rebuild_rows()
 
 
 func _tint_state(button: Button, row: Dictionary) -> void:
@@ -474,26 +731,7 @@ func _tint_state(button: Button, row: Dictionary) -> void:
 		button.add_theme_color_override("font_color", tokens.warn)
 
 
-func _add_bubble(line: HBoxContainer, bubble) -> void:
-	## The one problem count a row wears (spec section 6): red for errors, amber for "near", dim for unsaved.
-	if not (bubble is Dictionary):
-		return
-	var label := Label.new()
-	label.text = str(int(bubble["count"]))
-	label.custom_minimum_size = Vector2(40, 0)
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	match str(bubble["level"]):
-		"error":
-			label.add_theme_color_override("font_color", tokens.danger)
-		"warning":
-			label.add_theme_color_override("font_color", tokens.warn)
-		_:
-			label.theme_type_variation = &"LabelDim"
-	line.add_child(label)
-
-
-# --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), drawn with the same lines as above ---------------------------------------------
+# --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), listed with the same kinds as above ---------------------------------------------
 
 func _add_spec_rows() -> void:
 	var spec_rows := Model.visible_rows(_resp, _spec_open_keys(), _grouping(), _unsaved_part_ids())
@@ -505,9 +743,9 @@ func _add_spec_rows() -> void:
 				_tree[0]["state"] = srow["state"]
 				_add_row_line(_tree[0], 0, false, null)
 			"group":
-				_add_group_line(srow)
+				_descs.append({"kind": "group", "srow": srow})
 			"mates_folder", "patterns_folder":
-				_add_folder_line(srow)
+				_descs.append({"kind": "folder", "srow": srow}) # (their count and health; what is inside them is a later phase's, so the row is a label)
 			"feature":
 				pass # (features of a part are the design table's and a later phase's: not fetched here)
 			_:
@@ -517,65 +755,6 @@ func _add_spec_rows() -> void:
 				row["state"] = srow["state"] # (drawn from the latest unsaved set, not the one the row was built with)
 				var has_children := not (row["children"] as Array).is_empty()
 				_add_row_line(row, depth, bool(srow["expandable"]) and has_children, srow["bubble"])
-
-
-func _add_group_line(srow: Dictionary) -> void:
-	## A "Bolt M4 x4" row: opens to its members (spec section 4); pressing the name does the same, it is not a selection.
-	var key := str(srow["key"])
-	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 4)
-	line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(int(srow["depth"]) * INDENT_PX, 0)
-	line.add_child(spacer)
-	var toggle := func() -> void:
-		if _open_groups.has(key):
-			_open_groups.erase(key)
-		else:
-			_open_groups[key] = true
-		_rebuild_rows()
-	var arrow := Button.new()
-	arrow.text = "v" if bool(srow["open"]) else ">"
-	arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
-	arrow.pressed.connect(toggle)
-	line.add_child(arrow)
-	var b := Button.new()
-	b.theme_type_variation = &"ButtonRail"
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	var icon_name := Model.state_icon_for(str(srow["state"]))
-	if icon_name != "":
-		b.icon = UiIcons.texture(icon_name, 28)
-	b.text = str(srow["label"])
-	var hint := Model.state_hint_short(str(srow["state"]))
-	if hint != "":
-		b.text += "  · %s" % hint
-	b.clip_text = true
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-	_tint_state(b, {"state": srow["state"]})
-	if bool(srow["suppressed"]) or bool(srow["hidden"]):
-		b.modulate = Color(1, 1, 1, 0.5)
-	b.pressed.connect(toggle)
-	line.add_child(b)
-	_add_bubble(line, srow["bubble"])
-	_rows_box.add_child(line)
-
-
-func _add_folder_line(srow: Dictionary) -> void:
-	## The Mates / Patterns folders after the root's rows (spec section 7): their count and health. What is inside them is a later phase's, so the row is a label.
-	var line := HBoxContainer.new()
-	line.custom_minimum_size = Vector2(0, ROW_HEIGHT * 0.8)
-	var pad := Control.new()
-	pad.custom_minimum_size = Vector2(int(srow["depth"]) * INDENT_PX + 48, 0)
-	line.add_child(pad)
-	var label := Label.new()
-	label.text = "%s (%d)" % [str(srow["label"]), int(srow["count"])]
-	label.theme_type_variation = &"LabelDim"
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	line.add_child(label)
-	_add_bubble(line, srow["bubble"])
-	_rows_box.add_child(line)
 
 
 func _spec_open_keys() -> Array:

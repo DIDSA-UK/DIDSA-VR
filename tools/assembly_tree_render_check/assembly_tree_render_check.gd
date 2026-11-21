@@ -234,18 +234,16 @@ func open_rows(paths: Array) -> void:
 func lines() -> Array:
 	## What the window draws, row by row: {text, depth, colour, bubble, bubble_colour, icon, selected, dimmed}.
 	var out: Array = []
-	for line in window._rows_box.get_children():
-		if not (line is HBoxContainer) or line.get_child_count() < 3 or not (line.get_child(2) is Button):
-			if line is Label:
-				out.append({"text": (line as Label).text, "depth": 0, "colour": Color.WHITE, "bubble": "", "bubble_colour": Color.WHITE, "icon": false, "selected": false, "dimmed": false})
-			continue
+	for line in window.visible_lines():
 		var b: Button = line.get_child(2)
+		if not b.visible:
+			continue # (a folder line: a label)
 		var bubble := ""
 		var bubble_colour := Color.WHITE
-		for i in range(3, line.get_child_count()):
-			if line.get_child(i) is Label:
-				bubble = (line.get_child(i) as Label).text
-				bubble_colour = (line.get_child(i) as Label).get_theme_color("font_color")
+		var bl: Label = line.get_child(3)
+		if bl.visible:
+			bubble = bl.text
+			bubble_colour = bl.get_theme_color("font_color")
 		out.append({"text": b.text, "depth": int(round((line.get_child(0) as Control).custom_minimum_size.x / 24.0)), "colour": b.get_theme_color("font_color"),
 			"bubble": bubble, "bubble_colour": bubble_colour, "icon": b.icon != null, "selected": b.button_pressed, "dimmed": b.modulate.a < 0.9})
 	return out
@@ -573,21 +571,21 @@ func scenario_h() -> void:
 	await frames(3)
 	print("SMOKE TIMING h: open to the structure drawn (request, parse, 41 rows) %d ms; to the status merged and redrawn %d ms (%d nodes, truncated: %s)" % [structure_ms, status_ms, int(window._resp.get("node_count", 0)), str(window._resp.get("truncated_nodes", false))])
 	check("h: the call answered all 2,000 occurrences (40 Modules and 1,960 Items), not cut off", int(window._resp.get("node_count", 0)) == 2000 and not bool(window._resp.get("truncated_nodes", true)))
-	check("h: the 40 identical Modules fold into one 'Module x40' row: the window lists the root and that row", window._rows_box.get_child_count() == 2 and texts()[1].begins_with("Module x40"))
+	check("h: the 40 identical Modules fold into one 'Module x40' row: the window lists the root and that row", window.row_count() == 2 and texts()[1].begins_with("Module x40"))
 	await shot("h1_folded", false)
 	window._open_groups["#group:m01"] = true
 	for m in 40:
 		(Model.find_row(window._tree, ["m%02d" % (m + 1)]))["expanded"] = false
 	var t5 := Time.get_ticks_usec()
 	window._rebuild_rows()
-	print("SMOKE TIMING h: _rebuild_rows with the group open, every Module closed: %d rows in %.1f ms" % [window._rows_box.get_child_count(), (Time.get_ticks_usec() - t5) / 1000.0])
-	check("h: the group open lists the root, the group and its 40 Modules", window._rows_box.get_child_count() == 42)
+	print("SMOKE TIMING h: _rebuild_rows with the group open, every Module closed: %d rows in %.1f ms" % [window.row_count(), (Time.get_ticks_usec() - t5) / 1000.0])
+	check("h: the group open lists the root, the group and its 40 Modules", window.row_count() == 42)
 	for m in 40:
 		(Model.find_row(window._tree, ["m%02d" % (m + 1)]))["expanded"] = true
 	var t2 := Time.get_ticks_usec()
 	window._rebuild_rows()
 	var build_us := Time.get_ticks_usec() - t2
-	var count: int = window._rows_box.get_child_count()
+	var count: int = window.row_count()
 	print("SMOKE TIMING h: _rebuild_rows with every Module open: %d rows in %.1f ms (%.3f ms a row), in the frame it ran" % [count, build_us / 1000.0, build_us / 1000.0 / maxf(1.0, count)])
 	var t3 := Time.get_ticks_usec()
 	var spec_rows: Array = Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), [])
