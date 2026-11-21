@@ -624,15 +624,15 @@ func scenario_h() -> void:
 	window.scroll_target.scroll_vertical = int(bar.max_value)
 	await frames(4)
 	await shot("h4_scrolled_end", false)
-	# a timed sweep: the list scrolled 10 rows a frame from top to bottom (the frame includes the layout and, under Mesa, the draw), then back up
+	# a timed sweep: the list scrolled 10 rows a frame from top to bottom and back; a frame includes the re-bind, the layout and, under Mesa, the draw
 	var sweep_frames := 0
 	var worst_us := 0
 	var sweep_t0 := Time.get_ticks_usec()
 	var rows_h := int(bar.max_value / 60.0)
 	for pass_index in 2:
 		for i in range(0, rows_h, 10):
+			var f0 := Time.get_ticks_usec() # (before the scroll is set: the re-bind runs synchronously on value_changed)
 			window.scroll_target.scroll_vertical = int((i if pass_index == 0 else rows_h - i) * 60.0)
-			var f0 := Time.get_ticks_usec()
 			await process_frame
 			worst_us = maxi(worst_us, Time.get_ticks_usec() - f0)
 			sweep_frames += 1

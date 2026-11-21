@@ -552,6 +552,7 @@ func _layout_pool(force: bool = false) -> void:
 		while _pool.size() > need:
 			var gone: HBoxContainer = _pool.pop_back()
 			_forget_line(gone)
+			gone.set_meta("down_id", "") # (a press that went down on it is over: it holds no row)
 			_free_extras(gone)
 			gone.visible = false
 			_rows_box.move_child(gone, _rows_box.get_child_count() - 1)
@@ -609,7 +610,6 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 	_free_extras(line)
 	var d: Dictionary = _descs[index]
 	line.set_meta("desc", d)
-	line.set_meta("gen", int(line.get_meta("gen", 0)) + 1)
 	var arrow: Button = line.get_child(1)
 	var nb: Button = line.get_child(2)
 	var folder: Label = line.get_meta("folder")
@@ -703,17 +703,36 @@ func _bind_bubble(line: HBoxContainer, bubble) -> void:
 			label.theme_type_variation = &"LabelDim"
 
 
+static func _desc_id(d: Dictionary) -> String:
+	## Which row a control shows, whatever it was re-bound since: an occurrence row's path, a group's or folder's key.
+	if d.is_empty():
+		return ""
+	match str(d["kind"]):
+		"row":
+			return "r:" + Model.path_key((d["row"] as Dictionary).get("path", []))
+		"group":
+			return "g:" + str(d["srow"]["key"])
+	return "f:" + str(d["srow"]["key"])
+
+
 func _note_press(line: HBoxContainer) -> void:
 	## A press is acted on when it is released; remember which row the control showed when it went down.
-	line.set_meta("down_gen", int(line.get_meta("gen", 0)))
+	line.set_meta("down_id", _desc_id(line.get_meta("desc", {})))
 
 
 func _press_is_stale(line: HBoxContainer) -> bool:
-	## True when the control was re-bound to another row between the press and its release (the laser went down on one row, a refresh or a scroll changed what the
-	## control shows): the release must not act on the new row. A press with no recorded start (a keyboard or programmatic press) is taken as it is.
-	var down := int(line.get_meta("down_gen", -1))
-	line.set_meta("down_gen", -1)
-	return down != -1 and down != int(line.get_meta("gen", 0))
+	## True when the control shows another row than the one the press went down on (a scroll or a refresh moved the rows under the laser): the release must not act on the
+	## new row, and a toggle button Godot has already flipped goes back to its row's real state. A re-bind to the same row (a status answer, a rename, a part name) is not
+	## stale. The record ends here, on release; a press with no record (keyboard, programmatic) is taken as it is.
+	var down := str(line.get_meta("down_id", ""))
+	line.set_meta("down_id", "")
+	var d: Dictionary = line.get_meta("desc", {})
+	if down == "" or down == _desc_id(d):
+		return false
+	var nb: Button = line.get_child(2)
+	if nb.toggle_mode:
+		nb.set_pressed_no_signal(not d.is_empty() and str(d["kind"]) == "row" and _has_selected and _selected == (d["row"] as Dictionary).get("path", []))
+	return true
 
 
 func _on_line_arrow(line: HBoxContainer) -> void:

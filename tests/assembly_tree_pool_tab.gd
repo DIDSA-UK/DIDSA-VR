@@ -20,6 +20,21 @@ func frames(n: int = 3) -> void:
 		await process_frame
 
 
+func mouse(at: Vector2, down: bool) -> void:
+	## A real left-button press or release delivered to the panel's viewport (what the laser does), not pressed.emit().
+	var move := InputEventMouseMotion.new()
+	move.position = at
+	move.global_position = at
+	table.tree._viewport.push_input(move, true)
+	var ev := InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = down
+	ev.position = at
+	ev.global_position = at
+	ev.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+	table.tree._viewport.push_input(ev, true)
+
+
 func drawn_names() -> Array:
 	var out: Array = []
 	for line in table.tree.visible_lines():
@@ -87,27 +102,45 @@ func _initialize() -> void:
 	await frames(2)
 	check("2. ...and the revealed row is drawn when Parts shows again", "Part 149" in drawn_names() and win._row_controls.has("occ_149"))
 
-	# --- 3. a press across a re-bind
+	# --- 3. a press across a re-bind, with real mouse events through the panel's viewport
 	win._rows_scroll.scroll_vertical = 0
 	await frames(2)
 	win._selected = []
 	win._has_selected = false
 	var line: HBoxContainer = win.visible_lines()[3]
-	var first_name: String = (line.get_child(2) as Button).text
-	(line.get_child(2) as Button).button_down.emit()
-	(line.get_child(1) as Button).button_down.emit()
-	win._rows_scroll.scroll_vertical = int(60 * step) # (every control is bound to another row)
-	await frames(2)
-	check("3. (setup) the control the press went down on now shows another row", (line.get_child(2) as Button).text != first_name)
-	(line.get_child(2) as Button).pressed.emit()
-	(line.get_child(1) as Button).pressed.emit()
-	await frames(2)
-	check("3. the release acts on nothing: no selection, no row expanded", not win._has_selected and win.visible_lines().size() > 0 and not bool((win._tree[0]["children"] as Array)[int(win._first) + 3].get("expanded", false)))
-	var fresh: HBoxContainer = win.visible_lines()[2]
-	(fresh.get_child(2) as Button).button_down.emit()
-	(fresh.get_child(2) as Button).pressed.emit()
+	var nb: Button = line.get_child(2)
+	var path: Array = (win._descs[win._first + 3]["row"] as Dictionary)["path"]
+	var spot := nb.get_global_rect().get_center()
+	mouse(spot, true)
+	win._layout_pool(true) # (a status answer: every control is bound again, to the row it already shows)
 	await frames(1)
-	check("3. a press and release on the same row still selects it", win._has_selected)
+	mouse(spot, false)
+	await frames(1)
+	check("3. press, re-bind to the same row, release: it acts (selected, button shows it)", win._has_selected and win._selected == path and nb.button_pressed)
+	win._selected = []
+	win._has_selected = false
+	win._rebuild_rows()
+	await frames(2)
+	for which in ["name", "arrow"]:
+		nb = win.visible_lines()[3].get_child(2)
+		var button: Button = nb if which == "name" else win.visible_lines()[3].get_child(1)
+		var first_name: String = nb.text
+		var status_before: String = win._status_label.text
+		mouse(button.get_global_rect().get_center(), true)
+		win._rows_scroll.scroll_vertical = int(60 * step) # (every control is bound to another row)
+		await frames(2)
+		check("3. (setup, %s) the control the press went down on now shows another row" % which, nb.text != first_name)
+		mouse(button.get_global_rect().get_center(), false) # (released over the same control, which has scrolled with the list)
+		await frames(2)
+		var moved_row: Dictionary = win._descs[win._first + 3]["row"]
+		check("3. press on the %s, re-bind to another row, release: nothing selected, nothing expanded, nothing said, and the name button shows its own row's state (not pressed)" % which, not win._has_selected and not nb.button_pressed and not bool(moved_row.get("expanded", false)) and win._status_label.text == status_before)
+		win._rows_scroll.scroll_vertical = 0
+		await frames(2)
+	nb = win.visible_lines()[3].get_child(2)
+	mouse(nb.get_global_rect().get_center(), true)
+	mouse(nb.get_global_rect().get_center(), false)
+	await frames(1)
+	check("3. a press and release on the same row afterwards still selects it", win._has_selected and nb.button_pressed)
 
 	# --- 4. folder bubble order, extras freed
 	win._resp = {}
@@ -125,12 +158,36 @@ func _initialize() -> void:
 	await frames(2)
 	var normal: HBoxContainer = win.visible_lines()[2]
 	check("4. a row line has its bubble in front of the folder label again", normal.get_child(3) == normal.get_meta("bubble"))
+	var with_extras := 0
+	for l in win.visible_lines():
+		if l.get_child_count() > win.LINE_BASE:
+			with_extras += 1
 	var spare_before: int = win._spare.size()
-	win._rows_box.get_parent().size = Vector2(win._rows_box.get_parent().size.x, 120) # (a short list: the pool shrinks)
-	win._layout_pool(true)
-	await frames(1)
+	win._rows_scroll.size = Vector2(win._rows_scroll.size.x, 120) # (a short list: the pool shrinks)
+	win._layout_pool(true) # (counted straight away: a layout pass of the real container would put the size back)
 	var extras := 0
 	for l in win._spare:
 		extras += l.get_child_count() - win.LINE_BASE
-	check("4. lines that leave the pool carry no inline buttons (%d spare, %d extras)" % [win._spare.size(), extras], extras == 0)
+	check("4. lines that left the pool carry no inline buttons (spare %d -> %d, %d lines had them, %d extras left)" % [spare_before, win._spare.size(), with_extras, extras], with_extras > 0 and win._spare.size() > spare_before and extras == 0)
+	await frames(2)
+
+	# --- 5. timing (not asserted): the parts list of 2,000 rows scrolled 10 rows a frame down and back; the frame includes the re-bind (run on value_changed),
+	## the layout and, under a renderer, the draw. The parts list makes new Table / Bring buttons on every re-bind.
+	var many: Array = []
+	for i in 2000:
+		many.append({"id": "m%04d" % i, "path": ["m%04d" % i], "name": "Many %04d" % i, "named": true, "resolved_part_id": "PM%d" % i, "children": null, "expanded": false})
+	win._tree = [{"id": "", "path": [], "name": "Asm", "named": true, "resolved_part_id": "ASM", "expanded": true, "children": many}]
+	win._rebuild_rows()
+	await frames(3)
+	var frames_n := 0
+	var worst := 0
+	var t0 := Time.get_ticks_usec()
+	for pass_index in 2:
+		for i in range(0, 2000, 10):
+			var f0 := Time.get_ticks_usec()
+			win._rows_scroll.scroll_vertical = int((i if pass_index == 0 else 2000 - i) * step)
+			await process_frame
+			worst = maxi(worst, Time.get_ticks_usec() - f0)
+			frames_n += 1
+	print("SMOKE TIMING PARTS tab sweep (%d rows, 10 rows a frame down and up): %d frames, %.1f ms a frame on average, worst %.1f ms" % [win.row_count(), frames_n, (Time.get_ticks_usec() - t0) / 1000.0 / frames_n, worst / 1000.0])
 	quit(0)
