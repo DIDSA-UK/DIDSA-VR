@@ -544,6 +544,27 @@ func scenario_g() -> void:
 	older_backend = false
 
 
+func scenario_i() -> void:
+	await fresh()
+	print("== i: the Mates folder line under the root: its count and health come after the label (B6 fix round)")
+	var top := blank_part("folder-part", "Folder Test", [occ("base", PLATE_ID, "parts/plate.didsa", Vector3.ZERO, {"fixed": true}), occ("peg1", PEG_ID, "parts/peg.didsa", Vector3(30, 0, 60)), occ("peg2", PEG_ID, "parts/peg.didsa", Vector3(90, 0, 60))])
+	check("i: the fixture is on the backend", await import_doc("folder-part", [top]))
+	await add_mate("folder-part", "parallel", "peg1", peg_body, 0, "peg2", peg_body, 0)
+	await show_in_app("folder-part", true)
+	await open_window_and_wait()
+	await frames(3)
+	var folder = null
+	for line in window.visible_lines():
+		if (line.get_meta("folder") as Label).visible:
+			folder = line
+	check("i: the root lists a Mates folder line", folder != null)
+	if folder != null:
+		var label: Label = folder.get_meta("folder")
+		var bubble: Label = folder.get_meta("bubble")
+		check("i: it reads '%s' with the label before the count/health bubble (children %d, %d) and the bubble %s" % [label.text, label.get_index(), bubble.get_index(), "showing" if bubble.visible else "empty"], label.text.begins_with("Mates (") and label.get_index() < bubble.get_index())
+	await shot("i_mates_folder", true)
+
+
 func scenario_h() -> void:
 	await fresh()
 	print("== h: a generated tree of 2,000 occurrences")
@@ -603,6 +624,20 @@ func scenario_h() -> void:
 	window.scroll_target.scroll_vertical = int(bar.max_value)
 	await frames(4)
 	await shot("h4_scrolled_end", false)
+	# a timed sweep: the list scrolled 10 rows a frame from top to bottom (the frame includes the layout and, under Mesa, the draw), then back up
+	var sweep_frames := 0
+	var worst_us := 0
+	var sweep_t0 := Time.get_ticks_usec()
+	var rows_h := int(bar.max_value / 60.0)
+	for pass_index in 2:
+		for i in range(0, rows_h, 10):
+			window.scroll_target.scroll_vertical = int((i if pass_index == 0 else rows_h - i) * 60.0)
+			var f0 := Time.get_ticks_usec()
+			await process_frame
+			worst_us = maxi(worst_us, Time.get_ticks_usec() - f0)
+			sweep_frames += 1
+	var sweep_us := Time.get_ticks_usec() - sweep_t0
+	print("SMOKE TIMING h: scroll sweep, 10 rows a frame down and up: %d frames, %.1f ms a frame on average, worst %.1f ms" % [sweep_frames, sweep_us / 1000.0 / maxf(1.0, sweep_frames), worst_us / 1000.0])
 
 
 func _initialize() -> void:
@@ -644,7 +679,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var wanted := OS.get_environment("TREE_SCENARIOS")
-	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h"])
+	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h", "i"])
 	for s in picks:
 		window.request_hook = Callable(self, "stand_in")
 		match s:
@@ -656,6 +691,7 @@ func _initialize() -> void:
 			"f": await scenario_f()
 			"g": await scenario_g()
 			"h": await scenario_h()
+			"i": await scenario_i()
 	if rendering:
 		check("the panel was drawn with pixels in the last scenario", window_has_pixels())
 	check("no request to the backend failed outside the 404 stand-in", failed_requests == 0)

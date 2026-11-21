@@ -337,7 +337,7 @@ func _reveal(path: Array) -> void:
 
 func _scroll_to_row(path: Array) -> void:
 	## Brings the row at `path` into view (the least scrolling that shows it, with a row of context) and draws it. Rows are a fixed height, so no control is needed to know where it is.
-	if scroll_target == null:
+	if _rows_scroll == null:
 		return
 	var key := Model.path_key(path)
 	var index := -1
@@ -351,11 +351,11 @@ func _scroll_to_row(path: Array) -> void:
 	var step := ROW_HEIGHT + ROW_SEPARATION
 	var top := index * step
 	var view := _view_height()
-	var now := float(scroll_target.scroll_vertical)
+	var now := float(_rows_scroll.scroll_vertical)
 	if top < now:
-		scroll_target.scroll_vertical = int(maxf(0.0, top - step))
+		_rows_scroll.scroll_vertical = int(maxf(0.0, top - step))
 	elif top + ROW_HEIGHT > now + view:
-		scroll_target.scroll_vertical = int(top + ROW_HEIGHT - view + step)
+		_rows_scroll.scroll_vertical = int(top + ROW_HEIGHT - view + step)
 	_layout_pool()
 
 
@@ -384,6 +384,7 @@ func _build_content() -> Control:
 	rows_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	rows_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(rows_scroll)
+	_rows_scroll = rows_scroll
 	scroll_target = rows_scroll # right thumbstick scrolls the rows while the laser is on the window
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 4)
@@ -478,6 +479,7 @@ var _spare: Array = [] ## controls the list no longer needs (hidden, kept for wh
 var _first := 0
 var _top_spacer: Control
 var _bottom_spacer: Control
+var _rows_scroll: ScrollContainer ## the rows' own scroll box (scroll_target can point elsewhere: the design table's Build tab)
 var _none_label: Label
 
 
@@ -488,6 +490,7 @@ func _make_line() -> HBoxContainer:
 	line.add_child(Control.new()) # 0: the indent
 	var arrow := Button.new()
 	arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
+	arrow.button_down.connect(_note_press.bind(line))
 	arrow.pressed.connect(_on_line_arrow.bind(line))
 	line.add_child(arrow) # 1
 	var name_button := Button.new()
@@ -497,6 +500,7 @@ func _make_line() -> HBoxContainer:
 	name_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS # (a name too long even alone ends in "...", not mid-letter)
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_button.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+	name_button.button_down.connect(_note_press.bind(line))
 	name_button.pressed.connect(_on_line_name.bind(line))
 	name_button.resized.connect(_on_line_resized.bind(line))
 	line.add_child(name_button) # 2
@@ -510,11 +514,13 @@ func _make_line() -> HBoxContainer:
 	folder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	folder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	line.add_child(folder) # 4
+	line.set_meta("bubble", bubble)
+	line.set_meta("folder", folder)
 	return line
 
 
 func _view_height() -> float:
-	var h := scroll_target.size.y if scroll_target != null else 0.0
+	var h := _rows_scroll.size.y if _rows_scroll != null else 0.0
 	return h if h > 1.0 else DEFAULT_VIEW_H
 
 
@@ -526,7 +532,7 @@ func _layout_pool(force: bool = false) -> void:
 	var n := _descs.size()
 	var step := ROW_HEIGHT + ROW_SEPARATION
 	var need := mini(n, int(ceil(_view_height() / step)) + 1 + 2 * POOL_MARGIN)
-	var scroll := scroll_target.scroll_vertical if scroll_target != null else 0
+	var scroll := _rows_scroll.scroll_vertical if _rows_scroll != null else 0
 	var first := clampi(int(floor(scroll / step)) - POOL_MARGIN, 0, maxi(0, n - need))
 	if need != _pool.size():
 		force = true
@@ -546,6 +552,7 @@ func _layout_pool(force: bool = false) -> void:
 		while _pool.size() > need:
 			var gone: HBoxContainer = _pool.pop_back()
 			_forget_line(gone)
+			_free_extras(gone)
 			gone.visible = false
 			_rows_box.move_child(gone, _rows_box.get_child_count() - 1)
 			_spare.append(gone)
@@ -587,18 +594,29 @@ func _forget_line(line: Control) -> void:
 	line.set_meta("desc", {}) # (unbound)
 
 
-func _bind_line(line: HBoxContainer, index: int) -> void:
-	## Everything a row shows is set here, every time: a re-used control keeps nothing of the row it showed before (text, icon, tint, dimming, selection, bubble, hint, inline buttons).
-	_forget_line(line)
+func _free_extras(line: HBoxContainer) -> void:
+	## A subclass's inline buttons (the PARTS tab's Table / Bring) belong to the row the control showed: they are made again on every bind (_add_row_actions), so
+	## the PARTS tab pays for new buttons on every re-bind of a visible row.
 	while line.get_child_count() > LINE_BASE:
 		var extra := line.get_child(LINE_BASE)
 		line.remove_child(extra)
 		extra.queue_free()
+
+
+func _bind_line(line: HBoxContainer, index: int) -> void:
+	## Everything a row shows is set here, every time: a re-used control keeps nothing of the row it showed before (text, icon, tint, dimming, selection, bubble, hint, inline buttons).
+	_forget_line(line)
+	_free_extras(line)
 	var d: Dictionary = _descs[index]
 	line.set_meta("desc", d)
+	line.set_meta("gen", int(line.get_meta("gen", 0)) + 1)
 	var arrow: Button = line.get_child(1)
 	var nb: Button = line.get_child(2)
-	var folder: Label = line.get_child(4)
+	var folder: Label = line.get_meta("folder")
+	var bubble_label: Label = line.get_meta("bubble")
+	var is_folder := str(d["kind"]) == "folder"
+	line.move_child(folder if is_folder else bubble_label, 3) # (a folder's count and health come after its label, as other rows wear their bubble after the name)
+	line.move_child(bubble_label if is_folder else folder, 4)
 	nb.remove_theme_color_override("font_color")
 	nb.modulate = Color.WHITE
 	nb.icon = null
@@ -668,7 +686,7 @@ func _show_arrow(arrow: Button, expandable: bool, open: bool) -> void:
 
 func _bind_bubble(line: HBoxContainer, bubble) -> void:
 	## The one problem count a row wears (spec section 6): red for errors, amber for "near", dim for unsaved.
-	var label: Label = line.get_child(3)
+	var label: Label = line.get_meta("bubble")
 	label.remove_theme_color_override("font_color")
 	label.theme_type_variation = &""
 	if not (bubble is Dictionary):
@@ -685,9 +703,22 @@ func _bind_bubble(line: HBoxContainer, bubble) -> void:
 			label.theme_type_variation = &"LabelDim"
 
 
+func _note_press(line: HBoxContainer) -> void:
+	## A press is acted on when it is released; remember which row the control showed when it went down.
+	line.set_meta("down_gen", int(line.get_meta("gen", 0)))
+
+
+func _press_is_stale(line: HBoxContainer) -> bool:
+	## True when the control was re-bound to another row between the press and its release (the laser went down on one row, a refresh or a scroll changed what the
+	## control shows): the release must not act on the new row. A press with no recorded start (a keyboard or programmatic press) is taken as it is.
+	var down := int(line.get_meta("down_gen", -1))
+	line.set_meta("down_gen", -1)
+	return down != -1 and down != int(line.get_meta("gen", 0))
+
+
 func _on_line_arrow(line: HBoxContainer) -> void:
 	var d: Dictionary = line.get_meta("desc", {})
-	if d.is_empty():
+	if d.is_empty() or _press_is_stale(line):
 		return
 	if str(d["kind"]) == "row":
 		_expand_row(d["row"])
@@ -697,7 +728,7 @@ func _on_line_arrow(line: HBoxContainer) -> void:
 
 func _on_line_name(line: HBoxContainer) -> void:
 	var d: Dictionary = line.get_meta("desc", {})
-	if d.is_empty():
+	if d.is_empty() or _press_is_stale(line):
 		return
 	if str(d["kind"]) == "row":
 		_on_row_selected(d["row"])
