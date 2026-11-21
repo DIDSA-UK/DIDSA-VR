@@ -56,6 +56,17 @@ var _endpoint_missing := false ## the backend answered 404 to the tree call (an 
 var _open_groups: Dictionary = {} ## group row key -> true (a "Bolt M4 x4" row that is open)
 var _grouping_local := true ## the "fold repeats" switch when there is no main (tests); with a main it lives in app_settings.gd
 var _fold_button: Button
+var _find_button: Button
+var _query := "" ## B7 (spec section 11): the words typed into Find ("" = no filter); only the view is narrowed, the open rows are never changed by it
+var _unknown_tokens: Array = [] ## the filter's unknown ":tokens" of the last draw, for the hint
+var _query_box: Control
+var _query_label: Label
+var _query_hint: Label
+var _doc_key := "" ## B7 (spec section 12): the document key the tree shown belongs to; "" = none whose open rows can be stored (a file-less session, or a tree still loading)
+var _load_key := "" ## the document key when the load now in flight was requested
+var _restore_due := false ## the first tree answer after a new document restores its remembered open rows (once)
+var _open_touched := false ## the person opened or closed rows since the document's load began: a restore never overwrites that
+var _toolbar: Control
 
 const INDENT_PX := 24.0
 const DELETE_CONFIRM_MS := 4000 ## how long a first press on Delete waits for its second
@@ -83,7 +94,14 @@ func setup_tree(left: XRController3D, right: XRController3D, camera: XRCamera3D,
 	open_lateral_offset = -0.22
 	super.setup(left, right, camera)
 	if _uses_tree_endpoint():
-		# The grouping switch (spec section 4) lives in the window header, between the title and the close button; saved with the other user settings.
+		# Find (B7: the popup keyboard, spec section 11) and the grouping switch (spec section 4) live in the window header, between the title and the close button.
+		_find_button = add_header_button("", _open_find, false) # (an icon: the title still fits beside it)
+		_find_button.icon = UiIcons.texture("search", 40)
+		_find_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_find_button.expand_icon = false
+		_find_button.tooltip_text = "Find in the tree"
+		_header.move_child(_find_button, _header.get_child_count() - 2)
+		# The grouping switch is saved with the other user settings.
 		_fold_button = add_header_button("Fold x4", func() -> void: _set_grouping(not _grouping()), false)
 		_fold_button.toggle_mode = true
 		_fold_button.set_pressed_no_signal(_grouping())
@@ -105,6 +123,13 @@ func mark_stale() -> void:
 	## above on why it's a lazy client to GET .../occurrences rather than
 	## an eager assembly-mesh JSON fetch.
 	_stale = true
+	_refresh_token += 1 # (an answer still in flight describes the document that is going: it is dropped, open or not)
+	if _document_key() != _doc_key:
+		_query = "" # (a different document: the old words would hide it)
+	_doc_key = ""
+	_restore_due = true # (the first answer for this document restores what it had open)
+	_open_touched = false
+	_restored_any = false
 	_tree = []
 	_has_selected = false
 	_selected = []
@@ -128,6 +153,7 @@ func _on_opened() -> void:
 func _refresh_root() -> void:
 	_refresh_token += 1
 	var token := _refresh_token
+	_load_key = _document_key()
 	_root_part_id = _main.current_root_part_id() if _main else ""
 	if _root_part_id == "":
 		_set_status("No assembly loaded yet.")
@@ -310,7 +336,9 @@ func _on_world_selection(node: Node3D, level: Dictionary) -> void:
 		return # (the tree's own press: already shown)
 	_selected = path
 	_has_selected = true
-	if is_open():
+	if _filtering():
+		call_deferred("_rebuild_rows") # (a filter does not change the open rows: clearing it reveals the selection)
+	elif is_open():
 		_reveal(path)
 
 
@@ -318,6 +346,7 @@ func _reveal(path: Array) -> void:
 	## Expands every fetched-or-fetchable row above `path` (a level at a time), then redraws with the row marked and in view.
 	if _tree.is_empty():
 		return
+	_open_touched = true
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
 			if str(key).contains("#group:"):
@@ -331,6 +360,7 @@ func _reveal(path: Array) -> void:
 		elif not bool(row["expanded"]):
 			row["expanded"] = true
 	_rebuild_rows()
+	_store_open_keys()
 	await get_tree().process_frame # (the list's height settles: the spacers stand in for the rows that are not drawn)
 	_scroll_to_row(path)
 
@@ -372,13 +402,49 @@ func _build_content() -> Control:
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_status_label)
 
+	_query_box = VBoxContainer.new() # B7: the words being searched for, under the title, with a clear button (shown only while there are some)
+	_query_box.visible = false
+	var query_line := HBoxContainer.new()
+	query_line.add_theme_constant_override("separation", 6)
+	_query_label = Label.new()
+	_query_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_query_label.clip_text = true
+	query_line.add_child(_query_label)
+	var clear := Button.new()
+	clear.text = "Clear"
+	clear.pressed.connect(clear_query)
+	query_line.add_child(clear)
+	_query_box.add_child(query_line)
+	_query_hint = Label.new()
+	_query_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_query_hint.theme_type_variation = &"LabelDim"
+	_query_box.add_child(_query_hint)
+	box.add_child(_query_box)
+	box.move_child(_query_box, 0)
+
+	var toolbar := HBoxContainer.new()
+	toolbar.add_theme_constant_override("separation", 4)
+	_toolbar = toolbar
 	var refresh := Button.new()
 	refresh.text = "Refresh"
+	refresh.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	refresh.pressed.connect(func() -> void:
 		_stale = true
 		_refresh_root()
 	)
-	box.add_child(refresh)
+	toolbar.add_child(refresh)
+	if _uses_action_bar():
+		var collapse := Button.new()
+		collapse.text = "Collapse"
+		collapse.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		collapse.pressed.connect(collapse_all)
+		toolbar.add_child(collapse)
+		var to_selection := Button.new()
+		to_selection.text = "To selection"
+		to_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		to_selection.pressed.connect(expand_to_selection)
+		toolbar.add_child(to_selection)
+	box.add_child(toolbar)
 
 	var rows_scroll := ScrollContainer.new()
 	rows_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -433,6 +499,7 @@ func _rebuild_rows() -> void:
 	else:
 		_add_rows(_tree, 0, "")
 	_none_label.visible = _tree.is_empty()
+	_sync_query_row()
 	_layout_pool(true)
 	_rebuild_bar()
 
@@ -633,7 +700,7 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 		"group":
 			var srow: Dictionary = d["srow"]
 			(line.get_child(0) as Control).custom_minimum_size.x = int(srow["depth"]) * INDENT_PX
-			_show_arrow(arrow, true, bool(srow["open"]))
+			_show_arrow(arrow, true, bool(srow["open"]), bool(d.get("inert", false)))
 			folder.visible = false
 			nb.visible = true
 			nb.toggle_mode = false
@@ -646,14 +713,14 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 			if hint != "":
 				nb.text += "  · %s" % hint
 			_tint_state(nb, {"state": srow["state"]})
-			if bool(srow["suppressed"]) or bool(srow["hidden"]):
+			if bool(srow["suppressed"]) or bool(srow["hidden"]) or bool(d.get("dim", false)):
 				nb.modulate = Color(1, 1, 1, 0.5)
 			_bind_bubble(line, srow["bubble"])
 		_:
 			var row: Dictionary = d["row"]
 			var path: Array = row.get("path", [])
 			(line.get_child(0) as Control).custom_minimum_size.x = int(d["depth"]) * INDENT_PX
-			_show_arrow(arrow, bool(d["expandable"]), bool(row["expanded"]))
+			_show_arrow(arrow, bool(d["expandable"]), bool(d.get("open", row["expanded"])), bool(d.get("inert", false)))
 			folder.visible = false
 			nb.visible = true
 			nb.toggle_mode = true
@@ -665,8 +732,8 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 			_tint_state(nb, row)
 			if int(row.get("set_slot", -1)) >= 0 and Model.state_level(str(row.get("state", ""))) == "":
 				nb.add_theme_color_override("font_color", SET_COLOURS[int(row["set_slot"]) % SET_COLOURS.size()]) # M5: one colour per rigid set (the bracket in the flat app)
-			if bool(row.get("suppressed", false)) or _row_view_hidden(row):
-				nb.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved)
+			if bool(row.get("suppressed", false)) or _row_view_hidden(row) or bool(d.get("dim", false)):
+				nb.modulate = Color(1, 1, 1, 0.5) # dimmed: suppressed, or hidden in the view (view-only, never saved); under a filter, a row listed only because a match is below it
 			_bind_bubble(line, d["bubble"])
 			var key := Model.path_key(path)
 			line.set_meta("key", key)
@@ -675,13 +742,13 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 			_add_row_actions(line, row, bool(d["expandable"]))
 
 
-func _show_arrow(arrow: Button, expandable: bool, open: bool) -> void:
-	## A row that cannot open keeps the arrow's width, invisible and inert (the names stay in line).
+func _show_arrow(arrow: Button, expandable: bool, open: bool, inert: bool = false) -> void:
+	## A row that cannot open keeps the arrow's width, invisible and inert (the names stay in line). While a filter is on every chevron is inert: shown dim, as the filter has them.
 	arrow.visible = true
 	arrow.text = ("v" if open else ">") if expandable else "" # (a text expander: the state icon is on the name)
-	arrow.modulate = Color.WHITE if expandable else Color(1, 1, 1, 0)
-	arrow.mouse_filter = Control.MOUSE_FILTER_STOP if expandable else Control.MOUSE_FILTER_IGNORE
-	arrow.focus_mode = Control.FOCUS_ALL if expandable else Control.FOCUS_NONE
+	arrow.modulate = (Color(1, 1, 1, 0.4) if inert else Color.WHITE) if expandable else Color(1, 1, 1, 0)
+	arrow.mouse_filter = Control.MOUSE_FILTER_STOP if expandable and not inert else Control.MOUSE_FILTER_IGNORE
+	arrow.focus_mode = Control.FOCUS_ALL if expandable and not inert else Control.FOCUS_NONE
 
 
 func _bind_bubble(line: HBoxContainer, bubble) -> void:
@@ -737,12 +804,14 @@ func _press_is_stale(line: HBoxContainer) -> bool:
 
 func _on_line_arrow(line: HBoxContainer) -> void:
 	var d: Dictionary = line.get_meta("desc", {})
-	if d.is_empty() or _press_is_stale(line):
-		return
+	if d.is_empty() or _press_is_stale(line) or _filtering():
+		return # (the chevrons are inert while a filter is on, spec section 11)
+	_open_touched = true
 	if str(d["kind"]) == "row":
-		_expand_row(d["row"])
+		await _expand_row(d["row"])
 	elif str(d["kind"]) == "group":
 		_toggle_group(str(d["srow"]["key"]))
+	_store_open_keys()
 
 
 func _on_line_name(line: HBoxContainer) -> void:
@@ -751,8 +820,10 @@ func _on_line_name(line: HBoxContainer) -> void:
 		return
 	if str(d["kind"]) == "row":
 		_on_row_selected(d["row"])
-	elif str(d["kind"]) == "group":
+	elif str(d["kind"]) == "group" and not _filtering():
+		_open_touched = true
 		_toggle_group(str(d["srow"]["key"])) # (a group's name opens it too: it is not a selection)
+		_store_open_keys()
 
 
 func _on_line_resized(line: HBoxContainer) -> void:
@@ -781,19 +852,170 @@ func _tint_state(button: Button, row: Dictionary) -> void:
 		button.add_theme_color_override("font_color", tokens.warn)
 
 
+# --- B7: Find (spec section 11), Collapse, To selection, and the remembered open rows (spec section 12) ----------------------------------------------------------
+
+var _match_count := 0
+var _restored_any := false ## the document's remembered rows were applied to this tree (so a Save As carries them to the new file's entry)
+
+
+func _filtering() -> bool:
+	return _query != "" and _endpoint_active()
+
+
+func current_query() -> String:
+	return _query
+
+
+func _open_find() -> void:
+	if _main == null:
+		return
+	_main.open_keyboard_for(_query, func(text: String) -> void: set_query(text),
+		{"mode": "full", "title": "Find in the tree (e.g. bolt :errors  :missing  :hidden  :unsaved)", "confirm_label": "Find"})
+
+
+func set_query(text: String) -> void:
+	## Narrows the tree to the rows that match (and what is above them): words match names, ":errors" and the other tokens match states (Model.filtered_rows). The open rows are
+	## not changed. An empty text clears it.
+	var words := text.strip_edges()
+	if words == "":
+		clear_query()
+		return
+	_query = words
+	if _rows_scroll != null:
+		_rows_scroll.scroll_vertical = 0
+	_rebuild_rows()
+
+
+func clear_query() -> void:
+	## Back to the open rows as they were; the selected row, if any, is revealed (spec section 11).
+	if _query == "":
+		return
+	_query = ""
+	_unknown_tokens = []
+	_rebuild_rows()
+	if _has_selected and not _selected.is_empty() and not _tree.is_empty():
+		await _reveal(_selected)
+
+
+func _sync_query_row() -> void:
+	if _query_box == null:
+		return
+	_query_box.visible = _query != ""
+	if _query == "":
+		return
+	_query_label.text = "Find: %s" % _query
+	var hints: PackedStringArray = []
+	if not _filtering():
+		hints.append("The filter applies once the tree has loaded.")
+	else:
+		hints.append("%d match%s." % [_match_count, "" if _match_count == 1 else "es"] if _match_count > 0 else "No matches.")
+		for token in _unknown_tokens:
+			hints.append("Unknown filter %s." % str(token))
+		var words := _query.to_lower().split(" ", false)
+		if (words.has(":errors") or words.has(":warnings")) and not bool(_resp.get("status_included", false)):
+			hints.append("Constraint states are still loading.")
+		hints.append("Part and assembly names only: features are not searched.")
+	_query_hint.text = " ".join(hints)
+
+
+func collapse_all() -> void:
+	## Every row closed (the root stays open); stored.
+	if _tree.is_empty():
+		return
+	_open_touched = true
+	_collapse_rows(_tree[0]["children"] as Array)
+	_open_groups.clear()
+	_rebuild_rows()
+	_store_open_keys()
+
+
+func _collapse_rows(rows: Array) -> void:
+	for row in rows:
+		row["expanded"] = false
+		if row.get("children") != null:
+			_collapse_rows(row["children"])
+
+
+func expand_to_selection() -> void:
+	## Opens what is above the selected row (spec section 8's reveal keys) and scrolls to it; stored.
+	if _tree.is_empty():
+		return
+	_open_touched = true # (even when there is nothing to add: the person has chosen their rows)
+	if not _has_selected or _selected.is_empty():
+		_set_status("Nothing selected: pick a part first.")
+		return
+	await _reveal(_selected)
+
+
+func _document_key() -> String:
+	## The one place the remembered rows' key is decided: the document's file path, or "" when it has none (then nothing is stored or restored).
+	if _main == null or not _main.has_method("tree_document_key"):
+		return ""
+	return str(_main.tree_document_key())
+
+
+func _restore_open_rows(resp: Dictionary, rows: Array) -> void:
+	## The first tree answer of a document: its remembered open rows (Model.restore_open_keys: the ones that still exist). Not applied when the person has already opened or
+	## closed rows, or when the document is not the one the request was for. Does not move the selection or the camera.
+	var key := _document_key()
+	_doc_key = key
+	_restored_any = false
+	if key == "" or key != _load_key or _open_touched:
+		return
+	var stored = _main.tree_open_keys_for(key)
+	if not (stored is Array):
+		return
+	var index := Model.index_rows(rows)
+	for k in Model.restore_open_keys(resp, stored):
+		if str(k).contains("#group:"):
+			_open_groups[k] = true
+		elif index.has(k):
+			index[k]["expanded"] = true
+		else:
+			continue
+		_restored_any = true
+
+
+func _store_open_keys() -> void:
+	## Writes the open rows of the document shown, only after the person changed them (never from a refresh or a load), in the spec's order and within its limit.
+	if _doc_key == "" or _doc_key != _document_key() or _tree.is_empty() or _resp.is_empty() or _main == null or not _main.has_method("set_tree_open_keys"):
+		return
+	_main.set_tree_open_keys(_doc_key, Model.restore_open_keys(_resp, _spec_open_keys()))
+
+
+func note_document_changed() -> void:
+	## The document got a new file key without being replaced (Save As): its remembered rows follow it, so what was open there is open in the saved file too.
+	var key := _document_key()
+	if key == _doc_key or _tree.is_empty() or _resp.is_empty() or _stale:
+		return
+	_doc_key = key
+	if _open_touched or _restored_any:
+		_store_open_keys()
+
+
 # --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), listed with the same kinds as above ---------------------------------------------
 
 func _add_spec_rows() -> void:
-	var spec_rows := Model.visible_rows(_resp, _spec_open_keys(), _grouping(), _unsaved_part_ids())
+	var filtering := _filtering()
+	var spec_rows: Array
+	if filtering:
+		var found := Model.filtered_rows(_resp, _query, _spec_open_keys(), _grouping(), _unsaved_part_ids())
+		spec_rows = found["rows"]
+		_unknown_tokens = found["unknown"]
+		_match_count = spec_rows.filter(func(r): return bool(r["match"])).size()
+	else:
+		spec_rows = Model.visible_rows(_resp, _spec_open_keys(), _grouping(), _unsaved_part_ids())
+		_unknown_tokens = []
 	var index := Model.index_rows(_tree[0]["children"] as Array)
 	for srow in spec_rows:
 		var depth := int(srow["depth"])
+		var dim: bool = filtering and not bool(srow["match"]) and str(srow["kind"]) != "root" # (listed only because a match is below it)
 		match str(srow["kind"]):
 			"root":
 				_tree[0]["state"] = srow["state"]
 				_add_row_line(_tree[0], 0, false, null)
 			"group":
-				_descs.append({"kind": "group", "srow": srow})
+				_descs.append({"kind": "group", "srow": srow, "inert": filtering, "dim": dim})
 			"mates_folder", "patterns_folder":
 				_descs.append({"kind": "folder", "srow": srow}) # (their count and health; what is inside them is a later phase's, so the row is a label)
 			"feature":
@@ -805,6 +1027,11 @@ func _add_spec_rows() -> void:
 				row["state"] = srow["state"] # (drawn from the latest unsaved set, not the one the row was built with)
 				var has_children := not (row["children"] as Array).is_empty()
 				_add_row_line(row, depth, bool(srow["expandable"]) and has_children, srow["bubble"])
+				if filtering:
+					var d: Dictionary = _descs.back()
+					d["open"] = srow["open"]
+					d["inert"] = true
+					d["dim"] = dim
 
 
 func _spec_open_keys() -> Array:
@@ -870,6 +1097,8 @@ func _load_endpoint(token: int) -> bool:
 		if _route_missing(result):
 			_endpoint_missing = true # an older backend: no such route (not "Part not found", which is an answer from a backend that has the call)
 			_resp = {}
+			_restore_due = false # (open rows are remembered from the tree call's keys only)
+			_query = ""
 			_sync_fold_button()
 			return false
 		_set_status("Couldn't load the assembly tree: %s" % _reason(result))
@@ -912,6 +1141,8 @@ static func _reason(result: Dictionary) -> String:
 func _sync_fold_button() -> void:
 	if _fold_button != null:
 		_fold_button.visible = _uses_tree_endpoint() # (grouping is the tree call's: the per-level fallback has nothing to fold)
+	if _find_button != null:
+		_find_button.visible = _uses_tree_endpoint() # (so is the filter)
 
 
 func _tree_note(status_done: bool) -> String:
@@ -933,6 +1164,9 @@ func _adopt_response(resp: Dictionary) -> void:
 	_resp = resp
 	var old_children: Array = (_tree[0]["children"] as Array) if not _tree.is_empty() and _tree[0].get("children") != null else []
 	var rows := Model.merge_expanded(old_children, Model.rows_from_tree(resp.get("children", []), [], _root_part_id, bool(resp.get("status_failed", false)), _unsaved_part_ids()))
+	if _restore_due:
+		_restore_due = false
+		_restore_open_rows(resp, rows)
 	var root_name := str(resp.get("part_name", ""))
 	if root_name == "":
 		root_name = str(_part_names.get(_root_part_id, "Assembly"))

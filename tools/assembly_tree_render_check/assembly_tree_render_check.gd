@@ -2,7 +2,7 @@ extends SceneTree
 ## A5 check of the Assembly Tree window: real backend (DIDSA-CAD main, GET /parts/{id}/assembly-tree) AND, when there is a renderer, pictures.
 ## Fixtures are built through the backend's API (POST /import/native for the parts, POST /parts/{id}/mates, PATCH an occurrence's transform), from
 ## demo/assemblies/plate_and_peg/Plate_and_peg.didsa's two real parts plus generated feature-less parts; nothing is written to the repo.
-## Eight scenarios (TREE_SCENARIOS=a,c,... picks some; default all), each asserted on the window's own rows (a SMOKE line) and, with a renderer, saved as PNG:
+## Ten scenarios (TREE_SCENARIOS=a,c,... picks some; default all), each asserted on the window's own rows (a SMOKE line) and, with a renderer, saved as PNG:
 ##   a  a two-level assembly just opened: the structure only (status held back), then after ?status=true has merged in
 ##   b  a collapsed parent with a missing file and an over-constrained part below it: the count bubble (then open)
 ##   c  one Part placed 4 times in a level: "Peg x4" closed, open, and with "Fold x4" off
@@ -10,6 +10,7 @@ extends SceneTree
 ##   e  a part selected in the world: the tree opens down to it through a folded group
 ##   f  a rigid-set part that is over-constrained: the red tint wins over the set colour (the set ids are SYNTHETIC, see _patch_rigid_sets)
 ##   g  an older backend (a stand-in that answers the framework's 404 for the call): no Fold button, one level per request
+##   j  Find (B7): ":errors", a name with an unknown token, and cleared again, with the query line under the title
 ##   h  a generated tree of 2,000 occurrences: the window open and scrolled; the time the rows took to build is printed as "SMOKE TIMING ..." (a number, not an assertion)
 ## Pictures: TREE_RENDER_DIR=/some/dir  xvfb-run -a "$GODOT" --path . --script res://tools/assembly_tree_render_check/assembly_tree_render_check.gd   (Mesa software GL, the GL-compatibility
 ## driver, not the project's mobile renderer). <name>.png is the window's own pixels (what the panel texture holds), <name>_wide.png the view from eye height with
@@ -565,6 +566,32 @@ func scenario_i() -> void:
 	await shot("i_mates_folder", true)
 
 
+func scenario_j() -> void:
+	await fresh()
+	print("== j: Find on the Arm / Linkage assembly (B7): ':errors', a name, an unknown token, cleared")
+	var root_id := await fixture_problems()
+	check("j: the fixture is on the backend", root_id != "")
+	await show_in_app(root_id, true)
+	await open_window_and_wait()
+	var closed_texts := texts()
+	window.set_query(":errors")
+	await frames(3)
+	var errs := texts()
+	check("j: ':errors' lists the root, the Linkage above them, the two over-constrained pegs and the missing file, and not the healthy Pin B or the Plates (%s)" % str(errs), errs.any(func(t): return str(t).contains("Linkage")) and errs.any(func(t): return str(t).contains("Peg A")) and errs.any(func(t): return str(t).contains("lost_bracket")) and not errs.any(func(t): return str(t).contains("Pin B")))
+	check("j: the Linkage is listed only because rows below it match: dimmed; the matches are not", line_with("Linkage").get("dimmed", false) == true and line_with("Peg A").get("dimmed", true) == false)
+	check("j: the query shows under the title with its match count", window._query_box.visible and window._query_hint.text.contains("3 matches"))
+	await shot("j1_find_errors", true)
+	window.set_query("peg :nothing")
+	await frames(3)
+	var named := texts()
+	check("j: a name finds Peg A and Spare peg (not Pin B), the unknown token is named in the hint (%s)" % str(named), named.any(func(t): return str(t).contains("Peg A")) and not named.any(func(t): return str(t).contains("Pin B")) and window._query_hint.text.contains("Unknown filter :nothing"))
+	await shot("j2_find_name_unknown_token", true)
+	window.clear_query()
+	await frames(3)
+	check("j: cleared, the rows are the closed tree again and the query line is gone", texts() == closed_texts and not window._query_box.visible)
+	await shot("j3_cleared", true)
+
+
 func scenario_h() -> void:
 	await fresh()
 	print("== h: a generated tree of 2,000 occurrences")
@@ -679,7 +706,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var wanted := OS.get_environment("TREE_SCENARIOS")
-	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h", "i"])
+	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])
 	for s in picks:
 		window.request_hook = Callable(self, "stand_in")
 		match s:
@@ -692,6 +719,7 @@ func _initialize() -> void:
 			"g": await scenario_g()
 			"h": await scenario_h()
 			"i": await scenario_i()
+			"j": await scenario_j()
 	if rendering:
 		check("the panel was drawn with pixels in the last scenario", window_has_pixels())
 	check("no request to the backend failed outside the 404 stand-in", failed_requests == 0)

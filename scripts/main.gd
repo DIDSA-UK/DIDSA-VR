@@ -416,6 +416,20 @@ func set_tree_grouping(on: bool) -> void:
 	_settings.set_tree_group_repeats(on)
 
 
+func tree_document_key() -> String:
+	## What the Assembly Tree remembers its open rows under: the document's file path. "" when the session has no file (a new empty assembly, a bare .glb), so nothing is
+	## stored for it (a key that could not be read back on the next open would only leave entries nobody uses).
+	return _opened_native_path
+
+
+func tree_open_keys_for(doc: String):
+	return _settings.tree_open_keys(doc)
+
+
+func set_tree_open_keys(doc: String, keys: Array) -> void:
+	_settings.set_tree_open_keys(doc, keys)
+
+
 func world_preview_auto() -> bool:
 	return _settings.world_preview_auto
 
@@ -2777,6 +2791,7 @@ func save_project(policy: String = "ask") -> Dictionary:
 	var root_file: String = _project_save.path_of(str(session["root_part_id"]))
 	if root_file != "":
 		_opened_native_path = root_file # (a demo or a fresh session now has a root file: later saves update it in place)
+		_assembly_tree_window.note_document_changed() # (the tree's remembered open rows follow the file it is now saved as)
 		last_saved_path = root_file
 		_native_root_id_cache.erase(root_file)
 	if ok:

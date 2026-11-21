@@ -532,29 +532,48 @@ static func node_key(path: Array) -> String:
 
 # --- visible rows (section 7) --------------------------------------------------------------------------------------------------------------------------------
 
-static func visible_rows(response: Dictionary, open: Array, grouping: bool, unsaved_part_ids: Array, features: Dictionary = {}) -> Array:
+static func visible_rows(response: Dictionary, open: Array, grouping: bool, unsaved_part_ids: Array, features: Dictionary = {}, opts: Dictionary = {}) -> Array:
 	## The flat list a client draws for a set of open row keys. Every row: key, kind, depth, label, state, bubble, expandable, open, count, path, hidden, suppressed.
+	## `opts` is for the filter and the restore (spec 11 and 12): "listed" (a Dictionary of keys: only those rows are emitted), "all" (every row that can open is open) and
+	## "trace" (a Dictionary the walk fills: key -> {"parent", "fixed"}).
+	var ctx := {"open": open, "all": bool(opts.get("all", false)), "listed": opts.get("listed"), "trace": opts.get("trace"), "grouping": grouping, "unsaved": unsaved_part_ids, "features": features}
 	var rows: Array = []
 	var root_unsaved := unsaved_part_ids.has(str(response.get("part_id", "")))
-	rows.append(_row("", "root", 0, str(response.get("part_name", "")), "unsaved" if root_unsaved else "none", null, false, true, null, [], false, false))
-	_list_level(children_of(response), "", 1, open, grouping, unsaved_part_ids, features, rows)
-	var mates = response.get("mates")
-	if mates is Dictionary and int(mates.get("count", 0)) > 0:
-		rows.append(_row("#mates", "mates_folder", 1, "Mates", "none", folder_bubble(mates), true, open.has("#mates"), int(mates["count"]), null, false, false))
-	var patterns = response.get("patterns")
-	if patterns is Dictionary and int(patterns.get("count", 0)) > 0:
-		rows.append(_row("#patterns", "patterns_folder", 1, "Patterns", "none", null, true, open.has("#patterns"), int(patterns["count"]), null, false, false))
-	_add_features("", 1, features, rows)
+	_emit(ctx, rows, _row("", "root", 0, str(response.get("part_name", "")), "unsaved" if root_unsaved else "none", null, false, true, null, [], false, false), null, false)
+	_list_level(children_of(response), "", 1, ctx, rows)
+	if ctx["listed"] == null: # the Mates and Patterns folders are never listed while a filter is on
+		var mates = response.get("mates")
+		if mates is Dictionary and int(mates.get("count", 0)) > 0:
+			_emit(ctx, rows, _row("#mates", "mates_folder", 1, "Mates", "none", folder_bubble(mates), true, _is_open(ctx, "#mates"), int(mates["count"]), null, false, false), "", false)
+		var patterns = response.get("patterns")
+		if patterns is Dictionary and int(patterns.get("count", 0)) > 0:
+			_emit(ctx, rows, _row("#patterns", "patterns_folder", 1, "Patterns", "none", null, true, _is_open(ctx, "#patterns"), int(patterns["count"]), null, false, false), "", false)
+	_add_features("", 1, ctx, rows)
 	return rows
+
+
+static func _is_open(ctx: Dictionary, key: String) -> bool:
+	return bool(ctx["all"]) or (ctx["open"] as Array).has(key)
+
+
+static func _emit(ctx: Dictionary, rows: Array, row: Dictionary, parent, fixed: bool) -> bool:
+	## Appends a row unless a filter's `listed` set leaves it out; records its parent for the filter's walk back up.
+	var listed = ctx["listed"]
+	if listed != null and not (listed as Dictionary).has(row["key"]):
+		return false
+	rows.append(row)
+	if ctx["trace"] != null:
+		(ctx["trace"] as Dictionary)[row["key"]] = {"parent": parent, "fixed": fixed}
+	return true
 
 
 static func _row(key: String, kind: String, depth: int, label: String, state: String, bubble, expandable: bool, is_open: bool, count, path, hidden: bool, suppressed: bool) -> Dictionary:
 	return {"key": key, "kind": kind, "depth": depth, "label": label, "state": state, "bubble": bubble, "expandable": expandable, "open": is_open, "count": count, "path": path, "hidden": hidden, "suppressed": suppressed}
 
 
-static func _add_features(owner_key: String, depth: int, features: Dictionary, rows: Array) -> void:
-	for f in features.get(owner_key, []):
-		rows.append(_row("%s#feature:%s" % [owner_key, str(f["id"])], "feature", depth, str(f["label"]), "none", null, false, false, null, null, false, false))
+static func _add_features(owner_key: String, depth: int, ctx: Dictionary, rows: Array) -> void:
+	for f in (ctx["features"] as Dictionary).get(owner_key, []):
+		_emit(ctx, rows, _row("%s#feature:%s" % [owner_key, str(f["id"])], "feature", depth, str(f["label"]), "none", null, false, false, null, null, false, false), owner_key, false)
 
 
 static func children_of(node: Dictionary) -> Array:
@@ -567,24 +586,25 @@ static func node_expandable(node: Dictionary) -> bool:
 	return str(node.get("kind", "")) != "missing" and (not children_of(node).is_empty() or _n(node.get("feature_count")) > 0)
 
 
-static func _occurrence_row(node: Dictionary, label: String, depth: int, open: Array, unsaved: Array) -> Dictionary:
+static func _occurrence_row(node: Dictionary, label: String, depth: int, ctx: Dictionary) -> Dictionary:
 	var key := node_key(node["path"])
 	var expandable := node_expandable(node)
-	var is_open := expandable and open.has(key)
-	var bubble = occurrence_bubble(node, is_open, unsaved) if expandable else null
-	return _row(key, str(node.get("kind", "part")), depth, label, state_of(node, unsaved), bubble, expandable, is_open, null, node["path"], bool(node.get("hidden", false)), bool(node.get("suppressed", false)))
+	var is_open := expandable and _is_open(ctx, key)
+	var bubble = occurrence_bubble(node, is_open, ctx["unsaved"]) if expandable else null
+	return _row(key, str(node.get("kind", "part")), depth, label, state_of(node, ctx["unsaved"]), bubble, expandable, is_open, null, node["path"], bool(node.get("hidden", false)), bool(node.get("suppressed", false)))
 
 
-static func _list_level(siblings: Array, parent_key: String, depth: int, open: Array, grouping: bool, unsaved: Array, features: Dictionary, rows: Array) -> void:
-	for entry in plan_level(siblings, grouping):
+static func _list_level(siblings: Array, parent_key: String, depth: int, ctx: Dictionary, rows: Array) -> void:
+	var unsaved: Array = ctx["unsaved"]
+	for entry in plan_level(siblings, bool(ctx["grouping"])):
 		var names: Array = entry["names"]
 		if not bool(entry["group"]):
-			_list_node(siblings[entry["index"]], names[entry["index"]]["label"], depth, open, grouping, unsaved, features, rows)
+			_list_node(siblings[entry["index"]], names[entry["index"]]["label"], depth, parent_key, ctx, rows)
 			continue
 		var idx: Array = entry["members"]
 		var members: Array = idx.map(func(i): return siblings[i])
 		var gkey := group_key(parent_key, str(members[0]["occurrence_id"]))
-		var is_open := open.has(gkey)
+		var is_open := _is_open(ctx, gkey)
 		var live := members.filter(func(m): return not bool(m.get("suppressed", false)))
 		var pool: Array = live if not live.is_empty() else members
 		var state := "none"
@@ -594,18 +614,18 @@ static func _list_level(siblings: Array, parent_key: String, depth: int, open: A
 				state = st
 		var all_hidden := members.all(func(m): return bool(m.get("hidden", false)))
 		var all_suppressed := members.all(func(m): return bool(m.get("suppressed", false)))
-		rows.append(_row(gkey, "group", depth, "%s x%d" % [entry["base"], members.size()], state, null if is_open else group_bubble(members, unsaved), true, is_open, members.size(), null, all_hidden, all_suppressed))
-		if is_open:
+		var shown := _emit(ctx, rows, _row(gkey, "group", depth, "%s x%d" % [entry["base"], members.size()], state, null if is_open else group_bubble(members, unsaved), true, is_open, members.size(), null, all_hidden, all_suppressed), parent_key, false)
+		if shown and is_open:
 			for i in idx:
-				_list_node(siblings[i], names[i]["label"], depth + 1, open, grouping, unsaved, features, rows)
+				_list_node(siblings[i], names[i]["label"], depth + 1, gkey, ctx, rows)
 
 
-static func _list_node(node: Dictionary, label: String, depth: int, open: Array, grouping: bool, unsaved: Array, features: Dictionary, rows: Array) -> void:
-	var row := _occurrence_row(node, label, depth, open, unsaved)
-	rows.append(row)
-	if bool(row["open"]):
-		_list_level(children_of(node), str(row["key"]), depth + 1, open, grouping, unsaved, features, rows)
-		_add_features(str(row["key"]), depth + 1, features, rows)
+static func _list_node(node: Dictionary, label: String, depth: int, parent_key: String, ctx: Dictionary, rows: Array) -> void:
+	var row := _occurrence_row(node, label, depth, ctx)
+	var shown := _emit(ctx, rows, row, parent_key, bool(node.get("fixed", false)))
+	if shown and bool(row["open"]):
+		_list_level(children_of(node), str(row["key"]), depth + 1, ctx, rows)
+		_add_features(str(row["key"]), depth + 1, ctx, rows)
 
 
 # --- reveal (section 8) ----------------------------------------------------------------------------------------------------------------------------------------
@@ -631,6 +651,107 @@ static func reveal_keys(response: Dictionary, path: Array, grouping: bool) -> Ar
 			keys.append(node_key(path.slice(0, i + 1)))
 		siblings = children_of(node)
 	return keys
+
+
+# --- filter (section 11) ---------------------------------------------------------------------------------------------------------------------------------------
+
+const ERROR_STATES := ["missing", "cycle", "broken", "over_constrained", "lost_reference"] ## the bubble's `error` set (lost_reference is the live part's, spec 13)
+const WARNING_STATES := ["near", "moved_reference"]
+const FILTER_TOKENS := [":missing", ":errors", ":warnings", ":unsaved", ":fixed", ":hidden", ":suppressed", ":parts", ":assemblies", ":features", ":sketches"]
+const NON_MATCHING_KINDS := ["root", "group", "mates_folder", "patterns_folder", "bodies_folder", "planes_folder", "surfaces_folder", "curves_folder"]
+
+
+static func parse_query(query: String) -> Dictionary:
+	## {"terms", "tokens", "unknown"}: lower case, in query order, each word once; a word starting with ":" is a token (spec 11).
+	var terms: Array = []
+	var tokens: Array = []
+	var unknown: Array = []
+	for word in _words(query):
+		var bucket: Array = terms
+		if word.begins_with(":"):
+			bucket = tokens if FILTER_TOKENS.has(word) else unknown
+		if not bucket.has(word):
+			bucket.append(word)
+	return {"terms": terms, "tokens": tokens, "unknown": unknown}
+
+
+static func _words(query: String) -> Array:
+	var flat := query.to_lower()
+	for ws in ["\t", "\n", "\r", "\u000b", "\u000c"]:
+		flat = flat.replace(ws, " ")
+	return Array(flat.split(" ", false))
+
+
+static func _token_met(token: String, row: Dictionary, fixed: bool) -> bool:
+	match token:
+		":missing": return row["state"] == "missing"
+		":errors": return ERROR_STATES.has(row["state"])
+		":warnings": return WARNING_STATES.has(row["state"])
+		":unsaved": return row["state"] == "unsaved"
+		":fixed": return fixed
+		":hidden": return bool(row["hidden"])
+		":suppressed": return bool(row["suppressed"])
+		":parts": return row["kind"] == "part"
+		":assemblies": return row["kind"] == "assembly"
+		":features": return row["kind"] == "feature"
+		":sketches": return row.get("type") == "sketch"
+	return false
+
+
+static func filtered_rows(response: Dictionary, query: String, open: Array, grouping: bool, unsaved_part_ids: Array, features: Dictionary = {}) -> Dictionary:
+	## {"rows", "unknown"} (spec 11): section 7's rows narrowed to the root, the matches and their ancestors, every row with `match`. An empty query is no filter (the rows
+	## for `open`, every match false). The open keys are not changed: the caller keeps its own.
+	if _words(query).is_empty():
+		var plain: Array = visible_rows(response, open, grouping, unsaved_part_ids, features)
+		for r in plain:
+			r["match"] = false
+		return {"rows": plain, "unknown": []}
+	var parsed := parse_query(query)
+	var terms: Array = parsed["terms"]
+	var tokens: Array = parsed["tokens"]
+	var trace := {}
+	var everything: Array = visible_rows(response, [], grouping, unsaved_part_ids, features, {"all": true, "trace": trace})
+	var matches := {}
+	if not terms.is_empty() or not tokens.is_empty():
+		for r in everything:
+			if NON_MATCHING_KINDS.has(r["kind"]):
+				continue
+			var label: String = str(r["label"]).to_lower()
+			if terms.all(func(t): return label.contains(t)) and tokens.all(func(t): return _token_met(t, r, bool(trace[r["key"]]["fixed"]))):
+				matches[r["key"]] = true
+	var listed := {"": true}
+	for k in matches:
+		var key = k
+		while key != null and not listed.has(key):
+			listed[key] = true
+			key = trace[key]["parent"]
+	var opened: Array = []
+	for k in listed:
+		if k != "" and not opened.has(trace[k]["parent"]):
+			opened.append(trace[k]["parent"]) # a listed row is open when something below it is listed
+	var rows: Array = visible_rows(response, opened, grouping, unsaved_part_ids, features, {"listed": listed})
+	for r in rows:
+		r["match"] = matches.has(r["key"])
+	return {"rows": rows, "unknown": parsed["unknown"]}
+
+
+# --- remembered open rows (section 12) -------------------------------------------------------------------------------------------------------------------------
+
+const MAX_STORED_KEYS := 2000
+const OPEN_KINDS := ["assembly", "part", "group", "mates_folder", "patterns_folder"]
+
+
+static func restore_open_keys(response: Dictionary, stored: Array, limit: int = MAX_STORED_KEYS) -> Array:
+	## The stored keys that still name a row that can open, in the visible-row order of the tree with everything open and grouping on (whatever the current grouping, so a
+	## switch off and on loses nothing), at most `limit`. Feature keys and the root's "" are never kept.
+	var wanted := {}
+	for k in stored:
+		wanted[str(k)] = true
+	var kept: Array = []
+	for r in visible_rows(response, [], true, [], {}, {"all": true}):
+		if wanted.has(r["key"]) and OPEN_KINDS.has(r["kind"]) and bool(r["expandable"]):
+			kept.append(r["key"])
+	return kept.slice(0, limit)
 
 
 # --- the window's rows from the endpoint's nodes -------------------------------------------------------------------------------------------------------------

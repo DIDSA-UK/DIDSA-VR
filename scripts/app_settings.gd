@@ -47,6 +47,8 @@ var sandbox_ghosts: bool = false ## Relax all mates: a see-through copy of each 
 var sandbox_lines: bool = false ## Relax all mates: a thin line from each moved part to where it goes back to
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
 var tree_group_repeats: bool = true ## the Assembly Tree folds 4 or more identical siblings into one "Bolt M4 x4" row (docs/assembly-tree spec section 4; the header switch of assembly_tree_window.gd)
+var tree_open_docs: Dictionary = {} ## the Assembly Tree's remembered open rows (docs/assembly-tree spec section 12): document key (the file's path) -> the open row keys, oldest-stored first; only for a document whose tree the person changed
+const TREE_OPEN_MAX_DOCS := 64 ## how many documents' open rows are kept (the oldest-stored go first)
 var show_landing: bool = true ## the landing (logo, rocket garden, launcher) on every start; off: the old start-up import
 var show_tips: bool = true ## the landing's tips reel
 var paint_recent: Array = [] ## the Appearance tool's recent colours ("#RRGGBB", newest first, appearance_tool.gd RECENT_MAX)
@@ -70,6 +72,12 @@ func load_from_disk() -> void:
 	max_rooms = clampi(int(config.get_value("rooms", "max_rooms", max_rooms)), 1, 16)
 	room_glass = bool(config.get_value("rooms", "glass", room_glass))
 	tree_group_repeats = bool(config.get_value("tree", "group_repeats", tree_group_repeats))
+	var open_docs = config.get_value("tree_open", "docs", tree_open_docs)
+	tree_open_docs = {}
+	if open_docs is Dictionary:
+		for doc in open_docs:
+			if open_docs[doc] is Array and str(doc) != "":
+				tree_open_docs[str(doc)] = (open_docs[doc] as Array).map(func(k): return str(k))
 	world_preview_auto = bool(config.get_value("rooms", "preview_auto", world_preview_auto))
 	world_preview_pulse = bool(config.get_value("rooms", "preview_pulse", world_preview_pulse))
 	group_deadzone = clampi(int(config.get_value("rooms", "group_deadzone", group_deadzone)), 0, 2)
@@ -110,6 +118,7 @@ func save_to_disk() -> void:
 	config.set_value("rooms", "max_rooms", max_rooms)
 	config.set_value("rooms", "glass", room_glass)
 	config.set_value("tree", "group_repeats", tree_group_repeats)
+	config.set_value("tree_open", "docs", tree_open_docs)
 	config.set_value("rooms", "group_deadzone", group_deadzone)
 	config.set_value("rooms", "preview_auto", world_preview_auto)
 	config.set_value("rooms", "preview_pulse", world_preview_pulse)
@@ -246,6 +255,22 @@ func set_room_glass(on: bool) -> void:
 
 func set_tree_group_repeats(on: bool) -> void:
 	tree_group_repeats = on
+	save_to_disk()
+
+
+func tree_open_keys(doc: String):
+	## The remembered open row keys of one document (an Array, possibly empty: "everything collapsed" is remembered too), or null when nothing was stored for it.
+	return (tree_open_docs[doc] as Array).duplicate() if doc != "" and tree_open_docs.has(doc) else null
+
+
+func set_tree_open_keys(doc: String, keys: Array) -> void:
+	## Stores one document's open row keys (the caller keeps them in the spec's order and within its limit). "" is no document and stores nothing.
+	if doc == "":
+		return
+	tree_open_docs.erase(doc) # (re-added last: the oldest-stored are dropped first)
+	tree_open_docs[doc] = keys.duplicate()
+	while tree_open_docs.size() > TREE_OPEN_MAX_DOCS:
+		tree_open_docs.erase(tree_open_docs.keys()[0])
 	save_to_disk()
 
 
