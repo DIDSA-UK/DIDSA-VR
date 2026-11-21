@@ -58,6 +58,8 @@ var _grouping_local := true ## the "fold repeats" switch when there is no main (
 var _fold_button: Button
 var _find_button: Button
 var _query := "" ## B7 (spec section 11): the words typed into Find ("" = no filter); only the view is narrowed, the open rows are never changed by it
+var _query_key := "" ## the document key the query was typed under (a different one clears it)
+var _status_unavailable := false ## the ?status=true call failed: the constraint states are not coming (the hint says so, not "still loading")
 var _unknown_tokens: Array = [] ## the filter's unknown ":tokens" of the last draw, for the hint
 var _query_box: Control
 var _query_label: Label
@@ -124,8 +126,9 @@ func mark_stale() -> void:
 	## an eager assembly-mesh JSON fetch.
 	_stale = true
 	_refresh_token += 1 # (an answer still in flight describes the document that is going: it is dropped, open or not)
-	if _document_key() != _doc_key:
-		_query = "" # (a different document: the old words would hide it)
+	_status_unavailable = false
+	if _query != "" and _document_key() != _query_key:
+		_query = "" # (a different file: the old words would hide it)
 	_doc_key = ""
 	_restore_due = true # (the first answer for this document restores what it had open)
 	_open_touched = false
@@ -154,6 +157,7 @@ func _refresh_root() -> void:
 	_refresh_token += 1
 	var token := _refresh_token
 	_load_key = _document_key()
+	_status_unavailable = false
 	_root_part_id = _main.current_root_part_id() if _main else ""
 	if _root_part_id == "":
 		_set_status("No assembly loaded yet.")
@@ -342,25 +346,32 @@ func _on_world_selection(node: Node3D, level: Dictionary) -> void:
 		_reveal(path)
 
 
-func _reveal(path: Array) -> void:
-	## Expands every fetched-or-fetchable row above `path` (a level at a time), then redraws with the row marked and in view.
+func _reveal(path: Array, force: bool = false) -> void:
+	## Expands every fetched-or-fetchable row above `path` (a level at a time), then redraws with the row marked and in view. A selection that needs nothing opened changes
+	## nothing and stores nothing; `force` (the To selection button) counts as the person's choice even then.
 	if _tree.is_empty():
 		return
-	_open_touched = true
+	var changed := force
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
-			if str(key).contains("#group:"):
+			if str(key).contains("#group:") and not _open_groups.has(key):
 				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below)
+				changed = true
 	for ancestor in Model.ancestors_paths(path):
 		var row := Model.find_row(_tree, ancestor)
 		if row.is_empty():
 			break
 		if row["children"] == null:
 			await _expand_row(row)
+			changed = true
 		elif not bool(row["expanded"]):
 			row["expanded"] = true
+			changed = true
+	if changed:
+		_open_touched = true
 	_rebuild_rows()
-	_store_open_keys()
+	if changed:
+		_store_open_keys()
 	await get_tree().process_frame # (the list's height settles: the spacers stand in for the rows that are not drawn)
 	_scroll_to_row(path)
 
@@ -881,6 +892,7 @@ func set_query(text: String) -> void:
 		clear_query()
 		return
 	_query = words
+	_query_key = _document_key()
 	if _rows_scroll != null:
 		_rows_scroll.scroll_vertical = 0
 	_rebuild_rows()
@@ -913,7 +925,7 @@ func _sync_query_row() -> void:
 			hints.append("Unknown filter %s." % str(token))
 		var words := _query.to_lower().split(" ", false)
 		if (words.has(":errors") or words.has(":warnings")) and not bool(_resp.get("status_included", false)):
-			hints.append("Constraint states are still loading.")
+			hints.append("Constraint states are unavailable." if _status_unavailable or bool(_resp.get("status_failed", false)) else "Constraint states are still loading.")
 		hints.append("Part and assembly names only: features are not searched.")
 	_query_hint.text = " ".join(hints)
 
@@ -944,7 +956,7 @@ func expand_to_selection() -> void:
 	if not _has_selected or _selected.is_empty():
 		_set_status("Nothing selected: pick a part first.")
 		return
-	await _reveal(_selected)
+	await _reveal(_selected, true)
 
 
 func _document_key() -> String:
@@ -983,14 +995,28 @@ func _store_open_keys() -> void:
 	_main.set_tree_open_keys(_doc_key, Model.restore_open_keys(_resp, _spec_open_keys()))
 
 
-func note_document_changed() -> void:
-	## The document got a new file key without being replaced (Save As): its remembered rows follow it, so what was open there is open in the saved file too.
+func note_document_changed(old_key: String) -> void:
+	## The document got a new file key without being replaced (Save As): its remembered rows follow it. With the tree loaded and changed by the person, what is open now is
+	## stored under the new file; otherwise (the tree stale, never opened, or untouched) the old file's entry is copied as it is.
 	var key := _document_key()
-	if key == _doc_key or _tree.is_empty() or _resp.is_empty() or _stale:
+	if key == "" or key == old_key:
 		return
-	_doc_key = key
-	if _open_touched or _restored_any:
-		_store_open_keys()
+	if _load_key == old_key:
+		_load_key = key # (a load in flight for the old file restores under the new one)
+	if not _tree.is_empty() and not _resp.is_empty() and not _stale and _doc_key == old_key:
+		_doc_key = key
+		if _open_touched:
+			_store_open_keys()
+			return
+	if _main != null and _main.has_method("copy_tree_open_keys"):
+		_main.copy_tree_open_keys(old_key, key)
+
+
+func document_replaced() -> void:
+	## A different document is being loaded (not a re-read of the same one): the words typed for the old one are cleared, whatever the two files are called.
+	_query = ""
+	_query_key = ""
+	_sync_query_row()
 
 
 # --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), listed with the same kinds as above ---------------------------------------------
@@ -1122,6 +1148,7 @@ func _load_endpoint(token: int) -> bool:
 		_set_status(_tree_note(true))
 		_rebuild_rows()
 	else:
+		_status_unavailable = true
 		Model.clear_pending(_resp) # (no fresh status is coming: fall back to the flag-based state rather than "updating" for good)
 		_rebuild_rows()
 		_set_status((_tree_note(false) + " Constraint states unavailable: %s" % _reason(with_status)).strip_edges())

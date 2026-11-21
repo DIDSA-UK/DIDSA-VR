@@ -158,7 +158,7 @@ func _initialize() -> void:
 	# --- B7: remembered open rows across a reopen, and Find, against the real tree
 	var settings = main._settings
 	var doc := "user://e2e_assembly_tree_doc.didsa"
-	settings.tree_open_docs = {}
+	settings.tree_open_docs = []
 	main._opened_native_path = doc
 	window.mark_stale() # (what opening the file again does: the same tree call, a new load)
 	await _wait_for(func() -> bool: return not window._stale and bool(window._resp.get("status_included", false)))
@@ -182,6 +182,6 @@ func _initialize() -> void:
 	check("B7: clearing it gives back the rows that were open", window._spec_open_keys() == open_before and window.row_count() > top_rows.size() + 1)
 	window.collapse_all()
 	check("B7: Collapse stores the empty set", window._spec_open_keys().is_empty() and settings.tree_open_keys(doc) == [])
-	settings.tree_open_docs = {}
+	settings.tree_open_docs = []
 	window._set_grouping(true)
 	quit(0)

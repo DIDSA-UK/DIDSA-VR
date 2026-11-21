@@ -532,11 +532,15 @@ static func node_key(path: Array) -> String:
 
 # --- visible rows (section 7) --------------------------------------------------------------------------------------------------------------------------------
 
-static func visible_rows(response: Dictionary, open: Array, grouping: bool, unsaved_part_ids: Array, features: Dictionary = {}, opts: Dictionary = {}) -> Array:
+static func visible_rows(response: Dictionary, open, grouping: bool, unsaved_part_ids: Array, features: Dictionary = {}, opts: Dictionary = {}) -> Array:
 	## The flat list a client draws for a set of open row keys. Every row: key, kind, depth, label, state, bubble, expandable, open, count, path, hidden, suppressed.
 	## `opts` is for the filter and the restore (spec 11 and 12): "listed" (a Dictionary of keys: only those rows are emitted), "all" (every row that can open is open) and
 	## "trace" (a Dictionary the walk fills: key -> {"parent", "fixed"}).
-	var ctx := {"open": open, "all": bool(opts.get("all", false)), "listed": opts.get("listed"), "trace": opts.get("trace"), "grouping": grouping, "unsaved": unsaved_part_ids, "features": features}
+	var open_set: Dictionary = open if open is Dictionary else {} # (a set: _is_open asks once per row)
+	if open is Array:
+		for k in open:
+			open_set[k] = true
+	var ctx := {"open": open_set, "all": bool(opts.get("all", false)), "listed": opts.get("listed"), "trace": opts.get("trace"), "grouping": grouping, "unsaved": unsaved_part_ids, "features": features}
 	var rows: Array = []
 	var root_unsaved := unsaved_part_ids.has(str(response.get("part_id", "")))
 	_emit(ctx, rows, _row("", "root", 0, str(response.get("part_name", "")), "unsaved" if root_unsaved else "none", null, false, true, null, [], false, false), null, false)
@@ -553,7 +557,7 @@ static func visible_rows(response: Dictionary, open: Array, grouping: bool, unsa
 
 
 static func _is_open(ctx: Dictionary, key: String) -> bool:
-	return bool(ctx["all"]) or (ctx["open"] as Array).has(key)
+	return bool(ctx["all"]) or (ctx["open"] as Dictionary).has(key)
 
 
 static func _emit(ctx: Dictionary, rows: Array, row: Dictionary, parent, fixed: bool) -> bool:
@@ -675,11 +679,25 @@ static func parse_query(query: String) -> Dictionary:
 	return {"terms": terms, "tokens": tokens, "unknown": unknown}
 
 
+static func _is_space(code: int) -> bool:
+	## What Python's str.split() (the reference's) treats as whitespace: ASCII 9-13 and 28-32, U+0085, U+00A0, U+1680, U+2000-200A, U+2028, U+2029, U+202F, U+205F, U+3000.
+	return (code >= 9 and code <= 13) or (code >= 28 and code <= 32) or code == 0x85 or code == 0xA0 or code == 0x1680 or (code >= 0x2000 and code <= 0x200A) \
+		or code == 0x2028 or code == 0x2029 or code == 0x202F or code == 0x205F or code == 0x3000
+
+
 static func _words(query: String) -> Array:
-	var flat := query.to_lower()
-	for ws in ["\t", "\n", "\r", "\u000b", "\u000c"]:
-		flat = flat.replace(ws, " ")
-	return Array(flat.split(" ", false))
+	var out: Array = []
+	var current := ""
+	for ch in query.to_lower():
+		if _is_space(ch.unicode_at(0)):
+			if current != "":
+				out.append(current)
+				current = ""
+		else:
+			current += ch
+	if current != "":
+		out.append(current)
+	return out
 
 
 static func _token_met(token: String, row: Dictionary, fixed: bool) -> bool:
@@ -725,10 +743,10 @@ static func filtered_rows(response: Dictionary, query: String, open: Array, grou
 		while key != null and not listed.has(key):
 			listed[key] = true
 			key = trace[key]["parent"]
-	var opened: Array = []
+	var opened := {}
 	for k in listed:
-		if k != "" and not opened.has(trace[k]["parent"]):
-			opened.append(trace[k]["parent"]) # a listed row is open when something below it is listed
+		if k != "":
+			opened[trace[k]["parent"]] = true # a listed row is open when something below it is listed
 	var rows: Array = visible_rows(response, opened, grouping, unsaved_part_ids, features, {"listed": listed})
 	for r in rows:
 		r["match"] = matches.has(r["key"])

@@ -1,0 +1,123 @@
+extends SceneTree
+## Tree B7 (spec section 12): the Assembly Tree's remembered open rows in app_settings.gd, no scene. Its own file (next to the settings file), an explicit stored-at order that
+## survives a save and a load (a ConfigFile sorts dictionary keys, so the order is a list), the limits applied on every change AND on load (64 documents, 2,000 keys a
+## document, 400,000 characters in all, oldest-stored first), and the write delayed so a run of changes is one write and settings.cfg is not rewritten.
+## Run: "$GODOT" --headless --path . --script res://tests/tree_open_settings.gd  (see tests/README.md)
+
+const AppSettings := preload("res://scripts/app_settings.gd")
+const SETTINGS := "user://tree_open_settings_test.cfg"
+const TREE_FILE := "user://tree_open_settings_test_tree_open.cfg"
+
+
+func check(what: String, ok: bool) -> void:
+	print("SMOKE ", what, ": ", ok)
+
+
+func fresh() -> RefCounted:
+	return AppSettings.new()
+
+
+func docs_of(s: RefCounted) -> Array:
+	return s.tree_open_docs.map(func(e): return e["doc"])
+
+
+func clean() -> void:
+	for f in [SETTINGS, TREE_FILE]:
+		if FileAccess.file_exists(f):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(f))
+
+
+func _initialize() -> void:
+	var previous_path := OS.get_environment(AppSettings.PATH_ENV)
+	OS.set_environment(AppSettings.PATH_ENV, SETTINGS)
+	clean()
+	check("the remembered rows have their own file next to the settings file", AppSettings.tree_open_path() == TREE_FILE)
+
+	# --- the order survives a save and a load (alphabetical would be a, m, z)
+	var s := fresh()
+	for d in ["z.didsa", "a.didsa", "m.didsa"]:
+		s.set_tree_open_keys(d, ["x"])
+	s.save_to_disk()
+	var back := fresh()
+	back.load_from_disk()
+	check("the stored order (oldest first) comes back as it was, not sorted", docs_of(back) == ["z.didsa", "a.didsa", "m.didsa"])
+	back.set_tree_open_keys("z.didsa", ["y"])
+	check("storing a document again makes it the newest", docs_of(back) == ["a.didsa", "m.didsa", "z.didsa"] and back.tree_open_keys("z.didsa") == ["y"])
+	check("a document with nothing stored reads null; an empty set is remembered", back.tree_open_keys("none") == null and back.tree_open_keys("") == null)
+	back.set_tree_open_keys("e", [])
+	check("...an empty list is an entry", back.tree_open_keys("e") == [])
+
+	# --- eviction by that order after a restart
+	var full := fresh()
+	for i in AppSettings.TREE_OPEN_MAX_DOCS:
+		full.set_tree_open_keys("doc_%02d" % (AppSettings.TREE_OPEN_MAX_DOCS - 1 - i), ["k"]) # (names run backwards: the first stored, doc_63, sorts last)
+	full.save_to_disk()
+	var restarted := fresh()
+	restarted.load_from_disk()
+	check("%d documents are stored and come back in the same order" % AppSettings.TREE_OPEN_MAX_DOCS, restarted.tree_open_docs.size() == AppSettings.TREE_OPEN_MAX_DOCS and docs_of(restarted)[0] == "doc_63")
+	restarted.set_tree_open_keys("one_more", ["k"])
+	check("one past the limit after a restart: the oldest-stored goes (doc_63), not the alphabetical first", restarted.tree_open_docs.size() == AppSettings.TREE_OPEN_MAX_DOCS and restarted.tree_open_keys("doc_63") == null and restarted.tree_open_keys("doc_00") != null and docs_of(restarted).back() == "one_more")
+
+	# --- the limits apply on load too (a file written by hand or by an older build)
+	var config := ConfigFile.new()
+	var big: Array = []
+	for i in 100:
+		var keys: Array = []
+		for j in 3000:
+			keys.append("k%d" % j)
+		big.append({"doc": "big_%03d" % i, "keys": keys})
+	big.append({"doc": "", "keys": ["x"]})
+	big.append({"doc": "no_keys"})
+	big.append("not a dictionary")
+	config.set_value("docs", "list", big)
+	config.save(TREE_FILE)
+	var loaded := fresh()
+	loaded.load_from_disk()
+	var total := 0
+	for e in loaded.tree_open_docs:
+		total += loaded._tree_open_weight(e)
+	check("on load: at most 64 documents, 2,000 keys each, the characters within the cap, bad entries skipped", loaded.tree_open_docs.size() <= AppSettings.TREE_OPEN_MAX_DOCS and loaded.tree_open_docs.all(func(e): return (e["keys"] as Array).size() <= AppSettings.TREE_OPEN_MAX_KEYS) and total <= AppSettings.TREE_OPEN_MAX_CHARS and not loaded.tree_open_docs.is_empty())
+	check("...and what the cap drops is the oldest-stored: the last document written is still there, the first is not", loaded.tree_open_keys("big_099") != null and loaded.tree_open_keys("big_000") == null)
+	var heavy := fresh()
+	var long_keys: Array = []
+	for j in 2000:
+		long_keys.append("#group:%s/%s" % ["a".repeat(30), str(j)])
+	for i in 12:
+		heavy.set_tree_open_keys("heavy_%02d" % i, long_keys)
+	var heavy_total := 0
+	for e in heavy.tree_open_docs:
+		heavy_total += heavy._tree_open_weight(e)
+	check("a change over the character cap drops the oldest-stored documents (%d characters kept in %d documents)" % [heavy_total, heavy.tree_open_docs.size()], heavy_total <= AppSettings.TREE_OPEN_MAX_CHARS and heavy.tree_open_keys("heavy_11") != null and heavy.tree_open_keys("heavy_00") == null)
+	check("a document's key list is cut at 2,000 on a change too", fresh().tree_open_keys("x") == null and (func() -> bool:
+		var t := fresh()
+		t.set_tree_open_keys("many", range(5000).map(func(i): return "k%d" % i))
+		return (t.tree_open_keys("many") as Array).size() == 2000).call())
+	clean()
+
+	# --- the write is delayed: a run of changes is one write, and settings.cfg is not written
+	var d := fresh()
+	d.load_from_disk()
+	for i in 10:
+		d.set_tree_open_keys("run_%d" % i, ["a"])
+	check("ten changes in a row: nothing written yet, a write is waiting", not FileAccess.file_exists(TREE_FILE) and d._tree_open_dirty)
+	await create_timer(AppSettings.TREE_OPEN_SAVE_DELAY_S + 0.4).timeout
+	check("...the delayed write has run (one file with all ten, in order), and settings.cfg was never written", FileAccess.file_exists(TREE_FILE) and not d._tree_open_dirty and not FileAccess.file_exists(SETTINGS))
+	var again := fresh()
+	again.load_tree_open()
+	check("...and reads back", docs_of(again) == range(10).map(func(i): return "run_%d" % i))
+	d.set_tree_open_keys("late", ["a"])
+	d.flush_tree_open()
+	var flushed := fresh()
+	flushed.load_tree_open()
+	check("flush_tree_open writes at once (what main.gd does when the app pauses or quits)", flushed.tree_open_keys("late") == ["a"] and not d._tree_open_dirty)
+
+	# --- Save As with no tree: the entry is copied
+	var c := fresh()
+	c.set_tree_open_keys("old.didsa", ["p", "q"])
+	c.copy_tree_open_keys("old.didsa", "new.didsa")
+	c.copy_tree_open_keys("never.didsa", "other.didsa")
+	check("copy_tree_open_keys gives the new file the old one's rows (and does nothing for a file with none)", c.tree_open_keys("new.didsa") == ["p", "q"] and c.tree_open_keys("old.didsa") == ["p", "q"] and c.tree_open_keys("other.didsa") == null)
+	c.flush_tree_open()
+	clean()
+	OS.set_environment(AppSettings.PATH_ENV, previous_path)
+	quit(0)

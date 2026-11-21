@@ -639,6 +639,12 @@ func scenario_h() -> void:
 	var spec_rows: Array = Model.visible_rows(window._resp, window._spec_open_keys(), window._grouping(), [])
 	print("SMOKE TIMING h: Model.visible_rows alone (no controls): %d rows in %.1f ms" % [spec_rows.size(), (Time.get_ticks_usec() - t3) / 1000.0])
 	check("h: every Module open lists 2,002 rows (root, the group, 40 Modules, 1,960 Items)", count == 2002)
+	for q in [":parts", "item 07"]:
+		var t6 := Time.get_ticks_usec()
+		var found: Dictionary = Model.filtered_rows(window._resp, q, window._spec_open_keys(), window._grouping(), [])
+		print("SMOKE TIMING h: Model.filtered_rows('%s') on the 2,000 occurrences: %d rows listed in %.1f ms" % [q, (found["rows"] as Array).size(), (Time.get_ticks_usec() - t6) / 1000.0])
+		if q == ":parts":
+			check("h: ':parts' lists the root, the group, the 40 Modules above the parts and the 1,960 Items (2,002 rows)", (found["rows"] as Array).size() == 2002)
 	var t4 := Time.get_ticks_msec()
 	await frames(2)
 	print("SMOKE TIMING h: the two frames after that rebuild took %d ms (layout of %d rows)" % [Time.get_ticks_msec() - t4, count])

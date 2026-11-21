@@ -47,8 +47,13 @@ var sandbox_ghosts: bool = false ## Relax all mates: a see-through copy of each 
 var sandbox_lines: bool = false ## Relax all mates: a thin line from each moved part to where it goes back to
 var room_glass: bool = true ## Assembly Room walls drawn as see-through glass with a grid near your hands (off: thin wireframe only)
 var tree_group_repeats: bool = true ## the Assembly Tree folds 4 or more identical siblings into one "Bolt M4 x4" row (docs/assembly-tree spec section 4; the header switch of assembly_tree_window.gd)
-var tree_open_docs: Dictionary = {} ## the Assembly Tree's remembered open rows (docs/assembly-tree spec section 12): document key (the file's path) -> the open row keys, oldest-stored first; only for a document whose tree the person changed
+var tree_open_docs: Array = [] ## the Assembly Tree's remembered open rows (docs/assembly-tree spec section 12): [{doc, keys}], the oldest-stored first (an explicit order: a ConfigFile sorts dictionary keys); doc = the file's path. Kept in its own file (tree_open_path()), not settings.cfg
 const TREE_OPEN_MAX_DOCS := 64 ## how many documents' open rows are kept (the oldest-stored go first)
+const TREE_OPEN_MAX_KEYS := 2000 ## per document (spec 12's MAX_STORED_KEYS)
+const TREE_OPEN_MAX_CHARS := 400000 ## and the characters of every path and key together (about 400 KB on disk), the oldest-stored go first
+const TREE_OPEN_SAVE_DELAY_S := 1.5 ## a change is written this long after the last one (a run of chevron presses is one write); main.gd flushes on pause and quit
+var _tree_open_dirty := false
+var _tree_open_timer_set := false
 var show_landing: bool = true ## the landing (logo, rocket garden, launcher) on every start; off: the old start-up import
 var show_tips: bool = true ## the landing's tips reel
 var paint_recent: Array = [] ## the Appearance tool's recent colours ("#RRGGBB", newest first, appearance_tool.gd RECENT_MAX)
@@ -56,6 +61,7 @@ var paint_saved: Array = [] ## the Appearance tool's own saved appearances: [{na
 
 
 func load_from_disk() -> void:
+	load_tree_open()
 	var config := ConfigFile.new()
 	if config.load(path()) != OK:
 		return # no settings saved yet, or unreadable — defaults stand
@@ -72,12 +78,6 @@ func load_from_disk() -> void:
 	max_rooms = clampi(int(config.get_value("rooms", "max_rooms", max_rooms)), 1, 16)
 	room_glass = bool(config.get_value("rooms", "glass", room_glass))
 	tree_group_repeats = bool(config.get_value("tree", "group_repeats", tree_group_repeats))
-	var open_docs = config.get_value("tree_open", "docs", tree_open_docs)
-	tree_open_docs = {}
-	if open_docs is Dictionary:
-		for doc in open_docs:
-			if open_docs[doc] is Array and str(doc) != "":
-				tree_open_docs[str(doc)] = (open_docs[doc] as Array).map(func(k): return str(k))
 	world_preview_auto = bool(config.get_value("rooms", "preview_auto", world_preview_auto))
 	world_preview_pulse = bool(config.get_value("rooms", "preview_pulse", world_preview_pulse))
 	group_deadzone = clampi(int(config.get_value("rooms", "group_deadzone", group_deadzone)), 0, 2)
@@ -118,7 +118,6 @@ func save_to_disk() -> void:
 	config.set_value("rooms", "max_rooms", max_rooms)
 	config.set_value("rooms", "glass", room_glass)
 	config.set_value("tree", "group_repeats", tree_group_repeats)
-	config.set_value("tree_open", "docs", tree_open_docs)
 	config.set_value("rooms", "group_deadzone", group_deadzone)
 	config.set_value("rooms", "preview_auto", world_preview_auto)
 	config.set_value("rooms", "preview_pulse", world_preview_pulse)
@@ -144,6 +143,7 @@ func save_to_disk() -> void:
 	var err := config.save(path())
 	if err != OK:
 		push_warning("DIDSA VR: couldn't save %s (error %d)" % [path(), err])
+	flush_tree_open() # (anything waiting for its delayed write goes now)
 
 
 func set_cloud_cache_mb(value: int) -> void:
@@ -258,20 +258,105 @@ func set_tree_group_repeats(on: bool) -> void:
 	save_to_disk()
 
 
+static func tree_open_path() -> String:
+	## The remembered open rows' own file, next to the settings file (so a test's DIDSA_SETTINGS_PATH moves it too).
+	return path().get_basename() + "_tree_open.cfg"
+
+
+func _tree_open_index(doc: String) -> int:
+	for i in tree_open_docs.size():
+		if str(tree_open_docs[i]["doc"]) == doc:
+			return i
+	return -1
+
+
 func tree_open_keys(doc: String):
 	## The remembered open row keys of one document (an Array, possibly empty: "everything collapsed" is remembered too), or null when nothing was stored for it.
-	return (tree_open_docs[doc] as Array).duplicate() if doc != "" and tree_open_docs.has(doc) else null
+	var i := _tree_open_index(doc) if doc != "" else -1
+	return (tree_open_docs[i]["keys"] as Array).duplicate() if i >= 0 else null
 
 
 func set_tree_open_keys(doc: String, keys: Array) -> void:
-	## Stores one document's open row keys (the caller keeps them in the spec's order and within its limit). "" is no document and stores nothing.
+	## Stores one document's open row keys (the caller keeps them in the spec's order), newest last, within the limits; the write is delayed (flush_tree_open). "" is no document.
 	if doc == "":
 		return
-	tree_open_docs.erase(doc) # (re-added last: the oldest-stored are dropped first)
-	tree_open_docs[doc] = keys.duplicate()
+	var i := _tree_open_index(doc)
+	if i >= 0:
+		tree_open_docs.remove_at(i)
+	tree_open_docs.append({"doc": doc, "keys": keys.slice(0, TREE_OPEN_MAX_KEYS).map(func(k): return str(k))})
+	_trim_tree_open()
+	_tree_open_changed()
+
+
+func copy_tree_open_keys(from_doc: String, to_doc: String) -> void:
+	## Save As with no tree to read the rows from: the old file's entry becomes the new file's (nothing happens when the old one has none).
+	var keys = tree_open_keys(from_doc)
+	if keys is Array and to_doc != "" and to_doc != from_doc:
+		set_tree_open_keys(to_doc, keys)
+
+
+func _trim_tree_open() -> void:
+	## The limits, applied on every change and on load: documents (64), keys a document (2,000) and the characters of all of it; the oldest-stored go first.
 	while tree_open_docs.size() > TREE_OPEN_MAX_DOCS:
-		tree_open_docs.erase(tree_open_docs.keys()[0])
-	save_to_disk()
+		tree_open_docs.remove_at(0)
+	var total := 0
+	for e in tree_open_docs:
+		total += _tree_open_weight(e)
+	while total > TREE_OPEN_MAX_CHARS and not tree_open_docs.is_empty():
+		total -= _tree_open_weight(tree_open_docs[0])
+		tree_open_docs.remove_at(0)
+
+
+static func _tree_open_weight(entry: Dictionary) -> int:
+	var n := str(entry["doc"]).length()
+	for k in entry["keys"]:
+		n += str(k).length()
+	return n
+
+
+func load_tree_open() -> void:
+	tree_open_docs = []
+	var config := ConfigFile.new()
+	if config.load(tree_open_path()) != OK:
+		return
+	var stored = config.get_value("docs", "list", [])
+	if not (stored is Array):
+		return
+	for e in stored: # (oldest first, as written; a repeated document keeps its last entry)
+		if not (e is Dictionary) or str(e.get("doc", "")) == "" or not (e.get("keys") is Array):
+			continue
+		var i := _tree_open_index(str(e["doc"]))
+		if i >= 0:
+			tree_open_docs.remove_at(i)
+		tree_open_docs.append({"doc": str(e["doc"]), "keys": (e["keys"] as Array).slice(0, TREE_OPEN_MAX_KEYS).map(func(k): return str(k))})
+	_trim_tree_open()
+
+
+func _tree_open_changed() -> void:
+	## A change is written after a short delay, so a run of chevron presses is one write of this small file (and settings.cfg is not rewritten at all).
+	_tree_open_dirty = true
+	var tree = Engine.get_main_loop()
+	if not (tree is SceneTree):
+		flush_tree_open()
+		return
+	if _tree_open_timer_set:
+		return
+	_tree_open_timer_set = true
+	(tree as SceneTree).create_timer(TREE_OPEN_SAVE_DELAY_S).timeout.connect(func() -> void:
+		_tree_open_timer_set = false
+		flush_tree_open())
+
+
+func flush_tree_open() -> void:
+	## Writes the remembered rows now, if there is anything to write (main.gd calls it when the app pauses or quits).
+	if not _tree_open_dirty:
+		return
+	_tree_open_dirty = false
+	var config := ConfigFile.new()
+	config.set_value("docs", "list", tree_open_docs)
+	var err := config.save(tree_open_path())
+	if err != OK:
+		push_warning("DIDSA VR: couldn't save %s (error %d)" % [tree_open_path(), err])
 
 
 func set_world_preview_auto(on: bool) -> void:

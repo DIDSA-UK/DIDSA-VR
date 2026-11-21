@@ -191,6 +191,9 @@ func _initialize() -> void:
 
 	check("ancestors to expand for a path: the root and each level above it", Model.ancestors_paths(["s1", "k1", "kb"]) == [[], ["s1"], ["s1", "k1"]] and Model.ancestors_paths([]).is_empty())
 	check("a path's key", Model.path_key(["s1", "k1"]) == "s1/k1" and Model.path_key([]) == "")
+	var q := Model.parse_query("a\u00a0b\u3000:Errors\u2003x\t\u2028y  :Foo\u202f:foo a")
+	check("B7: a query splits on the Unicode whitespace Python's str.split() does (no-break, ideographic, em and narrow spaces, line separator), words once, tokens lower-cased", q["terms"] == ["a", "b", "x", "y"] and q["tokens"] == [":errors"] and q["unknown"] == [":foo"])
+	check("...and a query of only such spaces is no filter", Model.filtered_rows({"part_id": "r", "part_name": "R", "children": []}, "\u00a0 \u3000", [], true, [])["rows"].size() == 1)
 	run_robustness()
 	run_vectors()
 	quit(0)
