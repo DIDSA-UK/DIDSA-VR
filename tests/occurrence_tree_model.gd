@@ -71,29 +71,52 @@ func run_robustness() -> void:
 	check("a local Fix writes the flag into the held answer and drops the old constraint", old["children"][0]["fixed"] and old["children"][0]["constraint"] == null and Model.state_of(old["children"][0], []) == "fixed")
 
 
+const SKIPPED_KINDS := ["live_part", "live_part_filter", "live_part_restore"] ## the build tree's section 13 waits for Phase C (T2); skipped by name, never by default
+
+
 func run_vectors() -> void:
 	## tests/fixtures/assembly_tree_vectors.json: DIDSA-CAD's golden vectors for docs/assembly-tree/spec.md, copied unchanged (tests/fixtures/README.md).
 	var f := FileAccess.open("res://tests/fixtures/assembly_tree_vectors.json", FileAccess.READ)
 	var doc: Dictionary = JSON.parse_string(f.get_as_text())
-	check("the vectors file is the version this model implements, with the same state order", int(doc["version"]) == 1 and doc["states"] == Model.STATES)
+	check("the vectors file is the version this model implements, with the same state order", int(doc["version"]) == 2 and doc["states"] == Model.STATES)
 	var failed := 0
+	var ran := {}
+	var skipped := 0
 	for c in doc["cases"]:
+		var kind: String = c["kind"]
+		if SKIPPED_KINDS.has(kind):
+			skipped += 1
+			continue
 		var tree: Dictionary = doc["trees"][c["tree"]]
 		var ok := false
 		var diff := ""
-		if c["kind"] == "rows":
-			var got: Array = Model.visible_rows(tree, c["open"], bool(c["grouping"]), c["unsaved_part_ids"], c["features"])
-			diff = first_difference(got, c["expected"])
-			ok = diff == ""
-		else:
-			var keys: Array = Model.reveal_keys(tree, c["path"], bool(c["grouping"]))
-			ok = same(keys, c["expected"])
-			diff = "got %s want %s" % [JSON.stringify(keys), JSON.stringify(c["expected"])]
+		match kind:
+			"rows":
+				var got: Array = Model.visible_rows(tree, c["open"], bool(c["grouping"]), c["unsaved_part_ids"], c["features"])
+				diff = first_difference(got, c["expected"])
+				ok = diff == ""
+			"reveal":
+				var keys: Array = Model.reveal_keys(tree, c["path"], bool(c["grouping"]))
+				ok = same(keys, c["expected"])
+				diff = "got %s want %s" % [JSON.stringify(keys), JSON.stringify(c["expected"])]
+			"filter":
+				var res: Dictionary = Model.filtered_rows(tree, c["query"], c["open"], bool(c["grouping"]), c["unsaved_part_ids"], c.get("features", {}))
+				diff = first_difference(res["rows"], c["expected"]["rows"])
+				if diff == "" and not same(res["unknown"], c["expected"]["unknown"]):
+					diff = "unknown: got %s want %s" % [JSON.stringify(res["unknown"]), JSON.stringify(c["expected"]["unknown"])]
+				ok = diff == ""
+			"restore":
+				var kept: Array = Model.restore_open_keys(tree, c["stored"], int(c["limit"]))
+				ok = same(kept, c["expected"])
+				diff = "got %s want %s" % [JSON.stringify(kept), JSON.stringify(c["expected"])]
+			_:
+				diff = "unknown case kind %s (spec 9: a client fails on a kind it does not know)" % kind
+		ran[kind] = int(ran.get(kind, 0)) + 1
 		if not ok:
 			failed += 1
 			print("VECTOR FAILED ", c["name"], ": ", diff)
 		check("vector %s" % c["name"], ok)
-	check("every one of the %d vector cases passes" % doc["cases"].size(), failed == 0 and doc["cases"].size() >= 36)
+	check("every one of the %d vector cases run passes (rows, reveal, filter and restore run; the %d live_part cases skipped by name)" % [doc["cases"].size() - skipped, skipped], failed == 0 and ran.get("rows", 0) >= 30 and ran.get("reveal", 0) >= 6 and ran.get("filter", 0) >= 32 and ran.get("restore", 0) >= 7)
 
 
 func _initialize() -> void:
@@ -168,6 +191,9 @@ func _initialize() -> void:
 
 	check("ancestors to expand for a path: the root and each level above it", Model.ancestors_paths(["s1", "k1", "kb"]) == [[], ["s1"], ["s1", "k1"]] and Model.ancestors_paths([]).is_empty())
 	check("a path's key", Model.path_key(["s1", "k1"]) == "s1/k1" and Model.path_key([]) == "")
+	var q := Model.parse_query("a\u00a0b\u3000:Errors\u2003x\t\u2028y  :Foo\u202f:foo a")
+	check("B7: a query splits on the Unicode whitespace Python's str.split() does (no-break, ideographic, em and narrow spaces, line separator), words once, tokens lower-cased", q["terms"] == ["a", "b", "x", "y"] and q["tokens"] == [":errors"] and q["unknown"] == [":foo"])
+	check("...and a query of only such spaces is no filter", Model.filtered_rows({"part_id": "r", "part_name": "R", "children": []}, "\u00a0 \u3000", [], true, [])["rows"].size() == 1)
 	run_robustness()
 	run_vectors()
 	quit(0)

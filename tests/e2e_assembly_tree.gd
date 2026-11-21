@@ -5,7 +5,10 @@ extends SceneTree
 ##   sub-assembly) is imported as an assembly; the window reads the whole hierarchy with the tree call (the structure, then ?status=true), the nested rows exist under BOTH
 ##   placements of the sub-assembly; a nested part is fixed from the tree (the bottom bar's Fix, PATCHed on the sub-assembly's own Part), the tree shows it fixed under both
 ##   placements after its refresh, the backend agrees, and a grip on that part is refused with the "Part is fixed" words.
-## Writes nothing to disk but the throwaway secrets copy under user://.
+##   B7: with the document given a file key, the open rows are stored (a viewport-style reveal of the nested part) and come back when the document is read again (a reopen: the
+##   same tree call against the real backend), and Find narrows the real tree: a name finds both placements of the nested part, ":fixed" finds the fixed row and nothing is
+##   changed in the open rows by it.
+## Writes nothing to disk but the throwaway secrets copy and settings under user://.
 ## Run: DIDSA_NO_LANDING=1 DIDSA_SETTINGS_PATH=user://settings_test.cfg "$GODOT" --headless --path . --script res://tests/e2e_assembly_tree.gd
 ## Needs secrets.cfg (backend url + api_key) pointing at a running backend (tools/start_backend.sh).
 
@@ -151,4 +154,34 @@ func _initialize() -> void:
 			floating_on_server = not bool(o.get("fixed", false))
 	var settled: Dictionary = Model.find_row(window._tree, target["path"])
 	check("Tree A5.1: the backend says floating and the settled row agrees: no pin, a real state from the fresh status (%s)" % str(settled.get("state")), floating_on_server and settled["state"] != "fixed" and settled["state"] != "pending")
+
+	# --- B7: remembered open rows across a reopen, and Find, against the real tree
+	var settings = main._settings
+	var doc := "user://e2e_assembly_tree_doc.didsa"
+	settings.tree_open_docs = []
+	main._opened_native_path = doc
+	window.mark_stale() # (what opening the file again does: the same tree call, a new load)
+	await _wait_for(func() -> bool: return not window._stale and bool(window._resp.get("status_included", false)))
+	check("B7: the document with a file key loads with nothing stored for it and the default rows (only the root open)", window._doc_key == doc and window._spec_open_keys().is_empty() and settings.tree_open_keys(doc) == null)
+	window._selected = target["path"]
+	window._has_selected = true
+	await window.expand_to_selection()
+	var stored: Variant = settings.tree_open_keys(doc)
+	check("B7: To selection opens the row's ancestors and stores them (%s)" % str(stored), stored is Array and (stored as Array).has(str(target["path"][0])) and window.row_count() > top_rows.size() + 1)
+	var open_before: Array = window._spec_open_keys()
+	window.mark_stale() # reopen
+	await _wait_for(func() -> bool: return not window._stale and bool(window._resp.get("status_included", false)))
+	check("B7: read again from the real backend, the remembered rows are open again and the selection is not touched", window._spec_open_keys() == open_before and not Model.find_row(window._tree, target["path"]).is_empty() and window._restored_any)
+	window.set_query(str(target["name"]).get_slice(" ", 0))
+	var found: Array = window._descs.filter(func(d): return str(d["kind"]) == "row" and (d["row"] as Dictionary).get("path", []).size() == 2 and (d["row"] as Dictionary)["id"] == target["id"])
+	check("B7: Find on the real tree lists the nested part under both placements", found.size() == 2 and window.current_query() != "" and window._spec_open_keys() == open_before)
+	window.set_query(":fixed")
+	check("B7: ':fixed' lists rows (the fixed flag, whatever the state) and leaves the open rows alone", window.row_count() >= 1 and window._spec_open_keys() == open_before)
+	window.clear_query()
+	await _wait_for(func() -> bool: return true)
+	check("B7: clearing it gives back the rows that were open", window._spec_open_keys() == open_before and window.row_count() > top_rows.size() + 1)
+	window.collapse_all()
+	check("B7: Collapse stores the empty set", window._spec_open_keys().is_empty() and settings.tree_open_keys(doc) == [])
+	settings.tree_open_docs = []
+	window._set_grouping(true)
 	quit(0)

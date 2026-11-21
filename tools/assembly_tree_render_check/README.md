@@ -14,9 +14,9 @@ TREE_RENDER_DIR=/tmp/tree_shots xvfb-run -a -s "-screen 0 1280x720x24" "$GODOT" 
 
 ## What it shows
 
-Fixtures are built through the backend's API (`/import/native` from `demo/assemblies/plate_and_peg`, mates, a PATCHed pose); nothing is written to the repo. Nine scenarios (rows are read through `window.visible_lines()` / `row_count()`, since B6 draws only the visible rows), each asserted on the window's rows and saved as `<name>.png` (the panel's own pixels), `<name>_wide.png` (the view from eye height with the model) and `<name>.txt` (the rows as text):
+Fixtures are built through the backend's API (`/import/native` from `demo/assemblies/plate_and_peg`, mates, a PATCHed pose); nothing is written to the repo. Ten scenarios (rows are read through `window.visible_lines()` / `row_count()`, since B6 draws only the visible rows), each asserted on the window's rows and saved as `<name>.png` (the panel's own pixels), `<name>_wide.png` (the view from eye height with the model) and `<name>.txt` (the rows as text):
 
-a structure then status; b a collapsed parent's count bubble; c `Peg x4` folded, open, Fold off; d Fix and Float from the tree; e a world selection revealing a row through a folded group; f red tint over a rigid-set colour; g an older backend; h a 2,000-occurrence tree (row build time and a scroll sweep printed as `SMOKE TIMING`, not asserted); i the Mates folder line under the root (its count after the label).
+a structure then status; b a collapsed parent's count bubble; c `Peg x4` folded, open, Fold off; d Fix and Float from the tree; e a world selection revealing a row through a folded group; f red tint over a rigid-set colour; g an older backend; h a 2,000-occurrence tree (row build time, `Model.filtered_rows` for `:parts` and a name, and a scroll sweep printed as `SMOKE TIMING`, not asserted); i the Mates folder line under the root (its count after the label); j Find (B7): `:errors`, a name with an unknown token, and cleared (`j1_find_errors`, `j2_find_name_unknown_token`, `j3_cleared`).
 
 ## Limits
 

@@ -127,9 +127,10 @@ backend's UUIDs, so a rebuild changes every id but not the shape of the sketch. 
 
 ## `assembly_tree_vectors.json` — golden vectors for the assembly tree's rules
 
-A **byte-for-byte copy** of DIDSA-CAD's `docs/assembly-tree/vectors.json` (the contract of the assembly tree overhaul, `docs/assembly-tree-overhaul-scope.md` section 9.2; the rules are
-`docs/assembly-tree/spec.md`). Source commit: DIDSA-CAD `cc96da0eda2926941980916eeab3de5daed01140` (the last commit that changed the file; copied from `main` at `6bea778`, the merge of PR #388, Tree A1).
-36 cases over 13 trees: `rows` (the visible rows for a set of open keys, grouping on or off, unsaved Part ids and fetched features: key, kind, depth, label, state, bubble, expandable, open, count,
-path, hidden, suppressed) and `reveal` (the keys to open to list a row). Used by `tests/occurrence_tree_model.gd`, which requires every case to match exactly. The file is generated in DIDSA-CAD
+A **byte-for-byte copy** of DIDSA-CAD's `docs/assembly-tree/vectors.json`, **version 2** (the contract of the assembly tree overhaul, `docs/assembly-tree-overhaul-scope.md` sections 9.2 and 10.2; the rules are
+`docs/assembly-tree/spec.md`). Source commit: DIDSA-CAD `d0966bb0b788f8b905c8472ff584655fda4bd0ba` (the last commit that changed the file; copied from `main` at `a6c167b`, after the merge of PR #399; B1 is PR #397).
+102 cases: `rows` (30), `reveal` (6), `filter` (32: the rows narrowed to a query, with `match`, and the unknown tokens), `restore` (7: the stored open keys that survive a new tree, with a `limit`), and the build tree's
+`live_part` (12), `live_part_filter` (14) and `live_part_restore` (1). `tests/occurrence_tree_model.gd` runs `rows`, `reveal`, `filter` and `restore`, requires every case to match exactly, skips the three
+`live_part` kinds **by name** (VR's Build tab adopts spec section 13 in Phase C) and fails on any other kind it does not know (spec section 9). The file is generated in DIDSA-CAD
 (`tools/assembly_tree_vectors/generate.py`): **never edit it here**; when the contract changes the manager changes it in both repos and it is copied over again (and this commit note updated).
 

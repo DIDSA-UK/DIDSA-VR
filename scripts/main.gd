@@ -416,6 +416,30 @@ func set_tree_grouping(on: bool) -> void:
 	_settings.set_tree_group_repeats(on)
 
 
+func tree_document_key() -> String:
+	## What the Assembly Tree remembers its open rows under: the document's file path. "" when the session has no file (a new empty assembly, a bare .glb), so nothing is
+	## stored for it (a key that could not be read back on the next open would only leave entries nobody uses).
+	return _opened_native_path
+
+
+func tree_open_keys_for(doc: String):
+	return _settings.tree_open_keys(doc)
+
+
+func set_tree_open_keys(doc: String, keys: Array) -> void:
+	_settings.set_tree_open_keys(doc, keys)
+
+
+func copy_tree_open_keys(from_doc: String, to_doc: String) -> void:
+	_settings.copy_tree_open_keys(from_doc, to_doc)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_EXIT_TREE:
+		if _settings != null:
+			_settings.flush_tree_open() # (the Assembly Tree's remembered rows are written a moment after a change: not lost when the app is paused or closed)
+
+
 func world_preview_auto() -> bool:
 	return _settings.world_preview_auto
 
@@ -1516,6 +1540,7 @@ func unload_model() -> void:
 	_mates_tool.clear_picks()
 	_section_tool.reset()
 	design_table.tree.mark_stale()
+	_assembly_tree_window.document_replaced()
 	_assembly_tree_window.mark_stale()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
@@ -2408,6 +2433,8 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
 	design_table.tree.mark_stale() # the table's own copy of the tree, for the same reason
+	if not _reloading_world:
+		_assembly_tree_window.document_replaced() # (another document, not a re-read of this one: Find's words go)
 	_assembly_tree_window.mark_stale() # the Occurrence tree it's shown is about to point at parts that no longer exist — see that script's own mark_stale()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
 		hand.reset_interaction()
@@ -2776,7 +2803,9 @@ func save_project(policy: String = "ask") -> Dictionary:
 	var ok: bool = (result["failed"] as Array).is_empty() and (result["conflicts"] as Array).is_empty()
 	var root_file: String = _project_save.path_of(str(session["root_part_id"]))
 	if root_file != "":
+		var previous_file := _opened_native_path
 		_opened_native_path = root_file # (a demo or a fresh session now has a root file: later saves update it in place)
+		_assembly_tree_window.note_document_changed(previous_file) # (the tree's remembered open rows follow the file it is now saved as, loaded or not)
 		last_saved_path = root_file
 		_native_root_id_cache.erase(root_file)
 	if ok:

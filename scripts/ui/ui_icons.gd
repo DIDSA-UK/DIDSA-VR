@@ -136,6 +136,7 @@ const _ICONS := {
 	"infer_off": '<path d="M17 22L11 28A7.5 7.5 0 0 0 21.500 38.500L27 33"/><path d="M31 26L37 20A7.5 7.5 0 0 0 26.500 9.500L21 15"/><path d="M8 40L40 8"/>',
 	"snap": '<path d="M10 8V26a14 14 0 0 0 28 0V8H28V26a4 4 0 0 1-8 0V8Z"/><path d="M10 14H20M28 14H38"/>',
 	"feat_plane": '<path d="M8 32L20 14H42L30 32Z"/><path d="M24 36V42"/>',
+	"search": '<circle cx="21" cy="21" r="13"/><path d="M31 31L42 42"/>',
 	"plus": '<path d="M24 10V38M10 24H38"/>',
 	# server projects (S3): the sync state of a project, as symbols
 	"cloud": '<path d="M14 37a9 9 0 0 1-2-17.800A12 12 0 0 1 35 17a10 10 0 0 1 0 20Z"/>',

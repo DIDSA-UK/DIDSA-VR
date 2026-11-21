@@ -8,6 +8,9 @@ extends SceneTree
 ##   bar: Fix / Float PATCHes the occurrence on its parent Part, updates the state at any depth, one undo step; Hide / Show and Isolate are view-only and undoable
 ##        (the backend's `hidden` flag is never written); Rename PATCHes name_override, undoably; Delete on a nested row warns that it edits every placement (B3)
 ##   refresh keeps what was expanded and the selection (B4); and a fix made from the tree makes the V-1 refusal fire on a grip
+##   B7 (tree call only): Find narrows the tree (names, ":tokens", unknown tokens) without touching the open rows and clearing it reveals the selection; Collapse and To selection;
+##     the open rows are remembered per document and restored when it is opened again, never for a document nobody touched or one with no file, never over rows the person
+##     changed first, and a tree answer that arrives late for the previous document is dropped
 ## It runs twice: against a fake backend that serves GET /parts/{id}/assembly-tree (A5: one call for the whole tree, then ?status=true merged in; no per-level
 ## /occurrences reads), and against one that answers 404 to it (an older backend: the per-level fallback). Every check holds in both modes.
 ## NOT covered: how any of it looks or feels in the headset (the pulse, the bar's reach and size).
@@ -26,6 +29,8 @@ var status_fails := false ## the ?status=true call fails
 var null_children := false ## part nodes carry "children": null
 var truncated := false
 var mode := "tree" ## "tree": the fake serves the tree call; "404": it does not
+var hold_tree := false ## the tree call waits (the answer is made when it is asked, delivered when this clears)
+var tree_name := "Rig" ## the root's name in the tree answers: tells one document's answer from another's
 const PART_NAMES := {"R": "Rig", "S": "Drive", "K": "Bracket", "B": "Bolt"}
 const TOP_STATUS := {"s1": {"status": "fixed", "dof": 0}, "s2": {"status": "under_constrained", "dof": 2}}
 
@@ -61,7 +66,11 @@ func answer(method: int, path: String, body) -> Dictionary:
 			return {"ok": false, "json": null, "code": 404, "detail": "Part not found", "error": "{ \"detail\": \"Part not found\" }"}
 		if status_fails and bits[1].contains("status=true"):
 			return {"ok": false, "json": null, "code": 0, "error": ""}
-		return {"ok": true, "json": tree_response(bits[1].contains("status=true")), "error": ""}
+		var resp := tree_response(bits[1].contains("status=true"))
+		resp["part_name"] = tree_name
+		while hold_tree:
+			await process_frame # (a slow answer: made now, delivered when hold_tree clears)
+		return {"ok": true, "json": resp, "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "occurrences":
 		return {"ok": true, "json": occurrences.get(bits[0], []), "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "constraint-status":
@@ -283,6 +292,7 @@ func run_mode(which: String) -> void:
 		window._on_row_selected(Model.find_row(window._tree, ["extra3"]))
 		check("a member of a group still selects by its own path", window._has_selected and window._selected == ["extra3"])
 		await extra_checks()
+		await b7_checks()
 	main.queue_free()
 	await frames(3)
 
@@ -345,3 +355,235 @@ func extra_checks() -> void:
 	window.mark_stale()
 	await settle()
 	check("a new document clears the flag: the tree call is used again and the button is back", not window._endpoint_missing and not window._resp.is_empty() and window._fold_button.visible)
+
+
+# --- B7: Find, Collapse, To selection, remembered open rows ----------------------------------------------------------------------------------------------------------
+
+func press_arrow(key: String) -> bool:
+	## A press on the row's chevron, through the control the window drew for it. False when the row has no control on screen.
+	for line in window.visible_lines():
+		var d: Dictionary = line.get_meta("desc", {})
+		if d.is_empty():
+			continue
+		var line_key := str(d["srow"]["key"]) if str(d["kind"]) != "row" else Model.path_key((d["row"] as Dictionary).get("path", []))
+		if line_key == key:
+			await window._on_line_arrow(line)
+			return true
+	return false
+
+
+func listed_keys() -> Array:
+	return window._descs.map(func(d): return str(d["srow"]["key"]) if str(d["kind"]) != "row" else Model.path_key((d["row"] as Dictionary).get("path", [])))
+
+
+func b7_checks() -> void:
+	var settings = main._settings
+	settings.tree_open_docs = []
+	var doc_a := "user://b7_doc_a.didsa"
+	var doc_b := "user://b7_doc_b.didsa"
+	main._opened_native_path = doc_a
+	window.mark_stale()
+	await settle()
+	check("B7: a document with a file is keyed by it, and a tree nobody touched stores nothing", window._doc_key == doc_a and settings.tree_open_keys(doc_a) == null and settings.tree_open_docs.is_empty())
+	window._set_grouping(false) # (the rows below are easier to name one by one)
+	check("B7: the chevron presses reach rows on screen (the pool is drawn)", window.visible_lines().size() > 3)
+	await press_arrow("s2")
+	await press_arrow("s2/k1")
+	check("B7: opening rows stores them, in the spec's order", settings.tree_open_keys(doc_a) == ["s2", "s2/k1"])
+	await press_arrow("s2")
+	check("B7: closing a row stores that too (its open child keeps its key, so reopening the parent brings it back)", settings.tree_open_keys(doc_a) == ["s2/k1"])
+	await press_arrow("s2")
+	check("...and opening it again brings the child back as it was", settings.tree_open_keys(doc_a) == ["s2", "s2/k1"])
+
+	# --- the document is opened again: its rows come back, the selection is not touched
+	window._has_selected = true
+	window._selected = ["b0"]
+	window.mark_stale()
+	await settle()
+	check("B7: opened again, the remembered rows are open and nothing else; the selection is left as it was", bool(Model.find_row(window._tree, ["s2"])["expanded"]) and bool(Model.find_row(window._tree, ["s2", "k1"])["expanded"]) and not bool(Model.find_row(window._tree, ["s1"])["expanded"]) and window._restored_any)
+	check("B7: a restore alone writes nothing (the entry is as it was)", settings.tree_open_keys(doc_a) == ["s2", "s2/k1"])
+
+	# --- Find
+	var before_open: Array = window._spec_open_keys()
+	window.set_query(":missing")
+	var keys := listed_keys()
+	check("B7: ':missing' lists the root and the missing row only", keys == ["", "gone"] and window.current_query() == ":missing" and window._query_box.visible)
+	check("B7: the query shows under the title with the match count", window._query_label.text.contains(":missing") and window._query_hint.text.contains("1 match"))
+	window.set_query("zzz")
+	check("B7: no match: the root alone, and the hint says so", listed_keys() == [""] and window._query_hint.text.contains("No matches"))
+	window.set_query("bolt :foo")
+	keys = listed_keys()
+	check("B7: a name term lists the matches and what is above them (the closed s1 and s2 show open because a Bolt is below them), not the rest", keys.has("s1/k1/kb") and keys.has("s1") and keys.has("s1/k1") and keys.has("b0") and not keys.has("gone") and not keys.has("s1/k1/") and window._tree[0]["children"].size() > 4)
+	check("...an unknown token is named in the hint and left out of the matching", window._query_hint.text.contains("Unknown filter :foo"))
+	check("B7: the filter did not change the open rows (nor what was stored)", window._spec_open_keys() == before_open and settings.tree_open_keys(doc_a) == ["s2", "s2/k1"])
+	var shown_before := listed_keys()
+	await press_arrow("s1")
+	check("B7: the chevrons are inert while a filter is on", listed_keys() == shown_before and window._spec_open_keys() == before_open)
+	window.set_query(":errors")
+	check("B7: ':errors' without constraint states loaded finds only what the spec lists (the missing file), and says the states are still loading when they are", listed_keys() == ["", "gone"])
+	window.clear_query()
+	check("B7: clearing the filter gives the open rows again, the same as before", window.current_query() == "" and not window._query_box.visible and window._spec_open_keys() == before_open and listed_keys().has("s2/k1/kb") and not listed_keys().has("s1/k1"))
+
+	# --- Select a row under a filter, clear the filter: the row is revealed
+	window.collapse_all()
+	check("B7: Collapse closes every row (the root stays) and stores that", window._spec_open_keys().is_empty() and settings.tree_open_keys(doc_a) == [] and listed_keys().size() == window._tree[0]["children"].size() + 1)
+	window.set_query("bolt")
+	window._selected = ["s1", "k1", "kb"]
+	window._has_selected = true
+	window.clear_query()
+	await settle()
+	check("B7: a row selected while the filter was on is revealed when it is cleared", listed_keys().has("s1/k1/kb") and settings.tree_open_keys(doc_a) == ["s1", "s1/k1"])
+	window.collapse_all()
+	window._selected = ["s2", "k1", "kb"]
+	window._has_selected = true
+	await window.expand_to_selection()
+	check("B7: To selection opens what is above the selected row, and stores it", listed_keys().has("s2/k1/kb") and settings.tree_open_keys(doc_a) == ["s2", "s2/k1"])
+	window._has_selected = false
+	window.collapse_all()
+	await window.expand_to_selection()
+	check("B7: To selection with nothing selected says so and opens nothing", window._spec_open_keys().is_empty() and window._status_label.text.contains("Nothing selected"))
+
+	# --- Save As: the remembered rows follow the file
+	await press_arrow("s1")
+	check("(before Save As) one row open", settings.tree_open_keys(doc_a) == ["s1"])
+	var doc_c := "user://b7_doc_c.didsa"
+	main._opened_native_path = doc_c
+	window.note_document_changed(doc_a)
+	check("B7: after Save As the open rows are stored under the new file too", window._doc_key == doc_c and settings.tree_open_keys(doc_c) == ["s1"])
+
+	# --- selecting a row stores nothing unless it had to open something (B7 review)
+	var doc_d := "user://b7_doc_d.didsa"
+	main._opened_native_path = doc_d
+	window.mark_stale()
+	await settle()
+	window._on_row_selected(Model.find_row(window._tree, ["b0"]))
+	await window._reveal(["b0"])
+	check("B7: selecting a top-level row (a tree press, then the world's reveal of it) opens nothing and stores no entry", settings.tree_open_keys(doc_d) == null and not window._open_touched)
+	window._on_row_selected(Model.find_row(window._tree, ["b0"])) # (pressed again: cleared)
+	window._has_selected = true
+	window._selected = ["b0"]
+	window.set_query("bolt")
+	window.clear_query()
+	await settle()
+	check("B7: clearing a filter with a top-level row selected reveals nothing, so it stores nothing", settings.tree_open_keys(doc_d) == null and not window._open_touched)
+	await window._reveal(["s2", "k1", "kb"])
+	check("B7: a selection that has to open its ancestors does store them (they are open now)", settings.tree_open_keys(doc_d) == ["s2", "s2/k1"] and window._open_touched)
+	await window._reveal(["s2", "k1", "kb"])
+	settings.tree_open_docs = []
+	await window._reveal(["s2", "k1", "kb"])
+	check("...and a selection under rows that are already open changes and stores nothing", settings.tree_open_keys(doc_d) == null)
+	window._has_selected = false
+
+	# --- Save As with the tree stale or never opened: the entry is copied from the old file to the new one
+	window.close()
+	var doc_old := "user://b7_doc_old.didsa"
+	var doc_new := "user://b7_doc_new.didsa"
+	settings.set_tree_open_keys(doc_old, ["s2", "s2/k1"])
+	main._opened_native_path = doc_old
+	window.mark_stale() # (closed: nothing is loaded)
+	main._opened_native_path = doc_new
+	window.note_document_changed(doc_old)
+	check("B7: Save As with the tree not loaded copies the old file's open rows to the new file", window._tree.is_empty() and settings.tree_open_keys(doc_new) == ["s2", "s2/k1"] and settings.tree_open_keys(doc_old) == ["s2", "s2/k1"])
+	main._opened_native_path = doc_old
+	window.open() # the old file loads and restores; nothing touched
+	await settle()
+	var doc_new2 := "user://b7_doc_new2.didsa"
+	main._opened_native_path = doc_new2
+	window.note_document_changed(doc_old)
+	check("B7: Save As with the tree loaded and untouched (rows restored) copies the entry too, and later changes go to the new file", settings.tree_open_keys(doc_new2) == ["s2", "s2/k1"] and window._doc_key == doc_new2)
+	await press_arrow("s2")
+	check("...the next change is stored under the new file only", settings.tree_open_keys(doc_new2) == ["s2/k1"] and settings.tree_open_keys(doc_old) == ["s2", "s2/k1"])
+	# a load in flight when the file is saved as restores under the new file
+	main._opened_native_path = doc_old
+	hold_tree = true
+	window.mark_stale()
+	await frames(3)
+	main._opened_native_path = doc_new
+	window.note_document_changed(doc_old)
+	hold_tree = false
+	await settle()
+	check("B7: a load in flight when the file is saved as restores the (copied) rows under the new file", bool(Model.find_row(window._tree, ["s2"])["expanded"]) and window._doc_key == doc_new)
+
+	# --- Find's words: cleared on every document switch; the hint says unavailable after a failed status call
+	main._opened_native_path = doc_a
+	window.mark_stale()
+	await settle()
+	window.set_query("bolt")
+	window.mark_stale() # (the same file again: a refresh keeps the words)
+	await settle()
+	check("B7: a reload of the same file keeps the words", window.current_query() == "bolt")
+	main._opened_native_path = doc_b
+	window.mark_stale()
+	await settle()
+	check("B7: another file clears them", window.current_query() == "" and not window._query_box.visible)
+	main._opened_native_path = ""
+	window.mark_stale()
+	await settle()
+	window.set_query("bolt")
+	window.document_replaced()
+	check("B7: a replaced document with no file (the key never differs) clears them too", window.current_query() == "")
+	status_fails = true
+	window.mark_stale()
+	await settle()
+	window.set_query(":errors")
+	check("B7: after a failed status call the hint says the states are unavailable, not still loading", window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
+	status_fails = false
+	window.clear_query()
+	window.mark_stale()
+	await settle()
+
+	# --- a late answer for the previous document is dropped, and its rows are not applied to the new one
+	settings.tree_open_docs = []
+	settings.set_tree_open_keys(doc_a, ["s2"])
+	settings.set_tree_open_keys(doc_b, ["s1"])
+	main._opened_native_path = doc_a
+	tree_name = "Old"
+	hold_tree = true
+	window.mark_stale()
+	await frames(3) # (document A's request is in flight and waiting)
+	main._opened_native_path = doc_b
+	tree_name = "New"
+	window.mark_stale()
+	await frames(3)
+	hold_tree = false
+	await settle()
+	check("B7: the answer for the document that was left is dropped: the tree is the new document's", window._resp.get("part_name", "") == "New" and window._tree[0]["name"] == "New")
+	check("...the new document's rows are restored, not the old one's, and the old one's entry is untouched", bool(Model.find_row(window._tree, ["s1"])["expanded"]) and not bool(Model.find_row(window._tree, ["s2"])["expanded"]) and settings.tree_open_keys(doc_a) == ["s2"] and settings.tree_open_keys(doc_b) == ["s1"])
+
+	# --- the same with the window closed while the old answer is in flight (nothing starts a newer load until it is opened again)
+	tree_name = "Old2"
+	hold_tree = true
+	window.mark_stale()
+	await frames(3)
+	window.close()
+	main._opened_native_path = doc_a
+	window.mark_stale() # (closed: no new request)
+	hold_tree = false
+	await settle()
+	check("B7: a tree answer that lands after the document changed under a closed window is dropped too (nothing shown, still stale)", window._tree.is_empty() and window._stale and window._resp.is_empty())
+	tree_name = "Rig"
+	window.open()
+	await settle()
+	check("...and opening the window loads the new document, with its rows restored", window._tree[0]["name"] == "Rig" and bool(Model.find_row(window._tree, ["s2"])["expanded"]))
+	main._opened_native_path = doc_b
+
+	# --- rows the person changed before the first answer are not overwritten by a restore
+	tree_name = "Rig"
+	hold_tree = true
+	window.mark_stale()
+	await frames(3)
+	window._open_touched = true # (what the chevron, Collapse, To selection and a viewport pick set)
+	hold_tree = false
+	await settle()
+	check("B7: a restore never overwrites what the person changed before the first answer", not bool(Model.find_row(window._tree, ["s1"])["expanded"]) and settings.tree_open_keys(doc_b) == ["s1"])
+
+	# --- a session with no file keeps nothing
+	main._opened_native_path = ""
+	window.mark_stale()
+	await settle()
+	var docs_before: int = settings.tree_open_docs.size()
+	await press_arrow("s1")
+	window.collapse_all()
+	check("B7: a document with no file key stores nothing and restores nothing", window._doc_key == "" and settings.tree_open_docs.size() == docs_before and settings.tree_open_keys("") == null)
+	main._opened_native_path = ""
+	window._set_grouping(true) # (the switch is saved with the settings: leave it as the other checks expect)
