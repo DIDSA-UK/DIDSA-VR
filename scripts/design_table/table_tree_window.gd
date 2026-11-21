@@ -72,6 +72,8 @@ func show_tab(which: String) -> void:
 	scroll_target = _parts_scroll if which == "parts" else _build_scroll
 	if which == "build":
 		_redraw_build()
+	else:
+		_rebuild_rows() # (B6: the parts list draws only the rows on screen; what it drew while hidden was laid out for a box with no size)
 
 
 func current_tab() -> String:
