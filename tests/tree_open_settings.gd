@@ -111,6 +111,9 @@ func _initialize() -> void:
 	capped.set_tree_open_keys(big_name, ["abc", "d"])
 	check("...nor is a name whose first key cannot fit beside it", capped.tree_open_keys(big_name) == null and docs_of(capped) == ["wide"])
 	capped.set_tree_open_keys(big_name, ["ab"])
+	capped.set_tree_open_keys(big_name, ["abc", "d"])
+	check("...and an older entry for such a name is removed, not left to come back as rows the person no longer has", capped.tree_open_keys(big_name) == null)
+	capped.set_tree_open_keys(big_name, ["ab"])
 	check("...while one whose first key just fits is (and the older entry makes way)", capped.tree_open_keys(big_name) == ["ab"])
 
 	# --- on load: an entry whose name alone is over the cap, or whose first key cannot fit, is skipped (it would only be cut to nothing); the others stay

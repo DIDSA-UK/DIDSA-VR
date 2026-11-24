@@ -659,7 +659,7 @@ static func _room_level(siblings: Array, parent_key: String, parent_inside: bool
 		if group_inside:
 			out[gkey] = true
 		if all or open.has(gkey):
-			for m in members:
+			for m in members: # (judged one by one: the group row is lit when any member is, so the way to it shows; a member that is not the room's Part is outside)
 				_room_node(m, parent_inside, part_ids, open, grouping, all, out)
 
 

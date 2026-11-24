@@ -32,6 +32,7 @@ class FakeRooms extends Node:
 		return self
 
 	func instance_count(_root: String, _part: String) -> int:
+		await Engine.get_main_loop().process_frame # (an answer takes a frame: a late one can meet a newer selection or a closed room)
 		return count
 
 
@@ -193,8 +194,13 @@ func _initialize() -> void:
 	window._rebuild_bar()
 	await frames(4)
 	check("2. a late count for a row no longer selected is not shown", not window._bar_hint.text.contains("Placed"))
-	rooms.parts = []
+	window._selected = ["a1"]
+	rooms.count = 3
+	window._rebuild_bar()
+	rooms.parts = [] # (the room closes before the count is read)
 	window._on_rooms_changed()
+	await frames(4)
+	check("2. a late count for a room that has closed is not shown", not window._bar_hint.text.contains("Placed"))
 
 	# --- 3. the hint order
 	var base := {"name": "Peg", "path": ["x"], "id": "x"}

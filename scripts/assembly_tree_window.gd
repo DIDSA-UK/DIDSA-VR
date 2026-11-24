@@ -52,6 +52,7 @@ var _bar_hint: Label
 var _bar_row: Dictionary = {} ## the row the bar describes (B8: its hint is composed in _set_bar_hint)
 var _bar_uses := "" ## "Placed N times..." for a row whose room is open
 var _bar_greyed := ""
+var _bar_uses_token := 0 ## bumped by every bar rebuild: a count still being read for an older bar is dropped
 var _refresh_timer: SceneTreeTimer = null
 var _levels_token := 0
 var _rename_keyboard_row: Dictionary = {}
@@ -1441,6 +1442,7 @@ func _rebuild_bar() -> void:
 	var row := _selected_row()
 	if row.is_empty():
 		_bar_row = {}
+		_bar_uses_token += 1
 		_bar_hint.text = "Select a row to Fix, Hide, Isolate, Rename or Delete it."
 		return
 	var manager = _main.get("room_manager") if _main != null else null
@@ -1464,6 +1466,7 @@ func _rebuild_bar() -> void:
 		_bar_buttons.add_child(b)
 	_bar_greyed = "; ".join(greyed)
 	_bar_uses = ""
+	_bar_uses_token += 1
 	_bar_row = row
 	_set_bar_hint()
 	if str(room.get("text", "")) == "Close room":
@@ -1486,9 +1489,11 @@ func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
 		return
 	var path: Array = row.get("path", [])
 	var root := _root_part_id
+	_bar_uses_token += 1
+	var token := _bar_uses_token
 	var count: int = await e.instance_count(root, part_id)
-	if not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(self):
-		return # (the selection or the document moved on while this was read)
+	if not is_instance_valid(self) or token != _bar_uses_token or not _has_selected or _selected != path or root != _root_part_id or not manager.is_open_for(part_id):
+		return # (the selection, the document or the room moved on while this was read; every bar rebuild bumps the token)
 	_bar_uses = RoomConsole.uses_text(count)
 	_set_bar_hint()
 

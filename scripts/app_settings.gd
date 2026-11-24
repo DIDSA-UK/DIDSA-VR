@@ -280,9 +280,14 @@ func tree_open_keys(doc: String):
 
 func set_tree_open_keys(doc: String, keys: Array) -> void:
 	## Stores one document's open row keys (the caller keeps them in the spec's order), newest last, within the limits; the write is delayed (flush_tree_open). "" is no document.
-	if doc == "" or not _tree_open_fits(doc, keys):
-		return # (no document, or a name whose first key cannot fit under the character cap: nothing is stored, the cap stays true)
+	if doc == "":
+		return
 	var i := _tree_open_index(doc)
+	if not _tree_open_fits(doc, keys):
+		if i >= 0: # (a name whose first key cannot fit under the cap is not stored, the cap stays true; an older entry for it would come back as rows the person no longer has)
+			tree_open_docs.remove_at(i)
+			_tree_open_changed()
+		return
 	if i >= 0:
 		tree_open_docs.remove_at(i)
 	tree_open_docs.append({"doc": doc, "keys": keys.slice(0, TREE_OPEN_MAX_KEYS).map(func(k): return str(k))})
