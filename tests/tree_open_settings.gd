@@ -92,7 +92,7 @@ func _initialize() -> void:
 		var t := fresh()
 		t.set_tree_open_keys("many", range(5000).map(func(i): return "k%d" % i))
 		return (t.tree_open_keys("many") as Array).size() == 2000).call())
-	# --- the newest entry is never the one the cap evicts: its own keys are shortened, oldest first, instead
+	# --- the newest entry is never the one the cap evicts: its own keys are cut from the tail (the parents, first in the spec's order, stay) instead
 	var capped := fresh()
 	capped.set_tree_open_keys("small", ["a"])
 	var wide: Array = []

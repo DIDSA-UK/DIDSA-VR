@@ -206,7 +206,7 @@ Headless only; nothing here has been checked on a headset.
 - **Find kept for the same document:** `main._show_model` takes `same_document` (a component added, a session observer's refetch via `session_show_model(bytes, true)`, and `reload_world_model` as before); only the other callers (open, import, new empty assembly, demo, `unload_model`) call `document_replaced()`.
 - **Save As:** `note_document_changed` moves `_query_key` with `_doc_key` / `_load_key`, so the next `mark_stale` keeps the words.
 - **Store cap:** `_trim_tree_open` never evicts the newest entry; when it alone is over the character cap its own keys are cut from the tail until it fits (the list is in the spec's order, parents first, so what stays is whole).
-- **Status flag:** `_status_unavailable` is reset at the start of `_load_endpoint`, so an in-place re-read asks again.
+- **Status flag:** `_status_unavailable` is reset in `_load_endpoint` once the structure call has succeeded (just before `?status=true`), so an in-place re-read asks again and a failed structure call keeps the flag that goes with the old answer.
 - **Reveal:** `_reveal` captures `_refresh_token`, stops after any await if it changed, and counts a change only when an expand really fetched children.
 - **Nits:** Find's words are split and trimmed with the model's own whitespace (`Model._words`); the remembered-rows write is now a debounce (each change restarts the 1.5 s wait, but never past 10 s), as its comments always said; Find keeps the case that was typed (`Model.query_words`).
 - **Tests:** `tests/tree_b71.gd` (new; items 1, 2, 4, 5 and the whitespace nit, against a fake backend), `tests/tree_open_settings.gd` (the cap and the debounce).

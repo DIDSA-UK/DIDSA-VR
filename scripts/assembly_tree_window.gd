@@ -1115,7 +1115,6 @@ func _load_endpoint(token: int) -> bool:
 	## True = handled (loaded, or an error shown); false = the backend has no such call (404): the caller falls back to one request per level.
 	var base := "/parts/%s/assembly-tree" % _root_part_id
 	var seq := _mutation_seq
-	_status_unavailable = false # (one failed status call must not stick: this load asks again)
 	var result := await _get_json(base)
 	if token != _refresh_token:
 		return true
@@ -1144,6 +1143,7 @@ func _load_endpoint(token: int) -> bool:
 	_set_status(_tree_note(false))
 	_rebuild_rows()
 	seq = _mutation_seq
+	_status_unavailable = false # (one failed status call must not stick: this load asks again; a failed structure call above leaves the last answer's flag alone)
 	var with_status := await _get_json(base + "?status=true")
 	if token != _refresh_token or _tree.is_empty():
 		return true

@@ -15,6 +15,7 @@ var main
 var window
 var mode := "tree" ## "tree": the fake serves the tree call; "404": it does not (the per-level fallback)
 var status_fails := false
+var structure_fails := false ## the structure call (no ?status=true) fails
 var hold_part := "" ## a /occurrences read for this Part waits until it is cleared
 var occurrences := {
 	"R": [{"id": "s1", "resolved_part_id": "S"}, {"id": "s2", "resolved_part_id": "S"}],
@@ -61,6 +62,8 @@ func answer(method: int, path: String, _body) -> Dictionary:
 		if mode == "404":
 			return {"ok": false, "json": null, "code": 404, "detail": "Not Found", "error": "{ \"detail\": \"Not Found\" }"}
 		var with_status := bits[1].contains("status=true")
+		if not with_status and structure_fails:
+			return {"ok": false, "json": null, "code": 0, "error": ""}
 		if with_status and status_fails:
 			return {"ok": false, "json": null, "code": 0, "error": ""}
 		return {"ok": true, "json": {
@@ -163,6 +166,13 @@ func _initialize() -> void:
 	window._refresh_token += 1
 	await window._load_endpoint(window._refresh_token)
 	check("(the flag is set again by a new failure)", window._status_unavailable)
+	structure_fails = true # (a re-read whose structure call fails keeps the old tree and answer: and the flag that goes with them)
+	window._refresh_token += 1
+	await window._load_endpoint(window._refresh_token)
+	window.set_query(":errors")
+	check("4b. a failed structure call after a failed status call leaves the hint on 'unavailable', not 'still loading'", window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
+	window.clear_query()
+	structure_fails = false
 	status_fails = false
 	main.queue_free()
 	await frames(3)
