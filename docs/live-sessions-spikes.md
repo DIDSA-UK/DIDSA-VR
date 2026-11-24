@@ -139,6 +139,11 @@ round trips this low, P3 should try a 0.1 s target. 0.6 s (TwoVoip's default) wa
 **Spike V is closed (owner's decision, 2026-11-24), with two questions handed to P3 instead of re-run here:**
 - **V4 on the Quest** (noted, not logged): P3 encodes off the main thread from the start, whatever a logged benchmark says, so the
   result no longer changes the plan. P3 logs the encode time inside the XR app (its own V4) and lowers the complexity if needed.
+- **Where people are (owner's decision, 2026-11-24):** Host Session and Join Session ask **Same room** or **Remote** before
+  entering. **Same room**: voice off, mic and playback both (people hear each other directly; played voice would only add a late
+  copy). **Remote**: voice on, with the mode below. The choice can be changed during the session (tablet Settings > Session).
+  Open: a mixed session (two people in the room, one remote) leaves the remote person unable to hear the room; P3 decides whether
+  that needs anything more than the room's people choosing Remote.
 - **V9 (echo)**: P3 gives voice a **mode setting (owner's decision, 2026-11-24): Push to talk or Auto** (voice-activated), with a
   **sensitivity slider** and a live mic meter beside it showing where the threshold sits. **Push to talk is the default** until echo
   on the Quest's speakers has been tested. The slider's default comes from the spike's logs: quiet rooms read 0.000 to 0.013 (one
@@ -152,7 +157,7 @@ Not recorded: the Quest OS and phone Android versions.
 
 **What Spike V settles:** TwoVoip **as a prebuilt add-on** (no build from source): it loads on the Quest, the phone and the PC,
 captures, and carries voice both ways over the local Wi-Fi and the tunnel well inside the latency, loss and bandwidth limits
-(about 25 kbit/s a talker). **P3 is medium**, with three things fixed by this spike: encoding off the main thread, a Push to talk / Auto setting
+(about 25 kbit/s a talker). **P3 is medium**, with three things fixed by this spike: encoding off the main thread, Same room / Remote asked on entering, a Push to talk / Auto setting
 with a sensitivity slider (Push to talk by default), and a jitter target to try at 0.1 s (0.2 s held 150 to 360 ms of audio).
 
 ---
