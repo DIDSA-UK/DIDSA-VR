@@ -128,10 +128,12 @@ func file_conflict(container_id: String, file_text: String) -> String:
 	return ""
 
 
-func instance_count(root_part_id: String, target_part_id: String) -> int:
+func instance_count(root_part_id: String, target_part_id: String, fresh: bool = false) -> int:
 	## How many times `target_part_id` is placed in the assembly under `root_part_id`, counting every path to it (a bolt in a bracket that is placed three
 	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them. -1 when an occurrences read failed (the count is unknown,
 	## not 0).
+	if fresh:
+		_occurrence_cache.clear() # (the Assembly Tree asks again after the document changed: not the lists read before)
 	var memo := {}
 	return await _count_placements(root_part_id, target_part_id, memo, 0)
 

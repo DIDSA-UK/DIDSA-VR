@@ -66,6 +66,13 @@ func _initialize() -> void:
 	var unknown: int = await cold.instance_count("R", "B") # (K's occurrences cannot be read: the count of B is unknown, not 0)
 	print("SMOKE a count that needs an occurrences read that fails is -1 (unknown), not 0, and the console says nothing for it: ", unknown == -1 and load("res://scripts/room/room_console.gd").uses_text(-1) == "" and load("res://scripts/room/room_console.gd").uses_text(0) == "Not placed in the assembly")
 	fake.unreadable = []
+	var warm := RoomEdit.new(fake)
+	var before_change: int = await warm.instance_count("R", "S")
+	fake.occurrences["R"].append(fake.row("s3", "S")) # (a component is added behind its back)
+	var cached: int = await warm.instance_count("R", "S")
+	var fresh: int = await warm.instance_count("R", "S", true)
+	fake.occurrences["R"].pop_back()
+	print("SMOKE instance_count(..., fresh) reads again from the backend instead of the cached lists (2 cached, 3 fresh): ", before_change == 2 and cached == 2 and fresh == 3)
 
 	# --- a room with a console
 	var glb := RoomManagerTest.new().glb_for([
