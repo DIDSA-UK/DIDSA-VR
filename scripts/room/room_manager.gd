@@ -620,6 +620,15 @@ func room_for_part(part_id: String) -> Node:
 	return null
 
 
+func open_part_ids() -> Array:
+	## The Parts that have a room open now (not one still being placed or opened): the world tree dims the rows outside them.
+	var ids: Array = []
+	for r in rooms:
+		if is_instance_valid(r) and str(r.part_id) != "":
+			ids.append(str(r.part_id))
+	return ids
+
+
 func is_open_for(part_id: String) -> bool:
 	return room_for_part(part_id) != null or _opening.has(part_id) or is_placing_for(part_id)
 

@@ -16,6 +16,18 @@ const CommandStack := preload("res://scripts/command_stack.gd")
 const RoomManagerTest := preload("res://tests/room_manager.gd")
 
 
+class SlowApi extends RefCounted:
+	var rows: Array = []
+	var gate := false
+
+	func request(_method: int, path: String, _body) -> Dictionary:
+		var seen := rows.duplicate(true) if path.contains("/parts/R/") else []
+		if gate:
+			while gate:
+				await Engine.get_main_loop().process_frame
+		return {"ok": true, "code": 200, "json": seen, "error": ""}
+
+
 func _initialize() -> void:
 	RoomRegistry.clear()
 	RoomRegistry.set_max_rooms(4)
@@ -60,6 +72,32 @@ func _initialize() -> void:
 	# --- how many times a Part is placed
 	var e: RefCounted = manager.edit
 	print("SMOKE a Part's placements are counted along every path: S is placed twice, the bolt B three times (once directly, once in each K in each S... K x2 per S x2 = 4, plus 1 = 5): ", await e.instance_count("R", "S") == 2 and await e.instance_count("R", "K") == 4 and await e.instance_count("R", "B") == 5 and await e.instance_count("R", "NOPE") == 0)
+
+	fake.unreadable = ["K"]
+	var cold := RoomEdit.new(fake) # (no cache: the reads really happen)
+	var unknown: int = await cold.instance_count("R", "B") # (K's occurrences cannot be read: the count of B is unknown, not 0)
+	print("SMOKE a count that needs an occurrences read that fails is -1 (unknown), not 0, and the console says nothing for it: ", unknown == -1 and load("res://scripts/room/room_console.gd").uses_text(-1) == "" and load("res://scripts/room/room_console.gd").uses_text(0) == "Not placed in the assembly")
+	fake.unreadable = []
+	# a slow read begun before a fresh count does not store its (older) list afterwards
+	var slow := SlowApi.new()
+	var racing := RoomEdit.new(slow)
+	slow.rows = [fake.row("s1", "S")]
+	slow.gate = true
+	racing.occurrences_of("R") # (not awaited: the answer, one row, is held)
+	await process_frame
+	slow.rows = [fake.row("s1", "S"), fake.row("s2", "S")] # (a component is added)
+	slow.gate = false
+	var fresh_total: int = await racing.instance_count("R", "S", true)
+	await process_frame
+	var cached_total: int = await racing.instance_count("R", "S")
+	print("SMOKE a read begun before a fresh count does not write its older list into the cache afterwards (2 placements, not the 1 it saw): ", fresh_total == 2 and cached_total == 2)
+	var warm := RoomEdit.new(fake)
+	var before_change: int = await warm.instance_count("R", "S")
+	fake.occurrences["R"].append(fake.row("s3", "S")) # (a component is added behind its back)
+	var cached: int = await warm.instance_count("R", "S")
+	var fresh: int = await warm.instance_count("R", "S", true)
+	fake.occurrences["R"].pop_back()
+	print("SMOKE instance_count(..., fresh) reads again from the backend instead of the cached lists (2 cached, 3 fresh): ", before_change == 2 and cached == 2 and fresh == 3)
 
 	# --- a room with a console
 	var glb := RoomManagerTest.new().glb_for([

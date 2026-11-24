@@ -21,6 +21,7 @@ extends "res://scripts/diegetic_panel.gd"
 ## per placed *leaf* instance), so tapping one shows a status message
 ## instead of silently doing nothing.
 
+const RoomConsole := preload("res://scripts/room/room_console.gd")
 const BackendSession := preload("res://scripts/backend_session.gd") ## the API key and this app's own X-Document-Session on every call
 const Model := preload("res://scripts/tree/occurrence_tree_model.gd") ## rows, instance names, state icons, the bar's actions (pure, tests/occurrence_tree_model.gd)
 const API_PREFIX := "/document"
@@ -48,6 +49,13 @@ var _row_controls: Dictionary = {} ## path key -> the row's Control, for the row
 var _bar: Control ## the bottom action bar (never scrolls away)
 var _bar_buttons: HBoxContainer
 var _bar_hint: Label
+var _bar_row: Dictionary = {} ## the row the bar describes (B8: its hint is composed in _set_bar_hint)
+var _bar_uses := "" ## "Placed N times..." for a row whose room is open
+var _bar_greyed := ""
+var _uses_cache: Dictionary = {} ## {key (row, Part, assembly), count, fresh}: the last "Placed N times" count; `fresh` ends with the next tree answer
+var _uses_gen := 0 ## bumped by every document change (mark_stale, a tree answer): a count read before it is dropped
+var _uses_read_gen := 0 ## the generation the last count was asked under
+var _uses_reading := "" ## the key of the count being read now ("" = none): the same count is not asked for twice at once
 var _refresh_timer: SceneTreeTimer = null
 var _levels_token := 0
 var _rename_keyboard_row: Dictionary = {}
@@ -64,6 +72,8 @@ var _unknown_tokens: Array = [] ## the filter's unknown ":tokens" of the last dr
 var _query_box: Control
 var _query_label: Label
 var _query_hint: Label
+var _doc_serial := 0 ## bumped when another document replaces this one (document_replaced(), or a different file key at mark_stale()): a reveal still fetching a level stops
+var _mark_key := "" ## the document key at the last mark_stale()
 var _doc_key := "" ## B7 (spec section 12): the document key the tree shown belongs to; "" = none whose open rows can be stored (a file-less session, or a tree still loading)
 var _load_key := "" ## the document key when the load now in flight was requested
 var _restore_due := false ## the first tree answer after a new document restores its remembered open rows (once)
@@ -125,6 +135,12 @@ func mark_stale() -> void:
 	## above on why it's a lazy client to GET .../occurrences rather than
 	## an eager assembly-mesh JSON fetch.
 	_stale = true
+	_uses_cache = {}
+	_uses_gen += 1
+	var doc_key := _document_key()
+	if doc_key != _mark_key:
+		_mark_key = doc_key
+		_doc_serial += 1 # (another file: whatever was going on for the old one ends)
 	_refresh_token += 1 # (an answer still in flight describes the document that is going: it is dropped, open or not)
 	_status_unavailable = false
 	if _query != "" and _document_key() != _query_key:
@@ -253,7 +269,11 @@ static func _row_label(occ: Dictionary) -> String:
 	return "Component" # (the placeholder before a Part's name arrives is "Component N" with N the place among its siblings: occurrence_tree_model.gd)
 
 
+var _expand_dropped := false ## the last _expand_row threw its answer away because the tree was read again meanwhile (a reveal asks once more)
+
+
 func _expand_row(row: Dictionary) -> void:
+	_expand_dropped = false
 	if row["resolved_part_id"] == "" or _busy:
 		return
 	if row["children"] != null: # already fetched: just toggle
@@ -261,12 +281,24 @@ func _expand_row(row: Dictionary) -> void:
 		_rebuild_rows()
 		return
 	_busy = true
+	var serial := _doc_serial
+	var token := _refresh_token
 	var result := await _list_occurrences(row["resolved_part_id"])
 	_busy = false
-	row["children"] = _occurrences_to_rows(result["json"], row.get("path", [])) if result["ok"] else []
-	row["expanded"] = true
+	if serial != _doc_serial:
+		return # (another document replaced this one while the level was read: it is that document's rows now)
+	if token != _refresh_token:
+		_expand_dropped = true
+		return # (the document was read again while this level was in flight, a mark_stale() or a refresh: the answer may predate it; children stay null and the next press asks again)
+	var live := Model.find_row(_tree, row.get("path", [])) if not _tree.is_empty() else {}
+	if live.is_empty() or str(live.get("resolved_part_id", "")) != str(row["resolved_part_id"]):
+		return # (the row went while its level was read: a document switch, or a refresh that no longer has it)
+	row = live # (a refresh that came meanwhile built the row again: the level belongs to the one shown)
 	if not result["ok"]:
-		_set_status("Couldn't load children: %s" % result["error"])
+		_set_status("Couldn't load children: %s" % result["error"]) # (the row stays closed with its children not fetched: pressing it again asks again, and a reveal counts no change)
+		return
+	row["children"] = _occurrences_to_rows(result["json"], row.get("path", []))
+	row["expanded"] = true
 	_rebuild_rows()
 	await _apply_part_names(row["children"])
 	await _load_status(row["resolved_part_id"])
@@ -352,7 +384,7 @@ func _reveal(path: Array, force: bool = false) -> void:
 	if _tree.is_empty():
 		return
 	var changed := force
-	var token := _refresh_token # (a document switch while a level is fetched ends this reveal: it must not touch the new document)
+	var serial := _doc_serial # (a document switch while a level is fetched ends this reveal: it must not touch the new document; a Refresh of the same one does not)
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
 			if str(key).contains("#group:") and not _open_groups.has(key):
@@ -364,8 +396,16 @@ func _reveal(path: Array, force: bool = false) -> void:
 			break
 		if row["children"] == null:
 			await _expand_row(row)
-			if token != _refresh_token or _tree.is_empty():
+			if serial != _doc_serial or _tree.is_empty():
 				return
+			row = Model.find_row(_tree, ancestor) # (a Refresh meanwhile built the rows again)
+			if not row.is_empty() and row["children"] == null and _expand_dropped:
+				await _expand_row(row) # (that Refresh made the answer stale and it was dropped: ask once more on the row now shown)
+				if serial != _doc_serial or _tree.is_empty():
+					return
+				row = Model.find_row(_tree, ancestor)
+			if row.is_empty():
+				break
 			if row["children"] != null: # (counted only when the expand really fetched: a busy window or a gone row opened nothing)
 				changed = true
 		elif not bool(row["expanded"]):
@@ -551,6 +591,7 @@ func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = nu
 # --- the row pool (B6): fixed-height rows, only the visible ones (plus a margin) exist as controls, reused as the list scrolls ------------------------------------
 
 const ROW_SEPARATION := 4
+const RAIL_WIDTH := 5.0
 const POOL_MARGIN := 3 ## rows kept above and below the visible ones
 const DEFAULT_VIEW_H := 900.0 ## the list's height before it has been laid out
 const LINE_BASE := 5 ## spacer, arrow, name, bubble, folder label: anything after these on a line is a subclass's inline button (_add_row_actions)
@@ -569,7 +610,16 @@ func _make_line() -> HBoxContainer:
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override("separation", ROW_SEPARATION)
 	line.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-	line.add_child(Control.new()) # 0: the indent
+	var indent := Control.new()
+	var rail := ColorRect.new() # B8: the thin bar a row inside an open room wears at the line's left edge
+	rail.color = tokens.accent
+	rail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rail.visible = false
+	rail.anchor_bottom = 1.0
+	rail.offset_right = RAIL_WIDTH
+	indent.add_child(rail)
+	line.set_meta("rail", rail)
+	line.add_child(indent) # 0: the indent
 	var arrow := Button.new()
 	arrow.custom_minimum_size = Vector2(44, ROW_HEIGHT)
 	arrow.button_down.connect(_note_press.bind(line))
@@ -701,6 +751,8 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 	line.move_child(bubble_label if is_folder else folder, 4)
 	nb.remove_theme_color_override("font_color")
 	nb.modulate = Color.WHITE
+	line.modulate = Color(1, 1, 1, 0.5) if bool(d.get("room_dim", false)) else Color.WHITE # (B8: outside the open room)
+	(line.get_meta("rail") as Control).visible = bool(d.get("room_in", false)) # (inside it)
 	nb.icon = null
 	nb.tooltip_text = ""
 	match str(d["kind"]):
@@ -1005,6 +1057,7 @@ func note_document_changed(old_key: String) -> void:
 	var key := _document_key()
 	if key == "" or key == old_key:
 		return
+	_mark_key = key # (the same document under a new name: nothing in flight for it ends)
 	if _query_key == old_key:
 		_query_key = key # (the words typed are still for this document: the next mark_stale() must not clear them)
 	if _load_key == old_key:
@@ -1020,6 +1073,7 @@ func note_document_changed(old_key: String) -> void:
 
 func document_replaced() -> void:
 	## A different document is being loaded (not a re-read of the same one): the words typed for the old one are cleared, whatever the two files are called.
+	_doc_serial += 1
 	_query = ""
 	_query_key = ""
 	_sync_query_row()
@@ -1027,8 +1081,16 @@ func document_replaced() -> void:
 
 # --- the tree call's rendering (A5): the spec's visible rows (Model.visible_rows), listed with the same kinds as above ---------------------------------------------
 
+func _room_part_ids() -> Array:
+	## The Parts whose rooms are open now (B8: the world tree dims every row outside them).
+	var manager = _main.get("room_manager") if _main != null else null
+	return manager.open_part_ids() if manager != null and manager.has_method("open_part_ids") else []
+
+
 func _add_spec_rows() -> void:
 	var filtering := _filtering()
+	var room_parts := _room_part_ids()
+	var inside: Dictionary = Model.room_keys(_resp, room_parts, _spec_open_set(), _grouping(), filtering) if not room_parts.is_empty() else {}
 	var spec_rows: Array
 	if filtering:
 		var found := Model.filtered_rows(_resp, _query, _spec_open_keys(), _grouping(), _unsaved_part_ids())
@@ -1039,6 +1101,7 @@ func _add_spec_rows() -> void:
 		spec_rows = Model.visible_rows(_resp, _spec_open_keys(), _grouping(), _unsaved_part_ids())
 		_unknown_tokens = []
 	var index := Model.index_rows(_tree[0]["children"] as Array)
+	var first_desc := _descs.size()
 	for srow in spec_rows:
 		var depth := int(srow["depth"])
 		var dim: bool = filtering and not bool(srow["match"]) and str(srow["kind"]) != "root" # (listed only because a match is below it)
@@ -1064,6 +1127,33 @@ func _add_spec_rows() -> void:
 					d["open"] = srow["open"]
 					d["inert"] = true
 					d["dim"] = dim
+	if not room_parts.is_empty():
+		_mark_room_rows(first_desc, inside)
+
+
+func _mark_room_rows(first_desc: int, inside: Dictionary) -> void:
+	## B8: while a room is open every row outside it is dimmed ("room_dim") and the rows inside wear the rail ("room_in").
+	var everything := inside.has("")
+	for i in range(first_desc, _descs.size()):
+		var d: Dictionary = _descs[i]
+		var key := ""
+		match str(d["kind"]):
+			"row":
+				key = Model.path_key((d["row"] as Dictionary).get("path", []))
+			"group":
+				key = str(d["srow"]["key"])
+			_:
+				pass # (the Mates and Patterns folders belong to the assembly, not to a room)
+		var in_room: bool = everything or (str(d["kind"]) != "folder" and key != "" and inside.has(key))
+		d["room_in"] = in_room
+		d["room_dim"] = not in_room
+
+
+func _spec_open_set() -> Dictionary:
+	var set := {}
+	for k in _spec_open_keys():
+		set[k] = true
+	return set
 
 
 func _spec_open_keys() -> Array:
@@ -1133,9 +1223,11 @@ func _load_endpoint(token: int) -> bool:
 			_query = ""
 			_sync_fold_button()
 			return false
+		_structure_failed()
 		_set_status("Couldn't load the assembly tree: %s" % _reason(result))
 		return true
 	if not (result["json"] is Dictionary):
+		_structure_failed()
 		_set_status("Couldn't load the assembly tree: unexpected answer.")
 		return true
 	_adopt_response(result["json"])
@@ -1162,6 +1254,16 @@ func _load_endpoint(token: int) -> bool:
 		_rebuild_rows()
 		_set_status((_tree_note(false) + " Constraint states unavailable: %s" % _reason(with_status)).strip_edges())
 	return true
+
+
+func _structure_failed() -> void:
+	## The structure call failed and the answer shown stays. If that answer never had its states (a status answer dropped for a Fix / Float or a token, or one that failed),
+	## no status is coming for it: say "unavailable" whatever the flag was, and let a floated row stop reading "updating".
+	if _resp.is_empty() or _tree.is_empty() or bool(_resp.get("status_included", false)):
+		return
+	_status_unavailable = true
+	Model.clear_pending(_resp)
+	_rebuild_rows()
 
 
 static func _route_missing(result: Dictionary) -> bool:
@@ -1196,6 +1298,9 @@ func _adopt_response(resp: Dictionary) -> void:
 	## Takes a tree answer as the current one and rebuilds the rows from it, keeping what was open (spec section 8).
 	Model.normalise_tree(resp)
 	if not bool(resp.get("status_included", false)):
+		_uses_gen += 1
+		if not _uses_cache.is_empty():
+			_uses_cache["fresh"] = false # (the placements may have changed: the count is shown as it was and read again once)
 		Model.carry_status(resp, _resp)
 	_resp = resp
 	var old_children: Array = (_tree[0]["children"] as Array) if not _tree.is_empty() and _tree[0].get("children") != null else []
@@ -1219,26 +1324,48 @@ func _row_text(row: Dictionary, button: Button = null) -> String:
 	## still fits that button as laid out (its real width, its own theme font, icon and padding: so the problem bubble and any row buttons beside it are already
 	## taken out); without one, all of them. What is left out is in the bottom bar when the row is selected (_row_detail), and the icon and tint still show the state.
 	var text := str(row["name"])
-	var hint := _legacy_hint_short(row)
-	if row.has("state") and not bool(row.get("suppressed", false)):
-		hint = Model.state_hint_short(str(row["state"]), int(row.get("dof", -1)))
-	if bool(row.get("missing", false)):
-		hint = "missing"
-	var extras: Array = [hint]
-	if not bool(row.get("missing", false)) and _row_view_hidden(row):
-		extras.append("hidden")
-	if str(row.get("set_note", "")) != "":
-		extras.append(str(row["set_note"]))
-	if bool(row.get("status_unavailable", false)):
-		extras.append("no status")
+	var extras := row_extras(row)
 	for extra in extras:
-		if str(extra) == "":
-			continue
 		var longer: String = text + "  · %s" % str(extra)
 		if button != null and _text_width(longer, button) > _text_room(button):
 			break # (in priority order: once one does not fit, the rest are left for the bar)
 		text = longer
 	return text
+
+
+const PROBLEM_STATES := ["missing", "cycle", "broken", "over_constrained", "near"]
+
+
+func row_extras(row: Dictionary) -> Array:
+	## The short words a row may wear after its name, in the order they are kept when the row is narrow (B8, the owner's order, 21 Nov): a problem state's word first
+	## (missing, loop, broken, over, near); then "suppressed" (a suppressed part is not solved, so its state means little); the rigid-set note; the other state word
+	## (unsaved, under n, full, fixed, updating); "no status"; "hidden" last. The bottom bar keeps the full reasons (_row_detail).
+	var problem := ""
+	var state_word := ""
+	if bool(row.get("missing", false)):
+		problem = "missing"
+	elif row.has("state"):
+		var state := str(row["state"])
+		if PROBLEM_STATES.has(state):
+			problem = Model.state_hint_short(state)
+		else:
+			state_word = Model.state_hint_short(state, int(row.get("dof", -1)))
+	else:
+		var status_word := _legacy_hint_short({"status": row.get("status", ""), "dof": row.get("dof", -1), "fixed": row.get("fixed", false)})
+		if status_word == "over":
+			problem = status_word
+		else:
+			state_word = status_word
+	var extras: Array = [problem]
+	if bool(row.get("suppressed", false)):
+		extras.append("suppressed")
+	extras.append(str(row.get("set_note", "")))
+	extras.append(state_word)
+	if bool(row.get("status_unavailable", false)):
+		extras.append("no status")
+	if _row_view_hidden(row):
+		extras.append("hidden")
+	return extras.filter(func(e): return str(e) != "")
 
 
 static func _text_room(button: Button) -> float:
@@ -1335,6 +1462,9 @@ func _rebuild_bar() -> void:
 		child.queue_free()
 	var row := _selected_row()
 	if row.is_empty():
+		_bar_row = {}
+		_bar_uses = ""
+		_bar_greyed = ""
 		_bar_hint.text = "Select a row to Fix, Hide, Isolate, Rename or Delete it."
 		return
 	var manager = _main.get("room_manager") if _main != null else null
@@ -1356,8 +1486,60 @@ func _rebuild_bar() -> void:
 			greyed.append("%s: %s" % [action["label"], action["why"]])
 		b.pressed.connect(_on_bar_action.bind(str(action["id"]), row, room))
 		_bar_buttons.add_child(b)
+	_bar_greyed = "; ".join(greyed)
+	_bar_uses = ""
+	_bar_row = row
+	_set_bar_hint()
+	if str(room.get("text", "")) == "Close room":
+		_refresh_bar_uses(row, str(room["part_id"]))
+
+
+func _set_bar_hint() -> void:
+	var row := _bar_row
+	if row.is_empty():
+		return
 	var detail := _row_detail(row)
-	_bar_hint.text = "%s%s%s" % [str(row["name"]), ("  ·  " + detail) if detail != "" else "", ("  ·  " + "; ".join(greyed)) if not greyed.is_empty() else ""]
+	_bar_hint.text = "%s%s%s%s" % [str(row["name"]), ("  ·  " + detail) if detail != "" else "", ("  ·  " + _bar_uses) if _bar_uses != "" else "", ("  ·  " + _bar_greyed) if _bar_greyed != "" else ""]
+
+
+func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
+	## B8: a row whose room is open says how many times its Part is placed, as the room console does ("Placed N times: editing it here changes all of them"). The last
+	## count for the same row, Part and assembly is kept and shown at once; it is read again only after a tree answer (the placements may have changed) and never on
+	## every bar rebuild. A count that could not be read (-1) shows nothing.
+	var manager = _main.get("room_manager") if _main != null else null
+	var e = manager.edit_api() if manager != null and manager.has_method("edit_api") else null
+	if e == null or _root_part_id == "":
+		return
+	var path: Array = row.get("path", [])
+	var root := _root_part_id
+	var key := "%s|%s|%s" % [Model.path_key(path), part_id, root]
+	if str(_uses_cache.get("key", "")) == key:
+		_bar_uses = RoomConsole.uses_text(int(_uses_cache["count"]))
+		_set_bar_hint()
+		if bool(_uses_cache["fresh"]):
+			return
+	else:
+		_uses_cache = {}
+	var reading := "%s#%d" % [key, _uses_gen]
+	if _uses_reading == reading:
+		return # (this very count is being read already: its answer fills the bar)
+	_uses_reading = reading
+	var fresh := _uses_gen != _uses_read_gen # (the document changed since the last read: not from RoomEdit's cached lists; otherwise the cache is the cheap answer)
+	_uses_read_gen = _uses_gen
+	var count: int = await e.instance_count(root, part_id, fresh)
+	if not is_instance_valid(self):
+		return
+	if _uses_reading == reading:
+		_uses_reading = ""
+	if reading != "%s#%d" % [key, _uses_gen]:
+		if _has_selected and _selected == path:
+			call_deferred("_refresh_bar_uses", row, part_id) # (the document changed while this was read: the answer may predate it, so ask again now)
+		return
+	if not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
+		return # (the selection, the document or the room moved on while this was read)
+	_uses_cache = {"key": key, "count": count, "fresh": count >= 0} # (an unreadable count, -1, says nothing and is asked again by the next bar rebuild: a failure may be a moment's)
+	_bar_uses = RoomConsole.uses_text(count)
+	_set_bar_hint()
 
 
 func _bar_label(action: Dictionary, row: Dictionary) -> String:
@@ -1423,6 +1605,8 @@ func note_fixed_changed(path: Array, fixed: bool) -> void:
 	_mutation_seq += 1
 	if _endpoint_active():
 		Model.set_node_fixed(_resp, path, fixed)
+		if not fixed:
+			_resp["status_included"] = false # (the floated part's status is not in the answer held any more: if the read that follows fails, _structure_failed settles it)
 	var row := Model.find_row(_tree, path)
 	if not row.is_empty():
 		row["fixed"] = fixed
