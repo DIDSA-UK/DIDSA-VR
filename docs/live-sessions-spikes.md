@@ -237,6 +237,10 @@ The figures are for **your** phone (record make, model, chip, Android version).
   tests drawing, not download size.
 - Steps were tapped through in 1 to 3 s; the first second of a step includes the switch-over hitch (C8 showed 41 to 47 ms worst frames
   and was marked below-60 for that alone), so give each step about 20 s.
+- **Third run** (24 Nov): head tracking works (draw calls swing from 8 to 1208 as the view turns). The 600k stress model, looked at,
+  edges on, MSAA 2x: about 120 fps, GPU 7 ms, 1208 draw calls, window p95 8.3 to 16.7 ms. Not results yet: steps were tapped through
+  in 1 to 6 s (C3 never ran 10 minutes, C5 ended at 3 s with the phone picked up: 21 degrees "drift"). So the steps now **run by
+  themselves**, with a countdown, and leave out each step's first 2 s.
 - Harmless: the phone APK logs that it cannot load the OpenXR Vendors extension (it is for the Quest; the phone preset does not
   enable it).
 
@@ -255,8 +259,9 @@ The figures are for **your** phone (record make, model, chip, Android version).
 4. Allow installing from USB, `adb install -r build/didsa-phone-spike-debug.apk`, start **DIDSA Phone Spike** (C1).
 5. On the setup screen: type `http://<PC IP>:8080/gear_train.glb` and `.../heavy.glb`, switch **collision** on, press **Load both**:
    two load lines appear (C7). Type your viewer's lens values if you have them.
-6. Press **Start the run**, put the phone in the viewer. Tap through C2; on C3 wait **10 minutes** (C4); tap through C3b to C3d and
-   C8 (take the phone out of the viewer for C8); for C5 lay it flat on the table for 60 s. Tune k1 / k2 with the gamepad whenever lines
+6. Press **Start the run**, put the phone in the viewer. **The steps run by themselves** (since 24 Nov): 20 s each, C3 10 minutes
+   (its end is C4), C5 62 s; each step's first 2 s are left out of its numbers; a tap skips ahead. Take the phone out of the viewer
+   for C8 and turn with it; for C5 lay it flat on the table and leave it. Tune k1 / k2 with the gamepad whenever lines
    look bent (C6), and press its buttons once (C9).
 7. After the last step, **photograph the setup screen** (it lists every step's result). Send the photo, plus make / model / chip /
    Android version, to me or the next session.

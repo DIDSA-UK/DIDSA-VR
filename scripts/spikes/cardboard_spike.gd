@@ -25,6 +25,8 @@ const ViewModes := preload("res://scripts/view_modes.gd")
 const SETTINGS_PATH := "user://cardboard_spike.cfg"
 const DEMO_GLB := "res://demo/rockets/Saturn_V.glb"
 const REPORT_EVERY_S := 2.0
+const WARM_UP_S := 2.0 ## each step's first seconds (the switch-over hitch, shaders) are left out of its numbers
+const C4_AFTER_S := 540.0 ## C3 counts as C4 (a warm phone) when it ran at least this long
 const DRIFT_S := 60.0
 ## The barrel distortion of Godot's lens blit (servers/rendering/renderer_rd/shaders/blit.glsl), as a canvas shader on each eye.
 const LENS_SHADER := """
@@ -52,13 +54,13 @@ void fragment() {
 
 ## The guided steps (the doc's C2 to C8). model: "light" / "heavy"; stereo; edges; section; msaa (0 off, 1 2x); oversample.
 const STEPS := [
-	{"id": "C2", "label": "C2 light model, stereo, edges on, section on, MSAA 2x", "model": "light", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3", "label": "C3 heavy model, stereo, edges on, section on, MSAA 2x (leave it 10 minutes for C4)", "model": "heavy", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3b", "label": "C3b heavy, edges OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3c", "label": "C3c heavy, edges off, MSAA OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.5},
-	{"id": "C3d", "label": "C3d heavy, edges off, MSAA off, oversample 1.0", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.0},
-	{"id": "C8", "label": "C8 magic window (mono), heavy, edges on, section on", "model": "heavy", "stereo": false, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C5", "label": "C5 drift: lay the phone flat and still for 60 s", "model": "light", "stereo": true, "edges": false, "section": false, "msaa": 1, "oversample": 1.5, "drift": true},
+	{"id": "C2", "seconds": 20, "label": "C2 light model, stereo, edges on, section on, MSAA 2x", "model": "light", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3", "seconds": 600, "label": "C3 heavy model, stereo, edges on, section on, MSAA 2x (runs 10 minutes: its last lines are C4)", "model": "heavy", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3b", "seconds": 20, "label": "C3b heavy, edges OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3c", "seconds": 20, "label": "C3c heavy, edges off, MSAA OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.5},
+	{"id": "C3d", "seconds": 20, "label": "C3d heavy, edges off, MSAA off, oversample 1.0", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.0},
+	{"id": "C8", "seconds": 20, "label": "C8 magic window (mono), heavy, edges on, section on", "model": "heavy", "stereo": false, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C5", "seconds": 62, "label": "C5 drift: lay the phone flat and still; it ends by itself after 60 s", "model": "light", "stereo": true, "edges": false, "section": false, "msaa": 1, "oversample": 1.5, "drift": true},
 ]
 
 @onready var assembly_root: Node3D = $AssemblyRoot
@@ -76,6 +78,8 @@ var models: Dictionary = {} ## "light" / "heavy" -> {"scene": Node3D, "summary":
 var build_collision := false
 var _report_left := REPORT_EVERY_S
 var _step_started_ms := 0
+var _warmed := false
+var auto_advance := true ## each step ends by itself after its "seconds"; a tap ends it early
 var _drift_start_yaw := NAN
 var _joy_logged := 0
 var last_report := "" ## what the last report said (tests read it)
@@ -266,6 +270,7 @@ func apply_step(step: Dictionary) -> void:
 		mobile_vr.set("oversample", _oversample)
 	_set_stereo(bool(step["stereo"]))
 	stats.clear()
+	_warmed = false
 	_step_started_ms = Time.get_ticks_msec()
 	_drift_start_yaw = NAN
 	_report_left = REPORT_EVERY_S
@@ -481,8 +486,16 @@ func _process(delta: float) -> void:
 		window_camera.global_transform = xr_camera.global_transform # magic window: the phone is a window you turn
 	if _stereo_layer.visible:
 		_follow_head() # and again just before drawing (frame_pre_draw), whichever comes after the head's pose
-	stats.add(delta)
 	var step: Dictionary = STEPS[step_index]
+	var elapsed := _step_elapsed_s()
+	if not _warmed and elapsed >= WARM_UP_S:
+		_warmed = true
+		stats.clear()
+	if auto_advance and elapsed >= float(step.get("seconds", 20)):
+		finish_step()
+		next_step()
+		return
+	stats.add(delta)
 	if step.get("drift", false):
 		var yaw := xr_camera.global_transform.basis.get_euler().y
 		if is_nan(_drift_start_yaw) and Time.get_ticks_msec() - _step_started_ms > 2000:
@@ -491,6 +504,19 @@ func _process(delta: float) -> void:
 	if _report_left <= 0.0:
 		_report_left = REPORT_EVERY_S
 		report()
+
+
+func _step_elapsed_s() -> float:
+	return (Time.get_ticks_msec() - _step_started_ms) / 1000.0
+
+
+func finish_step() -> void:
+	## The step's last report; C3 that ran long enough is also C4 (the same heavy scene on a warm phone).
+	report()
+	var step: Dictionary = STEPS[step_index]
+	if step["id"] == "C3" and _step_elapsed_s() >= C4_AFTER_S:
+		results["C4"] = "C4 (C3 after %d s, warm phone): %s" % [int(_step_elapsed_s()), results["C3"]]
+		_log(results["C4"])
 
 
 func report() -> void:
@@ -507,7 +533,7 @@ func report() -> void:
 	stats.clear()
 	results[step["id"]] = text
 	_log(text)
-	hud_label.text = text.replace(" | ", "\n")
+	hud_label.text = "%s: %d of %d s (tap to skip)\n%s" % [step["id"], int(_step_elapsed_s()), int(step.get("seconds", 20)), text.replace(" | ", "\n")]
 
 
 # --- input ------------------------------------------------------------------------------------------------------------------------
@@ -531,7 +557,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var a_button: bool = event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A
 	var key: bool = event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_SPACE
 	if tap or a_button or key:
-		report()
+		finish_step()
 		next_step()
 	var b_button: bool = event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B
 	if b_button:
@@ -642,7 +668,7 @@ func _button(parent: Control, label: String, action: Callable) -> void:
 func _refresh_setup_text() -> void:
 	if _setup_text == null:
 		return
-	var lines := PackedStringArray(["Steps: tap the screen (the viewer's button) or gamepad A for the next step, B to stop; gamepad D-pad tunes the lens (k1 up / down, k2 left / right). The lens values above come from your viewer's QR profile, or tune by eye."])
+	var lines := PackedStringArray(["Steps run by themselves: 20 s each, C3 10 minutes (its end is C4), C5 a minute flat and still; the first 2 s of each are left out. A tap (the viewer's button) or gamepad A skips to the next step, B stops; gamepad D-pad tunes the lens (k1 up / down, k2 left / right). The lens values above come from your viewer's QR profile, or tune by eye."])
 	for slot in ["light", "heavy"]:
 		lines.append(models[slot]["summary"] if models.has(slot) else "%s: not loaded" % slot)
 	if not results.is_empty():

@@ -55,6 +55,16 @@ func _initialize() -> void:
 		await process_frame
 	spike.report()
 	print("SMOKE spike: report has the step and frame stats: ", spike.last_report.begins_with("C2 ") and spike.last_report.contains("fps"))
+	print("SMOKE spike: steps are timed, C3 ten minutes (C4), C5 over a minute: ",
+		spike.STEPS.all(func(st: Dictionary) -> bool: return st.has("seconds")) and spike.STEPS[1]["seconds"] == 600 and spike.STEPS[6]["seconds"] > 60)
+	var before: int = spike.step_index
+	spike._step_started_ms -= 1000 * int(spike.STEPS[before]["seconds"]) + 10
+	await process_frame
+	print("SMOKE spike: a step ends by itself when its time is up: ", spike.step_index == before + 1 and spike.results.has(spike.STEPS[before]["id"]))
+	spike._step_started_ms -= 1000 * 600
+	spike.finish_step()
+	print("SMOKE spike: C3 run ten minutes is kept as C4: ", spike.results.has("C4") and str(spike.results["C4"]).begins_with("C4 (C3 after"))
+	spike.next_step()
 	while spike.step_index != 5:
 		spike.next_step()
 	print("SMOKE spike: C8 is magic window (the window camera is current): ", spike.window_camera.current)
