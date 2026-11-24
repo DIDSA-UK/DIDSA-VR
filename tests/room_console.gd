@@ -61,6 +61,12 @@ func _initialize() -> void:
 	var e: RefCounted = manager.edit
 	print("SMOKE a Part's placements are counted along every path: S is placed twice, the bolt B three times (once directly, once in each K in each S... K x2 per S x2 = 4, plus 1 = 5): ", await e.instance_count("R", "S") == 2 and await e.instance_count("R", "K") == 4 and await e.instance_count("R", "B") == 5 and await e.instance_count("R", "NOPE") == 0)
 
+	fake.unreadable = ["K"]
+	var cold := RoomEdit.new(fake) # (no cache: the reads really happen)
+	var unknown: int = await cold.instance_count("R", "B") # (K's occurrences cannot be read: the count of B is unknown, not 0)
+	print("SMOKE a count that needs an occurrences read that fails is -1 (unknown), not 0, and the console says nothing for it: ", unknown == -1 and load("res://scripts/room/room_console.gd").uses_text(-1) == "" and load("res://scripts/room/room_console.gd").uses_text(0) == "Not placed in the assembly")
+	fake.unreadable = []
+
 	# --- a room with a console
 	var glb := RoomManagerTest.new().glb_for([
 		{"pos": Vector3(-200, 0, 0), "size": Vector3(100, 100, 100), "owner": "S", "occ": "k1"},

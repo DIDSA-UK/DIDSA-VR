@@ -18,6 +18,7 @@ class FakeRooms extends Node:
 	signal rooms_changed
 	var parts: Array = []
 	var count := 2
+	var calls := 0 ## how many counts were asked for
 
 	func open_part_ids() -> Array:
 		return parts.duplicate()
@@ -32,6 +33,7 @@ class FakeRooms extends Node:
 		return self
 
 	func instance_count(_root: String, _part: String) -> int:
+		calls += 1
 		await Engine.get_main_loop().process_frame # (an answer takes a frame: a late one can meet a newer selection or a closed room)
 		return count
 
@@ -194,6 +196,28 @@ func _initialize() -> void:
 	window._rebuild_bar()
 	await frames(4)
 	check("2. a late count for a row no longer selected is not shown", not window._bar_hint.text.contains("Placed"))
+	window._uses_cache = {}
+	window._selected = ["a1"]
+	rooms.count = -1 # (the occurrences could not be read: the count is unknown)
+	window._rebuild_bar()
+	await frames(4)
+	check("2. a count that could not be read says nothing (not 'Not placed in the assembly')", not window._bar_hint.text.contains("Placed") and not window._bar_hint.text.contains("Not placed") and window._uses_cache.is_empty())
+	rooms.count = 2
+	await create_timer(1.6).timeout # (any refresh the room changes queued has been answered: the cache is not waiting for a re-read)
+	window._rebuild_bar()
+	await frames(4)
+	rooms.calls = 0
+	window._uses_cache = {}
+	window._rebuild_bar()
+	await frames(4)
+	for i in 5:
+		window._rebuild_bar()
+		await frames(2)
+	check("2. the last count for the same row and Part is kept: five more bar rebuilds read nothing again (%d reads)" % rooms.calls, rooms.calls == 1 and window._bar_hint.text.contains("Placed 2 times"))
+	rooms.count = 3
+	window.request_refresh() # (a tree answer: the placements may have changed)
+	await create_timer(1.6).timeout
+	check("2. after a tree answer it is read once more (the old one stayed shown meanwhile): %d reads" % rooms.calls, rooms.calls == 2 and window._bar_hint.text.contains("Placed 3 times"))
 	window._selected = ["a1"]
 	rooms.count = 3
 	window._rebuild_bar()

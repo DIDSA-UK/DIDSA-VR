@@ -207,6 +207,8 @@ func _refresh_labels() -> void:
 
 static func uses_text(count: int) -> String:
 	## Also the Assembly Tree's bottom bar for a row whose room is open.
+	if count < 0:
+		return "" # (the count could not be read: say nothing rather than "Not placed")
 	return "Not placed in the assembly" if count == 0 else ("Placed once" if count == 1 else "Placed %d times: editing it here changes all of them" % count)
 
 

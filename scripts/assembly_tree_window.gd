@@ -52,7 +52,8 @@ var _bar_hint: Label
 var _bar_row: Dictionary = {} ## the row the bar describes (B8: its hint is composed in _set_bar_hint)
 var _bar_uses := "" ## "Placed N times..." for a row whose room is open
 var _bar_greyed := ""
-var _bar_uses_token := 0 ## bumped by every bar rebuild: a count still being read for an older bar is dropped
+var _uses_cache: Dictionary = {} ## {key (row, Part, assembly), count, fresh}: the last "Placed N times" count; `fresh` ends with the next tree answer
+var _uses_reading := "" ## the key of the count being read now ("" = none): the same count is not asked for twice at once
 var _refresh_timer: SceneTreeTimer = null
 var _levels_token := 0
 var _rename_keyboard_row: Dictionary = {}
@@ -132,6 +133,7 @@ func mark_stale() -> void:
 	## above on why it's a lazy client to GET .../occurrences rather than
 	## an eager assembly-mesh JSON fetch.
 	_stale = true
+	_uses_cache = {}
 	var doc_key := _document_key()
 	if doc_key != _mark_key:
 		_mark_key = doc_key
@@ -264,6 +266,9 @@ static func _row_label(occ: Dictionary) -> String:
 	return "Component" # (the placeholder before a Part's name arrives is "Component N" with N the place among its siblings: occurrence_tree_model.gd)
 
 
+var _expand_dropped := false ## the last _expand_row threw its answer away because the tree was read again meanwhile (a reveal asks once more)
+
+
 func _expand_row(row: Dictionary) -> void:
 	if row["resolved_part_id"] == "" or _busy:
 		return
@@ -272,11 +277,16 @@ func _expand_row(row: Dictionary) -> void:
 		_rebuild_rows()
 		return
 	_busy = true
+	_expand_dropped = false
 	var serial := _doc_serial
+	var token := _refresh_token
 	var result := await _list_occurrences(row["resolved_part_id"])
 	_busy = false
 	if serial != _doc_serial:
 		return # (another document replaced this one while the level was read: it is that document's rows now)
+	if token != _refresh_token:
+		_expand_dropped = true
+		return # (the document was read again while this level was in flight, a mark_stale() or a refresh: the answer may predate it; children stay null and the next press asks again)
 	var live := Model.find_row(_tree, row.get("path", [])) if not _tree.is_empty() else {}
 	if live.is_empty() or str(live.get("resolved_part_id", "")) != str(row["resolved_part_id"]):
 		return # (the row went while its level was read: a document switch, or a refresh that no longer has it)
@@ -386,6 +396,11 @@ func _reveal(path: Array, force: bool = false) -> void:
 			if serial != _doc_serial or _tree.is_empty():
 				return
 			row = Model.find_row(_tree, ancestor) # (a Refresh meanwhile built the rows again)
+			if not row.is_empty() and row["children"] == null and _expand_dropped:
+				await _expand_row(row) # (that Refresh made the answer stale and it was dropped: ask once more on the row now shown)
+				if serial != _doc_serial or _tree.is_empty():
+					return
+				row = Model.find_row(_tree, ancestor)
 			if row.is_empty():
 				break
 			if row["children"] != null: # (counted only when the expand really fetched: a busy window or a gone row opened nothing)
@@ -1279,6 +1294,8 @@ func _tree_note(status_done: bool) -> String:
 func _adopt_response(resp: Dictionary) -> void:
 	## Takes a tree answer as the current one and rebuilds the rows from it, keeping what was open (spec section 8).
 	Model.normalise_tree(resp)
+	if not _uses_cache.is_empty() and not bool(resp.get("status_included", false)):
+		_uses_cache["fresh"] = false # (the placements may have changed: the count is shown as it was and read again once)
 	if not bool(resp.get("status_included", false)):
 		Model.carry_status(resp, _resp)
 	_resp = resp
@@ -1444,7 +1461,6 @@ func _rebuild_bar() -> void:
 		_bar_row = {}
 		_bar_uses = ""
 		_bar_greyed = ""
-		_bar_uses_token += 1
 		_bar_hint.text = "Select a row to Fix, Hide, Isolate, Rename or Delete it."
 		return
 	var manager = _main.get("room_manager") if _main != null else null
@@ -1468,7 +1484,6 @@ func _rebuild_bar() -> void:
 		_bar_buttons.add_child(b)
 	_bar_greyed = "; ".join(greyed)
 	_bar_uses = ""
-	_bar_uses_token += 1
 	_bar_row = row
 	_set_bar_hint()
 	if str(room.get("text", "")) == "Close room":
@@ -1484,19 +1499,39 @@ func _set_bar_hint() -> void:
 
 
 func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
-	## B8: a row whose room is open says how many times its Part is placed, as the room console does ("Placed N times: editing it here changes all of them").
+	## B8: a row whose room is open says how many times its Part is placed, as the room console does ("Placed N times: editing it here changes all of them"). The last
+	## count for the same row, Part and assembly is kept and shown at once; it is read again only after a tree answer (the placements may have changed) and never on
+	## every bar rebuild. A count that could not be read (-1) shows nothing.
 	var manager = _main.get("room_manager") if _main != null else null
 	var e = manager.edit_api() if manager != null and manager.has_method("edit_api") else null
 	if e == null or _root_part_id == "":
 		return
 	var path: Array = row.get("path", [])
 	var root := _root_part_id
-	_bar_uses_token += 1
-	var token := _bar_uses_token
+	var key := "%s|%s|%s" % [Model.path_key(path), part_id, root]
+	if str(_uses_cache.get("key", "")) == key:
+		_bar_uses = RoomConsole.uses_text(int(_uses_cache["count"]))
+		_set_bar_hint()
+		if bool(_uses_cache["fresh"]):
+			return
+	else:
+		_uses_cache = {}
+	if _uses_reading == key:
+		return # (this very count is being read already: its answer fills the bar)
+	_uses_reading = key
 	var count: int = await e.instance_count(root, part_id)
-	if not is_instance_valid(self) or token != _bar_uses_token or not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
-		return # (the selection, the document or the room moved on while this was read; every bar rebuild bumps the token)
-	_bar_uses = RoomConsole.uses_text(count)
+	if not is_instance_valid(self):
+		return
+	if _uses_reading == key:
+		_uses_reading = ""
+	if not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
+		return # (the selection, the document or the room moved on while this was read)
+	if count < 0:
+		_uses_cache = {}
+		_bar_uses = ""
+	else:
+		_uses_cache = {"key": key, "count": count, "fresh": true}
+		_bar_uses = RoomConsole.uses_text(count)
 	_set_bar_hint()
 
 

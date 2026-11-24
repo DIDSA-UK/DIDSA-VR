@@ -30,12 +30,19 @@ func _init(p_api = null) -> void:
 
 func occurrences_of(owner_part_id: String, fresh: bool = false) -> Array:
 	## The Part's direct occurrences, as the backend lists them ([] if they could not be read). Cached; `fresh` re-reads.
+	var rows = await _occurrences_or_null(owner_part_id, fresh)
+	return rows if rows != null else []
+
+
+func _occurrences_or_null(owner_part_id: String, fresh: bool = false):
+	## The same, but null when the read failed (so a caller that counts can tell "none" from "could not read").
 	if not fresh and _occurrence_cache.has(owner_part_id):
 		return _occurrence_cache[owner_part_id]
 	var r: Dictionary = await api.request(HTTPClient.METHOD_GET, "/document/parts/%s/occurrences" % owner_part_id, null)
-	var rows: Array = r["json"] if r["ok"] and r["json"] is Array else []
-	if r["ok"]:
-		_occurrence_cache[owner_part_id] = rows
+	if not r["ok"]:
+		return null
+	var rows: Array = r["json"] if r["json"] is Array else []
+	_occurrence_cache[owner_part_id] = rows
 	return rows
 
 
@@ -123,7 +130,8 @@ func file_conflict(container_id: String, file_text: String) -> String:
 
 func instance_count(root_part_id: String, target_part_id: String) -> int:
 	## How many times `target_part_id` is placed in the assembly under `root_part_id`, counting every path to it (a bolt in a bracket that is placed three
-	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them.
+	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them. -1 when an occurrences read failed (the count is unknown,
+	## not 0).
 	var memo := {}
 	return await _count_placements(root_part_id, target_part_id, memo, 0)
 
@@ -134,13 +142,19 @@ func _count_placements(container_id: String, target_id: String, memo: Dictionary
 	if memo.has(container_id):
 		return memo[container_id]
 	var total := 0
-	for row in await occurrences_of(container_id):
+	var rows = await _occurrences_or_null(container_id)
+	if rows == null:
+		return -1
+	for row in rows:
 		var child = row.get("resolved_part_id")
 		if child == null or str(child) == "":
 			continue
 		if str(child) == target_id:
 			total += 1
-		total += await _count_placements(str(child), target_id, memo, depth + 1)
+		var below := await _count_placements(str(child), target_id, memo, depth + 1)
+		if below < 0:
+			return -1
+		total += below
 	memo[container_id] = total
 	return total
 

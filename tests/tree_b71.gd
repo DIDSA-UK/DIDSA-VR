@@ -8,6 +8,7 @@ extends SceneTree
 ##   B8 carry-over:
 ##   7. a status answer dropped for a Fix / Float followed by a failed refresh says "unavailable" whatever the flag was; a floated row does not stay on "updating"
 ##   8. a Refresh of the same document does not end a reveal still fetching a level; a failed level fetch leaves the row's children not fetched and is no change
+##   9. a level read in flight across a re-read of the same document is dropped (the row stays closed, children null, the next press asks again)
 ##   (3, the store's character cap, and the delayed write are in tests/tree_open_settings.gd.)
 ## NOT covered: how any of it looks or feels in the headset.
 ## Run: "$GODOT" --headless --path . --script res://tests/tree_b71.gd  (see tests/README.md)
@@ -296,6 +297,28 @@ func _initialize() -> void:
 	fail_part = ""
 	await window._reveal(window._selected)
 	check("8. pressed again it asks again and opens", Model.find_row(window._tree, ["s2"])["children"] != null and bool(Model.find_row(window._tree, ["s2"])["expanded"]) and window._open_touched)
+	main.queue_free()
+	await frames(2)
+
+	# --- 9. a level read in flight across a re-read of the same document is dropped, not put on the new rows
+	await boot()
+	settings = main._settings
+	settings.tree_open_docs = []
+	main._opened_native_path = doc_x
+	window.mark_stale()
+	await settle()
+	hold_part = "S"
+	var s2_row := Model.find_row(window._tree, ["s2"])
+	window._expand_row(s2_row) # (the chevron: not awaited, the level is held)
+	await frames(4)
+	window.mark_stale() # (the same file: a component added, a refresh after a discard; the tree is read again)
+	await settle()
+	hold_part = ""
+	await settle()
+	var s2_new := Model.find_row(window._tree, ["s2"])
+	check("9. the level that was in flight is dropped: the row shown has no children from it and is closed", not s2_new.is_empty() and s2_new["children"] == null and not bool(s2_new["expanded"]) and not window._busy)
+	await window._expand_row(s2_new)
+	check("9. ...and the next press asks again and opens it", s2_new["children"] != null and bool(s2_new["expanded"]))
 	main.queue_free()
 	await frames(2)
 	quit(0)
