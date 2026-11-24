@@ -9,6 +9,13 @@ extends Node3D
 ## (the viewer's button) or gamepad A moves to the next step; every 2 s it logs one `DIDSA VR: cardboard:` line (adb logcat) and shows the
 ## same text in front of the eyes. It reuses the app's viewing core only: environment_manager.gd, view_modes.gd, clip_look.gd and the
 ## clip globals, mesh_identity.gd.
+##
+## Stereo, two ways (the setup screen's switch). OWN (the default): two SubViewports, one camera per eye, side by side on a
+## CanvasLayer, each eye barrel-distorted by a canvas shader; the frustum and the distortion are the same maths as Godot's
+## MobileVRInterface (Projection::set_for_hmd and the blit's lens shader), and the head pose still comes from MobileVRInterface's
+## sensor fusion (its "head" tracker drives the XRCamera3D; the eye cameras follow it). GODOT'S: `use_xr` on the main viewport with
+## MobileVRInterface. On the owner's Galaxy S26 Ultra (24 Nov, Godot 4.7.2, Mobile renderer) Godot's path drew nothing to the screen
+## ("Layers of our texture doesn't match view count for this framebuffer" every frame), which is why OWN exists.
 
 const FrameStats := preload("res://scripts/spikes/frame_stats.gd")
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
@@ -19,6 +26,29 @@ const SETTINGS_PATH := "user://cardboard_spike.cfg"
 const DEMO_GLB := "res://demo/rockets/Saturn_V.glb"
 const REPORT_EVERY_S := 2.0
 const DRIFT_S := 60.0
+## The barrel distortion of Godot's lens blit (servers/rendering/renderer_rd/shaders/blit.glsl), as a canvas shader on each eye.
+const LENS_SHADER := """
+shader_type canvas_item;
+uniform float k1 = 0.215;
+uniform float k2 = 0.215;
+uniform float upscale = 1.5;
+uniform float aspect_ratio = 1.0;
+uniform vec2 eye_center = vec2(0.0);
+void fragment() {
+	vec2 coords = UV * 2.0 - 1.0;
+	vec2 offset = coords - eye_center;
+	offset.y /= aspect_ratio;
+	float r2 = dot(offset, offset);
+	offset *= 1.0 + k1 * r2 + k2 * r2 * r2;
+	offset.y *= aspect_ratio;
+	coords = (offset + eye_center) / upscale;
+	if (coords.x < -1.0 || coords.y < -1.0 || coords.x > 1.0 || coords.y > 1.0) {
+		COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+	} else {
+		COLOR = vec4(texture(TEXTURE, (coords + vec2(1.0)) * 0.5).rgb, 1.0);
+	}
+}
+"""
 
 ## The guided steps (the doc's C2 to C8). model: "light" / "heavy"; stereo; edges; section; msaa (0 off, 1 2x); oversample.
 const STEPS := [
@@ -51,6 +81,12 @@ var _joy_logged := 0
 var last_report := "" ## what the last report said (tests read it)
 var results: Dictionary = {} ## step id -> its last report: shown on the setup screen after the run (a photo of it is the result)
 var lens := {"iod": 6.0, "k1": 0.215, "k2": 0.215} ## MobileVRInterface's eye spacing (cm) and distortion; Godot's defaults
+var own_stereo := true ## false: Godot's MobileVRInterface path (use_xr on the main viewport)
+var display_width_cm := 14.5 ## MobileVRInterface's defaults, read from it when it exists
+var display_to_lens_cm := 4.0
+var _oversample := 1.5
+var _stereo_layer: CanvasLayer
+var _eyes: Array = [] ## {"viewport": SubViewport, "camera": Camera3D, "rect": TextureRect, "material": ShaderMaterial, "side": -1 / 1}
 
 
 func _ready() -> void:
@@ -60,6 +96,9 @@ func _ready() -> void:
 	mobile_vr = XRServer.find_interface("Native mobile")
 	if mobile_vr == null:
 		_log("no MobileVRInterface in this build")
+	else:
+		display_width_cm = float(mobile_vr.get("display_width"))
+		display_to_lens_cm = float(mobile_vr.get("display_to_lens"))
 	world_environment.setup($DirectionalLight3D, mobile_vr, get_viewport(), ($Ground/MeshInstance3D as MeshInstance3D).mesh.material as ShaderMaterial)
 	world_environment.apply_saved_scene("Mid")
 	view_modes = ViewModes.new()
@@ -67,6 +106,7 @@ func _ready() -> void:
 	add_child(view_modes)
 	view_modes.setup(self, 1)
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	_build_eyes()
 	_build_setup_ui()
 
 
@@ -178,15 +218,19 @@ func apply_step(step: Dictionary) -> void:
 	view_modes.set_mode(1 if step["edges"] else 0)
 	view_modes.apply_all()
 	_set_section(step["section"], scene)
-	get_viewport().msaa_3d = Viewport.MSAA_2X if int(step["msaa"]) == 1 else Viewport.MSAA_DISABLED
+	var msaa := Viewport.MSAA_2X if int(step["msaa"]) == 1 else Viewport.MSAA_DISABLED
+	get_viewport().msaa_3d = msaa
+	for eye in _eyes:
+		(eye["viewport"] as SubViewport).msaa_3d = msaa
+	_oversample = float(step["oversample"])
 	if mobile_vr != null:
-		mobile_vr.set("oversample", float(step["oversample"]))
+		mobile_vr.set("oversample", _oversample)
 	_set_stereo(bool(step["stereo"]))
 	stats.clear()
 	_step_started_ms = Time.get_ticks_msec()
 	_drift_start_yaw = NAN
 	_report_left = REPORT_EVERY_S
-	_log("step %s: %s | %s" % [step["id"], step["label"], models[step["model"]]["summary"]])
+	_log("step %s: %s | %s | %s" % [step["id"], step["label"], _stereo_summary(bool(step["stereo"])), models[step["model"]]["summary"]])
 
 
 func _apply_lens() -> void:
@@ -194,6 +238,7 @@ func _apply_lens() -> void:
 		mobile_vr.set("iod", float(lens["iod"]))
 		mobile_vr.set("k1", float(lens["k1"]))
 		mobile_vr.set("k2", float(lens["k2"]))
+	_layout_eyes()
 	var cfg := ConfigFile.new()
 	cfg.load(SETTINGS_PATH)
 	for k in lens:
@@ -202,17 +247,139 @@ func _apply_lens() -> void:
 
 
 func _set_stereo(on: bool) -> void:
-	if mobile_vr == null:
-		window_camera.current = true
-		return
-	if not mobile_vr.is_initialized():
-		if not mobile_vr.initialize():
-			_log("MobileVRInterface failed to initialise")
-			window_camera.current = true
-			return
-	get_viewport().use_xr = on
-	window_camera.current = not on
+	## MobileVRInterface is initialised either way: its sensor fusion moves the XRCamera3D (the head) for both stereo paths and for
+	## magic window. Only Godot's path turns use_xr on.
+	if mobile_vr != null and not mobile_vr.is_initialized() and not mobile_vr.initialize():
+		_log("MobileVRInterface failed to initialise")
+	var godot_path := on and not own_stereo and mobile_vr != null and mobile_vr.is_initialized()
+	var own := on and own_stereo
+	get_viewport().use_xr = godot_path
+	get_viewport().disable_3d = own # the eyes draw the world; the main viewport only shows them
+	_stereo_layer.visible = own
+	for eye in _eyes:
+		(eye["viewport"] as SubViewport).render_target_update_mode = SubViewport.UPDATE_ALWAYS if own else SubViewport.UPDATE_DISABLED
+	window_camera.current = not godot_path
 	hud_label.visible = on
+	if own:
+		_layout_eyes()
+		_follow_head()
+
+
+func _stereo_summary(on: bool) -> String:
+	if not on:
+		return "mono (magic window)"
+	if not own_stereo:
+		return "stereo: Godot's MobileVRInterface"
+	var size: Vector2i = (_eyes[0]["viewport"] as SubViewport).size
+	return "stereo: own, 2 eyes of %dx%d, screen %dx%d" % [size.x, size.y, _screen_size().x, _screen_size().y]
+
+
+# --- own stereo: two eye viewports ----------------------------------------------------------------------------------------------
+
+func _build_eyes() -> void:
+	_stereo_layer = CanvasLayer.new()
+	_stereo_layer.name = "StereoLayer"
+	_stereo_layer.layer = 0 # under the setup screen (layer 1)
+	_stereo_layer.visible = false
+	add_child(_stereo_layer)
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.add_theme_constant_override("separation", 0)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stereo_layer.add_child(row)
+	var shader := Shader.new()
+	shader.code = LENS_SHADER
+	for side in [-1, 1]:
+		var vp := SubViewport.new()
+		vp.name = "LeftEye" if side < 0 else "RightEye"
+		vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		add_child(vp) # a child of this node, so it shares the main viewport's World3D
+		var cam := Camera3D.new()
+		cam.projection = Camera3D.PROJECTION_FRUSTUM
+		cam.keep_aspect = Camera3D.KEEP_HEIGHT
+		cam.far = 500.0
+		vp.add_child(cam)
+		cam.current = true
+		RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
+		var mat := ShaderMaterial.new()
+		mat.shader = shader
+		var rect := TextureRect.new()
+		rect.texture = vp.get_texture()
+		rect.material = mat
+		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		rect.stretch_mode = TextureRect.STRETCH_SCALE
+		rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(rect)
+		_eyes.append({"viewport": vp, "camera": cam, "rect": rect, "material": mat, "side": side})
+	# The eyes follow the head just before the frame is drawn too, so they are never a frame behind the head tracker's pose.
+	RenderingServer.frame_pre_draw.connect(func() -> void:
+		if is_instance_valid(_stereo_layer) and _stereo_layer.visible:
+			_follow_head())
+
+
+func _screen_size() -> Vector2i:
+	var size := DisplayServer.window_get_size()
+	return Vector2i(maxi(size.x, 64), maxi(size.y, 64))
+
+
+func _layout_eyes() -> void:
+	## Each eye: half the screen times the oversample, an asymmetric frustum and the lens shader, as MobileVRInterface does them.
+	if _eyes.is_empty():
+		return
+	var screen := _screen_size()
+	var eye_size := Vector2i(maxi(int(screen.x * 0.5 * _oversample), 16), maxi(int(screen.y * _oversample), 16))
+	var aspect := float(eye_size.x) / float(eye_size.y)
+	var iod := float(lens["iod"])
+	# Projection::set_for_hmd, per unit of near distance
+	var f1 := (iod * 0.5) / display_to_lens_cm
+	var f2 := ((display_width_cm - iod) * 0.5) / display_to_lens_cm
+	var f3 := (display_width_cm / 4.0) / display_to_lens_cm
+	var add := ((f1 + f2) * (_oversample - 1.0)) / 2.0
+	f1 += add
+	f2 += add
+	f3 = f3 * _oversample / aspect
+	for eye in _eyes:
+		var vp: SubViewport = eye["viewport"]
+		vp.size = eye_size
+		var cam: Camera3D = eye["camera"]
+		cam.near = 0.05
+		var side := int(eye["side"])
+		# left eye: x from -f2 to f1; right eye: from -f1 to f2
+		var offset_x := (f1 - f2) * 0.5 if side < 0 else (f2 - f1) * 0.5
+		cam.frustum_offset = Vector2(offset_x * cam.near, 0.0)
+		cam.size = 2.0 * f3 * cam.near
+		var mat: ShaderMaterial = eye["material"]
+		mat.set_shader_parameter("k1", float(lens["k1"]))
+		mat.set_shader_parameter("k2", float(lens["k2"]))
+		mat.set_shader_parameter("upscale", _oversample)
+		mat.set_shader_parameter("aspect_ratio", aspect)
+		var centre := ((-iod / 2.0) + (display_width_cm / 4.0)) / (display_width_cm / 2.0)
+		mat.set_shader_parameter("eye_center", Vector2(centre if side < 0 else -centre, 0.0))
+
+
+func _follow_head() -> void:
+	var head := xr_camera.global_transform
+	for eye in _eyes:
+		var x := float(eye["side"]) * float(lens["iod"]) * 0.01 * 0.5
+		(eye["camera"] as Camera3D).global_transform = head * Transform3D(Basis.IDENTITY, Vector3(x, 0.0, 0.0))
+
+
+func _gpu_ms() -> float:
+	var total := RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
+	if _stereo_layer != null and _stereo_layer.visible:
+		for eye in _eyes:
+			total += RenderingServer.viewport_get_measured_render_time_gpu((eye["viewport"] as SubViewport).get_viewport_rid())
+	return total
+
+
+func _cpu_ms() -> float:
+	var total := RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
+	if _stereo_layer != null and _stereo_layer.visible:
+		for eye in _eyes:
+			total += RenderingServer.viewport_get_measured_render_time_cpu((eye["viewport"] as SubViewport).get_viewport_rid())
+	return total
 
 
 func _set_section(on: bool, scene: Node3D) -> void:
@@ -273,6 +440,8 @@ func _process(delta: float) -> void:
 		return
 	if window_camera.current and mobile_vr != null and mobile_vr.is_initialized():
 		window_camera.global_transform = xr_camera.global_transform # magic window: the phone is a window you turn
+	if _stereo_layer.visible:
+		_follow_head() # and again just before drawing (frame_pre_draw), whichever comes after the head's pose
 	stats.add(delta)
 	var step: Dictionary = STEPS[step_index]
 	if step.get("drift", false):
@@ -288,10 +457,9 @@ func _process(delta: float) -> void:
 func report() -> void:
 	var step: Dictionary = STEPS[step_index]
 	var s := stats.summary()
-	var rid := get_viewport().get_viewport_rid()
 	var text := "%s %s | %s | render cpu %.1f ms gpu %.1f ms | %d draw calls | %d s into the step" % [
 		step["id"], "PASS-60" if FrameStats.passes_60(s) else "below-60", FrameStats.line(s),
-		RenderingServer.viewport_get_measured_render_time_cpu(rid), RenderingServer.viewport_get_measured_render_time_gpu(rid),
+		_cpu_ms(), _gpu_ms(),
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
 		(Time.get_ticks_msec() - _step_started_ms) / 1000]
 	if step.get("drift", false) and not is_nan(_drift_start_yaw):
@@ -379,6 +547,15 @@ func _build_setup_ui() -> void:
 		cfg.save(SETTINGS_PATH)
 		_load_url("light", _url_light.text.strip_edges())
 		_load_url("heavy", _url_heavy.text.strip_edges()))
+	var godot_stereo := CheckButton.new()
+	godot_stereo.text = "Godot's stereo (MobileVRInterface) instead of the spike's own (Godot's drew black on the S26 Ultra)"
+	godot_stereo.button_pressed = not bool(cfg.get_value("stereo", "own", true))
+	own_stereo = not godot_stereo.button_pressed
+	godot_stereo.toggled.connect(func(on: bool) -> void:
+		own_stereo = not on
+		cfg.set_value("stereo", "own", own_stereo)
+		cfg.save(SETTINGS_PATH))
+	box.add_child(godot_stereo)
 	_button(buttons, "Use the demo rocket", func() -> void:
 		load_demo("light")
 		_refresh_setup_text())

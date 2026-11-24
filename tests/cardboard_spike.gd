@@ -32,6 +32,20 @@ func _initialize() -> void:
 	await process_frame
 	print("SMOKE spike: first step is C2: ", spike.step_index == 0 and spike.last_report.begins_with("step C2"))
 	print("SMOKE spike: the model is in the scene: ", spike.assembly_root.get_child_count() == 1)
+	print("SMOKE spike: own stereo by default: two eye viewports shown, the main viewport's 3D off, use_xr off: ",
+		spike.own_stereo and spike._eyes.size() == 2 and spike._stereo_layer.visible and spike.get_viewport().disable_3d and not spike.get_viewport().use_xr)
+	var left: Camera3D = spike._eyes[0]["camera"]
+	var right: Camera3D = spike._eyes[1]["camera"]
+	var head: Transform3D = spike.xr_camera.global_transform
+	spike._follow_head() # on a device frame_pre_draw does this; headless never draws
+	var gap := right.global_position.distance_to(left.global_position)
+	print("SMOKE spike: the eye cameras sit the eye spacing apart about the head: ", is_equal_approx(gap, spike.lens["iod"] * 0.01)
+		and (left.global_position + right.global_position).distance_to(head.origin * 2.0) < 0.0001)
+	print("SMOKE spike: the eye frustums lean apart, mirrored (set_for_hmd): ",
+		left.frustum_offset.x == -right.frustum_offset.x and left.frustum_offset.x != 0.0 and is_equal_approx(left.size, right.size))
+	var vp_size: Vector2i = (spike._eyes[0]["viewport"] as SubViewport).size
+	var screen: Vector2i = spike._screen_size()
+	print("SMOKE spike: each eye renders half the screen times the oversample: ", vp_size == Vector2i(int(screen.x * 0.5 * 1.5), int(screen.y * 1.5)))
 	for i in 5:
 		await process_frame
 	spike.report()
@@ -39,6 +53,7 @@ func _initialize() -> void:
 	while spike.step_index != 5:
 		spike.next_step()
 	print("SMOKE spike: C8 is magic window (the window camera is current): ", spike.window_camera.current)
+	print("SMOKE spike: magic window hides the eyes and turns the main viewport's 3D back on: ", not spike._stereo_layer.visible and not spike.get_viewport().disable_3d)
 	spike.next_step()
 	print("SMOKE spike: C5 drift step: ", spike.STEPS[spike.step_index]["id"] == "C5")
 	spike.next_step()

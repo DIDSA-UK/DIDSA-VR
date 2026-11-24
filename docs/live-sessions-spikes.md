@@ -173,6 +173,16 @@ spatial-entity settings off, and **this scene as the main scene** for a `phone` 
 (the preset with the `phone` feature tag, XR Mode Regular, no Meta plugin); and `tools/save_assembly_glb.gd`, which turns any native
 assembly file (multi-file ones too) into the glb the headset would load, through your backend.
 
+**Stereo, two ways (24 Nov).** Godot's `MobileVRInterface` path (`use_xr` on the main viewport) drew **nothing** on the owner's
+Galaxy S26 Ultra under the Mobile renderer: every frame logged `Layers of our texture doesn't match view count for this framebuffer`
+(`framebuffer_create_multipass`), then a failed draw list, while the frame timings showed the scene itself being rendered. So the spike
+now has **its own stereo, the default**: two SubViewports with one camera each (the eye spacing apart, following the `XRCamera3D` that
+`MobileVRInterface`'s sensor fusion still moves), each eye's frustum from the same maths as Godot's `Projection::set_for_hmd`, and the
+same barrel distortion as Godot's lens blit as a canvas shader. A switch on the setup screen goes back to Godot's path. Checked here:
+headless (`tests/cardboard_spike.gd`) and one Xvfb render, which showed both eyes and magic window correctly but ran on Godot's
+OpenGL fallback (no Vulkan in the build environment), **not** the Mobile renderer. For P5 this means Godot's built-in phone stereo
+cannot be assumed on the Mobile renderer.
+
 The app opens on a **setup screen** (touch): two model URLs (the PC serves them), the lens values (eye spacing, k1, k2: from your
 viewer's QR profile, or leave Godot's defaults), a collision switch, **Load both**, **Use the demo rocket** and **Start the run**.
 The run uses Godot's built-in `MobileVRInterface` (side-by-side stereo, lens distortion, gyro head tracking). **Tap the screen** (the
@@ -203,6 +213,16 @@ The figures are for **your** phone (record make, model, chip, Android version).
 | C7 | Load of the heavy glb (the load line on the setup screen) with **collision on** | ≤ **5 s** in total; note collision's share | Build collision lazily (only when the drone cursor needs it) |
 | C8 | Magic window | PASS-60 | |
 | C9 | A Bluetooth gamepad | Its buttons appear in the log with its name, and A / B / D-pad work | P5's mapping table needs another layout |
+
+### First run (24 Nov, Galaxy S26 Ultra, no viewer)
+
+- **C1: pass.** `OpenXR initialised = false, feature tag 'phone' = true`, from the same project as the Quest build.
+- **C7: pass.** The owner's largest assembly (89 parts, 29,084 triangles, 1480 KB glb) loaded in **157 ms**, collision 39 ms of it;
+  the gear train in 60 ms.
+- **Stereo was black** with Godot's path (above), so C2 to C6 are not results yet. The frame timings from that run (120 fps, GPU 4.7 to
+  5.8 ms) measured rendering that never reached the screen.
+- That assembly is **lighter than the demo rocket** (34,814 triangles), and the phone never left its 120 fps cap, so C3 / C4 need a
+  much heavier model (a few hundred thousand triangles) to say anything.
 
 ### Your steps (about an hour)
 
