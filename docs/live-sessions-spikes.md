@@ -1,7 +1,8 @@
 # Live sessions: the voice and Cardboard spikes (P0)
 
-Part of P0 of DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`. Plans written 2026-11-18; **the spike apps were built the
-same day and are ready to run, but neither spike has been run on a device and no result below is claimed.** Both need the owner's
+Part of P0 of DIDSA-CAD `docs/mates-storage-sessions-plan-2026-11-12.md`. Plans written 2026-11-18; the spike apps were built the
+same day. **The voice spike was run by the owner on 2026-11-24** on a Quest 3 and a Samsung Galaxy S26 Ultra (results under
+"Spike V results"). **The Cardboard spike has not been run on a device and no result for it is claimed.** Both need the owner's
 devices: a Quest 3 and an Android phone. The protocol they serve is DIDSA-CAD `docs/live-sessions-scope.md`; what a view-only build
 must not load is in [`main-gd-split-audit.md`](main-gd-split-audit.md). Where the files are: [`../spikes/README.md`](../spikes/README.md).
 
@@ -90,6 +91,45 @@ kbit/s out and in, each jitter buffer, the mic level.
    minutes (V7). Then V9: on the Quest tick **Open mic**, put it down with its speakers on, talk from the phone.
 10. Send me (or the next session) a photo of each device's screen after each step, or `adb logcat -s godot | grep "voice:"`, plus
     the phone's make and model and the Quest's OS version. Remove the tunnel hostname afterwards.
+
+### Spike V results (owner's run, 2026-11-24)
+
+**Devices:** Quest 3 (OS version not recorded) and Samsung Galaxy S26 Ultra (`SM-S948B`, Android version not recorded), both
+running the spike APK built with Godot 4.7.2 and TwoVoip v6.6.2; the relay on the owner's PC, reached on the local Wi-Fi and through
+a Cloudflare tunnel hostname. **The owner reports voice working on each device and between the two devices.** The numbers below come
+from `adb logcat -s godot` captures of the `voice:` lines (one 5 s window per line); what the captures do not show is said.
+
+| # | Result | Evidence |
+|---|---|---|
+| V1 | **Pass** on the Quest and the phone; **PC not reported** | Phone: `start: Android SM-S948B, Godot 4.7.2-stable (official), TwoVoip loaded`. Quest: its start line is not in the capture, but Opus frames were encoded, sent, echoed and played |
+| V2 | **Pass** | Phone: `permissions granted at start: ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.RECORD_AUDIO"]`. Quest: the grant line is not in the capture; the mic level moves and frames are sent, so it was granted |
+| V3 | **Pass** on both | Mic level 0.000 to 0.01 quiet, up to 0.15 (Quest) and 0.30 (phone) speaking. The phone's input mix rate is 44100 Hz (resampled to 48 kHz for Opus) |
+| V4 | **Phone: pass. Quest: not in the captures** | Phone, three runs of 500 frames: mean 456 / 466 / 490 µs, worst 2495 / 2558 / 2749 µs, 59 bytes a frame (thresholds 1000 / 3000 µs). The benchmark runs on the main thread and dropped the phone to 87 fps for that window. **The Quest benchmark still needs running** (the threshold is set for the Quest) |
+| V5 | **Phone: pass. Quest: pass in 11 of 13 windows** | Local Wi-Fi, echo relay. Phone (about 1 min, 2292 frames, 1 lost, 0 late): p50 16 to 37 ms, p95 57 to 92 ms. Quest (about 70 s, 2661 frames, 0 lost, 0 late): p50 22 to 36 ms, p95 64 to 85 ms, except two windows at 105 and 130 ms |
+| V6 | **Pass on loss; p95 ≤ 250 ms in all but two phone windows** | Through the tunnel, echo relay. Quest (about 95 s, 3697 frames, 1 lost = 0.03 %, 0 late): p50 37 to 39 ms, p95 50 to 81 ms, one window 135 ms. Phone, two runs (about 3 min and about 100 s, 0 lost, 0 late): p50 29 to 55 ms, p95 38 to 202 ms, one window each at **438 ms** and **607 ms**. The Quest run was a little under the 2 minutes asked for |
+| V7 | **Owner: worked by ear, both ways. The Quest's capture does not show the phone's audio arriving** | In the only Quest-to-phone capture (21:32 to 21:33, relay without `--echo`) the Quest sends 7 to 25 kbit/s but its received count stays at 6360, "in" is 0.0 kbit/s and it has no jitter buffer for a second sender; no phone capture covers that time. Either the phone was silent in that window or phone-to-Quest audio did not arrive then. Clarity at 0.2 s and any crackle were not written down |
+| V8 | **Pass** | Highest 5 s window: 27.0 kbit/s out (Quest), 26.9 (phone), against 40. The encoder is 48 kHz mono, 20 ms frames, 24 kbit/s, complexity 5, RNNoise and AGC on (59 bytes a frame plus the 4-byte header) |
+| V9 | **Not reported** | No open-mic echo test in the captures |
+
+**Frame rate:** the Quest held 72 fps (it runs the spike as a flat panel app) and the phone 117 to 121 fps throughout, voice on or off.
+
+**Jitter buffer:** at the 0.2 s target the buffers held **150 to 360 ms** while someone was talking (Quest 148 to 356 ms, phone 167 to
+336 ms), so playout adds roughly a quarter to a third of a second on top of a one-way network time of about 10 to 40 ms. With p95
+round trips this low, P3 should try a 0.1 s target. 0.6 s (TwoVoip's default) was not tried and is not needed.
+
+**Found in the run (for P3):**
+- Typing `https://voice.<domain>` gives `connecting to ...: Invalid parameter`; `wss://` works. `WebSocketPeer` takes only `ws://` and
+  `wss://`, so P3 should map `http(s)://` to `ws(s)://` or say what to type. The relay ignores the path, so `/ws` is optional.
+- `connecting to ...: OK` only means the request started; `relay says my id is N` is the proof of a connection.
+- The spike never drops a sender's speaker when that sender goes away, so after reconnects the phone listed a stale `1: 0 ms` buffer
+  beside its live one. P3 drops a speaker when its peer leaves.
+- The p95 is per 5 s window, so a single slow moment (the 438 and 607 ms windows) shows as a bad window; P3's own telemetry should
+  also keep a whole-session p95.
+
+**Still to do for Spike V:** V1 on the PC, V4 on the Quest, V9 (open mic with the Quest's speakers), a two-device capture covering
+V7 from both ends (to settle the phone-to-Quest question above), and the Quest OS and phone Android versions. Until V4 on the Quest
+and V9 are in, **P3's size is provisionally "TwoVoip as is" (medium)**: it loads, captures, encodes within budget on the phone and
+carries clear voice over the tunnel at well under the bandwidth limit.
 
 ---
 

@@ -3,6 +3,10 @@
 Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones used in older docs and commit messages.
 "Verified" means headless, software-render or real-backend tests unless a headset is named. Headset testing is ongoing and informal and is not recorded per feature here. See `docs/status.md`.
 
+## P0 voice spike results (24 Nov; **run by the owner** on a Quest 3 and a Samsung Galaxy S26 Ultra; docs only, no code changed)
+
+- `docs/live-sessions-spikes.md` "Spike V results": V1 to V3 and V8 pass on both devices; V4 passes on the phone (mean 456 to 490 µs, worst under 2.8 ms), **not yet run on the Quest**; V5 local round trip p95 57 to 92 ms (phone), 64 to 85 ms on the Quest with two windows at 105 and 130 ms; V6 through the tunnel 0 to 0.03 % lost, p95 mostly 38 to 202 ms with two single phone windows at 438 and 607 ms; V7 reported working by ear (the Quest's capture does not show the phone's audio arriving, to be rechecked); V9 not run. About 25 kbit/s a talker; jitter buffers held 150 to 360 ms at the 0.2 s target. Found for P3: `https://` relay URLs fail (`wss://` needed), stale speakers after reconnects, per-window p95 only.
+
 ## P4, live sessions: observer tools (drone cursor, own-view edits, Share / Ping / Look here / Raise hand, Reset my view; DIDSA-CAD plan P4; headless and a real hub, **not run on a headset or phone**; `docs/live-sessions.md`)
 
 - **Drone cursor** (`session_cursor.gd`; tablet View > Cursor): a small coloured, named marker flown along the right laser; the right stick lets it out and in (that stick is the cursor's while it is on: `controller.is_manipulating`); it picks what it touches (4 cm), is inside, or points at, and the paint breadcrumb's levels (Face, Body, Part, each sub-assembly) choose what is picked (A wider, B narrower); brackets round the pick. It travels in presence's `cursor` field (model space; `session_presence.gd`, a moving cursor counts as movement) and `session_avatars.gd` draws everyone's with their name and colour.
