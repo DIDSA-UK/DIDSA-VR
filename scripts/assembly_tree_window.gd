@@ -1442,6 +1442,8 @@ func _rebuild_bar() -> void:
 	var row := _selected_row()
 	if row.is_empty():
 		_bar_row = {}
+		_bar_uses = ""
+		_bar_greyed = ""
 		_bar_uses_token += 1
 		_bar_hint.text = "Select a row to Fix, Hide, Isolate, Rename or Delete it."
 		return
@@ -1492,7 +1494,7 @@ func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
 	_bar_uses_token += 1
 	var token := _bar_uses_token
 	var count: int = await e.instance_count(root, part_id)
-	if not is_instance_valid(self) or token != _bar_uses_token or not _has_selected or _selected != path or root != _root_part_id or not manager.is_open_for(part_id):
+	if not is_instance_valid(self) or token != _bar_uses_token or not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
 		return # (the selection, the document or the room moved on while this was read; every bar rebuild bumps the token)
 	_bar_uses = RoomConsole.uses_text(count)
 	_set_bar_hint()
