@@ -7,7 +7,8 @@ Newest first. Dates are 2026. Labels (Milestone, Phase, R-number) are the ones u
 
 - Godot's `MobileVRInterface` stereo drew a black screen on the phone (Mobile renderer, Godot 4.7.2: `Layers of our texture doesn't match view count for this framebuffer` every frame). `scripts/spikes/cardboard_spike.gd` now draws stereo itself by default: two eye SubViewports, `set_for_hmd`'s frustum, Godot's lens distortion as a canvas shader, the head still from `MobileVRInterface`; a setup-screen switch goes back to Godot's path. Report lines name the stereo used and the eye size; render times add up the eyes.
 - From the first run: C1 passes (the phone build starts without OpenXR), C7 passes (157 ms for the owner's largest assembly with collision). C2 to C6 not yet measured.
-- Tests: `cardboard_spike` +5 (the eyes, their spacing and mirrored frustums, their size, magic window turning them off). Checked under Xvfb on the OpenGL fallback only, not the Mobile renderer; not run on the phone yet.
+- Second run: own stereo draws; the phone's motion sensors were off (Godot 4.7 needs `input_devices/sensors/enable_*`), now on for the `phone` tag only. New: **Make it the heavy model**, a generated 300-part stress assembly (default 600,000 triangles) loaded through the glb path, because the owner's assemblies are lighter than the demo rocket.
+- Tests: `cardboard_spike` +6 (with the stress model) (the eyes, their spacing and mirrored frustums, their size, magic window turning them off). Checked under Xvfb on the OpenGL fallback only, not the Mobile renderer; not run on the phone yet.
 
 ## P0 voice spike results (24 Nov; **run by the owner** on a Quest 3 and a Samsung Galaxy S26 Ultra; docs only, no code changed)
 

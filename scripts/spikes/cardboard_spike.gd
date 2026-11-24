@@ -178,6 +178,45 @@ func _load_url(slot: String, url: String) -> void:
 	_refresh_setup_text()
 
 
+func make_stress(slot: String, triangles: int, parts := 300) -> void:
+	## A made-up assembly of `parts` spheres (one colour each) with about `triangles` triangles in all, written to a glb and loaded
+	## through load_glb_bytes like a served one: for C3 / C4 when no real assembly is heavy enough. Its load line measures the glb
+	## path; the time to make it is logged separately.
+	var t0 := Time.get_ticks_msec()
+	parts = maxi(parts, 1)
+	var rings := maxi(int(sqrt(float(triangles) / parts / 4.0)), 2) # a SphereMesh has about 4 * rings^2 triangles at radial = 2 * rings
+	var side := int(ceil(pow(parts, 1.0 / 3.0)))
+	var root := Node3D.new()
+	root.name = "Stress"
+	for i in parts:
+		var sphere := SphereMesh.new()
+		sphere.rings = rings
+		sphere.radial_segments = rings * 2
+		sphere.radius = 20.0
+		sphere.height = 40.0
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sphere.get_mesh_arrays())
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color.from_hsv(float(i) / parts, 0.5, 0.85)
+		mesh.surface_set_material(0, mat)
+		var part := MeshInstance3D.new()
+		part.name = "Part%03d" % i
+		part.mesh = mesh
+		part.position = Vector3(i % side, (i / side) % side, i / (side * side)) * 50.0
+		root.add_child(part)
+		part.owner = root
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	var ok := doc.append_from_scene(root, state) == OK
+	var bytes := doc.generate_buffer(state) if ok else PackedByteArray()
+	root.free()
+	if bytes.is_empty():
+		_log("%s: could not make the stress model" % slot)
+		return
+	_log("%s: stress model made in %d ms (%d parts, %d rings each)" % [slot, Time.get_ticks_msec() - t0, parts, rings])
+	load_glb_bytes(slot, bytes, "stress_%dk.glb" % (triangles / 1000))
+
+
 func load_demo(slot: String) -> void:
 	load_glb_bytes(slot, FileAccess.get_file_as_bytes(DEMO_GLB), DEMO_GLB)
 
@@ -556,6 +595,21 @@ func _build_setup_ui() -> void:
 		cfg.set_value("stereo", "own", own_stereo)
 		cfg.save(SETTINGS_PATH))
 	box.add_child(godot_stereo)
+	var stress_row := HBoxContainer.new()
+	box.add_child(stress_row)
+	var stress_label := Label.new()
+	stress_label.text = "Stress model, triangles:"
+	stress_row.add_child(stress_label)
+	var stress_count := LineEdit.new()
+	stress_count.text = str(cfg.get_value("stress", "triangles", 600000))
+	stress_count.custom_minimum_size = Vector2(220, 64)
+	stress_row.add_child(stress_count)
+	_button(stress_row, "Make it the heavy model (300 parts)", func() -> void:
+		var n := int(stress_count.text) if stress_count.text.is_valid_int() else 600000
+		cfg.set_value("stress", "triangles", n)
+		cfg.save(SETTINGS_PATH)
+		make_stress("heavy", n)
+		_refresh_setup_text())
 	_button(buttons, "Use the demo rocket", func() -> void:
 		load_demo("light")
 		_refresh_setup_text())

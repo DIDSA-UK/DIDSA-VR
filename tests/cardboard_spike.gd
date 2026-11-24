@@ -28,6 +28,11 @@ func _initialize() -> void:
 	print("SMOKE spike: setup screen shown: ", spike.setup_ui.visible)
 	spike.load_demo("light")
 	print("SMOKE spike: demo rocket loaded through the glb path: ", spike.models.has("light") and str(spike.models["light"]["summary"]).contains("parts"))
+	spike.make_stress("heavy", 20000, 20)
+	var stress: String = spike.models["heavy"]["summary"] if spike.models.has("heavy") else ""
+	var tri := int(stress.get_slice(" parts, ", 1).get_slice(" triangles", 0)) if stress.contains(" parts, ") else 0
+	print("SMOKE spike: the stress model loads through the glb path as the heavy model, 20 parts, near the triangles asked: ",
+		stress.contains("stress_20k.glb") and stress.contains("20 parts") and tri > 10000 and tri < 30000)
 	spike.start_run()
 	await process_frame
 	print("SMOKE spike: first step is C2: ", spike.step_index == 0 and spike.last_report.begins_with("step C2"))

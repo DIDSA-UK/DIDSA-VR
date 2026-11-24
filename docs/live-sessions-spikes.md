@@ -224,6 +224,22 @@ The figures are for **your** phone (record make, model, chip, Android version).
 - That assembly is **lighter than the demo rocket** (34,814 triangles), and the phone never left its 120 fps cap, so C3 / C4 need a
   much heavier model (a few hundred thousand triangles) to say anything.
 
+### Second run (24 Nov, own stereo)
+
+- **Own stereo draws** (no rendering errors; two eyes of 1755x1620 on a 2340x1080 screen, the Adreno 840 under Vulkan, Forward
+  Mobile). Whether the picture looked right was not reported in the log.
+- **The motion sensors were off:** Godot 4.7 reads the gyroscope, accelerometer, gravity and magnetometer only when
+  `input_devices/sensors/enable_*` is on, and it was not, so `MobileVRInterface` had no head tracking (the view would not turn) and a
+  drift reading would mean nothing. `project.godot` now turns all four on for the `phone` feature tag only (the Quest build is unchanged).
+- The heavy model this time was 1 part, 13,534 triangles: lighter still. The setup screen now has **Make it the heavy model**: a
+  made-up assembly of 300 parts with a chosen number of triangles (default 600,000), written to a glb and loaded through the same path
+  (600k: about 0.25 s to make and load in the build environment). Its glb is small because the parts share one sphere shape; it
+  tests drawing, not download size.
+- Steps were tapped through in 1 to 3 s; the first second of a step includes the switch-over hitch (C8 showed 41 to 47 ms worst frames
+  and was marked below-60 for that alone), so give each step about 20 s.
+- Harmless: the phone APK logs that it cannot load the OpenXR Vendors extension (it is for the Quest; the phone preset does not
+  enable it).
+
 ### Your steps (about an hour)
 
 **Once, on the PC (DIDSA-VR folder, backend running):**
