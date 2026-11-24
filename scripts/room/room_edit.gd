@@ -21,6 +21,7 @@ var mesh_tier := ""
 var mesh_include_hidden := false
 
 var _name_cache: Dictionary = {} ## Part id -> its name
+var _cache_gen := 0 ## bumped when the cache is cleared (instance_count with fresh): a read begun before does not store its answer
 var _occurrence_cache: Dictionary = {} ## owner Part id -> Array of OccurrenceResponse dictionaries, until that Part changes
 
 
@@ -38,11 +39,13 @@ func _occurrences_or_null(owner_part_id: String, fresh: bool = false):
 	## The same, but null when the read failed (so a caller that counts can tell "none" from "could not read").
 	if not fresh and _occurrence_cache.has(owner_part_id):
 		return _occurrence_cache[owner_part_id]
+	var gen := _cache_gen
 	var r: Dictionary = await api.request(HTTPClient.METHOD_GET, "/document/parts/%s/occurrences" % owner_part_id, null)
 	if not r["ok"]:
 		return null
 	var rows: Array = r["json"] if r["json"] is Array else []
-	_occurrence_cache[owner_part_id] = rows
+	if gen == _cache_gen: # (not when the cache was cleared while this was read: the list may predate the change that made the person clear it)
+		_occurrence_cache[owner_part_id] = rows
 	return rows
 
 
@@ -133,6 +136,7 @@ func instance_count(root_part_id: String, target_part_id: String, fresh: bool = 
 	## times counts three). The room console's "used N times": editing a Part in a room changes every one of them. -1 when an occurrences read failed (the count is unknown,
 	## not 0).
 	if fresh:
+		_cache_gen += 1
 		_occurrence_cache.clear() # (the Assembly Tree asks again after the document changed: not the lists read before)
 	var memo := {}
 	return await _count_placements(root_part_id, target_part_id, memo, 0)

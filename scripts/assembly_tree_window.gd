@@ -54,6 +54,7 @@ var _bar_uses := "" ## "Placed N times..." for a row whose room is open
 var _bar_greyed := ""
 var _uses_cache: Dictionary = {} ## {key (row, Part, assembly), count, fresh}: the last "Placed N times" count; `fresh` ends with the next tree answer
 var _uses_gen := 0 ## bumped by every document change (mark_stale, a tree answer): a count read before it is dropped
+var _uses_read_gen := 0 ## the generation the last count was asked under
 var _uses_reading := "" ## the key of the count being read now ("" = none): the same count is not asked for twice at once
 var _refresh_timer: SceneTreeTimer = null
 var _levels_token := 0
@@ -1300,7 +1301,6 @@ func _adopt_response(resp: Dictionary) -> void:
 		_uses_gen += 1
 		if not _uses_cache.is_empty():
 			_uses_cache["fresh"] = false # (the placements may have changed: the count is shown as it was and read again once)
-	if not bool(resp.get("status_included", false)):
 		Model.carry_status(resp, _resp)
 	_resp = resp
 	var old_children: Array = (_tree[0]["children"] as Array) if not _tree.is_empty() and _tree[0].get("children") != null else []
@@ -1524,16 +1524,20 @@ func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
 	if _uses_reading == reading:
 		return # (this very count is being read already: its answer fills the bar)
 	_uses_reading = reading
-	var count: int = await e.instance_count(root, part_id, true)
+	var fresh := _uses_gen != _uses_read_gen # (the document changed since the last read: not from RoomEdit's cached lists; otherwise the cache is the cheap answer)
+	_uses_read_gen = _uses_gen
+	var count: int = await e.instance_count(root, part_id, fresh)
 	if not is_instance_valid(self):
 		return
 	if _uses_reading == reading:
 		_uses_reading = ""
 	if reading != "%s#%d" % [key, _uses_gen]:
-		return # (the document changed while this was read: the answer may predate it; the bar's rebuild after that change asks again)
+		if _has_selected and _selected == path:
+			call_deferred("_refresh_bar_uses", row, part_id) # (the document changed while this was read: the answer may predate it, so ask again now)
+		return
 	if not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
 		return # (the selection, the document or the room moved on while this was read)
-	_uses_cache = {"key": key, "count": count, "fresh": true} # (an unreadable count, -1, is kept too: it says nothing, and is asked again only after a tree answer)
+	_uses_cache = {"key": key, "count": count, "fresh": count >= 0} # (an unreadable count, -1, says nothing and is asked again by the next bar rebuild: a failure may be a moment's)
 	_bar_uses = RoomConsole.uses_text(count)
 	_set_bar_hint()
 

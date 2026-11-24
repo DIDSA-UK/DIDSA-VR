@@ -229,12 +229,12 @@ func _initialize() -> void:
 	for i in 5:
 		window._rebuild_bar()
 		await frames(2)
-	check("2. the last count for the same row and Part is kept: five more bar rebuilds read nothing again (%d reads)" % rooms.calls, rooms.calls == 1 and window._bar_hint.text.contains("Placed 2 times"))
+	check("2. the last count for the same row and Part is kept: five more bar rebuilds read nothing again (%d reads, %d from the backend)" % [rooms.calls, rooms.fresh_calls], rooms.calls == 1 and rooms.fresh_calls == 0 and window._bar_hint.text.contains("Placed 2 times"))
 	rooms.count = 3
 	window.request_refresh() # (a tree answer: the placements may have changed)
 	await until(func(): return rooms.calls >= 2)
 	await frames(4)
-	check("2. after a tree answer it is read once more, from the backend and not from a cache (the old one stayed shown meanwhile): %d reads, %d fresh" % [rooms.calls, rooms.fresh_calls], rooms.calls == 2 and rooms.fresh_calls == 2 and window._bar_hint.text.contains("Placed 3 times"))
+	check("2. after a tree answer it is read once more, from the backend and not from a cache (the old one stayed shown meanwhile): %d reads, %d fresh" % [rooms.calls, rooms.fresh_calls], rooms.calls == 2 and rooms.fresh_calls == 1 and window._bar_hint.text.contains("Placed 3 times"))
 	# a read that was in flight when the document changed lands afterwards: it is dropped and the count is read again
 	window._uses_cache = {}
 	window._rebuild_bar()
@@ -249,20 +249,20 @@ func _initialize() -> void:
 	rooms.count = 3 # (a component is added: the document now has 3)
 	window.request_refresh()
 	await until(func(): return rooms.calls >= 2)
-	rooms.hold = false
+	rooms.hold = false # (released whatever the wait found, so nothing is left parked)
 	await until(func(): return window._bar_hint.text.contains("Placed 3 times"))
 	await frames(4)
 	check("2. a read in flight when the document changed is dropped (the bar says 3, not the 2 it saw: %d reads)" % rooms.calls, window._bar_hint.text.contains("Placed 3 times") and not window._bar_hint.text.contains("Placed 2"))
 	rooms.count = -1
 	window._uses_cache = {}
 	window._uses_reading = ""
-	rooms.calls = 0
 	window._rebuild_bar()
 	await frames(4)
-	for i in 5:
-		window._rebuild_bar()
-		await frames(2)
-	check("2. a count that could not be read is kept as unknown for the row: five rebuilds ask once (%d reads) and the bar says nothing" % rooms.calls, rooms.calls == 1 and not window._bar_hint.text.contains("Placed") and not window._bar_hint.text.contains("Not placed"))
+	var said_nothing: bool = not window._bar_hint.text.contains("Placed") and not window._bar_hint.text.contains("Not placed")
+	rooms.count = 2 # (the failure was a moment's: the next bar rebuild asks again)
+	window._rebuild_bar()
+	await frames(4)
+	check("2. an unreadable count says nothing and is not kept as the answer: the next rebuild asks again and shows it", said_nothing and window._bar_hint.text.contains("Placed 2 times"))
 	rooms.count = 3
 	window._selected = ["a1"]
 	rooms.count = 3
