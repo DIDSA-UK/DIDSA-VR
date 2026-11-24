@@ -97,19 +97,29 @@ kbit/s out and in, each jitter buffer, the mic level.
 **Devices:** Quest 3 (OS version not recorded) and Samsung Galaxy S26 Ultra (`SM-S948B`, Android version not recorded), both
 running the spike APK built with Godot 4.7.2 and TwoVoip v6.6.2; the relay on the owner's PC, reached on the local Wi-Fi and through
 a Cloudflare tunnel hostname. **The owner reports voice working on each device and between the two devices.** The numbers below come
-from `adb logcat -s godot` captures of the `voice:` lines (one 5 s window per line); what the captures do not show is said.
+from `adb logcat -s godot` captures of the `voice:` lines (one 5 s window per line) and from the owner's notes read off the
+screens (marked "notes"); what neither shows is said.
 
 | # | Result | Evidence |
 |---|---|---|
-| V1 | **Pass** on the Quest and the phone; **PC not reported** | Phone: `start: Android SM-S948B, Godot 4.7.2-stable (official), TwoVoip loaded`. Quest: its start line is not in the capture, but Opus frames were encoded, sent, echoed and played |
-| V2 | **Pass** | Phone: `permissions granted at start: ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.RECORD_AUDIO"]`. Quest: the grant line is not in the capture; the mic level moves and frames are sent, so it was granted |
-| V3 | **Pass** on both | Mic level 0.000 to 0.01 quiet, up to 0.15 (Quest) and 0.30 (phone) speaking. The phone's input mix rate is 44100 Hz (resampled to 48 kHz for Opus) |
-| V4 | **Phone: pass. Quest: not in the captures** | Phone, three runs of 500 frames: mean 456 / 466 / 490 µs, worst 2495 / 2558 / 2749 µs, 59 bytes a frame (thresholds 1000 / 3000 µs). The benchmark runs on the main thread and dropped the phone to 87 fps for that window. **The Quest benchmark still needs running** (the threshold is set for the Quest) |
-| V5 | **Phone: pass. Quest: pass in 11 of 13 windows** | Local Wi-Fi, echo relay. Phone (about 1 min, 2292 frames, 1 lost, 0 late): p50 16 to 37 ms, p95 57 to 92 ms. Quest (about 70 s, 2661 frames, 0 lost, 0 late): p50 22 to 36 ms, p95 64 to 85 ms, except two windows at 105 and 130 ms |
-| V6 | **Pass on loss; p95 ≤ 250 ms in all but two phone windows** | Through the tunnel, echo relay. Quest (about 95 s, 3697 frames, 1 lost = 0.03 %, 0 late): p50 37 to 39 ms, p95 50 to 81 ms, one window 135 ms. Phone, two runs (about 3 min and about 100 s, 0 lost, 0 late): p50 29 to 55 ms, p95 38 to 202 ms, one window each at **438 ms** and **607 ms**. The Quest run was a little under the 2 minutes asked for |
+| V1 | **Pass** on the Quest, the phone and the PC | Phone: `start: Android SM-S948B, Godot 4.7.2-stable (official), TwoVoip loaded`. Quest: its start line is not in the capture, but Opus frames were encoded, sent, echoed and played. PC (notes): the encode benchmark ran, so the add-on loaded |
+| V2 | **Pass** | Phone: `permissions granted at start: ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.RECORD_AUDIO"]`. Quest (notes): asked and granted |
+| V3 | **Pass** on both | Mic level 0.000 to 0.01 quiet; speaking, up to 0.15 (Quest, logs; 0.45 to 0.67 read off the screen, notes) and 0.30 (phone). The phone's input mix rate is 44100 Hz (resampled to 48 kHz for Opus) |
+| V4 | **Quest: FAIL** (mean and worst). Phone: mean passes, worst failed in one run of four. PC: pass | Thresholds: mean ≤ 1000 µs, worst ≤ 3000 µs, 500 frames of 20 ms, 59 bytes a frame every time. **Quest (notes): mean 1950 µs, worst 3250 µs.** Phone: logs mean 456 / 466 / 490 µs, worst 2495 / 2558 / 2749 µs; notes mean 467 µs, **worst 4110 µs**. PC baseline (notes): mean 394 µs, worst 2617 µs. The benchmark runs on the main thread and dropped the phone to 87 fps for that window. What the fail means is below the table |
+| V5 | **Phone: pass. Quest: pass in 11 of 13 windows** | Local Wi-Fi, echo relay. Phone (about 1 min, 2292 frames, 1 lost, 0 late): p50 16 to 37 ms, p95 57 to 92 ms. Quest (about 70 s, 2661 frames, 0 lost, 0 late): p50 22 to 36 ms, p95 64 to 85 ms, except two windows at 105 and 130 ms. Read off the screens (notes): Quest p50 25 ms, p95 64 ms; phone p50 24 ms, p95 77 ms |
+| V6 | **Pass on loss; p95 ≤ 250 ms in all but two phone windows** | Through the tunnel, echo relay. Quest (about 95 s, 3697 frames, 1 lost = 0.03 %, 0 late): p50 37 to 39 ms, p95 50 to 81 ms, one window 135 ms. Phone, two runs (about 3 min and about 100 s, 0 lost, 0 late): p50 29 to 55 ms, p95 38 to 202 ms, one window each at **438 ms** and **607 ms**; read off the phone's screen (notes): p50 36 ms, p95 104 ms. The Quest run was a little under the 2 minutes asked for |
 | V7 | **Owner: worked by ear, both ways. The Quest's capture does not show the phone's audio arriving** | In the only Quest-to-phone capture (21:32 to 21:33, relay without `--echo`) the Quest sends 7 to 25 kbit/s but its received count stays at 6360, "in" is 0.0 kbit/s and it has no jitter buffer for a second sender; no phone capture covers that time. Either the phone was silent in that window or phone-to-Quest audio did not arrive then. Clarity at 0.2 s and any crackle were not written down |
 | V8 | **Pass** | Highest 5 s window: 27.0 kbit/s out (Quest), 26.9 (phone), against 40. The encoder is 48 kHz mono, 20 ms frames, 24 kbit/s, complexity 5, RNNoise and AGC on (59 bytes a frame plus the 4-byte header) |
 | V9 | **Not reported** | No open-mic echo test in the captures |
+
+**V4 on the Quest, what the fail means:** encoding one 20 ms frame takes about 2 ms on average and up to 3.3 ms, against 0.4 to 0.5 ms
+on the phone and the PC, so the Quest is about four times slower here. Done on the main thread, an XR frame (13.9 ms at 72 Hz, 11.1 ms at
+90 Hz) would lose 2 to 3 ms whenever it encodes, which happens about every second frame while someone talks. As the table says, P3
+must **encode off the main thread** (TwoVoip's encoder on a `WorkerThreadPool` task or its own thread) **or lower the complexity**
+(the spike uses 5; Opus 0 to 3 is much cheaper, at some cost to quality at 24 kbit/s), and re-run the benchmark on the Quest at each
+complexity. Not checked: whether the Quest gives a flat panel app lower CPU clocks than an immersive XR app, which would make this
+figure pessimistic. The cost inside the XR app's frame is measured in P3, as planned. The phone's single 4.1 ms worst case (one 20 ms
+frame, mean unchanged) is a scheduling spike rather than a sustained cost; it argues for the same thread.
 
 **Frame rate:** the Quest held 72 fps (it runs the spike as a flat panel app) and the phone 117 to 121 fps throughout, voice on or off.
 
@@ -126,10 +136,13 @@ round trips this low, P3 should try a 0.1 s target. 0.6 s (TwoVoip's default) wa
 - The p95 is per 5 s window, so a single slow moment (the 438 and 607 ms windows) shows as a bad window; P3's own telemetry should
   also keep a whole-session p95.
 
-**Still to do for Spike V:** V1 on the PC, V4 on the Quest, V9 (open mic with the Quest's speakers), a two-device capture covering
-V7 from both ends (to settle the phone-to-Quest question above), and the Quest OS and phone Android versions. Until V4 on the Quest
-and V9 are in, **P3's size is provisionally "TwoVoip as is" (medium)**: it loads, captures, encodes within budget on the phone and
-carries clear voice over the tunnel at well under the bandwidth limit.
+**Still to do for Spike V:** V9 (open mic with the Quest's speakers), a two-device capture covering V7 from both ends (to settle the
+phone-to-Quest question above), the Quest OS and phone Android versions, and (optional, cheap) the Quest benchmark at complexity 0 to
+3 so P3 knows whether a lower complexity alone is enough.
+
+**What Spike V settles so far:** TwoVoip **as a prebuilt add-on** is fine: it loads on all three platforms, captures, and carries
+voice over the local Wi-Fi and the tunnel well inside the latency, loss and bandwidth limits, so it need not be built from source.
+**P3 is medium plus encoding off the main thread** (V4 failed on the Quest). V9 still decides push-to-talk by default or echo handling.
 
 ---
 
