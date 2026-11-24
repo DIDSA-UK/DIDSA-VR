@@ -1143,11 +1143,13 @@ func _load_endpoint(token: int) -> bool:
 	_set_status(_tree_note(false))
 	_rebuild_rows()
 	seq = _mutation_seq
+	var was_unavailable := _status_unavailable
 	_status_unavailable = false # (one failed status call must not stick: this load asks again; a failed structure call above leaves the last answer's flag alone)
 	var with_status := await _get_json(base + "?status=true")
 	if token != _refresh_token or _tree.is_empty():
 		return true
 	if seq != _mutation_seq:
+		_status_unavailable = was_unavailable # (this answer is dropped and no status call is pending: if the refresh below fails too, the hint stays as it was)
 		request_refresh()
 		return true
 	if with_status["ok"] and with_status["json"] is Dictionary:

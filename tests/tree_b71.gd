@@ -15,6 +15,7 @@ var main
 var window
 var mode := "tree" ## "tree": the fake serves the tree call; "404": it does not (the per-level fallback)
 var status_fails := false
+var hold_status := false ## the ?status=true call waits until this clears
 var structure_fails := false ## the structure call (no ?status=true) fails
 var hold_part := "" ## a /occurrences read for this Part waits until it is cleared
 var occurrences := {
@@ -64,6 +65,8 @@ func answer(method: int, path: String, _body) -> Dictionary:
 		var with_status := bits[1].contains("status=true")
 		if not with_status and structure_fails:
 			return {"ok": false, "json": null, "code": 0, "error": ""}
+		while with_status and hold_status:
+			await process_frame
 		if with_status and status_fails:
 			return {"ok": false, "json": null, "code": 0, "error": ""}
 		return {"ok": true, "json": {
@@ -166,14 +169,35 @@ func _initialize() -> void:
 	window._refresh_token += 1
 	await window._load_endpoint(window._refresh_token)
 	check("(the flag is set again by a new failure)", window._status_unavailable)
+	var tree_before: int = window._tree.size()
+	var resp_before: Dictionary = window._resp.duplicate(true)
 	structure_fails = true # (a re-read whose structure call fails keeps the old tree and answer: and the flag that goes with them)
 	window._refresh_token += 1
 	await window._load_endpoint(window._refresh_token)
 	window.set_query(":errors")
-	check("4b. a failed structure call after a failed status call leaves the hint on 'unavailable', not 'still loading'", window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
+	check("4b. a failed structure call after a failed status call leaves the old tree and answer, and the hint on 'unavailable', not 'still loading'", window._tree.size() == tree_before and window._resp == resp_before and window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
 	window.clear_query()
 	structure_fails = false
+	# a Fix / Float while ?status=true is in flight drops that answer; if the refresh it queues fails at the structure call, the flag is as it was
 	status_fails = false
+	window._refresh_token += 1
+	await window._load_endpoint(window._refresh_token) # (a clean load: the flag clears)
+	status_fails = true
+	window._refresh_token += 1
+	await window._load_endpoint(window._refresh_token) # (the status call fails: the flag is set)
+	status_fails = false
+	hold_status = true
+	window._refresh_token += 1
+	window._load_endpoint(window._refresh_token) # (not awaited: it waits on the held status call)
+	await frames(4)
+	window._mutation_seq += 1 # (the Fix / Float)
+	structure_fails = true
+	hold_status = false
+	await settle()
+	window.set_query(":errors")
+	check("4c. a dropped status answer whose refresh fails keeps the flag it had: 'unavailable', not 'still loading'", window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
+	window.clear_query()
+	structure_fails = false
 	main.queue_free()
 	await frames(3)
 
