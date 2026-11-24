@@ -1,7 +1,7 @@
 extends SceneTree
 ## Tree B7 (spec section 12): the Assembly Tree's remembered open rows in app_settings.gd, no scene. Its own file (next to the settings file), an explicit stored-at order that
 ## survives a save and a load (a ConfigFile sorts dictionary keys, so the order is a list), the limits applied on every change AND on load (64 documents, 2,000 keys a
-## document, 400,000 characters in all, oldest-stored first), and the write delayed so a run of changes is one write and settings.cfg is not rewritten.
+## document, 400,000 characters in all, oldest-stored first, never the newest), and the write delayed (restarted by each change) so a run of changes is one write and settings.cfg is not rewritten.
 ## Run: "$GODOT" --headless --path . --script res://tests/tree_open_settings.gd  (see tests/README.md)
 
 const AppSettings := preload("res://scripts/app_settings.gd")
@@ -92,6 +92,19 @@ func _initialize() -> void:
 		var t := fresh()
 		t.set_tree_open_keys("many", range(5000).map(func(i): return "k%d" % i))
 		return (t.tree_open_keys("many") as Array).size() == 2000).call())
+	# --- the newest entry is never the one the cap evicts: its own keys are shortened, oldest first, instead
+	var capped := fresh()
+	capped.set_tree_open_keys("small", ["a"])
+	var wide: Array = []
+	for j in 2000:
+		wide.append("#group:%s/%04d" % ["b".repeat(280), j]) # (about 300 characters each: 600,000 in all, over the cap alone)
+	capped.set_tree_open_keys("wide", wide)
+	var capped_keys = capped.tree_open_keys("wide")
+	var capped_total := 0
+	for e in capped.tree_open_docs:
+		capped_total += capped._tree_open_weight(e)
+	check("the entry just stored survives the cap even when it alone is over it (the older documents go first)", capped_keys != null and capped.tree_open_keys("small") == null and docs_of(capped) == ["wide"])
+	check("...its own keys are shortened to fit, oldest first (the end of its list is kept)", capped_total <= AppSettings.TREE_OPEN_MAX_CHARS and not (capped_keys as Array).is_empty() and capped_keys.back() == wide.back() and capped_keys[0] != wide[0])
 	clean()
 
 	# --- the write is delayed: a run of changes is one write, and settings.cfg is not written
@@ -110,6 +123,19 @@ func _initialize() -> void:
 	var flushed := fresh()
 	flushed.load_tree_open()
 	check("flush_tree_open writes at once (what main.gd does when the app pauses or quits)", flushed.tree_open_keys("late") == ["a"] and not d._tree_open_dirty)
+
+	# --- a debounce, not a throttle: each change restarts the wait
+	var deb := fresh()
+	deb.set_tree_open_keys("one", ["a"])
+	await create_timer(AppSettings.TREE_OPEN_SAVE_DELAY_S * 0.6).timeout
+	deb.set_tree_open_keys("two", ["a"]) # (0.9 s in: the first change's wait would end at 1.5 s)
+	await create_timer(AppSettings.TREE_OPEN_SAVE_DELAY_S * 0.6).timeout
+	check("a second change 0.9 s in moves the write: at 1.8 s nothing is written yet", deb._tree_open_dirty)
+	await create_timer(AppSettings.TREE_OPEN_SAVE_DELAY_S * 0.6).timeout
+	check("...and it is written the full delay after the last change, both documents in it", not deb._tree_open_dirty and (func() -> bool:
+		var back2 := fresh()
+		back2.load_tree_open()
+		return docs_of(back2).has("one") and docs_of(back2).has("two")).call())
 
 	# --- Save As with no tree: the entry is copied
 	var c := fresh()

@@ -352,6 +352,7 @@ func _reveal(path: Array, force: bool = false) -> void:
 	if _tree.is_empty():
 		return
 	var changed := force
+	var token := _refresh_token # (a document switch while a level is fetched ends this reveal: it must not touch the new document)
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
 			if str(key).contains("#group:") and not _open_groups.has(key):
@@ -363,7 +364,10 @@ func _reveal(path: Array, force: bool = false) -> void:
 			break
 		if row["children"] == null:
 			await _expand_row(row)
-			changed = true
+			if token != _refresh_token or _tree.is_empty():
+				return
+			if row["children"] != null: # (counted only when the expand really fetched: a busy window or a gone row opened nothing)
+				changed = true
 		elif not bool(row["expanded"]):
 			row["expanded"] = true
 			changed = true
@@ -887,7 +891,7 @@ func _open_find() -> void:
 func set_query(text: String) -> void:
 	## Narrows the tree to the rows that match (and what is above them): words match names, ":errors" and the other tokens match states (Model.filtered_rows). The open rows are
 	## not changed. An empty text clears it.
-	var words := text.strip_edges()
+	var words := " ".join(PackedStringArray(Model._words(text))) # (the model's own whitespace: what its parse_query splits on)
 	if words == "":
 		clear_query()
 		return
@@ -923,7 +927,7 @@ func _sync_query_row() -> void:
 		hints.append("%d match%s." % [_match_count, "" if _match_count == 1 else "es"] if _match_count > 0 else "No matches.")
 		for token in _unknown_tokens:
 			hints.append("Unknown filter %s." % str(token))
-		var words := _query.to_lower().split(" ", false)
+		var words: Array = Model._words(_query)
 		if (words.has(":errors") or words.has(":warnings")) and not bool(_resp.get("status_included", false)):
 			hints.append("Constraint states are unavailable." if _status_unavailable or bool(_resp.get("status_failed", false)) else "Constraint states are still loading.")
 		hints.append("Part and assembly names only: features are not searched.")
@@ -1001,6 +1005,8 @@ func note_document_changed(old_key: String) -> void:
 	var key := _document_key()
 	if key == "" or key == old_key:
 		return
+	if _query_key == old_key:
+		_query_key = key # (the words typed are still for this document: the next mark_stale() must not clear them)
 	if _load_key == old_key:
 		_load_key = key # (a load in flight for the old file restores under the new one)
 	if not _tree.is_empty() and not _resp.is_empty() and not _stale and _doc_key == old_key:
@@ -1109,6 +1115,7 @@ func _load_endpoint(token: int) -> bool:
 	## True = handled (loaded, or an error shown); false = the backend has no such call (404): the caller falls back to one request per level.
 	var base := "/parts/%s/assembly-tree" % _root_part_id
 	var seq := _mutation_seq
+	_status_unavailable = false # (one failed status call must not stick: this load asks again)
 	var result := await _get_json(base)
 	if token != _refresh_token:
 		return true

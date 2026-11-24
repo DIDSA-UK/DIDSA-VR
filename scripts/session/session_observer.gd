@@ -548,7 +548,7 @@ func _refetch_all() -> void:
 		return
 	if not bool(fetched["changed"]):
 		return # a 304: the same revision as the one shown
-	if not main.session_show_model(fetched["bytes"]):
+	if not main.session_show_model(fetched["bytes"], true): # (the same document, re-read: the viewer's Find words stay)
 		_fail("The presenter's changed model could not be read.")
 		return
 	if _have_place:
