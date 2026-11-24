@@ -53,6 +53,8 @@ const TREE_OPEN_MAX_KEYS := 2000 ## per document (spec 12's MAX_STORED_KEYS)
 const TREE_OPEN_MAX_CHARS := 400000 ## and the characters of every path and key together (about 400 KB on disk), the oldest-stored go first
 const TREE_OPEN_SAVE_DELAY_S := 1.5 ## a change is written this long after the last one (each change restarts the wait, so a run of chevron presses is one write); main.gd flushes on pause and quit
 var _tree_open_dirty := false
+var tree_open_max_wait_s := 10.0 ## a run of changes never keeps the write back longer than this
+var _tree_open_since_msec := 0 ## when the unwritten changes began (0: none)
 var _tree_open_gen := 0 ## bumped by every change: only the newest change's timer writes (a debounce)
 var show_landing: bool = true ## the landing (logo, rocket garden, launcher) on every start; off: the old start-up import
 var show_tips: bool = true ## the landing's tips reel
@@ -308,11 +310,11 @@ func _trim_tree_open() -> void:
 	if total > TREE_OPEN_MAX_CHARS and not tree_open_docs.is_empty():
 		var newest: Dictionary = tree_open_docs[tree_open_docs.size() - 1]
 		var keys: Array = newest["keys"]
-		var drop := 0 # (its own keys go oldest first, from the front, until it fits)
-		while total > TREE_OPEN_MAX_CHARS and drop < keys.size():
-			total -= str(keys[drop]).length()
-			drop += 1
-		newest["keys"] = keys.slice(drop)
+		var keep := keys.size() # (its own keys are cut from the tail until it fits: the list is in the spec's order, parents before what is under them, so what stays is whole)
+		while total > TREE_OPEN_MAX_CHARS and keep > 0:
+			keep -= 1
+			total -= str(keys[keep]).length()
+		newest["keys"] = keys.slice(0, keep)
 
 
 static func _tree_open_weight(entry: Dictionary) -> int:
@@ -343,9 +345,14 @@ func load_tree_open() -> void:
 func _tree_open_changed() -> void:
 	## A change is written after a short delay, so a run of chevron presses is one write of this small file (and settings.cfg is not rewritten at all).
 	_tree_open_dirty = true
+	if _tree_open_since_msec == 0:
+		_tree_open_since_msec = Time.get_ticks_msec()
 	var tree = Engine.get_main_loop()
 	if not (tree is SceneTree):
 		flush_tree_open()
+		return
+	if (Time.get_ticks_msec() - _tree_open_since_msec) / 1000.0 >= tree_open_max_wait_s:
+		flush_tree_open() # (changes kept coming inside the wait: a crash or a power-off must not lose all of them)
 		return
 	_tree_open_gen += 1
 	var gen := _tree_open_gen
@@ -359,6 +366,7 @@ func flush_tree_open() -> void:
 	if not _tree_open_dirty:
 		return
 	_tree_open_dirty = false
+	_tree_open_since_msec = 0
 	var config := ConfigFile.new()
 	config.set_value("docs", "list", tree_open_docs)
 	var err := config.save(tree_open_path())

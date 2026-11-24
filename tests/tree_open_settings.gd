@@ -104,7 +104,7 @@ func _initialize() -> void:
 	for e in capped.tree_open_docs:
 		capped_total += capped._tree_open_weight(e)
 	check("the entry just stored survives the cap even when it alone is over it (the older documents go first)", capped_keys != null and capped.tree_open_keys("small") == null and docs_of(capped) == ["wide"])
-	check("...its own keys are shortened to fit, oldest first (the end of its list is kept)", capped_total <= AppSettings.TREE_OPEN_MAX_CHARS and not (capped_keys as Array).is_empty() and capped_keys.back() == wide.back() and capped_keys[0] != wide[0])
+	check("...its own keys are shortened to fit, from the tail (the head of its list, the parents, is kept)", capped_total <= AppSettings.TREE_OPEN_MAX_CHARS and not (capped_keys as Array).is_empty() and capped_keys[0] == wide[0] and capped_keys.back() != wide.back() and capped_keys == wide.slice(0, capped_keys.size()))
 	clean()
 
 	# --- the write is delayed: a run of changes is one write, and settings.cfg is not written
@@ -136,6 +136,18 @@ func _initialize() -> void:
 		var back2 := fresh()
 		back2.load_tree_open()
 		return docs_of(back2).has("one") and docs_of(back2).has("two")).call())
+
+	# --- ...but a run of changes cannot hold the write back for ever: a maximum wait
+	var capped_wait := fresh()
+	capped_wait.tree_open_max_wait_s = 2.0
+	for i in 5: # (0.9 s apart: the plain wait of 1.5 s never ends in between)
+		capped_wait.set_tree_open_keys("run", [str(i)])
+		await create_timer(0.9).timeout
+	check("changes 0.9 s apart for 4.5 s are written within the maximum wait (2 s), not held back until they stop", FileAccess.file_exists(TREE_FILE) and (func() -> bool:
+		var back3 := fresh()
+		back3.load_tree_open()
+		return back3.tree_open_keys("run") != null).call())
+	capped_wait.flush_tree_open()
 
 	# --- Save As with no tree: the entry is copied
 	var c := fresh()

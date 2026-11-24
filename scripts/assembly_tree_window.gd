@@ -356,7 +356,7 @@ func _reveal(path: Array, force: bool = false) -> void:
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
 			if str(key).contains("#group:") and not _open_groups.has(key):
-				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below)
+				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below. mark_stale() clears _open_groups, so a switch during the awaits drops these)
 				changed = true
 	for ancestor in Model.ancestors_paths(path):
 		var row := Model.find_row(_tree, ancestor)
@@ -891,7 +891,7 @@ func _open_find() -> void:
 func set_query(text: String) -> void:
 	## Narrows the tree to the rows that match (and what is above them): words match names, ":errors" and the other tokens match states (Model.filtered_rows). The open rows are
 	## not changed. An empty text clears it.
-	var words := " ".join(PackedStringArray(Model._words(text))) # (the model's own whitespace: what its parse_query splits on)
+	var words := " ".join(PackedStringArray(Model.query_words(text, true))) # (the model's own whitespace, the typed case kept: what the query row shows and the keyboard reopens with)
 	if words == "":
 		clear_query()
 		return
@@ -927,7 +927,7 @@ func _sync_query_row() -> void:
 		hints.append("%d match%s." % [_match_count, "" if _match_count == 1 else "es"] if _match_count > 0 else "No matches.")
 		for token in _unknown_tokens:
 			hints.append("Unknown filter %s." % str(token))
-		var words: Array = Model._words(_query)
+		var words: Array = Model.query_words(_query)
 		if (words.has(":errors") or words.has(":warnings")) and not bool(_resp.get("status_included", false)):
 			hints.append("Constraint states are unavailable." if _status_unavailable or bool(_resp.get("status_failed", false)) else "Constraint states are still loading.")
 		hints.append("Part and assembly names only: features are not searched.")

@@ -128,6 +128,8 @@ func _initialize() -> void:
 	# --- 6. the query's words are the model's (an ideographic space and a tab separate words; the edges are trimmed the same way)
 	window.set_query("\u3000bolt\u3000:errors\t")
 	check("6. Find splits and trims on the model's whitespace, not ASCII space alone", window.current_query() == "bolt :errors")
+	window.set_query("Bracket  Left")
+	check("...and keeps the case that was typed (the keyboard reopens with it)", window.current_query() == "Bracket Left" and window._query_label.text == "Find: Bracket Left")
 	window.clear_query()
 
 	# --- 2. Save As: the words' key moves with the file
