@@ -105,6 +105,8 @@ func _initialize() -> void:
 		capped_total += capped._tree_open_weight(e)
 	check("the entry just stored survives the cap even when it alone is over it (the older documents go first)", capped_keys != null and capped.tree_open_keys("small") == null and docs_of(capped) == ["wide"])
 	check("...its own keys are shortened to fit, from the tail (the head of its list, the parents, is kept)", capped_total <= AppSettings.TREE_OPEN_MAX_CHARS and not (capped_keys as Array).is_empty() and capped_keys[0] == wide[0] and capped_keys.back() != wide.back() and capped_keys == wide.slice(0, capped_keys.size()))
+	capped.set_tree_open_keys("x".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1), ["a"])
+	check("...a document name that alone is over the cap is not stored (the cap stays true)", capped.tree_open_keys("x".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1)) == null and docs_of(capped) == ["wide"])
 	clean()
 
 	# --- the write is delayed: a run of changes is one write, and settings.cfg is not written

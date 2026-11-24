@@ -54,7 +54,7 @@ const TREE_OPEN_MAX_CHARS := 400000 ## and the characters of every path and key 
 const TREE_OPEN_SAVE_DELAY_S := 1.5 ## a change is written this long after the last one (each change restarts the wait, so a run of chevron presses is one write); main.gd flushes on pause and quit
 var _tree_open_dirty := false
 var tree_open_max_wait_s := 10.0 ## a run of changes never keeps the write back longer than this
-var _tree_open_since_msec := 0 ## when the unwritten changes began (0: none)
+var _tree_open_since_msec := -1 ## when the unwritten changes began (-1: none)
 var _tree_open_gen := 0 ## bumped by every change: only the newest change's timer writes (a debounce)
 var show_landing: bool = true ## the landing (logo, rocket garden, launcher) on every start; off: the old start-up import
 var show_tips: bool = true ## the landing's tips reel
@@ -280,8 +280,8 @@ func tree_open_keys(doc: String):
 
 func set_tree_open_keys(doc: String, keys: Array) -> void:
 	## Stores one document's open row keys (the caller keeps them in the spec's order), newest last, within the limits; the write is delayed (flush_tree_open). "" is no document.
-	if doc == "":
-		return
+	if doc == "" or doc.length() > TREE_OPEN_MAX_CHARS:
+		return # (no document, or a name that alone is over the character cap: nothing is stored, the cap stays true)
 	var i := _tree_open_index(doc)
 	if i >= 0:
 		tree_open_docs.remove_at(i)
@@ -345,7 +345,7 @@ func load_tree_open() -> void:
 func _tree_open_changed() -> void:
 	## A change is written after a short delay, so a run of chevron presses is one write of this small file (and settings.cfg is not rewritten at all).
 	_tree_open_dirty = true
-	if _tree_open_since_msec == 0:
+	if _tree_open_since_msec < 0:
 		_tree_open_since_msec = Time.get_ticks_msec()
 	var tree = Engine.get_main_loop()
 	if not (tree is SceneTree):
@@ -366,7 +366,7 @@ func flush_tree_open() -> void:
 	if not _tree_open_dirty:
 		return
 	_tree_open_dirty = false
-	_tree_open_since_msec = 0
+	_tree_open_since_msec = -1
 	var config := ConfigFile.new()
 	config.set_value("docs", "list", tree_open_docs)
 	var err := config.save(tree_open_path())
