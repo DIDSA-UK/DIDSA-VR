@@ -685,10 +685,11 @@ static func _is_space(code: int) -> bool:
 		or code == 0x2028 or code == 0x2029 or code == 0x202F or code == 0x205F or code == 0x3000
 
 
-static func _words(query: String) -> Array:
+static func query_words(query: String, keep_case: bool = false) -> Array:
+	## The words of a query, split on the reference's whitespace (see _is_space); lower case unless `keep_case` (what the window keeps and shows of what was typed).
 	var out: Array = []
 	var current := ""
-	for ch in query.to_lower():
+	for ch in (query if keep_case else query.to_lower()):
 		if _is_space(ch.unicode_at(0)):
 			if current != "":
 				out.append(current)
@@ -698,6 +699,10 @@ static func _words(query: String) -> Array:
 	if current != "":
 		out.append(current)
 	return out
+
+
+static func _words(query: String) -> Array:
+	return query_words(query)
 
 
 static func _token_met(token: String, row: Dictionary, fixed: bool) -> bool:

@@ -200,6 +200,18 @@ Everything below is headless-, software-render- and (where stated) real-backend-
 - **Changed:** C8 and the F4 row corrected here; the test fix (the take-back contract both apps rely on, with no `result_code` pinned, including the untested kept-conflict path that reads the failed list; it found that on arm64 every new constraint was taken back while a conflict was kept, fixed in `solver.py` in the same PR) is DIDSA-CAD branch `ccr-bfe722e3-jz5ask` (#386) (CAD `docs/status.md`, 2026-11-20 entry). No VR code changed.
 - **Not verified:** the arm64 take-back and red in either app's UI (read from the code, not run); the test fix itself until CAD CI's amd64 and arm64 legs finish on that branch.
 
+## 2026-11-24: Tree B7.1, follow-ups to B7's review round (DIDSA-CAD `docs/assembly-tree-overhaul-scope.md` section 10.6 B7)
+
+Headless only; nothing here has been checked on a headset.
+- **Find kept for the same document:** `main._show_model` takes `same_document` (a component added, a session observer's refetch via `session_show_model(bytes, true)`, and `reload_world_model` as before); only the other callers (open, import, new empty assembly, demo, `unload_model`) call `document_replaced()`.
+- **Save As:** `note_document_changed` moves `_query_key` with `_doc_key` / `_load_key`, so the next `mark_stale` keeps the words.
+- **Store cap:** `_trim_tree_open` never evicts the newest entry; when it alone is over the character cap its own keys are cut from the tail until it fits (the list is in the spec's order, parents first, so what stays is whole).
+- **Status flag:** `_status_unavailable` is reset in `_load_endpoint` once the structure call has succeeded (just before `?status=true`), so an in-place re-read asks again a failed structure call keeps the flag that goes with the old answer, and so does a status answer dropped for a Fix / Float (the flag is put back).
+- **Reveal:** `_reveal` captures `_refresh_token`, stops after any await if it changed, and counts a change only when an expand really fetched children.
+- **Nits:** Find's words are split and trimmed with the model's own whitespace (`Model._words`); the remembered-rows write is now a debounce (each change restarts the 1.5 s wait, but never past 10 s), as its comments always said; Find keeps the case that was typed (`Model.query_words`).
+- **Tests:** `tests/tree_b71.gd` (new; items 1, 2, 4, 5 and the whitespace nit, against a fake backend), `tests/tree_open_settings.gd` (the cap and the debounce).
+- **Not verified:** the add-component path itself (item 1 is tested through `session_show_model(bytes, true)`, the same `_show_model` flag; the add-component call site was not run); item 5 only in the per-level fallback, the one place a reveal fetches a level.
+
 ## 2026-11-21: Tree B7, Find, Collapse, To selection and remembered open rows in the Assembly Tree (DIDSA-CAD `docs/assembly-tree-overhaul-scope.md` section 10.6 B7; spec sections 11 and 12)
 
 Headless, live-backend and Mesa renders only; nothing here has been checked on a headset.

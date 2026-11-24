@@ -352,10 +352,11 @@ func _reveal(path: Array, force: bool = false) -> void:
 	if _tree.is_empty():
 		return
 	var changed := force
+	var token := _refresh_token # (a document switch while a level is fetched ends this reveal: it must not touch the new document)
 	if _endpoint_active():
 		for key in Model.reveal_keys(_resp, path, _grouping()):
 			if str(key).contains("#group:") and not _open_groups.has(key):
-				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below)
+				_open_groups[key] = true # (the group a row sits in opens too; the ancestors open below. mark_stale() clears _open_groups, so a switch during the awaits drops these)
 				changed = true
 	for ancestor in Model.ancestors_paths(path):
 		var row := Model.find_row(_tree, ancestor)
@@ -363,7 +364,10 @@ func _reveal(path: Array, force: bool = false) -> void:
 			break
 		if row["children"] == null:
 			await _expand_row(row)
-			changed = true
+			if token != _refresh_token or _tree.is_empty():
+				return
+			if row["children"] != null: # (counted only when the expand really fetched: a busy window or a gone row opened nothing)
+				changed = true
 		elif not bool(row["expanded"]):
 			row["expanded"] = true
 			changed = true
@@ -887,7 +891,7 @@ func _open_find() -> void:
 func set_query(text: String) -> void:
 	## Narrows the tree to the rows that match (and what is above them): words match names, ":errors" and the other tokens match states (Model.filtered_rows). The open rows are
 	## not changed. An empty text clears it.
-	var words := text.strip_edges()
+	var words := " ".join(PackedStringArray(Model.query_words(text, true))) # (the model's own whitespace, the typed case kept: what the query row shows and the keyboard reopens with)
 	if words == "":
 		clear_query()
 		return
@@ -923,7 +927,7 @@ func _sync_query_row() -> void:
 		hints.append("%d match%s." % [_match_count, "" if _match_count == 1 else "es"] if _match_count > 0 else "No matches.")
 		for token in _unknown_tokens:
 			hints.append("Unknown filter %s." % str(token))
-		var words := _query.to_lower().split(" ", false)
+		var words: Array = Model.query_words(_query)
 		if (words.has(":errors") or words.has(":warnings")) and not bool(_resp.get("status_included", false)):
 			hints.append("Constraint states are unavailable." if _status_unavailable or bool(_resp.get("status_failed", false)) else "Constraint states are still loading.")
 		hints.append("Part and assembly names only: features are not searched.")
@@ -1001,6 +1005,8 @@ func note_document_changed(old_key: String) -> void:
 	var key := _document_key()
 	if key == "" or key == old_key:
 		return
+	if _query_key == old_key:
+		_query_key = key # (the words typed are still for this document: the next mark_stale() must not clear them)
 	if _load_key == old_key:
 		_load_key = key # (a load in flight for the old file restores under the new one)
 	if not _tree.is_empty() and not _resp.is_empty() and not _stale and _doc_key == old_key:
@@ -1137,10 +1143,13 @@ func _load_endpoint(token: int) -> bool:
 	_set_status(_tree_note(false))
 	_rebuild_rows()
 	seq = _mutation_seq
+	var was_unavailable := _status_unavailable
+	_status_unavailable = false # (one failed status call must not stick: this load asks again; a failed structure call above leaves the last answer's flag alone)
 	var with_status := await _get_json(base + "?status=true")
 	if token != _refresh_token or _tree.is_empty():
 		return true
 	if seq != _mutation_seq:
+		_status_unavailable = was_unavailable # (this answer is dropped and no status call is pending: if the refresh below fails too, the hint stays as it was)
 		request_refresh()
 		return true
 	if with_status["ok"] and with_status["json"] is Dictionary:

@@ -2069,7 +2069,7 @@ func _add_component_file_impl(path: String) -> bool:
 	if mesh_result_code != HTTPRequest.RESULT_SUCCESS or mesh_response_code != 200:
 		_set_status("Mesh refresh after adding %s failed: %s" % [path.get_file(), _http_error_text(mesh_response_code, mesh_result_code, mesh_body)])
 		return false
-	if not _show_model(mesh_body, "", spawn_scale):
+	if not _show_model(mesh_body, "", spawn_scale, false, true):
 		return false
 	mark_dirty() # a component was added to the live document: a save would now differ from the file it came from
 	_set_status("Added %s. %d part mesh(es) now in the assembly." % [path.get_file(), _part_count])
@@ -2403,8 +2403,9 @@ func _parse_import_response(result: Array, step_description: String, req: HTTPRe
 	return parsed
 
 
-func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float, pick_from_inside: bool = false) -> bool:
-	## Parse glTF bytes and make them THE model, replacing whatever is loaded.
+func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: float, pick_from_inside: bool = false, same_document: bool = false) -> bool:
+	## Parse glTF bytes and make them THE model, replacing whatever is loaded. `same_document`: the model is this document's own, re-read (a component added, a world
+	## reload, an observer's refetch): the Assembly Tree's Find words stay. Every other caller opens a different document.
 	## Returns false (with a status message) if it couldn't.
 	var gltf_document := GLTFDocument.new()
 	var gltf_state := GLTFState.new()
@@ -2433,7 +2434,7 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
 	design_table.tree.mark_stale() # the table's own copy of the tree, for the same reason
-	if not _reloading_world:
+	if not same_document and not _reloading_world:
 		_assembly_tree_window.document_replaced() # (another document, not a re-read of this one: Find's words go)
 	_assembly_tree_window.mark_stale() # the Occurrence tree it's shown is about to point at parts that no longer exist — see that script's own mark_stale()
 	for hand in [$XROrigin3D/LeftController, $XROrigin3D/RightController]:
@@ -3117,9 +3118,9 @@ func session_activity() -> Dictionary:
 	return {"activity": "model", "detail": ""}
 
 
-func session_show_model(glb_bytes: PackedByteArray) -> bool:
-	## An observer shows the presenter's model (a glb fetched with the view token).
-	var shown := _show_model(glb_bytes, "", spawn_scale)
+func session_show_model(glb_bytes: PackedByteArray, same_document: bool = false) -> bool:
+	## An observer shows the presenter's model (a glb fetched with the view token). `same_document`: a refetch of the model already shown (Find's words stay).
+	var shown := _show_model(glb_bytes, "", spawn_scale, false, same_document)
 	if shown:
 		document_is_demo = true # not this person's document: replacing it never asks about unsaved changes
 	return shown

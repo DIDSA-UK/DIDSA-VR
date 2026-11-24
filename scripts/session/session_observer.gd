@@ -542,13 +542,14 @@ func _drain() -> void:
 
 
 func _refetch_all() -> void:
+	var source := model_source # (a re-read of the model on show; _show() replaces model_source for another one, which then is another document)
 	var fetched := await _fetch_glb(str(model_source.get("root_part_id", "")), model_source)
 	if not fetched["ok"]:
 		_fail(str(fetched["error"]))
 		return
 	if not bool(fetched["changed"]):
 		return # a 304: the same revision as the one shown
-	if not main.session_show_model(fetched["bytes"]):
+	if not main.session_show_model(fetched["bytes"], not _model_differs(source)): # (the same document, re-read: the viewer's Find words stay; another one: they go)
 		_fail("The presenter's changed model could not be read.")
 		return
 	if _have_place:
