@@ -5,6 +5,9 @@ extends SceneTree
 ##   6. Find's words are split on the model's whitespace
 ##   4. one failed ?status=true call does not leave "unavailable" standing for the next load
 ##   5. a To selection / selection reveal still fetching a level when the document switches stops there: the new document is not "touched", it opens nothing in it
+##   B8 carry-over:
+##   7. a status answer dropped for a Fix / Float followed by a failed refresh says "unavailable" whatever the flag was; a floated row does not stay on "updating"
+##   8. a Refresh of the same document does not end a reveal still fetching a level; a failed level fetch leaves the row's children not fetched and is no change
 ##   (3, the store's character cap, and the delayed write are in tests/tree_open_settings.gd.)
 ## NOT covered: how any of it looks or feels in the headset.
 ## Run: "$GODOT" --headless --path . --script res://tests/tree_b71.gd  (see tests/README.md)
@@ -18,6 +21,7 @@ var status_fails := false
 var hold_status := false ## the ?status=true call waits until this clears
 var structure_fails := false ## the structure call (no ?status=true) fails
 var hold_part := "" ## a /occurrences read for this Part waits until it is cleared
+var fail_part := "" ## a /occurrences read for this Part fails
 var occurrences := {
 	"R": [{"id": "s1", "resolved_part_id": "S"}, {"id": "s2", "resolved_part_id": "S"}],
 	"S": [{"id": "k1", "resolved_part_id": "K"}],
@@ -79,6 +83,8 @@ func answer(method: int, path: String, _body) -> Dictionary:
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "occurrences":
 		while bits[0] == hold_part:
 			await process_frame
+		if bits[0] == fail_part:
+			return {"ok": false, "json": null, "code": 500, "error": "boom"}
 		var rows: Array = occurrences.get(bits[0], [])
 		return {"ok": true, "json": rows, "error": ""}
 	if method == HTTPClient.METHOD_GET and bits.size() == 2 and bits[1] == "constraint-status":
@@ -198,6 +204,32 @@ func _initialize() -> void:
 	check("4c. a dropped status answer whose refresh fails keeps the flag it had: 'unavailable', not 'still loading'", window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
 	window.clear_query()
 	structure_fails = false
+	# --- 7. (B8 carry-over) a dropped status answer and a failed refresh, with the flag clear before
+	status_fails = false
+	window._refresh_token += 1
+	await window._load_endpoint(window._refresh_token)
+	check("(setup) a clean load: states arrived, the flag clear", not window._status_unavailable and bool(window._resp.get("status_included", false)))
+	hold_status = true
+	window._refresh_token += 1
+	window._load_endpoint(window._refresh_token)
+	await frames(4)
+	window._mutation_seq += 1 # (a Fix / Float: the status answer in flight is dropped)
+	structure_fails = true
+	hold_status = false
+	await settle()
+	window.set_query(":errors")
+	check("7. the status answer was dropped and the refresh failed: 'unavailable' although the flag was clear, never 'still loading'", window._status_unavailable and window._query_hint.text.contains("unavailable") and not window._query_hint.text.contains("still loading"))
+	window.clear_query()
+	structure_fails = false
+	window._refresh_token += 1
+	await window._load_endpoint(window._refresh_token)
+	check("(setup) a clean load again", not window._status_unavailable and bool(window._resp.get("status_included", false)))
+	structure_fails = true
+	window.note_fixed_changed(["s1"], false) # (a Float: the row reads 'updating' until a fresh status arrives; the read that follows fails)
+	check("(setup) the floated row says 'updating'", str(Model.find_row(window._tree, ["s1"])["state"]) == "pending")
+	await settle()
+	check("7. the failed refresh leaves the floated row on its flag, not 'updating' for good", str(Model.find_row(window._tree, ["s1"])["state"]) != "pending" and not window._row_text(Model.find_row(window._tree, ["s1"])).contains("updating"))
+	structure_fails = false
 	main.queue_free()
 	await frames(3)
 
@@ -225,6 +257,45 @@ func _initialize() -> void:
 	hold_part = ""
 	await settle()
 	check("5. the late level does not mark the new document touched, and opens nothing in it", not window._open_touched and not bool(Model.find_row(window._tree, ["s2"])["expanded"]) and settings.tree_open_docs.is_empty())
+	main.queue_free()
+	await frames(2)
+
+	# --- 8. a Refresh of the same document does not end a reveal; a failed level leaves children not fetched
+	await boot()
+	settings = main._settings
+	settings.tree_open_docs = []
+	main._opened_native_path = doc_x
+	window.mark_stale()
+	await settle()
+	window._has_selected = true
+	window._selected = ["s2", "k1", "kb"]
+	hold_part = "S"
+	window.expand_to_selection() # (not awaited: it waits on the held level)
+	await frames(4)
+	window._refresh_root() # (the Refresh button: the same document, a newer refresh)
+	await frames(6)
+	hold_part = ""
+	await settle()
+	var k1 := Model.find_row(window._tree, ["s2", "k1"])
+	check("8. a Refresh of the same document did not end the reveal: the levels below were fetched and opened", not k1.is_empty() and k1["children"] != null and bool(Model.find_row(window._tree, ["s2"])["expanded"]) and bool(k1["expanded"]))
+	main.queue_free()
+	await frames(2)
+	await boot()
+	settings = main._settings
+	settings.tree_open_docs = []
+	main._opened_native_path = doc_x
+	window.mark_stale()
+	await settle()
+	window._has_selected = true
+	window._selected = ["s2", "k1", "kb"]
+	fail_part = "S"
+	await window._reveal(window._selected)
+	var s2 := Model.find_row(window._tree, ["s2"])
+	check("8. a failed level fetch leaves the row's children not fetched and it closed", s2["children"] == null and not bool(s2["expanded"]) and window._status_label.text.contains("Couldn't load children"))
+	check("8. ...and it is no change: the rows are not 'touched' and nothing is stored", not window._open_touched and settings.tree_open_docs.is_empty())
+	fail_part = ""
+	await window._reveal(window._selected)
+	check("8. pressed again it asks again and opens", Model.find_row(window._tree, ["s2"])["children"] != null and bool(Model.find_row(window._tree, ["s2"])["expanded"]) and window._open_touched)
 	main.queue_free()
 	await frames(2)
 	quit(0)

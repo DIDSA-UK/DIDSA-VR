@@ -632,6 +632,47 @@ static func _list_node(node: Dictionary, label: String, depth: int, parent_key: 
 		_add_features(str(row["key"]), depth + 1, ctx, rows)
 
 
+# --- room context (B8) ---------------------------------------------------------------------------------------------------------------------------------------
+
+static func room_keys(response: Dictionary, part_ids: Array, open: Dictionary, grouping: bool, all: bool = false) -> Dictionary:
+	## The keys (an occurrence's path key, a group's key) of the rows inside an open room: a placement of one of the rooms' Parts, and everything below it (rooms are per
+	## Part, so every placement of that Part is inside). Walks only the open rows (every row with `all`, which a filter lists whatever is open). "" in the result: the root
+	## Part is itself a room's, so every row is inside.
+	var out := {}
+	if part_ids.is_empty():
+		return out
+	if part_ids.has(str(response.get("part_id", ""))):
+		out[""] = true
+		return out
+	_room_level(children_of(response), "", false, part_ids, open, grouping, all, out)
+	return out
+
+
+static func _room_level(siblings: Array, parent_key: String, parent_inside: bool, part_ids: Array, open: Dictionary, grouping: bool, all: bool, out: Dictionary) -> void:
+	for entry in plan_level(siblings, grouping):
+		if not bool(entry["group"]):
+			_room_node(siblings[entry["index"]], parent_inside, part_ids, open, grouping, all, out)
+			continue
+		var members: Array = (entry["members"] as Array).map(func(i): return siblings[i])
+		var gkey := group_key(parent_key, str(members[0]["occurrence_id"]))
+		var group_inside := parent_inside or members.any(func(m): return part_ids.has(str(m.get("resolved_part_id", ""))))
+		if group_inside:
+			out[gkey] = true
+		if all or open.has(gkey):
+			for m in members:
+				_room_node(m, parent_inside, part_ids, open, grouping, all, out)
+
+
+static func _room_node(node: Dictionary, parent_inside: bool, part_ids: Array, open: Dictionary, grouping: bool, all: bool, out: Dictionary) -> void:
+	var resolved = node.get("resolved_part_id")
+	var inside := parent_inside or (resolved != null and part_ids.has(str(resolved)))
+	var key := node_key(node["path"])
+	if inside:
+		out[key] = true
+	if all or open.has(key):
+		_room_level(children_of(node), key, inside, part_ids, open, grouping, all, out)
+
+
 # --- reveal (section 8) ----------------------------------------------------------------------------------------------------------------------------------------
 
 static func reveal_keys(response: Dictionary, path: Array, grouping: bool) -> Array:

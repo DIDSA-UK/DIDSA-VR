@@ -280,8 +280,8 @@ func tree_open_keys(doc: String):
 
 func set_tree_open_keys(doc: String, keys: Array) -> void:
 	## Stores one document's open row keys (the caller keeps them in the spec's order), newest last, within the limits; the write is delayed (flush_tree_open). "" is no document.
-	if doc == "" or doc.length() > TREE_OPEN_MAX_CHARS:
-		return # (no document, or a name that alone is over the character cap: nothing is stored, the cap stays true)
+	if doc == "" or not _tree_open_fits(doc, keys):
+		return # (no document, or a name whose first key cannot fit under the character cap: nothing is stored, the cap stays true)
 	var i := _tree_open_index(doc)
 	if i >= 0:
 		tree_open_docs.remove_at(i)
@@ -317,6 +317,11 @@ func _trim_tree_open() -> void:
 		newest["keys"] = keys.slice(0, keep)
 
 
+static func _tree_open_fits(doc: String, keys: Array) -> bool:
+	## A name that alone is over the character cap, or whose first key would not fit beside it, cannot be kept whole (trimming cuts keys from the tail).
+	return doc.length() + (str(keys[0]).length() if not keys.is_empty() else 0) <= TREE_OPEN_MAX_CHARS
+
+
 static func _tree_open_weight(entry: Dictionary) -> int:
 	var n := str(entry["doc"]).length()
 	for k in entry["keys"]:
@@ -335,6 +340,8 @@ func load_tree_open() -> void:
 	for e in stored: # (oldest first, as written; a repeated document keeps its last entry)
 		if not (e is Dictionary) or str(e.get("doc", "")) == "" or not (e.get("keys") is Array):
 			continue
+		if not _tree_open_fits(str(e["doc"]), e["keys"]):
+			continue # (a name over the cap, or whose first key cannot fit: it would only be cut to nothing)
 		var i := _tree_open_index(str(e["doc"]))
 		if i >= 0:
 			tree_open_docs.remove_at(i)
