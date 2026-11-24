@@ -139,17 +139,21 @@ round trips this low, P3 should try a 0.1 s target. 0.6 s (TwoVoip's default) wa
 **Spike V is closed (owner's decision, 2026-11-24), with two questions handed to P3 instead of re-run here:**
 - **V4 on the Quest** (noted, not logged): P3 encodes off the main thread from the start, whatever a logged benchmark says, so the
   result no longer changes the plan. P3 logs the encode time inside the XR app (its own V4) and lowers the complexity if needed.
-- **V9 (echo)**: P3 makes **push-to-talk the default**; open mic is offered only after P3 has tested it on the Quest's speakers (to
-  keep the Quest awake off the head, cover its proximity sensor, or try
-  `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`; neither was tried here). Echo cancellation is not in P3 unless
-  that test needs it.
+- **V9 (echo)**: P3 gives voice a **mode setting (owner's decision, 2026-11-24): Push to talk or Auto** (voice-activated), with a
+  **sensitivity slider** and a live mic meter beside it showing where the threshold sits. **Push to talk is the default** until echo
+  on the Quest's speakers has been tested. The slider's default comes from the spike's logs: quiet rooms read 0.000 to 0.013 (one
+  phone window 0.048), speech 0.02 to 0.30 (the level is the peak of each captured chunk), so **start at 0.03** and keep sending for
+  about 0.4 s after the level drops so word endings are not cut. Auto on open speakers can send the other person's voice back to them;
+  the slider does not stop that. P3 tests it (to keep the Quest awake off the head, cover its proximity sensor, or try
+  `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`; neither was tried here) and, if it echoes, raises the threshold
+  while someone else's audio is playing before reaching for echo cancellation.
 
 Not recorded: the Quest OS and phone Android versions.
 
 **What Spike V settles:** TwoVoip **as a prebuilt add-on** (no build from source): it loads on the Quest, the phone and the PC,
 captures, and carries voice both ways over the local Wi-Fi and the tunnel well inside the latency, loss and bandwidth limits
-(about 25 kbit/s a talker). **P3 is medium**, with three things fixed by this spike: encoding off the main thread, push-to-talk by
-default, and a jitter target to try at 0.1 s (0.2 s held 150 to 360 ms of audio).
+(about 25 kbit/s a talker). **P3 is medium**, with three things fixed by this spike: encoding off the main thread, a Push to talk / Auto setting
+with a sensitivity slider (Push to talk by default), and a jitter target to try at 0.1 s (0.2 s held 150 to 360 ms of audio).
 
 ---
 
