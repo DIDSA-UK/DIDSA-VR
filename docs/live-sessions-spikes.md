@@ -109,9 +109,9 @@ neither shows is said.
 | V4 | **Quest: FAIL, from notes only (no log yet).** Phone: pass (logs). PC: pass (notes only) | Thresholds: mean ≤ 1000 µs, worst ≤ 3000 µs, 500 frames of 20 ms, 59 bytes a frame every time. Phone, logs, three runs: mean 456 / 466 / 490 µs, worst 2495 / 2558 / 2749 µs. **Quest (notes): mean 1950 µs, worst 3250 µs**; no Quest benchmark line is in the captures, so this wants confirming from `adb logcat`. PC baseline (notes): mean 394 µs, worst 2617 µs. (A noted phone run with worst 4110 µs is not in the logs and is not used.) The benchmark runs on the main thread and dropped the phone to 87 fps for that window. What the fail means is below the table |
 | V5 | **Phone: pass. Quest: pass in 11 of 13 windows** | Local Wi-Fi, echo relay. Phone (about 1 min, 2292 frames, 1 lost, 0 late): p50 16 to 37 ms, p95 57 to 92 ms. Quest (about 70 s, 2661 frames, 0 lost, 0 late): p50 22 to 36 ms, p95 64 to 85 ms, except two windows at 105 and 130 ms. |
 | V6 | **Pass on loss; p95 ≤ 250 ms in all but two phone windows** | Through the tunnel, echo relay. Quest (about 95 s, 3697 frames, 1 lost = 0.03 %, 0 late): p50 37 to 39 ms, p95 50 to 81 ms, one window 135 ms. Phone, two runs (about 3 min and about 100 s, 0 lost, 0 late): p50 29 to 55 ms, p95 38 to 202 ms, one window each at **438 ms** and **607 ms**. The Quest run was a little under the 2 minutes asked for |
-| V7 | **Owner: worked by ear, both ways. The Quest's capture does not show the phone's audio arriving** | In the only Quest-to-phone capture (21:32 to 21:33, relay without `--echo`) the Quest sends 7 to 25 kbit/s but its received count stays at 6360, "in" is 0.0 kbit/s and it has no jitter buffer for a second sender; no phone capture covers that time. Either the phone was silent in that window or phone-to-Quest audio did not arrive then. Clarity at 0.2 s and any crackle were not written down |
+| V7 | **Pass (owner, by ear)**: audio went both ways through the tunnel | The owner switched each device's microphone off in turn and heard the other device each time. The logs agree: in the Quest-to-phone capture (21:32 to 21:33, relay without `--echo`) the Quest sends 7 to 25 kbit/s and receives nothing, which is what the phone's microphone being off looks like. No phone capture covers that time. Crackle and dropouts at 0.2 s were not written down |
 | V8 | **Pass** | Highest 5 s window: 27.0 kbit/s out (Quest), 26.9 (phone), against 40. The encoder is 48 kHz mono, 20 ms frames, 24 kbit/s, complexity 5, RNNoise and AGC on (59 bytes a frame plus the 4-byte header) |
-| V9 | **Not reported** | No open-mic echo test in the captures |
+| V9 | **Not run** | The Quest sleeps when it is taken off, so it could not be left on open mic with its speakers. Decision taken without it: see below |
 
 **V4 on the Quest, what the fail means (if the log confirms the noted figure):** encoding one 20 ms frame takes about 2 ms on average and up to 3.3 ms, against 0.4 to 0.5 ms
 on the phone and the PC, so the Quest is about four times slower here. Done on the main thread, an XR frame (13.9 ms at 72 Hz, 11.1 ms at
@@ -136,13 +136,20 @@ round trips this low, P3 should try a 0.1 s target. 0.6 s (TwoVoip's default) wa
 - The p95 is per 5 s window, so a single slow moment (the 438 and 607 ms windows) shows as a bad window; P3's own telemetry should
   also keep a whole-session p95.
 
-**Still to do for Spike V:** a logged Quest encode benchmark (`adb logcat -s godot`, the `encode benchmark:` line) to confirm V4, V9 (open mic with the Quest's speakers), a two-device capture covering V7 from both ends (to settle the
-phone-to-Quest question above), the Quest OS and phone Android versions, and (optional, cheap) the Quest benchmark at complexity 0 to
-3 so P3 knows whether a lower complexity alone is enough.
+**Spike V is closed (owner's decision, 2026-11-24), with two questions handed to P3 instead of re-run here:**
+- **V4 on the Quest** (noted, not logged): P3 encodes off the main thread from the start, whatever a logged benchmark says, so the
+  result no longer changes the plan. P3 logs the encode time inside the XR app (its own V4) and lowers the complexity if needed.
+- **V9 (echo)**: P3 makes **push-to-talk the default**; open mic is offered only after P3 has tested it on the Quest's speakers (to
+  keep the Quest awake off the head, cover its proximity sensor, or try
+  `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`; neither was tried here). Echo cancellation is not in P3 unless
+  that test needs it.
 
-**What Spike V settles so far:** TwoVoip **as a prebuilt add-on** is fine: it loads on all three platforms, captures, and carries
-voice over the local Wi-Fi and the tunnel well inside the latency, loss and bandwidth limits, so it need not be built from source.
-**P3 is medium plus encoding off the main thread** (V4 failed on the Quest by the noted figure; to be confirmed from a log). V9 still decides push-to-talk by default or echo handling.
+Not recorded: the Quest OS and phone Android versions.
+
+**What Spike V settles:** TwoVoip **as a prebuilt add-on** (no build from source): it loads on the Quest, the phone and the PC,
+captures, and carries voice both ways over the local Wi-Fi and the tunnel well inside the latency, loss and bandwidth limits
+(about 25 kbit/s a talker). **P3 is medium**, with three things fixed by this spike: encoding off the main thread, push-to-talk by
+default, and a jitter target to try at 0.1 s (0.2 s held 150 to 360 ms of audio).
 
 ---
 
