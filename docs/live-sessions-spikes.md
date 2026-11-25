@@ -252,6 +252,21 @@ The figures are for **your** phone (record make, model, chip, Android version).
   | C6, C9 | Not run (no viewer, no gamepad) |
   | C7 | **Pass**: 600k triangles loaded in 1528 ms with collision, of which collision 1126 ms (without: 414 ms). Collision is most of it: build it lazily in P5 |
 
+- **Fifth run** (25 Nov, section fixed, the model seen; 600k stress model as heavy, collision on). **Spike C's render budget is
+  settled; C4 and C5 are not.**
+
+  | # | Result |
+  |---|---|
+  | C1 | **Pass** |
+  | C2 | **Pass**: gear train 118 to 120 fps, p95 at most 8.6 ms |
+  | C3 | **Pass at 600k triangles / 300 parts, edges on, MSAA 2x, oversample 1.5**: every 2 s window PASS-60, nearly all at the 120 fps cap; worst window 98 fps (p95 13.7 ms); GPU 6 to 10 ms, up to 1208 draw calls. The limit above 600k is not known (2M not tried) |
+  | C3b to C3d | **Pass**, and edges off, MSAA off and oversample 1.0 changed the GPU time by under 1 ms: none of them is needed as a performance setting at this load |
+  | C4 | **Partial**: C3 ended at 133 s (the screen was bumped), not 10 minutes; no slow-down in those 2 minutes, so throttling is not ruled in or out |
+  | C5 | **Not a pass**: -4.6 degrees at 62 s, inside 5, but the heading swung between -34 and +27 degrees within the minute while the view really moved (draw calls 26 / 35 / 44). Drift creeps; this wanders. If the phone lay still, MobileVRInterface's fusion is unsteady flat on a desk, most likely its magnetometer correction. So P5 plans its own fusion from the gyroscope and gravity (the plan's fail column), to be compared with the magnetometer off |
+  | C6, C9 | Waiting for the viewer and a gamepad |
+  | C7 | **Pass**: 600k in 1540 ms with collision (1131 ms of it), gear train 73 ms |
+  | C8 | **Pass**: magic window 120 fps |
+
 - Harmless: the phone APK logs that it cannot load the OpenXR Vendors extension (it is for the Quest; the phone preset does not
   enable it).
 
@@ -283,6 +298,11 @@ The figures are for **your** phone (record make, model, chip, Android version).
 
 - **Voice (V1 to V9)** sets P3's size: TwoVoip as is (P3 medium), built from source (larger), or no workable add-on (P3 blocked; D5 would
   need revisiting). It also says whether open mic needs echo handling and how big the jitter buffer must be.
+- **Cardboard (C1 to C9)**, as run on the Galaxy S26 Ultra (25 Nov): the phone build is the same project (`phone` tag);
+  **the spike's own stereo, not Godot's** `MobileVRInterface` path (black on the Mobile renderer); 600k triangles in 300 parts at
+  full quality runs at about the display's 120 fps, so P5 starts **without** LOD or reduced settings; collision is most of the load
+  time, so it is built lazily; head tracking needs `input_devices/sensors/enable_*` and its own fusion (C5). Still open: C4 over 10
+  minutes, C6 in the viewer, C9 with a gamepad, and where the limit is above 600k. The original question list:
 - **Cardboard (C1 to C9)** sets P5's starting point: `MobileVRInterface` or a custom rig, the phone's default render settings, whether
   collision is built on load, whether magic window comes first, and whether the phone build can be the same project.
 - Neither changes P1 or P2.
