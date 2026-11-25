@@ -260,6 +260,17 @@ func _initialize() -> void:
 	table.return_part()
 	await frames(2)
 	check("4. while PARTS shows, a part leaving the table turns Table on again in the bar (was greyed: %s)" % str(greyed_on), greyed_on and tree.current_tab() == "parts" and not bar_button(tree, "Table").disabled)
+	# --- 4c. the root changed without the trees being told (an import that failed after main.gd set its root): the PARTS tab reads the new one on its next refresh
+	calls.clear()
+	root_id = "R2"
+	main._resolved_part_id = "R2"
+	tree.request_refresh()
+	var reread: bool = await until(func() -> bool: return calls.has("/parts/R2/assembly-tree") and tree._root_part_id == "R2" and tree._endpoint_active())
+	check("4. a root changed without mark_stale (a failed import) is read whole on the next refresh (the review's finding: %s)" % str(calls), reread)
+	root_id = "R"
+	main._resolved_part_id = "R"
+	tree.mark_stale()
+	await until(func() -> bool: return tree._endpoint_active())
 	table.close()
 	await frames(2)
 
@@ -283,6 +294,20 @@ func _initialize() -> void:
 	var d_gone: Dictionary = window._descs[2]
 	check("5. a room on a Part below a closed row whose children were never fetched: the row is the way to it, not dimmed", bool(d_sub.get("room_way", false)) and not bool(d_sub.get("room_dim", true)))
 	check("5. ...the root above it too", bool(window._descs[0].get("room_way", false)))
+	window._tree[0]["expanded"] = false
+	window._rebuild_rows()
+	check("5. a collapsed root with the room's Part somewhere below is the way to it too (the review's finding)", bool(window._descs[0].get("room_way", false)) and not bool(window._descs[0].get("room_dim", true)))
+	window._tree[0]["expanded"] = true
+	window._rebuild_rows()
+	var saved_parts: Array = []
+	for p in [box, cyl]:
+		saved_parts.append(p.get_meta("group_parts"))
+		p.remove_meta("group_parts")
+	window._rebuild_rows() # (a rebuild before the world is indexed: the index knows nothing)
+	for i in 2:
+		[box, cyl][i].set_meta("group_parts", saved_parts[i])
+	select(window, ["s1"])
+	check("5. the bar asks the world afresh: indexed after the last rebuild, Sub no longer reads 'can't tell' (%s)" % window._bar_hint.text, not window._bar_hint.text.contains("can't tell"))
 	check("5. a closed row the world has nothing of stays dimmed", bool(d_gone.get("room_dim", false)) and not bool(d_gone.get("room_way", false)))
 	select(window, ["occ_gone"])
 	check("5. ...and the bar says why it cannot tell (%s)" % window._bar_hint.text, window._bar_hint.text.contains("can't tell whether the open room's part is inside"))
@@ -367,13 +392,17 @@ func _initialize() -> void:
 	obs._on_model({"source": {"kind": "backend", "root_part_id": "NEW", "path": ""}, "title": "New", "rev": 0})
 	await frames(3)
 	check("7. (setup) the new model failed to show", obs.last_error == "boom" and obs.model_source.get("root_part_id") == "NEW")
+	check("7. no revision of the old document is left to compare the new one's events with (loaded_rev %d)" % obs.loaded_rev, obs.loaded_rev == 0)
 	obs.fetch_ok = true
 	var before := obs.fetches
 	obs._queue_doc(5, [], true)
 	await frames(3)
-	check("7. the new document's revision 5 is not taken as older than the old document's 40: it is fetched (%d -> %d)" % [before, obs.fetches], obs.fetches > before)
-	await until(func() -> bool: return not obs._busy)
-	check("7. ...and shown as the new document it is (not a re-read of the old one: %s), with its title and revision" % str(fake.shown), fake.shown == [false] and obs.title == "New" and obs.loaded_rev == 5 and obs._model_shown)
+	check("7. a change to the model that never showed is not fetched into the old one's scene (the review's finding: %d fetches, shown %s)" % [obs.fetches - before, str(fake.shown)], obs.fetches == before and fake.shown.is_empty())
+	obs._on_model({"source": {"kind": "backend", "root_part_id": "NEW2", "path": ""}, "title": "Next", "rev": 3})
+	await until(func() -> bool: return not obs._loading)
+	obs._queue_doc(4, [], true)
+	await until(func() -> bool: return not obs._busy and obs.fetches >= before + 2)
+	check("7. the next model shows, and its own revision 4 (after 3) is fetched as usual (%s)" % str(fake.shown), obs._model_shown and obs.title == "Next" and fake.shown == [false, true] and obs.loaded_rev == 4)
 	obs.queue_free()
 	fake.queue_free()
 	quit()

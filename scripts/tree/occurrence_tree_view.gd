@@ -156,8 +156,16 @@ func mark_stale() -> void:
 		_refresh_root()
 
 
+func _root_moved() -> bool:
+	## The scope's root is not the one the rows shown were read for: main.gd sets the root early in an import and returns before _show_model (which marks the trees
+	## stale) when the import or its mesh fails, so a tree can be holding the last document's rows.
+	return _main != null and not _stale and _root_part_id != "" and scope.root_part_id(_main) != _root_part_id
+
+
 func _on_opened() -> void:
-	if _stale:
+	if _root_moved():
+		mark_stale() # (reads the new root now: the window is open)
+	elif _stale:
 		_refresh_root()
 	elif _stale_levels:
 		_refresh_levels()
@@ -698,6 +706,7 @@ func _room_unknown_below(row: Dictionary) -> bool:
 	var room_parts := _room_part_ids()
 	if room_parts.is_empty():
 		return false
+	_room_index = {} # (asked fresh: the world may have been indexed since the last rebuild)
 	for d in _descs:
 		if str(d["kind"]) == "row" and (d["row"] as Dictionary).get("path", []) == row.get("path", []):
 			return bool(d.get("room_dim", false)) and _fallback_room_below(row, room_parts) == -1
@@ -1834,6 +1843,9 @@ func _refresh_levels() -> void:
 	if _tree.is_empty() or _root_part_id == "":
 		return
 	_stale_levels = false
+	if _root_moved():
+		mark_stale() # (a refresh of a tree whose root has gone reads the new one whole)
+		return
 	if _endpoint_active():
 		_refresh_token += 1 # (the whole tree is one call: re-read it in place; what is open and selected stays)
 		if await _load_endpoint(_refresh_token):

@@ -90,6 +90,9 @@ func room_below_index(main, root: String, room_parts: Array) -> Dictionary:
 		for i in parts.size():
 			if room_parts.has(str(parts[i])):
 				deepest = i
+		known[""] = true # (the root row: every leaf is below it)
+		if deepest >= 0:
+			below[""] = true
 		for k in range(1, p.size() + 1):
 			var key := Model.path_key(p.slice(0, k))
 			known[key] = true
