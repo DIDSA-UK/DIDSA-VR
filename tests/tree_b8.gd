@@ -208,7 +208,7 @@ func _initialize() -> void:
 	var marks := {}
 	for d in window._descs:
 		marks[str((d["row"] as Dictionary)["id"])] = ("dim" if bool(d["room_dim"]) else "full") + (" rail" if bool(d["room_in"]) else (" way" if bool(d["room_way"]) else ""))
-	check("B8.1 the fallback: a placement of the room's Part and the rows listed below it are inside, a row with one below it is the way, the rest dimmed, except a closed row not fetched yet (it may hold the Part): %s" % str(marks), marks == {"x1": "dim", "x1c": "dim", "y": "dim", "z": "full way", "zf": "full rail", "zfb": "full rail", "w": "full rail", "u": "full"})
+	check("B8.1 the fallback: a placement of the room's Part and the rows listed below it are inside, a row with one below it is the way, the rest dimmed (also a closed row not fetched yet, which may hold the Part: the fallback cannot tell): %s" % str(marks), marks == {"x1": "dim", "x1c": "dim", "y": "dim", "z": "full way", "zf": "full rail", "zfb": "full rail", "w": "full rail", "u": "dim"})
 	window._root_part_id = "A"
 	window._mark_fallback_room_rows()
 	check("B8.1 the fallback with the room on the assembly's own Part: every row inside", window._descs.all(func(d): return bool(d["room_in"]) and not bool(d["room_dim"])))

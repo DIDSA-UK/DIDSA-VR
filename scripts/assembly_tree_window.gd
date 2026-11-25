@@ -620,9 +620,8 @@ func _mark_fallback_room_rows() -> void:
 		var depth := int(d["depth"])
 		var lit: bool = bool(d["room_in"])
 		var way: bool = not lit and bool(seen.get(depth, false))
-		var unknown: bool = (d["row"] as Dictionary).get("children") == null and bool((d["row"] as Dictionary).get("resolved_part_id", "") != "") # (not fetched: it may hold the Part)
 		d["room_way"] = way
-		d["room_dim"] = not lit and not way and not unknown
+		d["room_dim"] = not lit and not way # (a row whose children are not fetched is dimmed too: the fallback cannot tell a leaf from an assembly until it is opened)
 		for k in seen.keys():
 			if int(k) >= depth:
 				seen.erase(k) # (this row's own subtree is done)
