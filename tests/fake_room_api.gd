@@ -3,6 +3,7 @@ extends RefCounted
 ## Used by tests/room_edit.gd and tests/room_drop.gd. Not a test.
 
 var occurrences: Dictionary = {} ## owner Part id -> Array of OccurrenceResponse-shaped dictionaries
+var unreadable: Array = [] ## owner Part ids whose occurrences read fails (a 500)
 var mates: Dictionary = {} ## owner Part id -> Array of {references: [{occurrence_id}, ...]}
 var names: Dictionary = {} ## Part id -> its name (GET /document/parts/{id})
 var calls: Array = [] ## [{method, path, body}] in order
@@ -46,6 +47,8 @@ func request(method: int, path: String, body = null) -> Dictionary:
 	var tail := "/".join(parts.slice(1))
 	if method == HTTPClient.METHOD_GET and tail == "" and names.has(owner):
 		return _ok({"id": owner, "name": names[owner]})
+	if method == HTTPClient.METHOD_GET and tail == "occurrences" and unreadable.has(owner):
+		return {"ok": false, "code": 500, "json": null, "error": "boom"}
 	if method == HTTPClient.METHOD_GET and tail == "occurrences":
 		return _ok(occurrences.get(owner, []).duplicate(true))
 	if method == HTTPClient.METHOD_GET and tail == "mates":

@@ -205,6 +205,13 @@ func _refresh_labels() -> void:
 	_sync_delete_label()
 
 
+static func uses_text(count: int) -> String:
+	## Also the Assembly Tree's bottom bar for a row whose room is open.
+	if count < 0:
+		return "" # (the count could not be read: say nothing rather than "Not placed")
+	return "Not placed in the assembly" if count == 0 else ("Placed once" if count == 1 else "Placed %d times: editing it here changes all of them" % count)
+
+
 func _refresh_uses() -> void:
 	## How many times this Part is placed in the assembly: editing it in the room changes every one.
 	if manager == null or _main == null:
@@ -217,7 +224,7 @@ func _refresh_uses() -> void:
 	var count: int = await e.instance_count(root_id, room.part_id)
 	if not is_instance_valid(self):
 		return
-	_uses_label.text = "Not placed in the assembly" if count == 0 else ("Placed once" if count == 1 else "Placed %d times: editing it here changes all of them" % count)
+	_uses_label.text = uses_text(count)
 
 
 func _on_opened() -> void:

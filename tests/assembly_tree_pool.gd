@@ -78,7 +78,7 @@ func wrong_rows() -> int:
 		var nb: Button = lines[i].get_child(2)
 		var red: bool = Model.state_level(str(row["state"])) == "error"
 		var ok: bool = nb.text.begins_with(str(row["name"]))
-		ok = ok and (nb.text.contains("· over") == (str(row["state"]) == "over_constrained" and not bool(row.get("suppressed", false)))) # (a hint appears only on the row it belongs to)
+		ok = ok and (nb.text.contains("· over") == (str(row["state"]) == "over_constrained")) # (a hint appears only on the row it belongs to; a problem word stays on a suppressed row, B8's order)
 		ok = ok and ((nb.get_theme_color("font_color") == window.tokens.danger) == red)
 		ok = ok and (nb.modulate.a < 0.9) == bool(row.get("suppressed", false))
 		ok = ok and nb.button_pressed == (window._has_selected and window._selected == row["path"])
@@ -116,12 +116,12 @@ func _initialize() -> void:
 	check("1. the open chain lists 1,995 rows (root, 4 sub-assemblies, 1,990 leaves) (%d)" % rows, rows == LEAVES + 5)
 	var pool: int = window.pool_size()
 	var wanted_max: int = int(ceil(window._view_height() / step)) + 1 + 2 * window.POOL_MARGIN
-	check("1. ...but only the pool's controls exist: %d, no more than the visible rows plus a margin (%d), not one per row" % [pool, wanted_max], pool > 0 and pool <= wanted_max and pool < 60)
+	check("1. ...but only the pool's controls exist: %d, exactly the visible rows plus a margin (%d), not one per row" % [pool, wanted_max], pool == wanted_max)
 	check("1. ...the list holds the pool's lines and three stand-ins (%d children)" % window._rows_box.get_child_count(), window._rows_box.get_child_count() <= pool + 3)
 	check("1. ...2,000 rows added fewer than 300 nodes to the scene (%d; one control per row would be about %d)" % [nodes_after - nodes_before, rows * 5], nodes_after - nodes_before < 300)
 	var bar: ScrollBar = scroll.get_v_scroll_bar()
 	check("1. the scroll bar still spans the whole list (max %d, the list is %d px)" % [int(bar.max_value), int(rows * step - window.ROW_SEPARATION)], absf(bar.max_value - (rows * step - window.ROW_SEPARATION)) < 2.0)
-	check("1. the drawn rows are the top of the list", window._first == 0 and window.visible_lines().size() > 8 and wrong_rows() == 0)
+	check("1. the drawn rows are the top of the list", window._first == 0 and window.visible_lines().size() == pool and wrong_rows() == 0)
 
 	# --- 2. scrolling: every drawn row shows its own row, none keeps what the control showed before
 	var bad := 0

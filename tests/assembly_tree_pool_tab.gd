@@ -67,7 +67,7 @@ func _initialize() -> void:
 	win._rebuild_rows()
 	await frames(3)
 	var step: float = win.ROW_HEIGHT + win.ROW_SEPARATION
-	check("(setup) 151 rows listed, only the pool's controls exist (%d)" % win.pool_size(), win.row_count() == 151 and win.pool_size() < 40)
+	check("(setup) 151 rows listed, only the pool's controls exist (%d)" % win.pool_size(), win.row_count() == 151 and win.pool_size() == int(ceil(win._view_height() / step)) + 1 + 2 * win.POOL_MARGIN)
 
 	# --- 1. Table from row ~100 and back
 	win._rows_scroll.scroll_vertical = int(98 * step)
@@ -85,7 +85,7 @@ func _initialize() -> void:
 	win.show_tab("parts")
 	await frames(2)
 	var names: Array = drawn_names()
-	check("1. back on Parts the rows are drawn, at the same place (%d rows, first %s, scroll %d)" % [names.size(), str(names[0]) if names.size() > 0 else "-", win._rows_scroll.scroll_vertical], names.size() > 8 and win._rows_scroll.scroll_vertical == int(98 * step) and "Box" in names)
+	check("1. back on Parts the rows are drawn, at the same place (%d rows, first %s, scroll %d)" % [names.size(), str(names[0]) if names.size() > 0 else "-", win._rows_scroll.scroll_vertical], names.size() == win.pool_size() and win._rows_scroll.scroll_vertical == int(98 * step) and "Box" in names)
 
 	# --- 2. reveal while Build shows
 	table.return_part()

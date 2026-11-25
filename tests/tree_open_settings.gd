@@ -107,6 +107,27 @@ func _initialize() -> void:
 	check("...its own keys are shortened to fit, from the tail (the head of its list, the parents, is kept)", capped_total <= AppSettings.TREE_OPEN_MAX_CHARS and not (capped_keys as Array).is_empty() and capped_keys[0] == wide[0] and capped_keys.back() != wide.back() and capped_keys == wide.slice(0, capped_keys.size()))
 	capped.set_tree_open_keys("x".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1), ["a"])
 	check("...a document name that alone is over the cap is not stored (the cap stays true)", capped.tree_open_keys("x".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1)) == null and docs_of(capped) == ["wide"])
+	var big_name := "n".repeat(AppSettings.TREE_OPEN_MAX_CHARS - 2)
+	capped.set_tree_open_keys(big_name, ["abc", "d"])
+	check("...nor is a name whose first key cannot fit beside it", capped.tree_open_keys(big_name) == null and docs_of(capped) == ["wide"])
+	capped.set_tree_open_keys(big_name, ["ab"])
+	capped.set_tree_open_keys(big_name, ["abc", "d"])
+	check("...and an older entry for such a name is removed, not left to come back as rows the person no longer has", capped.tree_open_keys(big_name) == null)
+	capped.set_tree_open_keys(big_name, ["ab"])
+	check("...while one whose first key just fits is (and the older entry makes way)", capped.tree_open_keys(big_name) == ["ab"])
+
+	# --- on load: an entry whose name alone is over the cap, or whose first key cannot fit, is skipped (it would only be cut to nothing); the others stay
+	var bad_file := ConfigFile.new()
+	bad_file.set_value("docs", "list", [
+		{"doc": "good_one", "keys": ["a"]},
+		{"doc": "y".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1), "keys": ["a"]},
+		{"doc": "w".repeat(AppSettings.TREE_OPEN_MAX_CHARS - 1), "keys": ["kk", "k"]},
+		{"doc": "good_two", "keys": ["b"]},
+	])
+	bad_file.save(TREE_FILE)
+	var skipping := fresh()
+	skipping.load_tree_open()
+	check("on load a name over the cap, and one whose first key cannot fit, are skipped; the entries around them stay in order: %s" % str(docs_of(skipping).map(func(d): return str(d).substr(0, 8))), docs_of(skipping) == ["good_one", "good_two"])
 	clean()
 
 	# --- the write is delayed: a run of changes is one write, and settings.cfg is not written
