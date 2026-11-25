@@ -673,6 +673,51 @@ static func _room_node(node: Dictionary, parent_inside: bool, part_ids: Array, o
 		_room_level(children_of(node), key, inside, part_ids, open, grouping, all, out)
 
 
+static func room_way_keys(response: Dictionary, part_ids: Array, grouping: bool) -> Dictionary:
+	## B8.1: the keys of the rows (and groups) that are not inside an open room but have a placement of the room's Part somewhere below them, open or not: the way to the
+	## room. The walk covers every node of the answer (a closed row's subtree is the very thing it has to say something about). "" is the root.
+	var out := {}
+	if part_ids.is_empty() or part_ids.has(str(response.get("part_id", ""))):
+		return out # (no room, or the root Part is itself a room's: every row is inside)
+	if _way_level(children_of(response), "", part_ids, grouping, out):
+		out[""] = true
+	return out
+
+
+static func _way_level(siblings: Array, parent_key: String, part_ids: Array, grouping: bool, out: Dictionary) -> bool:
+	## Whether any sibling is a placement of a room's Part or holds one below it. Rows inside (a placement of the Part) are not marked: they are "inside", not "the way".
+	var any := false
+	for entry in plan_level(siblings, grouping):
+		if not bool(entry["group"]):
+			any = _way_node(siblings[entry["index"]], part_ids, grouping, out) or any
+			continue
+		var members: Array = (entry["members"] as Array).map(func(i): return siblings[i])
+		var member_has := false
+		var member_is := false
+		for m in members:
+			member_has = _way_node(m, part_ids, grouping, out) or member_has
+			member_is = member_is or _is_room_node(m, part_ids)
+		if member_has and not member_is:
+			out[group_key(parent_key, str(members[0]["occurrence_id"]))] = true # (a group with a member that is the room's Part is "inside" already: room_keys)
+		any = any or member_has
+	return any
+
+
+static func _way_node(node: Dictionary, part_ids: Array, grouping: bool, out: Dictionary) -> bool:
+	var key := node_key(node["path"])
+	if _is_room_node(node, part_ids):
+		return true # (inside: what is below it is inside too, and none of it is "the way")
+	var below := _way_level(children_of(node), key, part_ids, grouping, out)
+	if below:
+		out[key] = true
+	return below
+
+
+static func _is_room_node(node: Dictionary, part_ids: Array) -> bool:
+	var resolved = node.get("resolved_part_id")
+	return resolved != null and part_ids.has(str(resolved))
+
+
 # --- reveal (section 8) ----------------------------------------------------------------------------------------------------------------------------------------
 
 static func reveal_keys(response: Dictionary, path: Array, grouping: bool) -> Array:

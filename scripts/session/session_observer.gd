@@ -129,6 +129,7 @@ func _load_from_snapshot(snapshot: Dictionary) -> void:
 		_fail("The presenter has not opened a model yet.")
 		return
 	title = str((model as Dictionary).get("title", ""))
+	_reset_queue()
 	_loading = true
 	var shown := await _show(model)
 	if shown and active:
@@ -493,6 +494,7 @@ func _on_model(message: Dictionary) -> void:
 		return
 	var model: Dictionary = (source as Dictionary).duplicate()
 	model["title"] = str(message.get("title", ""))
+	_reset_queue() # (another model: what was queued was the old one's)
 	_tracks.clear()
 	_latest.clear()
 	_etags.clear()
@@ -512,6 +514,12 @@ func _on_model(message: Dictionary) -> void:
 
 
 # --- A changed document ---------------------------------------------------------------------------------------------------------
+
+func _reset_queue() -> void:
+	_queue_parts = {}
+	_queue_all = false
+	_queue_rev = 0
+
 
 func _queue_doc(rev: int, parts: Array, all: bool) -> void:
 	if rev <= loaded_rev and rev != 0:
@@ -533,27 +541,31 @@ func _drain() -> void:
 		var all := _queue_all
 		_queue_parts = {}
 		_queue_all = false
+		_queue_rev = 0 # (this batch's revision is `rev`; what queues meanwhile starts again from its own, not from an older document's)
+		var done := true
 		if all:
-			await _refetch_all()
+			done = await _refetch_all()
 		else:
-			await _refetch_parts(parts)
-		loaded_rev = maxi(loaded_rev, rev)
+			done = await _refetch_parts(parts)
+		if done and active:
+			loaded_rev = maxi(loaded_rev, rev) # (a dropped refetch, the session ended or another model meanwhile, shows nothing of this revision: it must not make the next events look old)
 	_busy = false
 
 
-func _refetch_all() -> void:
+func _refetch_all() -> bool:
+	## True when the answer belonged to the document shown (whatever came of it); false when it was dropped (the session ended, or another model came in).
 	var source := model_source # (a re-read of the model on show; _show() replaces model_source for another one, which then is another document)
 	var fetched := await _fetch_glb(str(model_source.get("root_part_id", "")), model_source)
 	if not active or _model_differs(source):
-		return # (the session ended, or another model came in while this was fetched: these bytes are the old document's, nothing of them is shown, indexed or placed)
+		return false # (the session ended, or another model came in while this was fetched: these bytes are the old document's, nothing of them is shown, indexed or placed)
 	if not fetched["ok"]:
 		_fail(str(fetched["error"]))
-		return
+		return true
 	if not bool(fetched["changed"]):
-		return # a 304: the same revision as the one shown
+		return true # a 304: the same revision as the one shown
 	if not main.session_show_model(fetched["bytes"], true): # (the same document, re-read: the viewer's Find words stay)
 		_fail("The presenter's changed model could not be read.")
-		return
+		return true
 	if _have_place:
 		main.session_apply_place(_place) # (the document changed; where the presenter put it did not, and it may have moved meanwhile)
 	_index()
@@ -564,14 +576,19 @@ func _refetch_all() -> void:
 		var node: Node3D = _nodes.get(key)
 		if node != null and is_instance_valid(node):
 			_place_node(node, _latest[key]) # the newest poses received: the presenter's full table follows its own reload
+	return true
 
 
-func _refetch_parts(parts: Array) -> void:
+func _refetch_parts(parts: Array) -> bool:
+	## As _refetch_all: false when the answer was dropped, because the session ended or another model came in while it was fetched (B8.1).
+	var source := model_source
 	for pid in parts:
-		var fetched := await _fetch_glb(str(pid), model_source)
+		var fetched := await _fetch_glb(str(pid), source)
+		if not active or _model_differs(source):
+			return false
 		if not fetched["ok"]:
 			_fail(str(fetched["error"]))
-			return
+			return true
 		if not bool(fetched["changed"]):
 			continue
 		var nodes: Array = []
@@ -580,3 +597,4 @@ func _refetch_parts(parts: Array) -> void:
 				nodes.append(node)
 		if not nodes.is_empty():
 			main.swap_part_mesh(nodes, fetched["bytes"])
+	return true

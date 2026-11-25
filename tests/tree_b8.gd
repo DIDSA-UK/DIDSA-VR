@@ -114,11 +114,12 @@ func state_of(path: Array) -> String:
 	var d := desc_for(path)
 	if d.is_empty():
 		return "not listed"
-	var listed := ("dim" if bool(d.get("room_dim", false)) else "full") + (" rail" if bool(d.get("room_in", false)) else "")
+	var listed := ("dim" if bool(d.get("room_dim", false)) else "full") + (" rail" if bool(d.get("room_in", false)) else (" way" if bool(d.get("room_way", false)) else ""))
 	var line = window._row_controls.get(Model.path_key(path))
 	if line == null:
 		return listed
-	var shown := ("dim" if (line as Control).modulate.a < 0.9 else "full") + (" rail" if bool((line.get_meta("rail") as Control).visible) else "")
+	var rail: ColorRect = line.get_meta("rail")
+	var shown := ("dim" if (line as Control).modulate.a < 0.9 else "full") + ((" way" if rail.color.a < 0.9 else " rail") if rail.visible else "")
 	return listed if shown == listed else "MISMATCH %s vs %s" % [listed, shown]
 
 
@@ -159,7 +160,63 @@ func _initialize() -> void:
 	check("1. a sibling is dimmed, without the rail", state_of(["c"]) == "dim")
 	check("1. a row below another sibling is dimmed too, though it is a Bolt like the ones inside", state_of(["d"]) == "dim" and state_of(["d", "b3"]) == "dim")
 	var root_desc: Dictionary = window._descs[0]
-	check("1. the root row is outside the room: dimmed", bool(root_desc.get("room_dim", false)) and not bool(root_desc.get("room_in", false)))
+	check("1. the root row is outside the room, and the way to it (B8.1): not dimmed, a fainter rail, not inside", bool(root_desc.get("room_way", false)) and not bool(root_desc.get("room_dim", false)) and not bool(root_desc.get("room_in", false)))
+
+	# --- B8.1 item 1: the way to the room. The Bolts' room: the Frames and the Lid hold a Bolt, so they are the way (open or closed); the Plate holds none
+	rooms.parts = ["B"]
+	window._on_rooms_changed()
+	await frames(3)
+	check("B8.1 an ancestor of a placement of the room's Part is the way: not dimmed, the fainter rail, not inside", state_of(["a1"]) == "full way" and state_of(["d"]) == "full way")
+	check("B8.1 the placements themselves are inside; a sibling with none below it is dimmed", state_of(["a1", "b1"]) == "full rail" and state_of(["d", "b3"]) == "full rail" and state_of(["c"]) == "dim")
+	Model.find_row(window._tree, ["a1"])["expanded"] = false
+	window._rebuild_rows()
+	await frames(3)
+	check("B8.1 a closed ancestor still shows the way to a room placement it hides (the Bolt is not listed)", state_of(["a1", "b1"]) == "not listed" and state_of(["a1"]) == "full way")
+	var way_keys := Model.room_way_keys(tree_answer(false), ["B"], false)
+	check("B8.1 room_way_keys names the ancestors and the root, not the placements or the Plate: %s" % str(way_keys.keys()), way_keys.has("a1") and way_keys.has("a2") and way_keys.has("d") and way_keys.has("") and not way_keys.has("c") and not way_keys.has("a1/b1"))
+	var grouped := tree_answer(false)
+	grouped["children"] = [node("g1", "A", "Frame", [node("g1b", "B", "Bolt", [], ["g1"])], []), node("g2", "A", "Frame", [], []), node("g3", "A", "Frame", [], []), node("g4", "A", "Frame", [], [])]
+	var group_ways := Model.room_way_keys(grouped, ["B"], true)
+	var group_key := Model.group_key("", "g1")
+	check("B8.1 a group with a member holding the room's Part below it is the way too (and a group with nothing is not): %s" % str(group_ways.keys()), group_ways.has(group_key) and group_ways.has("") and Model.room_way_keys(grouped, ["Z"], true).is_empty())
+	Model.find_row(window._tree, ["a1"])["expanded"] = true
+	window._rebuild_rows()
+	await frames(2)
+
+	# --- B8.1 item 3: the rail is the theme's accent as it is now, and a theme change redraws the rows already built
+	var old_accent: Color = window.tokens.accent
+	window.tokens.accent = Color(0.9, 0.1, 0.1)
+	window.apply_theme()
+	await frames(2)
+	var tinted := 0
+	for line in window.visible_lines():
+		var rail_now: ColorRect = line.get_meta("rail")
+		if rail_now.visible and rail_now.color.r > 0.8 and rail_now.color.g < 0.2:
+			tinted += 1
+	window.tokens.accent = old_accent
+	window.apply_theme()
+	check("B8.1 after a theme change every drawn rail wears the new accent (%d lit rails tinted)" % tinted, tinted >= 3)
+
+	# --- B8.1 item 2: the per-level fallback (no tree answer) has the room context too: listed rows only, as deep as what was fetched
+	rooms.parts = ["A"]
+	var saved_descs: Array = window._descs.duplicate()
+	var saved_root: String = window._root_part_id
+	window._descs.clear()
+	for spec in [["x1", "R2", 0], ["x1c", "B", 1], ["y", "C", 0], ["z", "D", 0], ["zf", "A", 1], ["zfb", "B", 2], ["w", "A", 0], ["u", "E", 0]]:
+		window._add_row_line({"id": spec[0], "path": [spec[0]], "resolved_part_id": spec[1], "children": null if spec[0] == "u" else []}, spec[2], true)
+	window._mark_fallback_room_rows()
+	var marks := {}
+	for d in window._descs:
+		marks[str((d["row"] as Dictionary)["id"])] = ("dim" if bool(d["room_dim"]) else "full") + (" rail" if bool(d["room_in"]) else (" way" if bool(d["room_way"]) else ""))
+	check("B8.1 the fallback: a placement of the room's Part and the rows listed below it are inside, a row with one below it is the way, the rest dimmed (also a closed row not fetched yet, which may hold the Part: the fallback cannot tell): %s" % str(marks), marks == {"x1": "dim", "x1c": "dim", "y": "dim", "z": "full way", "zf": "full rail", "zfb": "full rail", "w": "full rail", "u": "dim"})
+	window._root_part_id = "A"
+	window._mark_fallback_room_rows()
+	check("B8.1 the fallback with the room on the assembly's own Part: every row inside", window._descs.all(func(d): return bool(d["room_in"]) and not bool(d["room_dim"])))
+	window._root_part_id = saved_root
+	window._descs = saved_descs
+	rooms.parts = ["A"]
+	window._rebuild_rows()
+	await frames(2)
 
 	# --- 1. a re-used control keeps nothing of the old row: close the room, everything is undimmed and the rail is gone, on every drawn control
 	rooms.parts = []
@@ -256,13 +313,30 @@ func _initialize() -> void:
 	rooms.count = -1
 	window._uses_cache = {}
 	window._uses_reading = ""
+	rooms.calls = 0
 	window._rebuild_bar()
 	await frames(4)
 	var said_nothing: bool = not window._bar_hint.text.contains("Placed") and not window._bar_hint.text.contains("Not placed")
-	rooms.count = 2 # (the failure was a moment's: the next bar rebuild asks again)
+	rooms.count = 2 # (the failure was a moment's)
+	for i in 5:
+		window._rebuild_bar()
+		await frames(2)
+	check("2. B8.1 an unreadable count says nothing and is not asked for again on every bar rebuild (%d read for six rebuilds)" % rooms.calls, said_nothing and rooms.calls == 1 and not window._bar_hint.text.contains("Placed"))
+	window.request_refresh() # (a tree answer: the placements may have changed, and the backend may be back: one more read)
+	await until(func(): return rooms.calls >= 2)
+	await frames(4)
+	check("2. B8.1 ...and once per tree answer it is asked for again, and shows the count when it can be read (%d reads)" % rooms.calls, rooms.calls == 2 and window._bar_hint.text.contains("Placed 2 times"))
+	rooms.count = -1
+	window._uses_cache = {}
+	window._uses_reading = ""
 	window._rebuild_bar()
 	await frames(4)
-	check("2. an unreadable count says nothing and is not kept as the answer: the next rebuild asks again and shows it", said_nothing and window._bar_hint.text.contains("Placed 2 times"))
+	rooms.count = 2
+	rooms.calls = 0
+	window._note_placements_may_change() # (what the per-level fallback's re-read of the levels does: it has no tree answer)
+	window._rebuild_bar()
+	await frames(4)
+	check("2. B8.1 in the per-level fallback a re-read of the levels also gives an unreadable count its one new try (%d reads)" % rooms.calls, rooms.calls == 1 and window._bar_hint.text.contains("Placed 2 times"))
 	rooms.count = 3
 	window._selected = ["a1"]
 	rooms.count = 3
