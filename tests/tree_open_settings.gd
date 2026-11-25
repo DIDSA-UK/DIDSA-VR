@@ -172,6 +172,14 @@ func _initialize() -> void:
 		return back3.tree_open_keys("run") != null).call())
 	capped_wait.flush_tree_open()
 
+	# --- B8.1: a later stored entry that cannot be kept still replaces the earlier one for its document (storing removes the old one too)
+	var unfit := ConfigFile.new()
+	unfit.set_value("docs", "list", [{"doc": "same.didsa", "keys": ["early"]}, {"doc": "other.didsa", "keys": ["o"]}, {"doc": "same.didsa", "keys": ["x".repeat(AppSettings.TREE_OPEN_MAX_CHARS + 1)]}])
+	unfit.save(TREE_FILE)
+	var unfit_back := fresh()
+	unfit_back.load_tree_open()
+	check("B8.1 a later entry for a document that is over the cap drops the earlier one: the document reads as having nothing stored", unfit_back.tree_open_keys("same.didsa") == null and unfit_back.tree_open_keys("other.didsa") == ["o"])
+
 	# --- Save As with no tree: the entry is copied
 	var c := fresh()
 	c.set_tree_open_keys("old.didsa", ["p", "q"])

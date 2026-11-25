@@ -539,6 +539,13 @@ func _build_content() -> Control:
 	return box
 
 
+func apply_theme() -> void:
+	## B8.1: a theme change redraws the rows in place too (the room rail's colour is the accent, set when a row is bound).
+	super.apply_theme()
+	if _rows_box != null:
+		_layout_pool(true)
+
+
 func _uses_action_bar() -> bool:
 	## The world tree has the bottom action bar; the design table's PARTS tab keeps its own inline Table / Bring buttons until phase T2 moves it onto the bar.
 	return true
@@ -553,6 +560,7 @@ func _rebuild_rows() -> void:
 		_add_spec_rows()
 	else:
 		_add_rows(_tree, 0, "")
+		_mark_fallback_room_rows()
 	_none_label.visible = _tree.is_empty()
 	_sync_query_row()
 	_layout_pool(true)
@@ -582,6 +590,44 @@ func _add_rows(rows: Array, depth: int, parent_part_id: String) -> void:
 		_add_row_line(row, depth, is_expandable)
 		if is_expandable and row["expanded"] and row["children"] != null:
 			_add_rows(row["children"], depth + 1, row["resolved_part_id"])
+
+
+func _mark_fallback_room_rows() -> void:
+	## B8.1: the per-level fallback has no tree answer, so the room context comes from the rows listed: a row that is a placement of an open room's Part, and every row
+	## listed below it, is inside; a row with an inside row below it is the way to it; the rest is dimmed. (What has not been fetched below a closed row is not known.)
+	var room_parts := _room_part_ids()
+	if room_parts.is_empty():
+		return
+	var everything := room_parts.has(_root_part_id) and _root_part_id != ""
+	var inside_depth := -1
+	for d in _descs:
+		if str(d["kind"]) != "row":
+			continue
+		var depth := int(d["depth"])
+		if inside_depth >= 0 and depth <= inside_depth:
+			inside_depth = -1
+		if inside_depth < 0 and room_parts.has(str((d["row"] as Dictionary).get("resolved_part_id", ""))):
+			inside_depth = depth
+			d["room_in"] = true
+		else:
+			d["room_in"] = everything or inside_depth >= 0
+		d["room_way"] = false
+	var seen: Dictionary = {} # (walking up the list: depth -> an inside row lies below the row now reached, within its own subtree)
+	for i in range(_descs.size() - 1, -1, -1):
+		var d: Dictionary = _descs[i]
+		if str(d["kind"]) != "row":
+			continue
+		var depth := int(d["depth"])
+		var lit: bool = bool(d["room_in"])
+		var way: bool = not lit and bool(seen.get(depth, false))
+		d["room_way"] = way
+		d["room_dim"] = not lit and not way
+		for k in seen.keys():
+			if int(k) >= depth:
+				seen.erase(k) # (this row's own subtree is done)
+		if lit or way:
+			for k in range(depth):
+				seen[k] = true
 
 
 func _add_row_line(row: Dictionary, depth: int, is_expandable: bool, bubble = null, show_arrow: bool = true) -> void:
@@ -752,7 +798,10 @@ func _bind_line(line: HBoxContainer, index: int) -> void:
 	nb.remove_theme_color_override("font_color")
 	nb.modulate = Color.WHITE
 	line.modulate = Color(1, 1, 1, 0.5) if bool(d.get("room_dim", false)) else Color.WHITE # (B8: outside the open room)
-	(line.get_meta("rail") as Control).visible = bool(d.get("room_in", false)) # (inside it)
+	var rail: ColorRect = line.get_meta("rail")
+	var way := bool(d.get("room_way", false)) # (B8.1: the way to a room below this row: a fainter rail)
+	rail.visible = bool(d.get("room_in", false)) or way # (inside it)
+	rail.color = Color(tokens.accent, 0.4 if way else 1.0) # (the current theme's accent, set on every bind: a theme change reaches the controls already built)
 	nb.icon = null
 	nb.tooltip_text = ""
 	match str(d["kind"]):
@@ -1091,6 +1140,7 @@ func _add_spec_rows() -> void:
 	var filtering := _filtering()
 	var room_parts := _room_part_ids()
 	var inside: Dictionary = Model.room_keys(_resp, room_parts, _spec_open_set(), _grouping(), filtering) if not room_parts.is_empty() else {}
+	var ways: Dictionary = Model.room_way_keys(_resp, room_parts, _grouping()) if not room_parts.is_empty() else {}
 	var spec_rows: Array
 	if filtering:
 		var found := Model.filtered_rows(_resp, _query, _spec_open_keys(), _grouping(), _unsaved_part_ids())
@@ -1128,11 +1178,12 @@ func _add_spec_rows() -> void:
 					d["inert"] = true
 					d["dim"] = dim
 	if not room_parts.is_empty():
-		_mark_room_rows(first_desc, inside)
+		_mark_room_rows(first_desc, inside, ways)
 
 
-func _mark_room_rows(first_desc: int, inside: Dictionary) -> void:
-	## B8: while a room is open every row outside it is dimmed ("room_dim") and the rows inside wear the rail ("room_in").
+func _mark_room_rows(first_desc: int, inside: Dictionary, ways: Dictionary) -> void:
+	## B8: while a room is open every row outside it is dimmed ("room_dim") and the rows inside wear the rail ("room_in"). B8.1: a row or group outside it that has a
+	## placement of the room's Part below it ("room_way": an ancestor, a closed group) is not dimmed and wears a fainter rail, so the way to the room shows.
 	var everything := inside.has("")
 	for i in range(first_desc, _descs.size()):
 		var d: Dictionary = _descs[i]
@@ -1145,15 +1196,17 @@ func _mark_room_rows(first_desc: int, inside: Dictionary) -> void:
 			_:
 				pass # (the Mates and Patterns folders belong to the assembly, not to a room)
 		var in_room: bool = everything or (str(d["kind"]) != "folder" and key != "" and inside.has(key))
+		var way: bool = not in_room and str(d["kind"]) != "folder" and ways.has(key) # ("" is the root row)
 		d["room_in"] = in_room
-		d["room_dim"] = not in_room
+		d["room_way"] = way
+		d["room_dim"] = not in_room and not way
 
 
 func _spec_open_set() -> Dictionary:
-	var set := {}
+	var open := {} # (not `set`: that would shadow Object.set())
 	for k in _spec_open_keys():
-		set[k] = true
-	return set
+		open[k] = true
+	return open
 
 
 func _spec_open_keys() -> Array:
@@ -1505,7 +1558,7 @@ func _set_bar_hint() -> void:
 func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
 	## B8: a row whose room is open says how many times its Part is placed, as the room console does ("Placed N times: editing it here changes all of them"). The last
 	## count for the same row, Part and assembly is kept and shown at once; it is read again only after a tree answer (the placements may have changed) and never on
-	## every bar rebuild. A count that could not be read (-1) shows nothing.
+	## every bar rebuild. A count that could not be read (-1) shows nothing, and is asked for again only after the next tree answer, like any other.
 	var manager = _main.get("room_manager") if _main != null else null
 	var e = manager.edit_api() if manager != null and manager.has_method("edit_api") else null
 	if e == null or _root_part_id == "":
@@ -1537,7 +1590,7 @@ func _refresh_bar_uses(row: Dictionary, part_id: String) -> void:
 		return
 	if not _has_selected or _selected != path or root != _root_part_id or not is_instance_valid(manager) or not manager.is_open_for(part_id):
 		return # (the selection, the document or the room moved on while this was read)
-	_uses_cache = {"key": key, "count": count, "fresh": count >= 0} # (an unreadable count, -1, says nothing and is asked again by the next bar rebuild: a failure may be a moment's)
+	_uses_cache = {"key": key, "count": count, "fresh": true} # (B8.1: an unreadable count, -1, shows nothing and is read again once per tree answer, not on every bar rebuild: _adopt_response ends `fresh`)
 	_bar_uses = RoomConsole.uses_text(count)
 	_set_bar_hint()
 

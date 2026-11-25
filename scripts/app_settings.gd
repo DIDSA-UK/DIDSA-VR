@@ -345,11 +345,11 @@ func load_tree_open() -> void:
 	for e in stored: # (oldest first, as written; a repeated document keeps its last entry)
 		if not (e is Dictionary) or str(e.get("doc", "")) == "" or not (e.get("keys") is Array):
 			continue
-		if not _tree_open_fits(str(e["doc"]), e["keys"]):
-			continue # (a name over the cap, or whose first key cannot fit: it would only be cut to nothing)
 		var i := _tree_open_index(str(e["doc"]))
 		if i >= 0:
-			tree_open_docs.remove_at(i)
+			tree_open_docs.remove_at(i) # (the later entry replaces the earlier one for the document, even when it is the one that cannot be kept, as storing does)
+		if not _tree_open_fits(str(e["doc"]), e["keys"]):
+			continue # (a name over the cap, or whose first key cannot fit: it would only be cut to nothing)
 		tree_open_docs.append({"doc": str(e["doc"]), "keys": (e["keys"] as Array).slice(0, TREE_OPEN_MAX_KEYS).map(func(k): return str(k))})
 	_trim_tree_open()
 
