@@ -29,6 +29,13 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/vsync/vsync_mode=0
 
+[input_devices]
+
+sensors/enable_accelerometer.phone=true
+sensors/enable_gravity.phone=true
+sensors/enable_gyroscope.phone=true
+sensors/enable_magnetometer.phone=true
+
 [layer_names]
 
 3d_physics/layer_1="world"

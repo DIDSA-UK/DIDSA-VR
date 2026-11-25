@@ -28,17 +28,60 @@ func _initialize() -> void:
 	print("SMOKE spike: setup screen shown: ", spike.setup_ui.visible)
 	spike.load_demo("light")
 	print("SMOKE spike: demo rocket loaded through the glb path: ", spike.models.has("light") and str(spike.models["light"]["summary"]).contains("parts"))
+	spike.make_stress("heavy", 20000, 20)
+	var stress: String = spike.models["heavy"]["summary"] if spike.models.has("heavy") else ""
+	var tri := int(stress.get_slice(" parts, ", 1).get_slice(" triangles", 0)) if stress.contains(" parts, ") else 0
+	print("SMOKE spike: the stress model loads through the glb path as the heavy model, 20 parts, near the triangles asked: ",
+		stress.contains("stress_20k.glb") and stress.contains("20 parts") and tri > 10000 and tri < 30000)
 	spike.start_run()
 	await process_frame
 	print("SMOKE spike: first step is C2: ", spike.step_index == 0 and spike.last_report.begins_with("step C2"))
 	print("SMOKE spike: the model is in the scene: ", spike.assembly_root.get_child_count() == 1)
+	print("SMOKE spike: own stereo by default: two eye viewports shown, the main viewport's 3D off, use_xr off: ",
+		spike.own_stereo and spike._eyes.size() == 2 and spike._stereo_layer.visible and spike.get_viewport().disable_3d and not spike.get_viewport().use_xr)
+	var left: Camera3D = spike._eyes[0]["camera"]
+	var right: Camera3D = spike._eyes[1]["camera"]
+	var head: Transform3D = spike.xr_camera.global_transform
+	spike._follow_head() # on a device frame_pre_draw does this; headless never draws
+	var gap := right.global_position.distance_to(left.global_position)
+	print("SMOKE spike: the eye cameras sit the eye spacing apart about the head: ", is_equal_approx(gap, spike.lens["iod"] * 0.01)
+		and (left.global_position + right.global_position).distance_to(head.origin * 2.0) < 0.0001)
+	print("SMOKE spike: the eye frustums lean apart, mirrored (set_for_hmd): ",
+		left.frustum_offset.x == -right.frustum_offset.x and left.frustum_offset.x != 0.0 and is_equal_approx(left.size, right.size))
+	var vp_size: Vector2i = (spike._eyes[0]["viewport"] as SubViewport).size
+	var screen: Vector2i = spike._screen_size()
+	print("SMOKE spike: each eye renders half the screen times the oversample: ", vp_size == Vector2i(int(screen.x * 0.5 * 1.5), int(screen.y * 1.5)))
 	for i in 5:
 		await process_frame
 	spike.report()
 	print("SMOKE spike: report has the step and frame stats: ", spike.last_report.begins_with("C2 ") and spike.last_report.contains("fps"))
+	print("SMOKE spike: steps are timed, C3 ten minutes (C4), C5 over a minute: ",
+		spike.STEPS.all(func(st: Dictionary) -> bool: return st.has("seconds")) and spike.STEPS[1]["seconds"] == 600 and spike.STEPS[6]["seconds"] > 60)
+	var before: int = spike.step_index
+	spike._step_started_ms -= 1000 * int(spike.STEPS[before]["seconds"]) + 10
+	await process_frame
+	print("SMOKE spike: a step ends by itself when its time is up: ", spike.step_index == before + 1 and spike.results.has(spike.STEPS[before]["id"]))
+	spike._step_started_ms -= 1000 * 600
+	spike.finish_step()
+	var model: Node3D = spike.models["heavy"]["scene"]
+	var middle: Vector3 = model.global_transform * spike._bounds(model).get_center()
+	var plane: Vector3 = spike.section_origin
+	print("SMOKE spike: a mm model's section plane goes through its middle in world space (it was 150 m off, cutting it all away): ",
+		plane.distance_to(middle) < 0.001 and absf(middle.z + 1.8) < 0.001)
+	print("SMOKE spike: C3 run ten minutes is kept as C4: ", spike.results.has("C4") and str(spike.results["C4"]).begins_with("C4 (C3 after"))
+	spike.next_step()
 	while spike.step_index != 5:
 		spike.next_step()
 	print("SMOKE spike: C8 is magic window (the window camera is current): ", spike.window_camera.current)
+	print("SMOKE spike: magic window hides the eyes and turns the main viewport's 3D back on: ", not spike._stereo_layer.visible and not spike.get_viewport().disable_3d)
+	var flat := Transform3D(Basis(Vector3.RIGHT, -PI / 2.0), Vector3(0, 1, 0)) # looking straight down, like a phone on a table
+	spike.xr_camera.global_transform = flat
+	var h0: float = spike.heading()
+	spike.xr_camera.global_transform = Transform3D(Basis(Vector3.UP, deg_to_rad(10.0)) * flat.basis, flat.origin)
+	var turned := rad_to_deg(angle_difference(h0, spike.heading()))
+	spike.xr_camera.global_transform = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-0.5)) * flat.basis, flat.origin)
+	var wobble := rad_to_deg(angle_difference(h0, spike.heading()))
+	print("SMOKE spike: a flat phone's heading follows a 10 degree turn and ignores a half-degree tilt: ", absf(turned - 10.0) < 0.01 and absf(wobble) < 0.01)
 	spike.next_step()
 	print("SMOKE spike: C5 drift step: ", spike.STEPS[spike.step_index]["id"] == "C5")
 	spike.next_step()

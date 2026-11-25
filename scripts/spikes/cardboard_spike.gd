@@ -9,6 +9,13 @@ extends Node3D
 ## (the viewer's button) or gamepad A moves to the next step; every 2 s it logs one `DIDSA VR: cardboard:` line (adb logcat) and shows the
 ## same text in front of the eyes. It reuses the app's viewing core only: environment_manager.gd, view_modes.gd, clip_look.gd and the
 ## clip globals, mesh_identity.gd.
+##
+## Stereo, two ways (the setup screen's switch). OWN (the default): two SubViewports, one camera per eye, side by side on a
+## CanvasLayer, each eye barrel-distorted by a canvas shader; the frustum and the distortion are the same maths as Godot's
+## MobileVRInterface (Projection::set_for_hmd and the blit's lens shader), and the head pose still comes from MobileVRInterface's
+## sensor fusion (its "head" tracker drives the XRCamera3D; the eye cameras follow it). GODOT'S: `use_xr` on the main viewport with
+## MobileVRInterface. On the owner's Galaxy S26 Ultra (24 Nov, Godot 4.7.2, Mobile renderer) Godot's path drew nothing to the screen
+## ("Layers of our texture doesn't match view count for this framebuffer" every frame), which is why OWN exists.
 
 const FrameStats := preload("res://scripts/spikes/frame_stats.gd")
 const MeshIdentity := preload("res://scripts/mesh_identity.gd")
@@ -18,17 +25,42 @@ const ViewModes := preload("res://scripts/view_modes.gd")
 const SETTINGS_PATH := "user://cardboard_spike.cfg"
 const DEMO_GLB := "res://demo/rockets/Saturn_V.glb"
 const REPORT_EVERY_S := 2.0
+const WARM_UP_S := 2.0 ## each step's first seconds (the switch-over hitch, shaders) are left out of its numbers
+const C4_AFTER_S := 540.0 ## C3 counts as C4 (a warm phone) when it ran at least this long
 const DRIFT_S := 60.0
+## The barrel distortion of Godot's lens blit (servers/rendering/renderer_rd/shaders/blit.glsl), as a canvas shader on each eye.
+const LENS_SHADER := """
+shader_type canvas_item;
+uniform float k1 = 0.215;
+uniform float k2 = 0.215;
+uniform float upscale = 1.5;
+uniform float aspect_ratio = 1.0;
+uniform vec2 eye_center = vec2(0.0);
+void fragment() {
+	vec2 coords = UV * 2.0 - 1.0;
+	vec2 offset = coords - eye_center;
+	offset.y /= aspect_ratio;
+	float r2 = dot(offset, offset);
+	offset *= 1.0 + k1 * r2 + k2 * r2 * r2;
+	offset.y *= aspect_ratio;
+	coords = (offset + eye_center) / upscale;
+	if (coords.x < -1.0 || coords.y < -1.0 || coords.x > 1.0 || coords.y > 1.0) {
+		COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+	} else {
+		COLOR = vec4(texture(TEXTURE, (coords + vec2(1.0)) * 0.5).rgb, 1.0);
+	}
+}
+"""
 
 ## The guided steps (the doc's C2 to C8). model: "light" / "heavy"; stereo; edges; section; msaa (0 off, 1 2x); oversample.
 const STEPS := [
-	{"id": "C2", "label": "C2 light model, stereo, edges on, section on, MSAA 2x", "model": "light", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3", "label": "C3 heavy model, stereo, edges on, section on, MSAA 2x (leave it 10 minutes for C4)", "model": "heavy", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3b", "label": "C3b heavy, edges OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C3c", "label": "C3c heavy, edges off, MSAA OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.5},
-	{"id": "C3d", "label": "C3d heavy, edges off, MSAA off, oversample 1.0", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.0},
-	{"id": "C8", "label": "C8 magic window (mono), heavy, edges on, section on", "model": "heavy", "stereo": false, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
-	{"id": "C5", "label": "C5 drift: lay the phone flat and still for 60 s", "model": "light", "stereo": true, "edges": false, "section": false, "msaa": 1, "oversample": 1.5, "drift": true},
+	{"id": "C2", "seconds": 20, "label": "C2 light model, stereo, edges on, section on, MSAA 2x", "model": "light", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3", "seconds": 600, "label": "C3 heavy model, stereo, edges on, section on, MSAA 2x (runs 10 minutes: its last lines are C4)", "model": "heavy", "stereo": true, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3b", "seconds": 20, "label": "C3b heavy, edges OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C3c", "seconds": 20, "label": "C3c heavy, edges off, MSAA OFF", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.5},
+	{"id": "C3d", "seconds": 20, "label": "C3d heavy, edges off, MSAA off, oversample 1.0", "model": "heavy", "stereo": true, "edges": false, "section": true, "msaa": 0, "oversample": 1.0},
+	{"id": "C8", "seconds": 20, "label": "C8 magic window (mono), heavy, edges on, section on", "model": "heavy", "stereo": false, "edges": true, "section": true, "msaa": 1, "oversample": 1.5},
+	{"id": "C5", "seconds": 62, "label": "C5 drift: lay the phone flat and still; it ends by itself after 60 s", "model": "light", "stereo": true, "edges": false, "section": false, "msaa": 1, "oversample": 1.5, "drift": true},
 ]
 
 @onready var assembly_root: Node3D = $AssemblyRoot
@@ -46,11 +78,20 @@ var models: Dictionary = {} ## "light" / "heavy" -> {"scene": Node3D, "summary":
 var build_collision := false
 var _report_left := REPORT_EVERY_S
 var _step_started_ms := 0
+var _warmed := false
+var section_origin := Vector3.ZERO ## where the section plane was last put (world space)
+var auto_advance := true ## each step ends by itself after its "seconds"; a tap ends it early
 var _drift_start_yaw := NAN
 var _joy_logged := 0
 var last_report := "" ## what the last report said (tests read it)
 var results: Dictionary = {} ## step id -> its last report: shown on the setup screen after the run (a photo of it is the result)
 var lens := {"iod": 6.0, "k1": 0.215, "k2": 0.215} ## MobileVRInterface's eye spacing (cm) and distortion; Godot's defaults
+var own_stereo := true ## false: Godot's MobileVRInterface path (use_xr on the main viewport)
+var display_width_cm := 14.5 ## MobileVRInterface's defaults, read from it when it exists
+var display_to_lens_cm := 4.0
+var _oversample := 1.5
+var _stereo_layer: CanvasLayer
+var _eyes: Array = [] ## {"viewport": SubViewport, "camera": Camera3D, "rect": TextureRect, "material": ShaderMaterial, "side": -1 / 1}
 
 
 func _ready() -> void:
@@ -60,6 +101,9 @@ func _ready() -> void:
 	mobile_vr = XRServer.find_interface("Native mobile")
 	if mobile_vr == null:
 		_log("no MobileVRInterface in this build")
+	else:
+		display_width_cm = float(mobile_vr.get("display_width"))
+		display_to_lens_cm = float(mobile_vr.get("display_to_lens"))
 	world_environment.setup($DirectionalLight3D, mobile_vr, get_viewport(), ($Ground/MeshInstance3D as MeshInstance3D).mesh.material as ShaderMaterial)
 	world_environment.apply_saved_scene("Mid")
 	view_modes = ViewModes.new()
@@ -67,6 +111,7 @@ func _ready() -> void:
 	add_child(view_modes)
 	view_modes.setup(self, 1)
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	_build_eyes()
 	_build_setup_ui()
 
 
@@ -138,6 +183,45 @@ func _load_url(slot: String, url: String) -> void:
 	_refresh_setup_text()
 
 
+func make_stress(slot: String, triangles: int, parts := 300) -> void:
+	## A made-up assembly of `parts` spheres (one colour each) with about `triangles` triangles in all, written to a glb and loaded
+	## through load_glb_bytes like a served one: for C3 / C4 when no real assembly is heavy enough. Its load line measures the glb
+	## path; the time to make it is logged separately.
+	var t0 := Time.get_ticks_msec()
+	parts = maxi(parts, 1)
+	var rings := maxi(int(sqrt(float(triangles) / parts / 4.0)), 2) # a SphereMesh has about 4 * rings^2 triangles at radial = 2 * rings
+	var side := int(ceil(pow(parts, 1.0 / 3.0)))
+	var root := Node3D.new()
+	root.name = "Stress"
+	for i in parts:
+		var sphere := SphereMesh.new()
+		sphere.rings = rings
+		sphere.radial_segments = rings * 2
+		sphere.radius = 20.0
+		sphere.height = 40.0
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sphere.get_mesh_arrays())
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color.from_hsv(float(i) / parts, 0.5, 0.85)
+		mesh.surface_set_material(0, mat)
+		var part := MeshInstance3D.new()
+		part.name = "Part%03d" % i
+		part.mesh = mesh
+		part.position = Vector3(i % side, (i / side) % side, i / (side * side)) * 50.0
+		root.add_child(part)
+		part.owner = root
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	var ok := doc.append_from_scene(root, state) == OK
+	var bytes := doc.generate_buffer(state) if ok else PackedByteArray()
+	root.free()
+	if bytes.is_empty():
+		_log("%s: could not make the stress model" % slot)
+		return
+	_log("%s: stress model made in %d ms (%d parts, %d rings each)" % [slot, Time.get_ticks_msec() - t0, parts, rings])
+	load_glb_bytes(slot, bytes, "stress_%dk.glb" % (triangles / 1000))
+
+
 func load_demo(slot: String) -> void:
 	load_glb_bytes(slot, FileAccess.get_file_as_bytes(DEMO_GLB), DEMO_GLB)
 
@@ -178,15 +262,20 @@ func apply_step(step: Dictionary) -> void:
 	view_modes.set_mode(1 if step["edges"] else 0)
 	view_modes.apply_all()
 	_set_section(step["section"], scene)
-	get_viewport().msaa_3d = Viewport.MSAA_2X if int(step["msaa"]) == 1 else Viewport.MSAA_DISABLED
+	var msaa := Viewport.MSAA_2X if int(step["msaa"]) == 1 else Viewport.MSAA_DISABLED
+	get_viewport().msaa_3d = msaa
+	for eye in _eyes:
+		(eye["viewport"] as SubViewport).msaa_3d = msaa
+	_oversample = float(step["oversample"])
 	if mobile_vr != null:
-		mobile_vr.set("oversample", float(step["oversample"]))
+		mobile_vr.set("oversample", _oversample)
 	_set_stereo(bool(step["stereo"]))
 	stats.clear()
+	_warmed = false
 	_step_started_ms = Time.get_ticks_msec()
 	_drift_start_yaw = NAN
 	_report_left = REPORT_EVERY_S
-	_log("step %s: %s | %s" % [step["id"], step["label"], models[step["model"]]["summary"]])
+	_log("step %s: %s | %s | %s" % [step["id"], step["label"], _stereo_summary(bool(step["stereo"])), models[step["model"]]["summary"]])
 
 
 func _apply_lens() -> void:
@@ -194,6 +283,7 @@ func _apply_lens() -> void:
 		mobile_vr.set("iod", float(lens["iod"]))
 		mobile_vr.set("k1", float(lens["k1"]))
 		mobile_vr.set("k2", float(lens["k2"]))
+	_layout_eyes()
 	var cfg := ConfigFile.new()
 	cfg.load(SETTINGS_PATH)
 	for k in lens:
@@ -202,17 +292,139 @@ func _apply_lens() -> void:
 
 
 func _set_stereo(on: bool) -> void:
-	if mobile_vr == null:
-		window_camera.current = true
-		return
-	if not mobile_vr.is_initialized():
-		if not mobile_vr.initialize():
-			_log("MobileVRInterface failed to initialise")
-			window_camera.current = true
-			return
-	get_viewport().use_xr = on
-	window_camera.current = not on
+	## MobileVRInterface is initialised either way: its sensor fusion moves the XRCamera3D (the head) for both stereo paths and for
+	## magic window. Only Godot's path turns use_xr on.
+	if mobile_vr != null and not mobile_vr.is_initialized() and not mobile_vr.initialize():
+		_log("MobileVRInterface failed to initialise")
+	var godot_path := on and not own_stereo and mobile_vr != null and mobile_vr.is_initialized()
+	var own := on and own_stereo
+	get_viewport().use_xr = godot_path
+	get_viewport().disable_3d = own # the eyes draw the world; the main viewport only shows them
+	_stereo_layer.visible = own
+	for eye in _eyes:
+		(eye["viewport"] as SubViewport).render_target_update_mode = SubViewport.UPDATE_ALWAYS if own else SubViewport.UPDATE_DISABLED
+	window_camera.current = not godot_path
 	hud_label.visible = on
+	if own:
+		_layout_eyes()
+		_follow_head()
+
+
+func _stereo_summary(on: bool) -> String:
+	if not on:
+		return "mono (magic window)"
+	if not own_stereo:
+		return "stereo: Godot's MobileVRInterface"
+	var size: Vector2i = (_eyes[0]["viewport"] as SubViewport).size
+	return "stereo: own, 2 eyes of %dx%d, screen %dx%d" % [size.x, size.y, _screen_size().x, _screen_size().y]
+
+
+# --- own stereo: two eye viewports ----------------------------------------------------------------------------------------------
+
+func _build_eyes() -> void:
+	_stereo_layer = CanvasLayer.new()
+	_stereo_layer.name = "StereoLayer"
+	_stereo_layer.layer = 0 # under the setup screen (layer 1)
+	_stereo_layer.visible = false
+	add_child(_stereo_layer)
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.add_theme_constant_override("separation", 0)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stereo_layer.add_child(row)
+	var shader := Shader.new()
+	shader.code = LENS_SHADER
+	for side in [-1, 1]:
+		var vp := SubViewport.new()
+		vp.name = "LeftEye" if side < 0 else "RightEye"
+		vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		add_child(vp) # a child of this node, so it shares the main viewport's World3D
+		var cam := Camera3D.new()
+		cam.projection = Camera3D.PROJECTION_FRUSTUM
+		cam.keep_aspect = Camera3D.KEEP_HEIGHT
+		cam.far = 500.0
+		vp.add_child(cam)
+		cam.current = true
+		RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
+		var mat := ShaderMaterial.new()
+		mat.shader = shader
+		var rect := TextureRect.new()
+		rect.texture = vp.get_texture()
+		rect.material = mat
+		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		rect.stretch_mode = TextureRect.STRETCH_SCALE
+		rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(rect)
+		_eyes.append({"viewport": vp, "camera": cam, "rect": rect, "material": mat, "side": side})
+	# The eyes follow the head just before the frame is drawn too, so they are never a frame behind the head tracker's pose.
+	RenderingServer.frame_pre_draw.connect(func() -> void:
+		if is_instance_valid(_stereo_layer) and _stereo_layer.visible:
+			_follow_head())
+
+
+func _screen_size() -> Vector2i:
+	var size := DisplayServer.window_get_size()
+	return Vector2i(maxi(size.x, 64), maxi(size.y, 64))
+
+
+func _layout_eyes() -> void:
+	## Each eye: half the screen times the oversample, an asymmetric frustum and the lens shader, as MobileVRInterface does them.
+	if _eyes.is_empty():
+		return
+	var screen := _screen_size()
+	var eye_size := Vector2i(maxi(int(screen.x * 0.5 * _oversample), 16), maxi(int(screen.y * _oversample), 16))
+	var aspect := float(eye_size.x) / float(eye_size.y)
+	var iod := float(lens["iod"])
+	# Projection::set_for_hmd, per unit of near distance
+	var f1 := (iod * 0.5) / display_to_lens_cm
+	var f2 := ((display_width_cm - iod) * 0.5) / display_to_lens_cm
+	var f3 := (display_width_cm / 4.0) / display_to_lens_cm
+	var add := ((f1 + f2) * (_oversample - 1.0)) / 2.0
+	f1 += add
+	f2 += add
+	f3 = f3 * _oversample / aspect
+	for eye in _eyes:
+		var vp: SubViewport = eye["viewport"]
+		vp.size = eye_size
+		var cam: Camera3D = eye["camera"]
+		cam.near = 0.05
+		var side := int(eye["side"])
+		# left eye: x from -f2 to f1; right eye: from -f1 to f2
+		var offset_x := (f1 - f2) * 0.5 if side < 0 else (f2 - f1) * 0.5
+		cam.frustum_offset = Vector2(offset_x * cam.near, 0.0)
+		cam.size = 2.0 * f3 * cam.near
+		var mat: ShaderMaterial = eye["material"]
+		mat.set_shader_parameter("k1", float(lens["k1"]))
+		mat.set_shader_parameter("k2", float(lens["k2"]))
+		mat.set_shader_parameter("upscale", _oversample)
+		mat.set_shader_parameter("aspect_ratio", aspect)
+		var centre := ((-iod / 2.0) + (display_width_cm / 4.0)) / (display_width_cm / 2.0)
+		mat.set_shader_parameter("eye_center", Vector2(centre if side < 0 else -centre, 0.0))
+
+
+func _follow_head() -> void:
+	var head := xr_camera.global_transform
+	for eye in _eyes:
+		var x := float(eye["side"]) * float(lens["iod"]) * 0.01 * 0.5
+		(eye["camera"] as Camera3D).global_transform = head * Transform3D(Basis.IDENTITY, Vector3(x, 0.0, 0.0))
+
+
+func _gpu_ms() -> float:
+	var total := RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
+	if _stereo_layer != null and _stereo_layer.visible:
+		for eye in _eyes:
+			total += RenderingServer.viewport_get_measured_render_time_gpu((eye["viewport"] as SubViewport).get_viewport_rid())
+	return total
+
+
+func _cpu_ms() -> float:
+	var total := RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
+	if _stereo_layer != null and _stereo_layer.visible:
+		for eye in _eyes:
+			total += RenderingServer.viewport_get_measured_render_time_cpu((eye["viewport"] as SubViewport).get_viewport_rid())
+	return total
 
 
 func _set_section(on: bool, scene: Node3D) -> void:
@@ -228,18 +440,22 @@ func _set_section(on: bool, scene: Node3D) -> void:
 			elif not ClipLook.is_clip(part.material_override):
 				part.material_override = ClipLook.clip_for(part.material_override, part)
 		var box := _bounds(scene)
-		RenderingServer.global_shader_parameter_set("section_plane_origin", box.get_center())
+		# _bounds is in the model's own units (mm for a backend glb); the plane is a world position
+		section_origin = scene.global_transform * box.get_center()
+		RenderingServer.global_shader_parameter_set("section_plane_origin", section_origin)
 		RenderingServer.global_shader_parameter_set("section_plane_normal", Vector3.RIGHT)
 	RenderingServer.global_shader_parameter_set("section_enabled", on)
 
 
 func _fit_in_front(scene: Node3D) -> void:
-	## The model about 1.2 m tall, 1.5 m in front of a seated viewer (glb units are mm for a backend glb, m for a demo).
+	## The model 1.2 m across, 1.8 m ahead, its middle a little below the eyes, so it is in view with the phone held level (glb units
+	## are mm for a backend glb, m for a demo). The eyes are MobileVRInterface's eye_height (1.85 m by default), not the scene's camera.
 	assembly_root.transform = Transform3D.IDENTITY
 	var box := _bounds(scene)
 	var size := maxf(box.get_longest_axis_size(), 0.001)
 	var s := 1.2 / size
-	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), Vector3(0, 1.1, -1.5) - box.get_center() * s)
+	var eye_y := float(mobile_vr.get("eye_height")) if mobile_vr != null else xr_camera.global_position.y
+	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), Vector3(0, eye_y - 0.2, -1.8) - box.get_center() * s)
 
 
 func _bounds(scene: Node3D) -> AABB:
@@ -273,10 +489,20 @@ func _process(delta: float) -> void:
 		return
 	if window_camera.current and mobile_vr != null and mobile_vr.is_initialized():
 		window_camera.global_transform = xr_camera.global_transform # magic window: the phone is a window you turn
-	stats.add(delta)
+	if _stereo_layer.visible:
+		_follow_head() # and again just before drawing (frame_pre_draw), whichever comes after the head's pose
 	var step: Dictionary = STEPS[step_index]
+	var elapsed := _step_elapsed_s()
+	if not _warmed and elapsed >= WARM_UP_S:
+		_warmed = true
+		stats.clear()
+	if auto_advance and elapsed >= float(step.get("seconds", 20)):
+		finish_step()
+		next_step()
+		return
+	stats.add(delta)
 	if step.get("drift", false):
-		var yaw := xr_camera.global_transform.basis.get_euler().y
+		var yaw := heading()
 		if is_nan(_drift_start_yaw) and Time.get_ticks_msec() - _step_started_ms > 2000:
 			_drift_start_yaw = yaw
 	_report_left -= delta
@@ -285,22 +511,44 @@ func _process(delta: float) -> void:
 		report()
 
 
+func heading() -> float:
+	## The phone's heading about the vertical, for C5. Euler yaw is meaningless when the camera looks straight down (a phone lying
+	## flat: gimbal lock, it swung 200 degrees on the owner's phone), so a flat phone uses its top edge, which is then level.
+	var b := xr_camera.global_transform.basis
+	var v := -b.z
+	if absf(v.normalized().y) > 0.7:
+		v = b.y
+	return atan2(v.x, v.z)
+
+
+func _step_elapsed_s() -> float:
+	return (Time.get_ticks_msec() - _step_started_ms) / 1000.0
+
+
+func finish_step() -> void:
+	## The step's last report; C3 that ran long enough is also C4 (the same heavy scene on a warm phone).
+	report()
+	var step: Dictionary = STEPS[step_index]
+	if step["id"] == "C3" and _step_elapsed_s() >= C4_AFTER_S:
+		results["C4"] = "C4 (C3 after %d s, warm phone): %s" % [int(_step_elapsed_s()), results["C3"]]
+		_log(results["C4"])
+
+
 func report() -> void:
 	var step: Dictionary = STEPS[step_index]
 	var s := stats.summary()
-	var rid := get_viewport().get_viewport_rid()
 	var text := "%s %s | %s | render cpu %.1f ms gpu %.1f ms | %d draw calls | %d s into the step" % [
 		step["id"], "PASS-60" if FrameStats.passes_60(s) else "below-60", FrameStats.line(s),
-		RenderingServer.viewport_get_measured_render_time_cpu(rid), RenderingServer.viewport_get_measured_render_time_gpu(rid),
+		_cpu_ms(), _gpu_ms(),
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
 		(Time.get_ticks_msec() - _step_started_ms) / 1000]
 	if step.get("drift", false) and not is_nan(_drift_start_yaw):
-		var drift := rad_to_deg(angle_difference(_drift_start_yaw, xr_camera.global_transform.basis.get_euler().y))
+		var drift := rad_to_deg(angle_difference(_drift_start_yaw, heading()))
 		text += " | yaw drift %.1f deg (pass <= 5 deg at %d s)" % [drift, int(DRIFT_S)]
 	stats.clear()
 	results[step["id"]] = text
 	_log(text)
-	hud_label.text = text.replace(" | ", "\n")
+	hud_label.text = "%s: %d of %d s (tap to skip)\n%s" % [step["id"], int(_step_elapsed_s()), int(step.get("seconds", 20)), text.replace(" | ", "\n")]
 
 
 # --- input ------------------------------------------------------------------------------------------------------------------------
@@ -324,7 +572,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var a_button: bool = event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A
 	var key: bool = event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_SPACE
 	if tap or a_button or key:
-		report()
+		finish_step()
 		next_step()
 	var b_button: bool = event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B
 	if b_button:
@@ -379,6 +627,30 @@ func _build_setup_ui() -> void:
 		cfg.save(SETTINGS_PATH)
 		_load_url("light", _url_light.text.strip_edges())
 		_load_url("heavy", _url_heavy.text.strip_edges()))
+	var godot_stereo := CheckButton.new()
+	godot_stereo.text = "Godot's stereo (MobileVRInterface) instead of the spike's own (Godot's drew black on the S26 Ultra)"
+	godot_stereo.button_pressed = not bool(cfg.get_value("stereo", "own", true))
+	own_stereo = not godot_stereo.button_pressed
+	godot_stereo.toggled.connect(func(on: bool) -> void:
+		own_stereo = not on
+		cfg.set_value("stereo", "own", own_stereo)
+		cfg.save(SETTINGS_PATH))
+	box.add_child(godot_stereo)
+	var stress_row := HBoxContainer.new()
+	box.add_child(stress_row)
+	var stress_label := Label.new()
+	stress_label.text = "Stress model, triangles:"
+	stress_row.add_child(stress_label)
+	var stress_count := LineEdit.new()
+	stress_count.text = str(cfg.get_value("stress", "triangles", 600000))
+	stress_count.custom_minimum_size = Vector2(220, 64)
+	stress_row.add_child(stress_count)
+	_button(stress_row, "Make it the heavy model (300 parts)", func() -> void:
+		var n := int(stress_count.text) if stress_count.text.is_valid_int() else 600000
+		cfg.set_value("stress", "triangles", n)
+		cfg.save(SETTINGS_PATH)
+		make_stress("heavy", n)
+		_refresh_setup_text())
 	_button(buttons, "Use the demo rocket", func() -> void:
 		load_demo("light")
 		_refresh_setup_text())
@@ -411,7 +683,7 @@ func _button(parent: Control, label: String, action: Callable) -> void:
 func _refresh_setup_text() -> void:
 	if _setup_text == null:
 		return
-	var lines := PackedStringArray(["Steps: tap the screen (the viewer's button) or gamepad A for the next step, B to stop; gamepad D-pad tunes the lens (k1 up / down, k2 left / right). The lens values above come from your viewer's QR profile, or tune by eye."])
+	var lines := PackedStringArray(["Steps run by themselves: 20 s each, C3 10 minutes (its end is C4), C5 a minute flat and still; the first 2 s of each are left out. A tap (the viewer's button) or gamepad A skips to the next step, B stops; gamepad D-pad tunes the lens (k1 up / down, k2 left / right). The lens values above come from your viewer's QR profile, or tune by eye."])
 	for slot in ["light", "heavy"]:
 		lines.append(models[slot]["summary"] if models.has(slot) else "%s: not loaded" % slot)
 	if not results.is_empty():
