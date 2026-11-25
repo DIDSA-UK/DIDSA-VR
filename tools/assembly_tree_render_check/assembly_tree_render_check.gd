@@ -2,7 +2,7 @@ extends SceneTree
 ## A5 check of the Assembly Tree window: real backend (DIDSA-CAD main, GET /parts/{id}/assembly-tree) AND, when there is a renderer, pictures.
 ## Fixtures are built through the backend's API (POST /import/native for the parts, POST /parts/{id}/mates, PATCH an occurrence's transform), from
 ## demo/assemblies/plate_and_peg/Plate_and_peg.didsa's two real parts plus generated feature-less parts; nothing is written to the repo.
-## Ten scenarios (TREE_SCENARIOS=a,c,... picks some; default all), each asserted on the window's own rows (a SMOKE line) and, with a renderer, saved as PNG:
+## Eleven scenarios (TREE_SCENARIOS=a,c,... picks some; default all), each asserted on the window's own rows (a SMOKE line) and, with a renderer, saved as PNG:
 ##   a  a two-level assembly just opened: the structure only (status held back), then after ?status=true has merged in
 ##   b  a collapsed parent with a missing file and an over-constrained part below it: the count bubble (then open)
 ##   c  one Part placed 4 times in a level: "Peg x4" closed, open, and with "Fold x4" off
@@ -12,6 +12,8 @@ extends SceneTree
 ##   g  an older backend (a stand-in that answers the framework's 404 for the call): no Fold button, one level per request
 ##   j  Find (B7): ":errors", a name with an unknown token, and cleared again, with the query line under the title
 ##   h  a generated tree of 2,000 occurrences: the window open and scrolled; the time the rows took to build is printed as "SMOKE TIMING ..." (a number, not an assertion)
+##   p  C6: the design table's PARTS tab on the one tree component: a placed part selected (its bar: Table, Bring, Fix, Hide, Isolate, Rename, Room, Delete), then a
+##      sub-assembly (Table and Bring greyed with the reason); pictures of the table tree's own panel (p1_parts_part, p2_parts_subassembly)
 ## Pictures: TREE_RENDER_DIR=/some/dir  xvfb-run -a "$GODOT" --path . --script res://tools/assembly_tree_render_check/assembly_tree_render_check.gd   (Mesa software GL, the GL-compatibility
 ## driver, not the project's mobile renderer). <name>.png is the window's own pixels (what the panel texture holds), <name>_wide.png the view from eye height with
 ## the model, <name>.txt the rows as text. Under --headless (a headless run) there is nothing to draw: only the SMOKE lines on the rows are checked.
@@ -41,6 +43,7 @@ var older_backend := false ## the tree call answers the framework's 404 (scenari
 var patch_sets: Array = [] ## scenario f: occurrence ids that get the same (synthetic) rigid set
 var eye: Camera3D
 var failed_requests := 0
+var last_window ## the window the last scenario drew (the pixel check at the end): the World tree, or the table's tree after scenario p
 
 
 # --- plumbing -------------------------------------------------------------------------------------------------------------------------------------
@@ -291,11 +294,11 @@ func shot(name: String, wide := false) -> void:
 			full.save_png(out_dir.path_join(name + "_wide.png"))
 
 
-func window_has_pixels() -> bool:
+func window_has_pixels(win = null) -> bool:
 	## Not blank: the panel texture has several distinct colours (it can't be judged more than that here).
 	if not rendering:
 		return true
-	var img: Image = window._viewport.get_texture().get_image()
+	var img: Image = (win if win != null else window)._viewport.get_texture().get_image()
 	if img == null or img.is_empty():
 		return false
 	var seen := {}
@@ -592,6 +595,50 @@ func scenario_j() -> void:
 	await shot("j3_cleared", true)
 
 
+func scenario_p() -> void:
+	await fresh()
+	print("== p: the design table's PARTS tab on the one tree component (C6)")
+	var root_id := await fixture_two_level()
+	check("p: the fixture is on the backend", root_id != "")
+	await show_in_app(root_id, true)
+	var table = main.design_table
+	var tree = table.tree
+	tree.request_hook = Callable(self, "stand_in")
+	tree.mark_stale()
+	table.open()
+	tree.show_tab("parts")
+	await wait_for(func() -> bool: return tree._endpoint_active() and bool(tree._resp.get("status_included", false)))
+	await frames(4)
+	check("p: the PARTS tab reads the tree call and lists the root and its four placements (%d rows)" % tree.row_count(), tree._endpoint_active() and tree.row_count() >= 4)
+	tree._on_row_selected(Model.find_row(tree._tree, ["loose"]))
+	await frames(4)
+	var texts_p: Array = tree._bar_buttons.get_children().map(func(b): return (b as Button).text)
+	check("p: a placed part's bar offers Table, Bring, Fix, Hide, Isolate, Rename, Room, Delete (%s)" % str(texts_p), texts_p == ["Table", "Bring", "Float" if bool(Model.find_row(tree._tree, ["loose"]).get("fixed", false)) else "Fix", "Hide", "Isolate", "Rename", "Room", "Delete"])
+	check("p: ...Table and Bring enabled for the loose Peg in the arena", not (tree._bar_buttons.get_child(0) as Button).disabled and not (tree._bar_buttons.get_child(1) as Button).disabled)
+	check("p: the list keeps room for rows with the bar showing (%d px, %d rows)" % [int(tree._view_height()), int(tree._view_height() / (tree.ROW_HEIGHT + tree.ROW_SEPARATION))], tree._view_height() >= 3 * (tree.ROW_HEIGHT + tree.ROW_SEPARATION))
+	await shot_window(tree, "p1_parts_part")
+	tree._on_row_selected(Model.find_row(tree._tree, ["carrier1"]))
+	await frames(4)
+	check("p: a sub-assembly's Table and Bring are greyed with the reason (%s)" % tree._bar_hint.text, (tree._bar_buttons.get_child(0) as Button).disabled and tree._bar_hint.text.contains("Table, Bring: a sub-assembly"))
+	await shot_window(tree, "p2_parts_subassembly")
+	last_window = tree # (left open: the final pixel check reads this panel)
+
+
+func shot_window(win, name: String) -> void:
+	## Another window's own panel texture (the design table's tree), saved as <name>.png, with its bar line as <name>.txt.
+	await frames(4)
+	if out_dir == "":
+		return
+	var f := FileAccess.open(out_dir.path_join(name + ".txt"), FileAccess.WRITE)
+	if f != null:
+		f.store_string("bar: %s\nbuttons: %s\nlist height: %d px\n" % [win._bar_hint.text, str(win._bar_buttons.get_children().map(func(b): return (b as Button).text)), int(win._view_height())])
+	if not rendering:
+		return
+	var img: Image = win._viewport.get_texture().get_image()
+	if img != null and not img.is_empty():
+		img.save_png(out_dir.path_join(name + ".png"))
+
+
 func scenario_h() -> void:
 	await fresh()
 	print("== h: a generated tree of 2,000 occurrences")
@@ -712,9 +759,10 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var wanted := OS.get_environment("TREE_SCENARIOS")
-	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])
+	var picks: PackedStringArray = wanted.split(",", false) if wanted != "" else PackedStringArray(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "p"])
 	for s in picks:
 		window.request_hook = Callable(self, "stand_in")
+		last_window = window
 		match s:
 			"a": await scenario_a()
 			"b": await scenario_b()
@@ -726,7 +774,8 @@ func _initialize() -> void:
 			"h": await scenario_h()
 			"i": await scenario_i()
 			"j": await scenario_j()
+			"p": await scenario_p()
 	if rendering:
-		check("the panel was drawn with pixels in the last scenario", window_has_pixels())
+		check("the panel was drawn with pixels in the last scenario", window_has_pixels(last_window if last_window != null else window))
 	check("no request to the backend failed outside the 404 stand-in", failed_requests == 0)
 	quit(0)

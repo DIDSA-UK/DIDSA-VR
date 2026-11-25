@@ -29,6 +29,7 @@ var active := false
 var model_source: Dictionary = {}
 var title := ""
 var loaded_rev := 0
+var _model_shown := true ## false from a model change until that model is on show: while a model that failed to show is not on show, its changes are not fetched into the old one's scene (C6)
 var status_text := ""
 var fetch_count := 0 ## glb requests made (a test reads it)
 var not_modified_count := 0
@@ -97,6 +98,7 @@ func stop() -> void:
 	_scene_root = null
 	model_source = {}
 	loaded_rev = 0
+	_model_shown = true
 
 
 # --- The model ------------------------------------------------------------------------------------------------------------------
@@ -130,8 +132,11 @@ func _load_from_snapshot(snapshot: Dictionary) -> void:
 		return
 	title = str((model as Dictionary).get("title", ""))
 	_reset_queue()
+	loaded_rev = 0 # (C6, 10.8 VR leftover 3: from here on nothing is compared against the old document's revision, whether or not the new one is shown)
+	_model_shown = false
 	_loading = true
 	var shown := await _show(model)
+	_model_shown = shown
 	if shown and active:
 		_apply_snapshot(snapshot)
 		var rev = snapshot.get("rev")
@@ -495,11 +500,14 @@ func _on_model(message: Dictionary) -> void:
 	var model: Dictionary = (source as Dictionary).duplicate()
 	model["title"] = str(message.get("title", ""))
 	_reset_queue() # (another model: what was queued was the old one's)
+	loaded_rev = 0 # (C6, 10.8 VR leftover 3: and its revision is not this one's; a model that fails to show must not make this one's events look old)
 	_tracks.clear()
 	_latest.clear()
 	_etags.clear()
+	_model_shown = false
 	_loading = true
 	var shown := await _show(model)
+	_model_shown = shown
 	if shown:
 		title = str(model["title"])
 		loaded_rev = int(message.get("rev", model.get("rev", 0)))
@@ -522,6 +530,8 @@ func _reset_queue() -> void:
 
 
 func _queue_doc(rev: int, parts: Array, all: bool) -> void:
+	if not _model_shown:
+		return # (C6: the model the presenter opened is not on show (its load failed; model_failed said so): its changes are not swapped into the old one's scene. A new model or a rejoin shows it.)
 	if rev <= loaded_rev and rev != 0:
 		return # nothing newer than what is shown
 	for pid in parts:

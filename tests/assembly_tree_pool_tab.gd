@@ -3,7 +3,7 @@ extends SceneTree
 ##   1. Table pressed on a row ~100 (the part is seated, the window switches to Build) and back to Parts: the rows are drawn, at the same place
 ##   2. a reveal while Build shows lays out the parts list's own scroll box, not the Build list's, and the revealed row is drawn when Parts shows again
 ##   3. a press that went down on a row and is released after its control was re-bound to another row acts on nothing (selection, expansion)
-##   4. a Mates folder line wears its count after the label; the inline Table / Bring buttons are freed when a line leaves the pool
+##   4. a Mates folder line wears its count after the label; no line carries inline buttons (C6: Table / Bring are in the bottom bar), in the pool or spare
 ## NOT covered: the headset. Run: "$GODOT" --headless --path . --script res://tests/assembly_tree_pool_tab.gd  (see tests/README.md)
 
 var main
@@ -72,11 +72,15 @@ func _initialize() -> void:
 	# --- 1. Table from row ~100 and back
 	win._rows_scroll.scroll_vertical = int(98 * step)
 	await frames(2)
+	win._selected = ["occ_box"] # (C6: Table is in the bottom bar of the selected row)
+	win._has_selected = true
+	win._rebuild_rows()
+	await frames(1)
 	var tables: Array = []
 	for b in win._viewport.find_children("*", "Button", true, false):
 		if (b as Button).text == "Table" and not (b as Button).disabled:
 			tables.append(b)
-	check("1. row 100 (Box, in the arena) is drawn with an enabled Table button (%d enabled)" % tables.size(), tables.size() == 1)
+	check("1. row 100 (Box, in the arena) is drawn, selected, and the bar's Table is enabled (%d enabled)" % tables.size(), tables.size() == 1 and win._row_controls.has("occ_box") and win._bar_buttons.is_ancestor_of(tables[0]))
 	(tables[0] as Button).pressed.emit()
 	await frames(2)
 	check("1. Table seats the part and the window shows Build", table.seated != null and win.current_tab() == "build" and win.scroll_target == win._build_scroll)
@@ -85,7 +89,8 @@ func _initialize() -> void:
 	win.show_tab("parts")
 	await frames(2)
 	var names: Array = drawn_names()
-	check("1. back on Parts the rows are drawn, at the same place (%d rows, first %s, scroll %d)" % [names.size(), str(names[0]) if names.size() > 0 else "-", win._rows_scroll.scroll_vertical], names.size() == win.pool_size() and win._rows_scroll.scroll_vertical == int(98 * step) and "Box" in names)
+	var need: int = mini(win.row_count(), int(ceil(win._view_height() / step)) + 1 + 2 * win.POOL_MARGIN) # (C6: the bar of the selected row takes room, so the list is shorter than at the start and part of the pool is spare)
+	check("1. back on Parts the rows are drawn, at the same place (%d rows for %d needed, first %s, scroll %d)" % [names.size(), need, str(names[0]) if names.size() > 0 else "-", win._rows_scroll.scroll_vertical], names.size() == need and win._rows_scroll.scroll_vertical == int(98 * step) and "Box" in names)
 
 	# --- 2. reveal while Build shows
 	table.return_part()
@@ -158,6 +163,10 @@ func _initialize() -> void:
 	await frames(2)
 	var normal: HBoxContainer = win.visible_lines()[2]
 	check("4. a row line has its bubble in front of the folder label again", normal.get_child(3) == normal.get_meta("bubble"))
+	win._has_selected = false # (C6: no selected row, so the bar is one line and the list is tall again before it is made short)
+	win._selected = []
+	win._rebuild_rows()
+	await frames(2)
 	var with_extras := 0
 	for l in win.visible_lines():
 		if l.get_child_count() > win.LINE_BASE:
@@ -168,11 +177,11 @@ func _initialize() -> void:
 	var extras := 0
 	for l in win._spare:
 		extras += l.get_child_count() - win.LINE_BASE
-	check("4. lines that left the pool carry no inline buttons (spare %d -> %d, %d lines had them, %d extras left)" % [spare_before, win._spare.size(), with_extras, extras], with_extras > 0 and win._spare.size() > spare_before and extras == 0)
+	check("4. no line carries inline buttons, in the pool or after it left it (spare %d -> %d, %d lines in the pool had some, %d extras in spare)" % [spare_before, win._spare.size(), with_extras, extras], with_extras == 0 and win._spare.size() > spare_before and extras == 0)
 	await frames(2)
 
 	# --- 5. timing (not asserted): the parts list of 2,000 rows scrolled 10 rows a frame down and back; the frame includes the re-bind (run on value_changed),
-	## the layout and, under a renderer, the draw. The parts list makes new Table / Bring buttons on every re-bind.
+	## the layout and, under a renderer, the draw. (Before C6 the parts list made new Table / Bring buttons on every re-bind; they are in the bar now.)
 	var many: Array = []
 	for i in 2000:
 		many.append({"id": "m%04d" % i, "path": ["m%04d" % i], "name": "Many %04d" % i, "named": true, "resolved_part_id": "PM%d" % i, "children": null, "expanded": false})

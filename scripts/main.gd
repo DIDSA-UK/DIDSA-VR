@@ -1539,6 +1539,7 @@ func unload_model() -> void:
 	design_table.on_model_replaced()
 	_mates_tool.clear_picks()
 	_section_tool.reset()
+	design_table.tree.document_replaced() # (C6: the table's PARTS tab has Find too; document_replaced before mark_stale, as for the World tree)
 	design_table.tree.mark_stale()
 	_assembly_tree_window.document_replaced()
 	_assembly_tree_window.mark_stale()
@@ -2433,6 +2434,8 @@ func _show_model(glb_bytes: PackedByteArray, base_path: String, scale_value: flo
 	design_table.on_model_replaced() # the table's seated part is about to be freed with the rest
 	_mates_tool.clear_picks()
 	_section_tool.reset() # drops its stale per-part tracking before they're freed below; the gizmo/active state stay put — see that script's own reset() docstring
+	if not same_document and not _reloading_world:
+		design_table.tree.document_replaced() # (C6: the PARTS tab's Find words go too)
 	design_table.tree.mark_stale() # the table's own copy of the tree, for the same reason
 	if not same_document and not _reloading_world:
 		_assembly_tree_window.document_replaced() # (another document, not a re-read of this one: Find's words go)
@@ -2807,6 +2810,7 @@ func save_project(policy: String = "ask") -> Dictionary:
 		var previous_file := _opened_native_path
 		_opened_native_path = root_file # (a demo or a fresh session now has a root file: later saves update it in place)
 		_assembly_tree_window.note_document_changed(previous_file) # (the tree's remembered open rows follow the file it is now saved as, loaded or not)
+		design_table.tree.note_document_changed(previous_file) # (C6: the PARTS tab's Find words and a load in flight follow it too; it stores no rows)
 		last_saved_path = root_file
 		_native_root_id_cache.erase(root_file)
 	if ok:
