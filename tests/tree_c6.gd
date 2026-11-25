@@ -6,11 +6,13 @@ extends SceneTree
 ##   3. on a sub-assembly row Table and Bring are greyed with the reason in the hint; Table seats the part found by PATH; then Table reads "it is on the table";
 ##      Hide from the PARTS bar hides the part; a row with nothing in the arena is greyed with its reason; the pure rule (Scope.table_actions) for the root and a
 ##      closed table
-##   4. the PARTS tab notices a new root (another document) on its next refresh and reads it whole (main.gd marks only the World tree stale)
+##   4. the PARTS tab's Find words go with another document and stay across Save As (main.gd tells it as it tells the World tree); its bar follows the seat while
+##      PARTS shows (a part lifted off the table can be taken again)
 ##   5. leftover 1: the per-level fallback, a room open on a Part below a CLOSED row whose children were never fetched: the row is the way to it (not dimmed),
 ##      from the world's nodes; a closed row the world cannot answer for stays dimmed and the bar says why
-##   6. leftover 2: apply_theme binds again only the rows on screen; the pool's margin rows are bound again when a scroll brings them on
-##   7. leftover 3: a model that fails to show leaves no old revision behind: the new document's first events are not taken as old
+##   6. leftover 2: apply_theme binds again only the rows on screen; the pool's margin rows are bound again when a scroll or a taller list brings them on
+##   7. leftover 3: a model that fails to show leaves no old revision behind: the new document's first events are not taken as old, and its next change shows it as
+##      a new document (title, revision), not as a re-read of the old one
 ## NOT covered: the headset; how the bar looks (the render check's PARTS-tab picture: tools/assembly_tree_render_check/, scenario p).
 ## Run: "$GODOT" --headless --path . --script res://tests/tree_c6.gd  (see tests/README.md)
 
@@ -225,17 +227,39 @@ func _initialize() -> void:
 	var closed: Array = Scope.table_actions({"id": "p", "path": ["p"]}, {"node": true, "open": false})
 	check("3. (pure) a closed table greys Table, not Bring", not closed[0]["enabled"] and str(closed[0]["why"]) == "open the table first" and closed[1]["enabled"])
 
-	# --- 4. a new root
-	calls.clear()
-	root_id = "R2"
-	main._resolved_part_id = "R2"
-	tree.request_refresh()
-	var reread: bool = await until(func() -> bool: return calls.has("/parts/R2/assembly-tree") and tree._root_part_id == "R2" and tree._endpoint_active())
-	check("4. the PARTS tab notices another document's root on its next refresh and reads it whole (%s)" % str(calls), reread)
-	root_id = "R"
-	main._resolved_part_id = "R"
+	# --- 4. a new document: Find's words on PARTS go (main.gd tells the PARTS tab as it tells the World tree; the review's finding)
+	tree.set_query("box")
+	check("4. (setup) Find on PARTS narrows the rows (%d listed)" % tree.row_count(), tree.current_query() == "box" and tree.row_count() < 5)
+	main._opened_native_path = "user://tree_c6_saved_as.didsa"
+	tree.note_document_changed("user://tree_c6.didsa")
 	tree.mark_stale()
+	check("4. after Save As (a new file key) the PARTS tab keeps its Find words, as the World tree does", tree.current_query() == "box")
+	main._show_model(FileAccess.get_file_as_bytes("res://tests/fixtures/topology_box_cylinder.glb"), "", 0.001)
+	await frames(2)
+	check("4. another document opened under the same file key: the PARTS tab's Find words go (main.gd's document_replaced, not the key)", tree.current_query() == "")
+	for p in get_nodes_in_group("grabbable_parts"):
+		var occ := str(p.get_meta("occurrence_id", ""))
+		p.set_meta("owner_part_id", "SUB")
+		p.set_meta("group_root", "R")
+		p.set_meta("group_path", ["s1", occ])
+		p.set_meta("group_parts", ["SUB", "PART_BOX" if occ == "occ_box" else "PART_CYL"])
+		if occ == "occ_box":
+			box = p
+		else:
+			cyl = p
+	main._resolved_part_id = "R"
 	await until(func() -> bool: return tree._endpoint_active())
+	# --- 4b. the bar follows the seat while PARTS shows (the review's finding): a part lifted off the table can be taken again
+	tree.show_tab("parts")
+	select(tree, ["s1", "occ_box"])
+	bar_button(tree, "Table").pressed.emit()
+	await frames(2)
+	tree.show_tab("parts")
+	select(tree, ["s1", "occ_box"])
+	var greyed_on: bool = bar_button(tree, "Table").disabled
+	table.return_part()
+	await frames(2)
+	check("4. while PARTS shows, a part leaving the table turns Table on again in the bar (was greyed: %s)" % str(greyed_on), greyed_on and tree.current_tab() == "parts" and not bar_button(tree, "Table").disabled)
 	table.close()
 	await frames(2)
 
@@ -264,6 +288,14 @@ func _initialize() -> void:
 	check("5. ...and the bar says why it cannot tell (%s)" % window._bar_hint.text, window._bar_hint.text.contains("can't tell whether the open room's part is inside"))
 	select(window, ["s1"])
 	check("5. a row the world can answer for says nothing of the kind", not window._bar_hint.text.contains("can't tell"))
+	var kids_many: Array = window._tree[0]["children"].duplicate()
+	for i in 200:
+		kids_many.append({"id": "z%03d" % i, "path": ["z%03d" % i], "name": "Leaf %03d" % i, "named": true, "resolved_part_id": "PZ%d" % i, "children": null, "expanded": false})
+	window._tree[0]["children"] = kids_many
+	var builds_before: int = window.scope.index_builds
+	window._rebuild_rows()
+	check("5. 202 closed rows with a room open: the world is walked once for the rebuild, not once per row (%d walks)" % (window.scope.index_builds - builds_before), window.scope.index_builds - builds_before == 1)
+	window._tree[0]["children"] = kids_many.slice(0, 2)
 	rooms.parts = ["PART_X_ELSEWHERE"]
 	window._rebuild_rows()
 	check("5. a room on a Part nowhere below Sub: Sub is dimmed (the world's nodes answer no)", bool(window._descs[1].get("room_dim", false)) and not bool(window._descs[1].get("room_way", false)))
@@ -297,12 +329,29 @@ func _initialize() -> void:
 	window._rows_scroll.scroll_vertical = int(42 * step)
 	await frames(3)
 	shown = window._on_screen_range()
+	var resized_ok := true
 	var stale_on_screen := 0
 	for i in window._pool.size():
 		var index: int = window._first + i
 		if index >= shown.x and index <= shown.y and int(window._pool[i].get_meta("theme_rev", -1)) != window._theme_rev:
 			stale_on_screen += 1
 	check("6. ...a scroll binds the margin rows it brings on screen (%d left stale on screen)" % stale_on_screen, stale_on_screen == 0)
+	var rows_h: float = floor(window._view_height() / step)
+	window._rows_scroll.scroll_vertical = int(42.5 * step) # (half a row down: a list that grows by a third of a row then shows one more row without needing a bigger pool)
+	window._rows_scroll.size = Vector2(window._rows_scroll.size.x, (rows_h + 0.3) * step)
+	window._on_list_resized()
+	window.apply_theme()
+	var need_before: int = window._pool.size()
+	var end_before: int = window._on_screen_range().y
+	window._rows_scroll.size = Vector2(window._rows_scroll.size.x, (rows_h + 0.6) * step)
+	window._on_list_resized()
+	check("6. (setup) the list grew to show one more row with the same pool (%d -> %d rows to %d, pool %d -> %d)" % [end_before, window._on_screen_range().y, window._descs.size(), need_before, window._pool.size()], window._on_screen_range().y == end_before + 1 and window._pool.size() == need_before)
+	shown = window._on_screen_range()
+	for i in window._pool.size():
+		var index: int = window._first + i
+		if index >= shown.x and index <= shown.y and int(window._pool[i].get_meta("theme_rev", -1)) != window._theme_rev:
+			resized_ok = false
+	check("6. ...and so does a list that grows without a scroll (the review's finding)", resized_ok)
 	window.close()
 
 	# --- 7. leftover 3: the observer's revision across a model that fails to show
@@ -323,6 +372,8 @@ func _initialize() -> void:
 	obs._queue_doc(5, [], true)
 	await frames(3)
 	check("7. the new document's revision 5 is not taken as older than the old document's 40: it is fetched (%d -> %d)" % [before, obs.fetches], obs.fetches > before)
+	await until(func() -> bool: return not obs._busy)
+	check("7. ...and shown as the new document it is (not a re-read of the old one: %s), with its title and revision" % str(fake.shown), fake.shown == [false] and obs.title == "New" and obs.loaded_rev == 5 and obs._model_shown)
 	obs.queue_free()
 	fake.queue_free()
 	quit()

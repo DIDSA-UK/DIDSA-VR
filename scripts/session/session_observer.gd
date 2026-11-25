@@ -29,6 +29,7 @@ var active := false
 var model_source: Dictionary = {}
 var title := ""
 var loaded_rev := 0
+var _model_shown := true ## false from a model change until that model is on show: a model that failed to show is shown whole on its next change, not re-read as the old one (C6)
 var status_text := ""
 var fetch_count := 0 ## glb requests made (a test reads it)
 var not_modified_count := 0
@@ -97,6 +98,7 @@ func stop() -> void:
 	_scene_root = null
 	model_source = {}
 	loaded_rev = 0
+	_model_shown = true
 
 
 # --- The model ------------------------------------------------------------------------------------------------------------------
@@ -131,8 +133,10 @@ func _load_from_snapshot(snapshot: Dictionary) -> void:
 	title = str((model as Dictionary).get("title", ""))
 	_reset_queue()
 	loaded_rev = 0 # (C6, 10.8 VR leftover 3: from here on nothing is compared against the old document's revision, whether or not the new one is shown)
+	_model_shown = false
 	_loading = true
 	var shown := await _show(model)
+	_model_shown = shown
 	if shown and active:
 		_apply_snapshot(snapshot)
 		var rev = snapshot.get("rev")
@@ -500,8 +504,10 @@ func _on_model(message: Dictionary) -> void:
 	_tracks.clear()
 	_latest.clear()
 	_etags.clear()
+	_model_shown = false
 	_loading = true
 	var shown := await _show(model)
+	_model_shown = shown
 	if shown:
 		title = str(model["title"])
 		loaded_rev = int(message.get("rev", model.get("rev", 0)))
@@ -545,13 +551,39 @@ func _drain() -> void:
 		_queue_all = false
 		_queue_rev = 0 # (this batch's revision is `rev`; what queues meanwhile starts again from its own, not from an older document's)
 		var done := true
-		if all:
+		if not _model_shown:
+			done = await _show_again(rev) # (the model never showed: its change is shown as the new document it is, not swapped into the old one's scene)
+		elif all:
 			done = await _refetch_all()
 		else:
 			done = await _refetch_parts(parts)
 		if done and active:
 			loaded_rev = maxi(loaded_rev, rev) # (a dropped refetch, the session ended or another model meanwhile, shows nothing of this revision: it must not make the next events look old)
 	_busy = false
+
+
+func _show_again(rev: int) -> bool:
+	## The model the presenter opened failed to show (its first fetch failed) and has changed since: it is shown now as a new document, as _on_model would have shown
+	## it (its title, the place, visibility, section, model_ready). True when it is on show now; false when it failed again or was dropped (the session ended).
+	var model := model_source.duplicate()
+	_loading = true
+	var shown := await _show(model)
+	_loading = false
+	if not active or _model_differs(model):
+		_replay_held()
+		return false
+	_model_shown = shown
+	if shown:
+		title = str(model.get("title", title))
+		loaded_rev = maxi(loaded_rev, rev)
+		if _have_place:
+			main.session_apply_place(_place)
+		_apply_visibility()
+		_apply_section()
+	_replay_held()
+	if shown:
+		model_ready.emit()
+	return shown # (a show that failed again raises no revision: the next change tries once more)
 
 
 func _refetch_all() -> bool:

@@ -12,6 +12,7 @@ extends RefCounted
 ## The parts of a scope that need no scene are static and pure (table_actions), tested in tests/tree_c6.gd.
 
 const GroupIndex := preload("res://scripts/group_index.gd")
+const Model := preload("res://scripts/tree/occurrence_tree_model.gd")
 
 const WORLD := "world"
 const TABLE := "table"
@@ -21,6 +22,7 @@ var offers_room := true ## the bar's Room / Close room (Model.actions_for's room
 var room_context := true ## rows outside an open room are dimmed, the inside ones wear the rail (B8)
 var remembers_rows := true ## the open rows are stored and restored per document (B7)
 var table ## design_table.gd, for the Table scope
+var index_builds := 0 ## how many times room_below_index walked the world (a test reads it: once per rebuild, not once per row)
 
 
 static func world() -> RefCounted:
@@ -72,24 +74,37 @@ func isolate_row(main, path: Array, label: String) -> void:
 		main.isolate_tree_row(path, label)
 
 
-func room_below(main, path: Array, room_parts: Array) -> int:
-	## C6 (10.8 VR leftover 1): whether a placement of an open room's Part lies BELOW the row at `path`, read from the world's own nodes (each carries the Parts its
-	## path resolves to, group_index.gd `group_parts`), so it is known for a closed row whose children were never fetched. 1 = yes, 0 = no, -1 = the world cannot
-	## say (nothing of the row is on screen with a path: not indexed, hidden by the mesh, suppressed).
-	var nodes := row_nodes(main, path)
-	var known := false
-	for n in nodes:
-		if not is_instance_valid(n) or not n.has_meta("group_parts") or not n.has_meta("group_path"):
+func room_below_index(main, root: String, room_parts: Array) -> Dictionary:
+	## C6 (10.8 VR leftover 1): which rows have a placement of an open room's Part BELOW them, read once from the world's own nodes (each leaf carries the Parts its
+	## path resolves to, group_index.gd `group_parts`), so it is known for a closed row whose children were never fetched. {parts, known: {row key: true} (a leaf
+	## of the world lies under that row), below: {row key: true}}. One walk over the world per call (nodes x depth); the view asks once per rebuild.
+	index_builds += 1
+	var known := {}
+	var below := {}
+	for n in row_nodes(main, []):
+		if not is_instance_valid(n) or not n.has_meta("group_path") or not n.has_meta("group_parts") or str(n.get_meta("group_root", "")) != root:
 			continue
 		var p: Array = n.get_meta("group_path")
-		if p.size() < path.size() or p.slice(0, path.size()) != path:
-			continue
-		known = true
 		var parts: Array = n.get_meta("group_parts")
-		for i in range(path.size(), parts.size()):
+		var deepest := -1 # (the deepest place on the leaf's path that resolves to a room's Part: every row above that place has the room below it)
+		for i in parts.size():
 			if room_parts.has(str(parts[i])):
-				return 1
-	return 0 if known else -1
+				deepest = i
+		for k in range(1, p.size() + 1):
+			var key := Model.path_key(p.slice(0, k))
+			known[key] = true
+			if deepest >= k:
+				below[key] = true
+	return {"parts": room_parts.duplicate(), "known": known, "below": below}
+
+
+static func room_below_in(index: Dictionary, path: Array) -> int:
+	## From room_below_index: 1 = a room's Part is below the row at `path`, 0 = no, -1 = the world cannot say (nothing of the row is on screen with a path: not
+	## indexed, left out of the mesh, suppressed).
+	var key := Model.path_key(path)
+	if (index.get("below", {}) as Dictionary).has(key):
+		return 1
+	return 0 if (index.get("known", {}) as Dictionary).has(key) else -1
 
 
 # --- Table / Bring (the Table scope) --------------------------------------------------------------------------------------------------------------------------

@@ -76,7 +76,8 @@ func clipped(b: Button) -> bool:
 
 
 func table_tree_rows() -> void:
-	## The design table's PARTS tab (table_tree_window.gd, a subclass: per-level rows, with Table / Bring buttons beside each name): the hint must fit what is left.
+	## The design table's PARTS tab (table_tree_window.gd, the tree component at the docked width): the hint must fit the row. C6: Table / Bring were buttons beside
+	## each name until they moved into the bottom bar; the bar's buttons (two lines of them) must show their whole labels.
 	var table = main.design_table
 	table.open()
 	await process_frame
@@ -91,7 +92,15 @@ func table_tree_rows() -> void:
 		if (b as Button).theme_type_variation == &"ButtonRail":
 			found.append(b)
 	var cut := found.filter(func(b): return clipped(b) and b.text.contains("  · "))
-	check("the design table's tree: rows beside the Table / Bring buttons have no hint cut off (%s)" % ", ".join(found.map(func(b): return b.text)), found.size() >= 2 and cut.is_empty())
+	check("the design table's tree: rows at the docked width have no hint cut off (%s)" % ", ".join(found.map(func(b): return b.text)), found.size() >= 2 and cut.is_empty())
+	table.tree._selected = ["o1"]
+	table.tree._has_selected = true
+	table.tree._rebuild_bar()
+	for i in 6:
+		await process_frame
+	var bar: Array = table.tree._bar_buttons.get_children()
+	var bar_cut := bar.filter(func(b): return clipped(b))
+	check("the design table's tree: the PARTS bar's buttons show their whole labels (%s; cut: %s)" % [", ".join(bar.map(func(b): return b.text)), ", ".join(bar_cut.map(func(b): return b.text))], bar.size() == 8 and bar_cut.is_empty())
 	table.close()
 
 

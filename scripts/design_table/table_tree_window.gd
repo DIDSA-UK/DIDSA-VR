@@ -40,8 +40,8 @@ func setup_for_table(p_table, left: XRController3D, right: XRController3D, camer
 	setup_tree(left, right, camera, main)
 	panel_title = "Table tree"
 	set_title("Table tree")
-	panel_size = Vector2(0.30, 0.46) # (C6: 6 cm taller than before, for the bottom bar the PARTS tab has now; the same pixels per metre)
-	viewport_size = Vector2i(516, 791)
+	panel_size = Vector2(0.30, 0.40)
+	viewport_size = Vector2i(516, 688)
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
 	# "+" in the header beside the close button: a new empty part on the table (the same as the tablet's Table page > New part).
@@ -89,6 +89,8 @@ func _on_build_changed() -> void:
 		_redraw_build()
 	else:
 		_build_dirty = true
+	if _tab == "parts":
+		_rebuild_bar() # (C6: the bar's Table / Bring read the seat: a part lifted off or put on the table changes them)
 
 
 func _on_opened() -> void:

@@ -156,16 +156,8 @@ func mark_stale() -> void:
 		_refresh_root()
 
 
-func _root_moved() -> bool:
-	## The scope's root is not the one the rows shown were read for (another document was opened while this tree was not told: main.gd marks only the World tree
-	## stale, so the table's PARTS tab finds out here).
-	return _main != null and not _stale and _root_part_id != "" and scope.root_part_id(_main) != _root_part_id
-
-
 func _on_opened() -> void:
-	if _root_moved():
-		mark_stale() # (reads the new root now: the window is open)
-	elif _stale:
+	if _stale:
 		_refresh_root()
 	elif _stale_levels:
 		_refresh_levels()
@@ -623,8 +615,10 @@ func _mark_fallback_room_rows() -> void:
 	## fetched or not) the rows it has read and the world's own nodes say whether the room is there (_fallback_room_below); when neither can say, the row stays
 	## dimmed and the bar says why (_row_detail).
 	var room_parts := _room_part_ids()
+	_room_index = {}
 	if room_parts.is_empty():
 		return # (none open, or a scope without room context: _room_part_ids)
+	_room_index = scope.room_below_index(_main, _root_part_id, room_parts) # (once per rebuild: one walk over the world, not one per row)
 	var everything := room_parts.has(_root_part_id) and _root_part_id != ""
 	var inside_depth := -1
 	for d in _descs:
@@ -660,6 +654,9 @@ func _mark_fallback_room_rows() -> void:
 				seen[k] = true
 
 
+var _room_index: Dictionary = {} ## Scope.room_below_index for the rooms open at the last rebuild (the fallback only)
+
+
 static func _lists_below(row: Dictionary) -> bool:
 	## The fallback lists this row's children under it (it is open and they were read): what is below it is in the list.
 	return bool(row.get("expanded", false)) and row.get("children") != null
@@ -667,11 +664,13 @@ static func _lists_below(row: Dictionary) -> bool:
 
 func _fallback_room_below(row: Dictionary, room_parts: Array) -> int:
 	## Whether a placement of an open room's Part lies below a row the list does not open: 1 yes, 0 no, -1 can't tell. The levels already read under it come first
-	## (a closed row keeps what it read), then the world's own nodes (Scope.room_below: every leaf knows the Parts its path resolves to).
+	## (a closed row keeps what it read), then the world's own nodes (Scope.room_below_index, built once per rebuild: every leaf knows the Parts its path resolves to).
 	var read := _read_room_below(row, room_parts)
 	if read == 1:
 		return 1
-	var world: int = scope.room_below(_main, row.get("path", []), room_parts)
+	if _room_index.get("parts", null) != room_parts:
+		_room_index = scope.room_below_index(_main, _root_part_id, room_parts)
+	var world: int = Scope.room_below_in(_room_index, row.get("path", []))
 	return world if world != -1 else read
 
 
@@ -778,6 +777,11 @@ func _view_height() -> float:
 
 
 func _layout_pool(force: bool = false) -> void:
+	_layout_pool_rows(force)
+	_rebind_stale_on_screen() # (C6: a row bound under an older theme that a scroll, a resize or a rebuild brings on screen is bound again)
+
+
+func _layout_pool_rows(force: bool = false) -> void:
 	## Draws the rows that are on screen: the pool is as long as the visible rows plus a margin, and each control is re-bound to the row now at its place.
 	## A scroll of k rows re-binds k controls (the ones that left one end are moved to the other); `force` (a rebuild, a resize) re-binds them all.
 	if _rows_box == null or _top_spacer == null:
@@ -833,7 +837,6 @@ func _layout_pool(force: bool = false) -> void:
 
 func _on_scrolled(_value: float) -> void:
 	_layout_pool()
-	_rebind_stale_on_screen()
 
 
 func _on_list_resized() -> void:
@@ -1831,9 +1834,6 @@ func _refresh_levels() -> void:
 	if _tree.is_empty() or _root_part_id == "":
 		return
 	_stale_levels = false
-	if _root_moved():
-		mark_stale() # (a refresh of a tree whose root has gone reads the new one whole)
-		return
 	if _endpoint_active():
 		_refresh_token += 1 # (the whole tree is one call: re-read it in place; what is open and selected stays)
 		if await _load_endpoint(_refresh_token):
