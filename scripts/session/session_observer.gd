@@ -130,6 +130,7 @@ func _load_from_snapshot(snapshot: Dictionary) -> void:
 		return
 	title = str((model as Dictionary).get("title", ""))
 	_reset_queue()
+	loaded_rev = 0 # (C6, 10.8 VR leftover 3: from here on nothing is compared against the old document's revision, whether or not the new one is shown)
 	_loading = true
 	var shown := await _show(model)
 	if shown and active:
@@ -495,6 +496,7 @@ func _on_model(message: Dictionary) -> void:
 	var model: Dictionary = (source as Dictionary).duplicate()
 	model["title"] = str(message.get("title", ""))
 	_reset_queue() # (another model: what was queued was the old one's)
+	loaded_rev = 0 # (C6, 10.8 VR leftover 3: and its revision is not this one's; a model that fails to show must not make this one's events look old)
 	_tracks.clear()
 	_latest.clear()
 	_etags.clear()

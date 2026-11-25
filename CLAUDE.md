@@ -15,6 +15,7 @@ The CAD backend and the flat Flutter app live in `DIDSA-UK/DIDSA-CAD`; this repo
 ## Layout
 
 - `scripts/`: `main.gd` (scene root), `controller.gd` (all hand input), `two_hand_model.gd`, tools (`mates_tool`, `measure_tool`, `section_tool`, `colour_tool`), windows (`*_window.gd` on `diegetic_panel.gd`), `locomotion.gd`.
+- `scripts/tree/`: the occurrence tree component (C6): `occurrence_tree_view.gd` (rows, pool, bottom bar, Find, remembered rows, room context) driven by `occurrence_tree_scope.gd` (World, Table PARTS; Room in C7), and `occurrence_tree_model.gd` (the pure rules). `assembly_tree_window.gd` is its World window; the table's PARTS tab is `design_table/table_tree_window.gd`.
 - `scripts/room/`: Assembly Rooms (clipped sub-assembly workspaces): manager, registry, clip, handles, console, edit, world preview.
 - `scripts/design_table/`: the part-modelling console (sketch, constraints, features); `cad_api.gd` is its backend client.
 - `scripts/ui/`: wrist tablet (`tablet_registry.gd`, `tablet_pages.gd`), theming (`didsa_ui_theme.gd`), shader FX.

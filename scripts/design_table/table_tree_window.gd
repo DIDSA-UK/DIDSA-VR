@@ -1,13 +1,13 @@
-extends "res://scripts/assembly_tree_window.gd"
+extends "res://scripts/tree/occurrence_tree_view.gd"
 ## The tree at the design table's left, from John's sketch. Two tabs:
 ##   BUILD  the part on the table's own build tree, the flat app's part-design-lens tree: every feature that made it (planes, sketches,
 ##          extrudes, fillets...) in order, with Edit / Hide / Roll back / Delete on the selected row (the logic is table_build.gd, this
 ##          is only its view). It opens as soon as a part goes on the table.
-##   PARTS  the ordinary Assembly Tree window (browse the occurrences, tap a name to select the part) docked to the console and given
-##          two actions on every placed part:
+##   PARTS  the one occurrence tree component (C6, scripts/tree/occurrence_tree_view.gd) with the Table scope (occurrence_tree_scope.gd): the world's
+##          assembly, its rows, Find, the bottom bar. Select a row; the bar adds two actions to the World tree's (Fix, Hide, Isolate, Rename, Room, Delete):
 ##   Table  puts that part on the table to edit it, without carrying it there;
 ##   Bring  moves it to a spot in front of you in the arena (an ordinary, undoable move).
-## Only parts with geometry in the arena can be taken: a sub-assembly row has none of its own (open it and take one of its parts).
+## Only parts with geometry in the arena can be taken: on a sub-assembly row both are greyed with the reason (open it and take one of its parts).
 ## It is a child of the console, so it moves with it; its own grab handle still moves it separately, and its X puts it away
 ## until the table is next opened.
 ##
@@ -36,11 +36,12 @@ const Visibility := preload("res://scripts/design_table/visibility.gd")
 
 func setup_for_table(p_table, left: XRController3D, right: XRController3D, camera: XRCamera3D, main: Node) -> void:
 	table = p_table
+	scope = Scope.for_table(p_table)
 	setup_tree(left, right, camera, main)
 	panel_title = "Table tree"
 	set_title("Table tree")
-	panel_size = Vector2(0.30, 0.40)
-	viewport_size = Vector2i(516, 688)
+	panel_size = Vector2(0.30, 0.46) # (C6: 6 cm taller than before, for the bottom bar the PARTS tab has now; the same pixels per metre)
+	viewport_size = Vector2i(516, 791)
 	_apply_panel_size(panel_size, true)
 	_base_width = panel_size.x
 	# "+" in the header beside the close button: a new empty part on the table (the same as the tablet's Table page > New part).
@@ -70,6 +71,7 @@ func show_tab(which: String) -> void:
 	_tab_parts.set_pressed_no_signal(which == "parts")
 	_tab_build.set_pressed_no_signal(which == "build")
 	scroll_target = _parts_scroll if which == "parts" else _build_scroll
+	_sync_fold_button() # (Find and the grouping switch are the PARTS tab's: hidden on BUILD)
 	if which == "build":
 		_redraw_build()
 	else:
@@ -359,37 +361,28 @@ func _place_in_front_of_camera() -> void:
 	transform = Transform3D(Basis(Vector3.UP, deg_to_rad(dock_yaw_degrees)), dock_position)
 
 
-func _uses_action_bar() -> bool:
-	return false # the PARTS tab keeps its inline Table / Bring buttons until phase T2 (docs/feature-tree-review-2026-11-11.md)
+func _sync_fold_button() -> void:
+	## Find is the PARTS tab's (hidden on BUILD). The grouping switch is the World tree's: it is one saved setting both trees follow, and the docked header has no
+	## room for it beside Find, + and the title.
+	super._sync_fold_button()
+	if _find_button != null:
+		_find_button.visible = _find_button.visible and _tab == "parts"
+	if _fold_button != null:
+		_fold_button.visible = false
 
 
-func _add_row_actions(line: HBoxContainer, row: Dictionary, _is_expandable: bool) -> void:
-	var occurrence_id := str(row.get("id", ""))
-	if occurrence_id == "": # the root row is the assembly itself
-		return
-	var node: Node3D = table.node_for_occurrence(occurrence_id) if table else null
-	var on_table: bool = node != null and node == table.seated
-	line.add_child(_action("Table", "table", node != null and not on_table, _take_to_table.bind(occurrence_id), &"ButtonAccent"))
-	line.add_child(_action("Bring", "scale", node != null and not on_table, _bring.bind(occurrence_id), &""))
+func _on_scope_action(action_id: String, row: Dictionary) -> void:
+	match action_id:
+		"table":
+			_take_to_table(row.get("path", []))
+		"bring":
+			_bring(row.get("path", []))
 
 
-func _action(text: String, icon_name: String, enabled: bool, callback: Callable, variation: StringName) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.icon = UiIcons.texture(icon_name, 24)
-	b.disabled = not enabled
-	b.custom_minimum_size = Vector2(0, 0)
-	b.add_theme_font_size_override("font_size", tokens.font_small)
-	if variation != &"":
-		b.theme_type_variation = variation
-	b.pressed.connect(callback)
-	return b
-
-
-func _take_to_table(occurrence_id: String) -> void:
+func _take_to_table(path: Array) -> void:
 	if table == null:
 		return
-	var node: Node3D = table.node_for_occurrence(occurrence_id)
+	var node: Node3D = scope.table_node(_main, path)
 	if node == null:
 		_set_status("That part isn't in the arena (hidden, or a sub-assembly with no body of its own).")
 		return
@@ -398,11 +391,12 @@ func _take_to_table(occurrence_id: String) -> void:
 	_rebuild_rows()
 
 
-func _bring(occurrence_id: String) -> void:
+func _bring(path: Array) -> void:
 	if table == null:
 		return
-	var node: Node3D = table.node_for_occurrence(occurrence_id)
+	var node: Node3D = scope.table_node(_main, path)
 	if node == null:
 		_set_status("That part isn't in the arena (hidden, or a sub-assembly with no body of its own).")
 		return
 	_set_status(table.bring_part(node))
+	_rebuild_bar()
