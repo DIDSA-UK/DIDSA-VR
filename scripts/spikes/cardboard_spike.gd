@@ -79,6 +79,7 @@ var build_collision := false
 var _report_left := REPORT_EVERY_S
 var _step_started_ms := 0
 var _warmed := false
+var section_origin := Vector3.ZERO ## where the section plane was last put (world space)
 var auto_advance := true ## each step ends by itself after its "seconds"; a tap ends it early
 var _drift_start_yaw := NAN
 var _joy_logged := 0
@@ -439,18 +440,22 @@ func _set_section(on: bool, scene: Node3D) -> void:
 			elif not ClipLook.is_clip(part.material_override):
 				part.material_override = ClipLook.clip_for(part.material_override, part)
 		var box := _bounds(scene)
-		RenderingServer.global_shader_parameter_set("section_plane_origin", box.get_center())
+		# _bounds is in the model's own units (mm for a backend glb); the plane is a world position
+		section_origin = scene.global_transform * box.get_center()
+		RenderingServer.global_shader_parameter_set("section_plane_origin", section_origin)
 		RenderingServer.global_shader_parameter_set("section_plane_normal", Vector3.RIGHT)
 	RenderingServer.global_shader_parameter_set("section_enabled", on)
 
 
 func _fit_in_front(scene: Node3D) -> void:
-	## The model about 1.2 m tall, 1.5 m in front of a seated viewer (glb units are mm for a backend glb, m for a demo).
+	## The model 1.2 m across, 1.8 m ahead, its middle a little below the eyes, so it is in view with the phone held level (glb units
+	## are mm for a backend glb, m for a demo). The eyes are MobileVRInterface's eye_height (1.85 m by default), not the scene's camera.
 	assembly_root.transform = Transform3D.IDENTITY
 	var box := _bounds(scene)
 	var size := maxf(box.get_longest_axis_size(), 0.001)
 	var s := 1.2 / size
-	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), Vector3(0, 1.1, -1.5) - box.get_center() * s)
+	var eye_y := float(mobile_vr.get("eye_height")) if mobile_vr != null else xr_camera.global_position.y
+	assembly_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), Vector3(0, eye_y - 0.2, -1.8) - box.get_center() * s)
 
 
 func _bounds(scene: Node3D) -> AABB:

@@ -246,14 +246,11 @@ The figures are for **your** phone (record make, model, chip, Android version).
   | # | Result |
   |---|---|
   | C1 | **Pass** (above) |
-  | C2 | **Pass**: gear train, 120 fps, p95 8.3 to 8.9 ms |
-  | C3 | **Pass at 600k triangles / 300 parts**: looking at the whole model, the worst windows ran 80 to 90 fps (p95 12.5 to 16.7 ms, GPU up to 10.6 ms, 1208 draw calls); otherwise 120. 2M was not tried, so the limit is not known |
-  | C3b to C3d | **Pass**: edges off, MSAA off, oversample 1.0 change little at this load |
+  | C2, C3, C3b to C3d, C8 | **Not valid** (found 25 Nov, the owner saw no model): the spike put the section plane at the model's middle in the model's own units, so for a mm glb (every backend glb and the stress model) it sat about 150 m away and cut the whole model away. The GPU still ran the vertices (up to 1208 draw calls) but threw away every pixel, so these numbers under-count. Only the demo rocket (metres) ever showed. Fixed: the plane is now in world space, and the model sits at eye height 1.8 m ahead. What the numbers did show: 600k triangles' vertex work alone kept 80 to 120 fps |
   | C4 | **Not measured**: C3 was ended by a tap at 33 s |
   | C5 | **Not valid**: ended at 38 s by a tap, and the spike's yaw was wrong for a phone lying flat (Euler yaw at gimbal lock, swinging -175 to +55 degrees); now measured from the phone's top edge when flat (`heading()`) |
   | C6, C9 | Not run (no viewer, no gamepad) |
   | C7 | **Pass**: 600k triangles loaded in 1528 ms with collision, of which collision 1126 ms (without: 414 ms). Collision is most of it: build it lazily in P5 |
-  | C8 | **Pass**: magic window 120 fps |
 
 - Harmless: the phone APK logs that it cannot load the OpenXR Vendors extension (it is for the Quest; the phone preset does not
   enable it).

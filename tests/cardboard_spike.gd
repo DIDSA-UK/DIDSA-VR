@@ -63,6 +63,11 @@ func _initialize() -> void:
 	print("SMOKE spike: a step ends by itself when its time is up: ", spike.step_index == before + 1 and spike.results.has(spike.STEPS[before]["id"]))
 	spike._step_started_ms -= 1000 * 600
 	spike.finish_step()
+	var model: Node3D = spike.models["heavy"]["scene"]
+	var middle: Vector3 = model.global_transform * spike._bounds(model).get_center()
+	var plane: Vector3 = spike.section_origin
+	print("SMOKE spike: a mm model's section plane goes through its middle in world space (it was 150 m off, cutting it all away): ",
+		plane.distance_to(middle) < 0.001 and absf(middle.z + 1.8) < 0.001)
 	print("SMOKE spike: C3 run ten minutes is kept as C4: ", spike.results.has("C4") and str(spike.results["C4"]).begins_with("C4 (C3 after"))
 	spike.next_step()
 	while spike.step_index != 5:
