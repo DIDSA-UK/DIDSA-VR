@@ -497,13 +497,23 @@ func _process(delta: float) -> void:
 		return
 	stats.add(delta)
 	if step.get("drift", false):
-		var yaw := xr_camera.global_transform.basis.get_euler().y
+		var yaw := heading()
 		if is_nan(_drift_start_yaw) and Time.get_ticks_msec() - _step_started_ms > 2000:
 			_drift_start_yaw = yaw
 	_report_left -= delta
 	if _report_left <= 0.0:
 		_report_left = REPORT_EVERY_S
 		report()
+
+
+func heading() -> float:
+	## The phone's heading about the vertical, for C5. Euler yaw is meaningless when the camera looks straight down (a phone lying
+	## flat: gimbal lock, it swung 200 degrees on the owner's phone), so a flat phone uses its top edge, which is then level.
+	var b := xr_camera.global_transform.basis
+	var v := -b.z
+	if absf(v.normalized().y) > 0.7:
+		v = b.y
+	return atan2(v.x, v.z)
 
 
 func _step_elapsed_s() -> float:
@@ -528,7 +538,7 @@ func report() -> void:
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
 		(Time.get_ticks_msec() - _step_started_ms) / 1000]
 	if step.get("drift", false) and not is_nan(_drift_start_yaw):
-		var drift := rad_to_deg(angle_difference(_drift_start_yaw, xr_camera.global_transform.basis.get_euler().y))
+		var drift := rad_to_deg(angle_difference(_drift_start_yaw, heading()))
 		text += " | yaw drift %.1f deg (pass <= 5 deg at %d s)" % [drift, int(DRIFT_S)]
 	stats.clear()
 	results[step["id"]] = text

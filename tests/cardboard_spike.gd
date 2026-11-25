@@ -69,6 +69,14 @@ func _initialize() -> void:
 		spike.next_step()
 	print("SMOKE spike: C8 is magic window (the window camera is current): ", spike.window_camera.current)
 	print("SMOKE spike: magic window hides the eyes and turns the main viewport's 3D back on: ", not spike._stereo_layer.visible and not spike.get_viewport().disable_3d)
+	var flat := Transform3D(Basis(Vector3.RIGHT, -PI / 2.0), Vector3(0, 1, 0)) # looking straight down, like a phone on a table
+	spike.xr_camera.global_transform = flat
+	var h0: float = spike.heading()
+	spike.xr_camera.global_transform = Transform3D(Basis(Vector3.UP, deg_to_rad(10.0)) * flat.basis, flat.origin)
+	var turned := rad_to_deg(angle_difference(h0, spike.heading()))
+	spike.xr_camera.global_transform = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-0.5)) * flat.basis, flat.origin)
+	var wobble := rad_to_deg(angle_difference(h0, spike.heading()))
+	print("SMOKE spike: a flat phone's heading follows a 10 degree turn and ignores a half-degree tilt: ", absf(turned - 10.0) < 0.01 and absf(wobble) < 0.01)
 	spike.next_step()
 	print("SMOKE spike: C5 drift step: ", spike.STEPS[spike.step_index]["id"] == "C5")
 	spike.next_step()
