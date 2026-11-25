@@ -156,5 +156,21 @@ func _initialize() -> void:
 	check("B8.1 ...and the same refetch for the model still shown does raise it (9)", obs.loaded_rev == 9)
 	obs.queue_free()
 	fake.queue_free()
+
+	# --- B8.1 (review): the queue's own revision starts again for the next document, or its changes 3..9 would be dropped as old
+	pair = fresh()
+	obs = pair[0]
+	fake = pair[1]
+	obs.loaded_rev = 3
+	obs._queue_doc(9, [], true)
+	obs.gate = true
+	await frames(4)
+	obs.model_source = {"kind": "backend", "root_part_id": "OTHER", "path": ""}
+	obs.loaded_rev = 1 # (the new model came in at rev 1)
+	obs._queue_doc(2, [], true)
+	await frames(4)
+	check("B8.1 after a refetch to rev 9, the next model's rev 2 is applied as 2 (loaded_rev %d), so rev 3 is not dropped as old" % obs.loaded_rev, obs.loaded_rev == 2)
+	obs.queue_free()
+	fake.queue_free()
 	await frames(2)
 	quit(0)

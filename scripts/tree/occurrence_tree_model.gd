@@ -705,9 +705,9 @@ static func _way_level(siblings: Array, parent_key: String, part_ids: Array, gro
 
 static func _way_node(node: Dictionary, part_ids: Array, grouping: bool, out: Dictionary) -> bool:
 	var key := node_key(node["path"])
-	var below := _way_level(children_of(node), key, part_ids, grouping, out)
 	if _is_room_node(node, part_ids):
 		return true # (inside: what is below it is inside too, and none of it is "the way")
+	var below := _way_level(children_of(node), key, part_ids, grouping, out)
 	if below:
 		out[key] = true
 	return below

@@ -129,6 +129,7 @@ func _load_from_snapshot(snapshot: Dictionary) -> void:
 		_fail("The presenter has not opened a model yet.")
 		return
 	title = str((model as Dictionary).get("title", ""))
+	_reset_queue()
 	_loading = true
 	var shown := await _show(model)
 	if shown and active:
@@ -493,6 +494,7 @@ func _on_model(message: Dictionary) -> void:
 		return
 	var model: Dictionary = (source as Dictionary).duplicate()
 	model["title"] = str(message.get("title", ""))
+	_reset_queue() # (another model: what was queued was the old one's)
 	_tracks.clear()
 	_latest.clear()
 	_etags.clear()
@@ -512,6 +514,12 @@ func _on_model(message: Dictionary) -> void:
 
 
 # --- A changed document ---------------------------------------------------------------------------------------------------------
+
+func _reset_queue() -> void:
+	_queue_parts = {}
+	_queue_all = false
+	_queue_rev = 0
+
 
 func _queue_doc(rev: int, parts: Array, all: bool) -> void:
 	if rev <= loaded_rev and rev != 0:
@@ -533,6 +541,7 @@ func _drain() -> void:
 		var all := _queue_all
 		_queue_parts = {}
 		_queue_all = false
+		_queue_rev = 0 # (this batch's revision is `rev`; what queues meanwhile starts again from its own, not from an older document's)
 		var done := true
 		if all:
 			done = await _refetch_all()

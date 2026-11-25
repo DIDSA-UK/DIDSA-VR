@@ -202,13 +202,13 @@ func _initialize() -> void:
 	var saved_descs: Array = window._descs.duplicate()
 	var saved_root: String = window._root_part_id
 	window._descs.clear()
-	for spec in [["x1", "R2", 0], ["x1c", "B", 1], ["y", "C", 0], ["z", "D", 0], ["zf", "A", 1], ["zfb", "B", 2], ["w", "A", 0]]:
-		window._add_row_line({"id": spec[0], "path": [spec[0]], "resolved_part_id": spec[1]}, spec[2], true)
+	for spec in [["x1", "R2", 0], ["x1c", "B", 1], ["y", "C", 0], ["z", "D", 0], ["zf", "A", 1], ["zfb", "B", 2], ["w", "A", 0], ["u", "E", 0]]:
+		window._add_row_line({"id": spec[0], "path": [spec[0]], "resolved_part_id": spec[1], "children": null if spec[0] == "u" else []}, spec[2], true)
 	window._mark_fallback_room_rows()
 	var marks := {}
 	for d in window._descs:
 		marks[str((d["row"] as Dictionary)["id"])] = ("dim" if bool(d["room_dim"]) else "full") + (" rail" if bool(d["room_in"]) else (" way" if bool(d["room_way"]) else ""))
-	check("B8.1 the fallback: a placement of the room's Part and the rows listed below it are inside, a row with one below it is the way, the rest dimmed: %s" % str(marks), marks == {"x1": "dim", "x1c": "dim", "y": "dim", "z": "full way", "zf": "full rail", "zfb": "full rail", "w": "full rail"})
+	check("B8.1 the fallback: a placement of the room's Part and the rows listed below it are inside, a row with one below it is the way, the rest dimmed, except a closed row not fetched yet (it may hold the Part): %s" % str(marks), marks == {"x1": "dim", "x1c": "dim", "y": "dim", "z": "full way", "zf": "full rail", "zfb": "full rail", "w": "full rail", "u": "full"})
 	window._root_part_id = "A"
 	window._mark_fallback_room_rows()
 	check("B8.1 the fallback with the room on the assembly's own Part: every row inside", window._descs.all(func(d): return bool(d["room_in"]) and not bool(d["room_dim"])))
@@ -326,6 +326,17 @@ func _initialize() -> void:
 	await until(func(): return rooms.calls >= 2)
 	await frames(4)
 	check("2. B8.1 ...and once per tree answer it is asked for again, and shows the count when it can be read (%d reads)" % rooms.calls, rooms.calls == 2 and window._bar_hint.text.contains("Placed 2 times"))
+	rooms.count = -1
+	window._uses_cache = {}
+	window._uses_reading = ""
+	window._rebuild_bar()
+	await frames(4)
+	rooms.count = 2
+	rooms.calls = 0
+	window._note_placements_may_change() # (what the per-level fallback's re-read of the levels does: it has no tree answer)
+	window._rebuild_bar()
+	await frames(4)
+	check("2. B8.1 in the per-level fallback a re-read of the levels also gives an unreadable count its one new try (%d reads)" % rooms.calls, rooms.calls == 1 and window._bar_hint.text.contains("Placed 2 times"))
 	rooms.count = 3
 	window._selected = ["a1"]
 	rooms.count = 3

@@ -596,8 +596,8 @@ func _mark_fallback_room_rows() -> void:
 	## B8.1: the per-level fallback has no tree answer, so the room context comes from the rows listed: a row that is a placement of an open room's Part, and every row
 	## listed below it, is inside; a row with an inside row below it is the way to it; the rest is dimmed. (What has not been fetched below a closed row is not known.)
 	var room_parts := _room_part_ids()
-	if room_parts.is_empty():
-		return
+	if room_parts.is_empty() or not _uses_action_bar():
+		return # (the design table's PARTS tab has no room context)
 	var everything := room_parts.has(_root_part_id) and _root_part_id != ""
 	var inside_depth := -1
 	for d in _descs:
@@ -620,8 +620,9 @@ func _mark_fallback_room_rows() -> void:
 		var depth := int(d["depth"])
 		var lit: bool = bool(d["room_in"])
 		var way: bool = not lit and bool(seen.get(depth, false))
+		var unknown: bool = (d["row"] as Dictionary).get("children") == null and bool((d["row"] as Dictionary).get("resolved_part_id", "") != "") # (not fetched: it may hold the Part)
 		d["room_way"] = way
-		d["room_dim"] = not lit and not way
+		d["room_dim"] = not lit and not way and not unknown
 		for k in seen.keys():
 			if int(k) >= depth:
 				seen.erase(k) # (this row's own subtree is done)
@@ -1347,13 +1348,19 @@ func _tree_note(status_done: bool) -> String:
 	return " ".join(notes)
 
 
+func _note_placements_may_change() -> void:
+	## A tree answer (or, in the per-level fallback, a re-read of the levels): a count read before it is dropped, and the one shown is read again once. This is the one
+	## place an unreadable count (-1) is given another try (B8.1): not on every bar rebuild.
+	_uses_gen += 1
+	if not _uses_cache.is_empty():
+		_uses_cache["fresh"] = false
+
+
 func _adopt_response(resp: Dictionary) -> void:
 	## Takes a tree answer as the current one and rebuilds the rows from it, keeping what was open (spec section 8).
 	Model.normalise_tree(resp)
 	if not bool(resp.get("status_included", false)):
-		_uses_gen += 1
-		if not _uses_cache.is_empty():
-			_uses_cache["fresh"] = false # (the placements may have changed: the count is shown as it was and read again once)
+		_note_placements_may_change()
 		Model.carry_status(resp, _resp)
 	_resp = resp
 	var old_children: Array = (_tree[0]["children"] as Array) if not _tree.is_empty() and _tree[0].get("children") != null else []
@@ -1754,6 +1761,7 @@ func _refresh_levels() -> void:
 		if await _load_endpoint(_refresh_token):
 			return
 		# the backend turned out not to have the call: the rows already here are re-read a level at a time below
+	_note_placements_may_change() # (the fallback has no tree answer: its re-read of the levels is the same moment)
 	_levels_token += 1
 	var token := _levels_token
 	await _refresh_row_level(_tree[0], token)
