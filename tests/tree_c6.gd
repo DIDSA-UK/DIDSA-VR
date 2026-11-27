@@ -62,6 +62,19 @@ class FakeMain extends Node:
 		pass
 
 
+class FakeRows extends Node:
+	var nodes: Array = []
+	var reads := 0
+
+	func tree_row_nodes(_path: Array) -> Array:
+		reads += 1
+		return nodes
+
+
+class FakeClient extends Node:
+	var snapshot := {}
+
+
 class StubObserver extends "res://scripts/session/session_observer.gd":
 	var fetch_ok := true
 	var fetches := 0
@@ -226,6 +239,32 @@ func _initialize() -> void:
 	check("3. (pure) the root row: Table and Bring greyed, the assembly itself", not root_actions[0]["enabled"] and not root_actions[1]["enabled"] and str(root_actions[0]["why"]).contains("the assembly itself"))
 	var closed: Array = Scope.table_actions({"id": "p", "path": ["p"]}, {"node": true, "open": false})
 	check("3. (pure) a closed table greys Table, not Bring", not closed[0]["enabled"] and str(closed[0]["why"]) == "open the table first" and closed[1]["enabled"])
+	# (the review's finding: a hidden part was told "nothing of it is in the arena")
+	cyl.visible = false
+	select(tree, ["s1", "occ_cyl"])
+	check("3. a hidden part: Table greyed because it is hidden, not 'nothing of it is in the arena' (%s)" % tree._bar_hint.text, bar_button(tree, "Table").disabled and tree._bar_hint.text.contains("it is hidden: show it first") and not tree._bar_hint.text.contains("nothing of it"))
+	cyl.visible = true
+	select(tree, ["occ_gone"])
+	select(tree, ["s1", "occ_cyl"])
+	check("3. ...shown again, Table is back", not bar_button(tree, "Table").disabled)
+	var hidden_actions: Array = Scope.table_actions({"id": "p", "path": ["p"]}, {"node": false, "hidden": true})
+	check("3. (pure) a hidden row's reason names the hiding", not hidden_actions[0]["enabled"] and str(hidden_actions[0]["why"]) == "it is hidden: show it first" and str(hidden_actions[1]["why"]) == "it is hidden: show it first")
+	# (the review's finding: the row's nodes are read once per bar, not once for the members and again inside table_node)
+	var rows_main := FakeRows.new()
+	rows_main.nodes = [cyl]
+	tree.scope.extra_actions(rows_main, Model.find_row(tree._tree, ["s1", "occ_cyl"]))
+	check("3. the bar reads the world's nodes for a row once (%d reads)" % rows_main.reads, rows_main.reads == 1)
+	rows_main.free()
+	# (the review's finding: opening or closing a room re-read the PARTS tree, which shows nothing about rooms)
+	var reads_before := calls.size()
+	tree._on_rooms_changed()
+	await frames(40)
+	check("3. a room opening or closing does not re-read the PARTS tree (%d requests)" % (calls.size() - reads_before), tree.scope.room_context == false and calls.size() == reads_before)
+	tree.scope.room_context = true # (the same call on a tree that does show rooms is still re-read: the check is not vacuous)
+	tree._on_rooms_changed()
+	var re_read: bool = await until(func() -> bool: return calls.size() > reads_before)
+	tree.scope.room_context = false
+	check("3. ...while a tree with room context still is", re_read)
 
 	# --- 4. a new document: Find's words on PARTS go (main.gd tells the PARTS tab as it tells the World tree; the review's finding)
 	tree.set_query("box")
@@ -405,4 +444,40 @@ func _initialize() -> void:
 	check("7. the next model shows, and its own revision 4 (after 3) is fetched as usual (%s)" % str(fake.shown), obs._model_shown and obs.title == "Next" and fake.shown == [false, true] and obs.loaded_rev == 4)
 	obs.queue_free()
 	fake.queue_free()
+
+	# --- 8. the review's finding: a resume (the WebSocket dropped and came back) after a model that failed to show tries to show it again
+	var fake2 := FakeMain.new()
+	var obs2 := StubObserver.new()
+	var hub := FakeClient.new()
+	obs2.main = fake2
+	obs2.client = hub
+	obs2.active = true
+	obs2.model_source = {"kind": "backend", "root_part_id": "OLD", "path": ""}
+	root.add_child(fake2)
+	root.add_child(hub)
+	root.add_child(obs2)
+	obs2.fetch_ok = false
+	obs2._on_model({"source": {"kind": "backend", "root_part_id": "NEW", "path": ""}, "title": "New", "rev": 0})
+	await frames(3)
+	check("8. (setup) the model failed to show on a transient error", obs2.last_error == "boom" and not obs2._model_shown and fake2.shown.is_empty())
+	hub.snapshot = {"model": {"kind": "backend", "root_part_id": "NEW", "path": "", "title": "New", "rev": 7}, "rev": 7}
+	obs2.fetch_ok = true
+	var fetches_before := obs2.fetches
+	obs2._on_welcomed({}, true) # (the same model as the failed one: _model_differs is false)
+	await until(func() -> bool: return not obs2._loading)
+	check("8. the resume fetched the model again and it is on show (%d fetches, shown %s, loaded_rev %d)" % [obs2.fetches - fetches_before, str(fake2.shown), obs2.loaded_rev], obs2._model_shown and obs2.fetches == fetches_before + 1 and fake2.shown == [false] and obs2.loaded_rev == 7 and obs2.title == "New")
+	obs2._queue_doc(8, [], true)
+	await until(func() -> bool: return not obs2._busy and obs2.fetches >= fetches_before + 2)
+	check("8. ...and a later change to it is applied, not dropped (%d fetches)" % (obs2.fetches - fetches_before), obs2.fetches >= fetches_before + 2 and obs2.loaded_rev == 8)
+	# a resume while a model is still loading does not start a second load
+	obs2._loading = true
+	obs2._model_shown = false
+	var fetches_mid := obs2.fetches
+	obs2._on_welcomed({}, true)
+	await frames(2)
+	check("8. a resume while a load is still going starts no second one", obs2.fetches == fetches_mid)
+	obs2._loading = false
+	obs2.queue_free()
+	hub.queue_free()
+	fake2.queue_free()
 	quit()

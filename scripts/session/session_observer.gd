@@ -111,6 +111,9 @@ func _on_welcomed(_welcome: Dictionary, resumed: bool) -> void:
 	if model is Dictionary and _model_differs(model):
 		_load_from_snapshot(snapshot) # the presenter opened something else while this connection was down
 		return
+	if model is Dictionary and not (model as Dictionary).is_empty() and not _model_shown and not _loading:
+		_load_from_snapshot(snapshot) # the same model, but it never got on show (its load failed): a resume tries again, or every change to it would be dropped for good
+		return
 	_apply_snapshot(snapshot, false) # (a resume: what this person changed in their own view is kept)
 	if int(snapshot.get("rev", 0) if snapshot.get("rev") != null else 0) > loaded_rev:
 		_queue_doc(int(snapshot["rev"]), [], true)
@@ -531,7 +534,7 @@ func _reset_queue() -> void:
 
 func _queue_doc(rev: int, parts: Array, all: bool) -> void:
 	if not _model_shown:
-		return # (C6: the model the presenter opened is not on show (its load failed; model_failed said so): its changes are not swapped into the old one's scene. A new model or a rejoin shows it.)
+		return # (C6: the model the presenter opened is not on show (its load failed; model_failed said so): its changes are not swapped into the old one's scene. A new model, or a reconnect (which tries to show it again), shows it.)
 	if rev <= loaded_rev and rev != 0:
 		return # nothing newer than what is shown
 	for pid in parts:

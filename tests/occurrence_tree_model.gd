@@ -172,6 +172,7 @@ func _initialize() -> void:
 	var missing_actions: Array = Model.actions_for(rows[3], {})
 	check("a missing-file row can only be deleted; the rest is greyed with a reason", action(missing_actions, "delete")["enabled"] and not action(missing_actions, "fix")["enabled"] and str(action(missing_actions, "fix")["why"]).contains("missing") and not action(missing_actions, "hide")["enabled"] and str(action(missing_actions, "hide")["why"]) != "")
 
+	check("Delete's hint: an unreadable placement count (-1) on a nested row says so instead of staying silent; a readable one does not (the review's finding)", Model.delete_hint(Model.rows_from_occurrences([occ[0]], [])[0], -1) == "" and Model.delete_hint(rows[0], -1).contains("could not check") and Model.delete_hint(rows[0], 3) == "Delete edits all 3 placements of its assembly" and Model.delete_hint(rows[0], 1) == "")
 	check("Delete on a nested row warns that it edits every placement; a top-level row or a single placement does not", Model.delete_warning(rows[0], 3) == "edits all 3 placements of its assembly" and Model.delete_warning(rows[0], 1) == "" and Model.delete_warning(Model.rows_from_occurrences([occ[0]], [])[0], 3) == "")
 
 	# find by path, and a refresh that keeps what was expanded

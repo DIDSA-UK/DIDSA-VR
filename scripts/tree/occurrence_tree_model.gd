@@ -175,6 +175,17 @@ static func delete_warning(row: Dictionary, used: int) -> String:
 	return "edits all %d placements of its assembly" % used
 
 
+static func delete_hint(row: Dictionary, used: int) -> String:
+	## What the bar says after the first press of Delete, besides the mates: the placements warning, or (nested row, `used` -1: the read of its assembly's placements
+	## failed) that the count is unknown, so a second press is not taken to be safe for want of a warning. "" when there is nothing to say.
+	var warning := delete_warning(row, used)
+	if warning != "":
+		return "Delete %s" % warning
+	if kind_of(row) == KIND_NESTED and used < 0:
+		return "Delete: could not check how many times its assembly is placed (it may change every placement)"
+	return ""
+
+
 static func path_key(path: Array) -> String:
 	return "/".join(PackedStringArray(path.map(func(x) -> String: return str(x))))
 

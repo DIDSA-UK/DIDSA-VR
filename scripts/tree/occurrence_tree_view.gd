@@ -1836,7 +1836,8 @@ func request_refresh() -> void:
 
 func _on_rooms_changed() -> void:
 	_rebuild_rows()
-	request_refresh()
+	if scope.room_context: # (the Table scope shows nothing about rooms: opening or closing one changes none of its rows, so it is not re-read from the server)
+		request_refresh()
 
 
 func _refresh_levels() -> void:
@@ -1915,9 +1916,9 @@ func _on_delete_pressed(row: Dictionary) -> void:
 		if Model.kind_of(row) == Model.KIND_NESTED:
 			_delete_used = await e.instance_count(_root_part_id, owner) # B3: a nested delete edits the sub-assembly's Part, so every placement of it
 		_rebuild_rows()
-		var warning := Model.delete_warning(row, _delete_used)
-		if warning != "" and _bar_hint != null:
-			_bar_hint.text = "%s  ·  Delete %s" % [str(row.get("name", "")), warning]
+		var hint := Model.delete_hint(row, _delete_used)
+		if hint != "" and _bar_hint != null:
+			_bar_hint.text = "%s  ·  %s" % [str(row.get("name", "")), hint]
 
 
 func _list_occurrences(part_id: String) -> Dictionary:

@@ -16,7 +16,7 @@ reset_settings
 smoke_cut() { if [ -n "${SMOKE_CUT:-}" ]; then cut -c1-"$SMOKE_CUT"; else cat; fi; }
 
 echo "== parse check"
-for f in scripts/*.gd scripts/motion/*.gd scripts/ui/*.gd scripts/appearance/*.gd scripts/landing/*.gd scripts/cloud/*.gd scripts/session/*.gd; do
+for f in scripts/*.gd scripts/motion/*.gd scripts/ui/*.gd scripts/appearance/*.gd scripts/landing/*.gd scripts/cloud/*.gd scripts/session/*.gd scripts/tree/*.gd scripts/room/*.gd scripts/design_table/*.gd scripts/design_table/features/*.gd; do
   out=$("$GODOT" --headless --path . --check-only --script "res://$f" 2>&1 | grep -E "SCRIPT ERROR|Parse Error")
   if [ -n "$out" ]; then echo "FAIL $f"; echo "$out"; fail=1; fi
 done
