@@ -117,18 +117,20 @@ func extra_actions(main, row: Dictionary) -> Array:
 	if kind != TABLE:
 		return []
 	var path: Array = row.get("path", [])
-	var members := row_nodes(main, path) if not path.is_empty() else []
+	var members := row_nodes(main, path) if not path.is_empty() else [] # (read once: the world is walked for it, and this runs on every bar rebuild)
+	var hidden := not members.is_empty() and members.all(func(n) -> bool: return is_instance_valid(n) and not n.visible)
 	return table_actions(row, {
-		"node": table_node(main, path) != null,
+		"node": table_node(main, path, members) != null,
 		"on_table": on_table(path),
 		"members": members.size(),
+		"hidden": hidden,
 		"open": table != null and bool(table.get("_open")),
 	})
 
 
 static func table_actions(row: Dictionary, ctx: Dictionary) -> Array:
 	## Pure. `ctx`: {node: bool (one body of its own in the arena that can be taken), on_table: bool (it is the part on the table now), members: int (world parts
-	## under the row), open: bool (the table is open)}. Table and Bring work on one part with geometry; a greyed one says why.
+	## under the row), hidden: bool (every one of them is hidden), open: bool (the table is open)}. Table and Bring work on one part with geometry; a greyed one says why.
 	var path: Array = row.get("path", [])
 	var why := ""
 	if path.is_empty() or str(row.get("id", "")) == "":
@@ -137,6 +139,8 @@ static func table_actions(row: Dictionary, ctx: Dictionary) -> Array:
 		why = "it is on the table"
 	elif bool(row.get("missing", false)):
 		why = "its file is missing"
+	elif bool(ctx.get("hidden", false)):
+		why = "it is hidden: show it first"
 	elif not bool(ctx.get("node", false)):
 		var children = row.get("children")
 		var sub: bool = int(ctx.get("members", 0)) > 1 or (children is Array and not (children as Array).is_empty())
@@ -148,13 +152,13 @@ static func table_actions(row: Dictionary, ctx: Dictionary) -> Array:
 	]
 
 
-func table_node(main, path: Array) -> Node3D:
+func table_node(main, path: Array, row_members = null) -> Node3D:
 	## The one arena part a row stands for that can be taken to the table or brought (visible, not held, not in a room, not already on the table), found by PATH
 	## (a part inside the second placement of a sub-assembly is not the one inside the first). A world without paths (not indexed yet) falls back to the occurrence
 	## id, which is unique only among the root's own parts.
 	if table == null or path.is_empty():
 		return null
-	var nodes := row_nodes(main, path)
+	var nodes: Array = row_members if row_members is Array else row_nodes(main, path) # (a caller that already read the row's nodes passes them: no second walk of the world)
 	var exact: Array = nodes.filter(func(n) -> bool: return is_instance_valid(n) and n is MeshInstance3D and n.has_meta("group_path") and GroupIndex.path_of(n) == path and _takeable(n))
 	if exact.size() == 1:
 		return exact[0]
